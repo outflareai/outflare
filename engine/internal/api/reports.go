@@ -12,6 +12,7 @@ import (
 
 func (s *Server) routesReports(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reports", s.inBrand(auth.ScopeSequencesRead, s.report))
+	mux.HandleFunc("GET /v1/brands/{brand}/reports", s.onBrand(auth.ScopeSequencesRead, s.report))
 }
 
 // parseWhen reads a date (2026-10-01, the start of that day in tz) or an

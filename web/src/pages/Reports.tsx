@@ -33,6 +33,7 @@ export function Reports({ ws }: { ws: string }) {
   // The sidebar's brand narrows the report; with brands, it can compare them.
   const { query: brandQuery, active: brands } = useBrand(ws);
   const brandKey = brandQuery.brand ?? "";
+  const pickedId = brands.find((b) => b.handle === brandKey)?.id;
 
   useEffect(() => {
     const list = (brand: string) => api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand } } });
@@ -43,7 +44,8 @@ export function Reports({ ws }: { ws: string }) {
   useEffect(() => {
     const from = new Date(Date.now() - days * 86400000).toISOString();
     setReport(null);
-    api.GET("/v1/workspaces/{ws}/reports", { params: { path: { ws }, query: { from, group_by: group, timezone: zone, ...brandQuery, ...(sequence ? { sequence_id: sequence } : {}) } } }).then(({ data, error }) => {
+    if (!pickedId) return;
+    api.GET("/v1/brands/{brand}/reports", { params: { path: { brand: pickedId }, query: { from, group_by: group, timezone: zone, ...(sequence ? { sequence_id: sequence } : {}) } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setError("");
       setReport(data);
@@ -65,7 +67,7 @@ export function Reports({ ws }: { ws: string }) {
         <span className="flex-1" />
         <Tabs value={group} onValueChange={(v) => setGroup(v as Group)}>
           <TabsList className="h-8">
-            {groups.filter((g) => g.id !== "brand" || brands.length > 1).map((g) => <TabsTrigger key={g.id} value={g.id} className="px-2.5 text-[12px]">{g.label}</TabsTrigger>)}
+            {groups.filter((g) => g.id !== "brand").map((g) => <TabsTrigger key={g.id} value={g.id} className="px-2.5 text-[12px]">{g.label}</TabsTrigger>)}
           </TabsList>
         </Tabs>
       </div>

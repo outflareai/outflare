@@ -29,6 +29,10 @@ func TestAdSuggestions(t *testing.T) {
 		t.Fatal(err)
 	}
 	active, paused := metaCampaigns(t, e, ws)
+	// The new account took the workspace's only brand, whose rules start in
+	// shadow mode; a person turns them on so they suggest.
+	brand := brandOf(t, e, `SELECT outflare_first_brand($1)::text`, ws)
+	owner.must(200, "PUT", "/v1/brands/"+brand+"/ads/economics", map[string]any{"shadow_mode": false})
 	exec := func(sql string, args ...any) {
 		t.Helper()
 		if _, err := e.pool.Exec(ctx, sql, args...); err != nil {

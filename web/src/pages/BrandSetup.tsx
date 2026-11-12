@@ -45,7 +45,7 @@ export function BrandSetup({ ws, canManage, go }: { ws: string; canManage: boole
     const path = { params: { path: { ws, brand: handle } } };
     const [{ data, error }, h] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/brands/{brand}/setup", path),
-      api.GET("/v1/workspaces/{ws}/install-health", { params: { path: { ws }, query: { brand: handle } } }),
+      api.GET("/v1/brands/{brand}/install-health", { params: { path: { brand: brand?.id ?? "" } } }),
     ]);
     if (error || !data) return setError(errorMessage(error));
     setError("");

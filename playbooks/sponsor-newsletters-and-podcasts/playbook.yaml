@@ -37,19 +37,19 @@ inputs:
     example: 1,500 USD
 steps:
   - say: Read the brand's context, and check its setup kit is applied so the Partnerships board is there.
-    tools: [getBrandContext, listRecordTypes]
+    tools: [getBrandContext, listBrandRecordTypes]
   - say: Look at partnerships already on the board, so nobody is asked twice.
     tools: [listBrandRecords]
   - say: Shortlist newsletters and podcasts on the topics, with their audience size and published prices, and work out the price per 1,000 readers or listeners where they share it.
     tools: []
   - say: Add each one as a company with its host or editor as a person, and a partnership at Found with the platform, deal type flat fee and the published price as the fee.
-    tools: [lookupRecords, createBrandRecord, updateBrandRecord]
+    tools: [lookupBrandRecords, createBrandRecord, updateBrandRecord]
   - say: Draft a short rate card request to the best shortlisted ones that don't publish prices, as a sequence held until a person approves it.
     tools: [createBrandSequence, replaceBrandSequenceSteps, previewBrandSequence]
   - say: Suggest which test slots to book within the budget, cheapest per reader first. For each slot a person books, make its tracked link, save it and the promo code on the partnership, and record the fee as spend.
     tools: [updateBrandRecord, createBrandTrackingLink, recordSpend]
   - say: Thirty days after each slot runs, report visits, sign-ups, paying customers and cost per paying customer, and say which to book again.
-    tools: [getAnalyticsReport, outcomesReport, updateBrandRecord]
+    tools: [getAnalyticsReport, getBrandOutcomesReport, updateBrandRecord]
 guardrails:
   - Never book a slot, agree a price or pay anyone; a person does that from their own account.
   - Stay within the test budget.

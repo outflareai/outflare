@@ -24,7 +24,9 @@ import (
 func (s *Server) routesOutcomes(mux *http.ServeMux) {
 	read, manage := auth.ScopeOutcomesRead, auth.ScopeOutcomesManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/outcomes/report", s.inBrand(read, s.outcomesReport))
+	mux.HandleFunc("GET /v1/brands/{brand}/outcomes/report", s.onBrand(read, s.outcomesReport))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/outcomes/export", s.inWorkspace(read, s.outcomesExport))
+	mux.HandleFunc("GET /v1/brands/{brand}/outcomes/export", s.onBrand(read, s.outcomesExport))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/outcomes/syncs", s.inWorkspace(read, s.listOutcomeSyncs))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/outcomes/syncs/{id}/run", s.inWorkspace(manage, s.runOutcomeSync))
 

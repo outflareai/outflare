@@ -14,8 +14,10 @@ import (
 )
 
 // A refund of a payment whose conversion went to Google lowers that
-// conversion's value there (a restatement), and a refund of what is left
-// takes it away (a retraction), found by the order id it was sent with.
+// conversion's value there (a restatement: the event sent again through
+// the Data Manager API with its new value and the same transaction id),
+// and a refund of what is left takes it away (a retraction, through the
+// Ads API's conversion adjustments, found by the order id).
 func TestAdConversionAdjustments(t *testing.T) {
 	e := freshEnv(t)
 	ctx := context.Background()
@@ -85,11 +87,19 @@ func TestAdConversionAdjustments(t *testing.T) {
 		t.Fatalf("adjust: %+v %v", res, err)
 	}
 	up := uploads()
+	// A rule made by hand says nothing about the customer type.
+	if !strings.HasPrefix(up[0], "/v1/events:ingest") || strings.Contains(up[0], "customerType") {
+		t.Fatalf("the conversion should go through the Data Manager API: %s", up[0])
+	}
+	var transport string
+	if err := e.pool.QueryRow(ctx, `SELECT transport FROM ad_conversion_sends WHERE rule_id = $1`, rule).Scan(&transport); err != nil || transport != "data_manager" {
+		t.Fatalf("transport %s %v", transport, err)
+	}
 	last := up[len(up)-1]
-	for _, want := range []string{":uploadConversionAdjustments", `"adjustmentType":"RESTATEMENT"`, `"adjustedValue":30`, `"orderId":"` + orderID + `"`,
-		`"conversionAction":"customers/123/conversionActions/42"`, `"partialFailure":true`} {
+	for _, want := range []string{"/v1/events:ingest", `"conversionValue":30`, `"transactionId":"` + orderID + `"`, `"lastUpdatedTimestamp"`,
+		`"productDestinationId":"42"`} {
 		if !strings.Contains(last, want) {
-			t.Fatalf("adjustment lacks %s: %s", want, last)
+			t.Fatalf("restatement lacks %s: %s", want, last)
 		}
 	}
 
@@ -102,7 +112,8 @@ func TestAdConversionAdjustments(t *testing.T) {
 		t.Fatalf("retract: %+v %v", res, err)
 	}
 	up = uploads()
-	if last = up[len(up)-1]; !strings.Contains(last, `"adjustmentType":"RETRACTION"`) || strings.Contains(last, "restatementValue") {
+	if last = up[len(up)-1]; !strings.Contains(last, ":uploadConversionAdjustments") || !strings.Contains(last, `"adjustmentType":"RETRACTION"`) ||
+		!strings.Contains(last, `"orderId":"`+orderID+`"`) || strings.Contains(last, "restatementValue") {
 		t.Fatalf("retraction: %s", last)
 	}
 	var sent int

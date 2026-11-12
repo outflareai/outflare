@@ -47,6 +47,7 @@ A query belongs to one brand (`plans/brands/README.md`): different brands are di
 | `social_posts` | `social.read` | Posts on the workspace's own social accounts |
 | `reviews`, `review_page_days` | `social.read` | [Reviews](reviews.md) of the brands on Trustpilot, G2, Capterra, SourceForge and Google, and each review page's numbers day by day |
 | `backlinks`, `link_prospects` | `seo.read` | [Link building](seo.md): links from other sites to the brands' websites, live or lost, with each linking domain's strength, traffic and spam score; and the pages that could link, with how each was found (`method`), its score and where its pitch stands (`stage`), such as `select method, count(*) filter (where live_at is not null) from link_prospects group by 1` |
+| `coverage_donor_profiles`, `coverage_link_orders` | `coverage.read` | [Paid link orders](link-orders.md): the brand's donor catalog (domain, PBN flag, niches and stored metrics, without notes) and each order's status, donor price (minor units and currency), live-check result and Coverage placement, without notes or `lost_reason`. Amounts in USD and EUR stay in their own currency, such as `select currency, status, count(*), sum(donor_amount_minor) from coverage_link_orders group by 1, 2` |
 
 jsonb columns such as `attributes` are read with `->>`: `select attributes->>'plan' as plan, count(*) from people group by 1`.
 

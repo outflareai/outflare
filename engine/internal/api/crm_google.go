@@ -23,7 +23,13 @@ type crmMailRollout struct {
 	Enabled  bool     `json:"enabled"`
 	Allowed  []string `json:"allowed_user_ids"`
 	Excluded []string `json:"excluded_user_ids"`
-	Version  int      `json:"version"`
+	// WorkspaceIntegrationID reads every enabled person's mailbox through
+	// the company's Google Workspace connection, without them signing in.
+	WorkspaceIntegrationID *string `json:"workspace_integration_id"`
+	// HistoryDays is how far back a mailbox read through Workspace starts;
+	// 0 reads its whole history.
+	HistoryDays int `json:"history_days"`
+	Version     int `json:"version"`
 }
 type mailQuery interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -143,6 +149,13 @@ func (s *Server) putCRMMailRollout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if in.HistoryDays < 0 || in.HistoryDays > 3650 {
+		writeError(w, r, 400, "invalid_request", "history_days is 0 (everything) to 3650")
+		return
+	}
+	if in.WorkspaceIntegrationID != nil && *in.WorkspaceIntegrationID == "" {
+		in.WorkspaceIntegrationID = nil
+	}
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "crm-rollout:"+a.Brand); err != nil {
 			return err
@@ -166,6 +179,11 @@ func (s *Server) putCRMMailRollout(w http.ResponseWriter, r *http.Request) {
 				return errInvalid("eligibility lists must contain members of this brand")
 			}
 		}
+		if in.WorkspaceIntegrationID != nil {
+			if err := s.checkWorkspaceConnection(r.Context(), tx, a.WorkspaceID, a.Brand, *in.WorkspaceIntegrationID); err != nil {
+				return err
+			}
+		}
 		raw, _ := json.Marshal(in)
 		_, err = tx.Exec(r.Context(), `INSERT INTO crm_mail_rollout(workspace_id,brand_id,config)VALUES($1,$2,$3) ON CONFLICT(brand_id) DO UPDATE SET config=$3,version=crm_mail_rollout.version+1,updated_at=now()`, a.WorkspaceID, a.Brand, raw)
 		if err != nil {
@@ -179,7 +197,12 @@ func (s *Server) putCRMMailRollout(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		in.Version = cur.Version + 1
-		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "crm_mail.rollout_updated", "crm_mail_rollout", a.Brand, map[string]any{"brand_id": a.Brand, "enabled": in.Enabled, "allowed_count": len(in.Allowed), "excluded_count": len(in.Excluded)})
+		added, err := s.provisionWorkspaceMailboxes(r.Context(), tx, a.WorkspaceID, a.Brand, in)
+		if err != nil {
+			return err
+		}
+		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "crm_mail.rollout_updated", "crm_mail_rollout", a.Brand, map[string]any{"brand_id": a.Brand, "enabled": in.Enabled, "allowed_count": len(in.Allowed), "excluded_count": len(in.Excluded),
+			"workspace": in.WorkspaceIntegrationID != nil, "workspace_mailboxes_added": added, "history_days": in.HistoryDays})
 	})
 	if errors.Is(err, errConflict) {
 		writeError(w, r, 409, "conflict", "rollout changed; reload before saving")
@@ -205,7 +228,8 @@ func (s *Server) getCRMGoogleConnection(w http.ResponseWriter, r *http.Request) 
 	var state string
 	var at *time.Time
 	var code *string
-	err = s.pool.QueryRow(r.Context(), `SELECT status,last_synced_at,error_code FROM crm_google_connections WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3`, a.WorkspaceID, a.Brand, a.UserID).Scan(&state, &at, &code)
+	var viaWorkspace bool
+	err = s.pool.QueryRow(r.Context(), `SELECT status,last_synced_at,error_code,workspace_integration_id IS NOT NULL FROM crm_google_connections WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3`, a.WorkspaceID, a.Brand, a.UserID).Scan(&state, &at, &code, &viaWorkspace)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		s.internal(w, r, err)
 		return
@@ -221,14 +245,18 @@ func (s *Server) getCRMGoogleConnection(w http.ResponseWriter, r *http.Request) 
 	if !eligible {
 		state = "not_eligible"
 	}
-	if !s.crmGoogleConfigured() {
+	if !s.crmGoogleConfigured() && !viaWorkspace {
 		state = "not_configured"
+	}
+	via := "personal"
+	if viaWorkspace {
+		via = "workspace"
 	}
 	clientID := ""
 	if s.oauth != nil {
 		clientID = s.oauth.Google.ID
 	}
-	writeJSON(w, 200, map[string]any{"redirect_uri": s.publicURL + "/v1/crm-mail/google/callback", "client_id": clientID, "configured": s.crmGoogleConfigured(), "eligible": eligible, "connected": connected, "status": state, "last_synced_at": at, "error_code": code, "capture_count": count})
+	writeJSON(w, 200, map[string]any{"redirect_uri": s.publicURL + "/v1/crm-mail/google/callback", "client_id": clientID, "configured": s.crmGoogleConfigured(), "eligible": eligible, "connected": connected, "status": state, "last_synced_at": at, "error_code": code, "capture_count": count, "via": via})
 }
 func (s *Server) authorizeCRMGoogle(w http.ResponseWriter, r *http.Request) {
 	if !s.crmMailPerson(w, r) {
@@ -389,6 +417,15 @@ func (s *Server) disconnectCRMGoogle(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := tx.Exec(r.Context(), `DELETE FROM crm_mail_oauth_flows WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3`, a.WorkspaceID, a.Brand, a.UserID); err != nil {
 			return err
+		}
+		// A mailbox an admin reads through Google Workspace stops when they
+		// take the person off the rollout; deleting captured mail still works.
+		var viaWorkspace bool
+		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM crm_google_connections WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND workspace_integration_id IS NOT NULL)`, a.WorkspaceID, a.Brand, a.UserID).Scan(&viaWorkspace); err != nil {
+			return err
+		}
+		if viaWorkspace && purge != "true" {
+			return errInvalid("your admin reads your work mail through Google Workspace; ask them to take you off CRM email, or delete what was captured with purge=true")
 		}
 		if _, err := tx.Exec(r.Context(), `DELETE FROM crm_google_connections WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3`, a.WorkspaceID, a.Brand, a.UserID); err != nil {
 			return err

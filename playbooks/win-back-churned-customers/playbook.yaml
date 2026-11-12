@@ -41,7 +41,7 @@ inputs:
     optional: true
 steps:
   - say: Check which payment and cancellation events the workspace receives, and that the failed-payment event arrives.
-    tools: [listEventDefinitions, listBrandCustomerEvents]
+    tools: [listBrandEventDefinitions, listBrandCustomerEvents]
   - say: Check what the setup kit would add, then add it with those events. Its list and two journeys arrive as drafts.
     tools: [previewKit, applyKit]
   - say: Rewrite the four emails in the brand's voice.

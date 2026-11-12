@@ -58,13 +58,16 @@ type adjustment struct {
 	value                       *int64
 	at, convAt                  time.Time
 	attempts                    int
+	// sendID is the conversion sent; transport the path it took, which
+	// decides how a restatement goes back (adjust_feed.go).
+	sendID, transport string
 }
 
 // AdjustRule sends a rule's adjustments that are due. A platform that
 // can't change a conversion after taking it skips them, saying so.
 func (s *Sender) AdjustRule(ctx context.Context, ws, ruleID string) (Result, error) {
 	var res Result
-	rows, err := s.Pool.Query(ctx, `SELECT a.id::text, x.event_id, a.kind, a.currency, a.value_micros, a.occurred_at, x.occurred_at, a.attempts
+	rows, err := s.Pool.Query(ctx, `SELECT a.id::text, x.event_id, a.kind, a.currency, a.value_micros, a.occurred_at, x.occurred_at, a.attempts, x.id::text, x.transport
 		FROM ad_conversion_adjustments a JOIN ad_conversion_sends x ON x.id = a.send_id
 		WHERE a.workspace_id = $1 AND x.rule_id = $2 AND a.status = 'queued' AND a.next_attempt_at <= now()
 		ORDER BY a.occurred_at, a.created_at LIMIT 500`, ws, ruleID)
@@ -74,7 +77,7 @@ func (s *Sender) AdjustRule(ctx context.Context, ws, ruleID string) (Result, err
 	var list []adjustment
 	for rows.Next() {
 		var a adjustment
-		if err := rows.Scan(&a.id, &a.eventID, &a.kind, &a.currency, &a.value, &a.at, &a.convAt, &a.attempts); err != nil {
+		if err := rows.Scan(&a.id, &a.eventID, &a.kind, &a.currency, &a.value, &a.at, &a.convAt, &a.attempts, &a.sendID, &a.transport); err != nil {
 			rows.Close()
 			return res, dbError{err}
 		}
@@ -95,6 +98,26 @@ func (s *Sender) AdjustRule(ctx context.Context, ws, ruleID string) (Result, err
 	o, err := s.Store.Open(ctx, s.Pool, ws, r.integrationID)
 	if err != nil {
 		return res, err
+	}
+	// Restatements of conversions that went through the data feed go
+	// back the same way; the rest, and every retraction, as adjustments.
+	feeder, hasFeed := o.Connector.(connectors.FeedSender)
+	var restate, rest []adjustment
+	for _, a := range list {
+		if viaFeed(a, hasFeed) {
+			restate = append(restate, a)
+		} else {
+			rest = append(rest, a)
+		}
+	}
+	if len(restate) > 0 {
+		if err := s.restateViaFeed(ctx, ws, o, feeder, r, restate, &res); err != nil {
+			return res, err
+		}
+	}
+	list = rest
+	if len(list) == 0 {
+		return res, nil
 	}
 	adj, ok := o.Connector.(connectors.ConversionAdjuster)
 	if !ok {

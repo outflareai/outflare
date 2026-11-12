@@ -18,7 +18,9 @@ import (
 
 var _ c.AdTargetingManager = GoogleAds{}
 
-func (GoogleAds) BiddingMethods() []string { return []string{c.BidMaxConversions, c.BidMaxValue} }
+func (GoogleAds) BiddingMethods() []string {
+	return []string{c.BidMaxConversions, c.BidMaxValue, c.BidPortfolio}
+}
 
 func googleCampaignID(id string) error {
 	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
@@ -45,7 +47,7 @@ func (g GoogleAds) CampaignTargeting(ctx context.Context, cl *c.Client, creds c.
 	}
 	login := acct.Meta["login_customer_id"]
 	rows, err := g.search(ctx, cl, creds, acct.ID, login,
-		"SELECT campaign.id, campaign.bidding_strategy_type, campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros, "+
+		"SELECT campaign.id, campaign.bidding_strategy_type, campaign.bidding_strategy, campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros, "+
 			"campaign.target_roas.target_roas, campaign.maximize_conversion_value.target_roas FROM campaign WHERE campaign.id = "+campaignID)
 	if err != nil {
 		return c.AdTargeting{}, err
@@ -57,6 +59,10 @@ func (g GoogleAds) CampaignTargeting(ctx context.Context, cl *c.Client, creds c.
 	googleBidding(&cp, rows[0])
 	t := c.AdTargeting{Bidding: c.AdBidding{Strategy: cp.BiddingStrategy, TargetCPAMicros: cp.TargetCPAMicros, TargetROAS: cp.TargetROAS},
 		Audiences: []c.AdAudience{}, Countries: []string{}, Notes: []string{}}
+	// A portfolio strategy keeps its target on itself (AdPortfolios).
+	if ps := rows[0].Campaign.BiddingStrategy; ps != "" {
+		t.Bidding.BiddingStrategyID = lastPart(ps)
+	}
 	crit, err := g.criteria(ctx, cl, creds, acct, campaignID)
 	if err != nil {
 		return t, err
@@ -115,9 +121,11 @@ func (g GoogleAds) CampaignTargeting(ctx context.Context, cl *c.Client, creds c.
 }
 
 // SetBidding switches the campaign to Maximise conversions (with a target
-// cost per conversion, or none) or Maximise conversion value (with a
-// target return, or none). A campaign on a portfolio strategy is refused by
-// Google; change that strategy in Google Ads.
+// cost per conversion, or none), Maximise conversion value (with a target
+// return, or none) or a portfolio strategy of the account. The strategy is
+// one oneof on the campaign, so setting a standard one takes the campaign
+// off its portfolio strategy, and setting a portfolio one replaces its
+// standard strategy.
 func (g GoogleAds) SetBidding(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, b c.AdBidding) error {
 	if err := googleCampaignID(campaignID); err != nil {
 		return err
@@ -147,8 +155,14 @@ func (g GoogleAds) SetBidding(ctx context.Context, cl *c.Client, creds c.Creds, 
 			mask = "maximize_conversion_value.target_roas"
 		}
 		update["maximizeConversionValue"] = mv
+	case c.BidPortfolio:
+		if _, err := strconv.ParseInt(b.BiddingStrategyID, 10, 64); err != nil {
+			return c.Errf(c.ErrInvalid, "a portfolio strategy is named by its id, from the account's bidding strategies")
+		}
+		update["biddingStrategy"] = g.resource(acct, "biddingStrategies", b.BiddingStrategyID)
+		mask = "bidding_strategy"
 	default:
-		return c.Errf(c.ErrInvalid, "Google Ads bidding here is maximize_conversions or maximize_conversion_value")
+		return c.Errf(c.ErrInvalid, "Google Ads bidding here is maximize_conversions, maximize_conversion_value or portfolio")
 	}
 	return g.call(cl, creds, acct.Meta["login_customer_id"]).post(ctx, g.base(cl)+"/customers/"+esc(acct.ID)+"/campaigns:mutate",
 		map[string]any{"operations": []any{map[string]any{"update": update, "updateMask": mask}}}, nil)

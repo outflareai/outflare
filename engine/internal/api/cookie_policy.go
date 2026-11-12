@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/brands"
 	"github.com/outflareai/outflare/engine/internal/cookies"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 )
@@ -286,7 +287,22 @@ func policyVersion(ctx context.Context, q pgx.Tx, ws, keyID string, version int)
 	if err != nil {
 		return v, err
 	}
-	return v, json.Unmarshal(raw, &v.Policy)
+	if err := json.Unmarshal(raw, &v.Policy); err != nil {
+		return v, err
+	}
+	// Who runs the site: the site's brand's legal name and address.
+	var brand *string
+	if err := q.QueryRow(ctx, `SELECT brand_id FROM site_keys WHERE workspace_id = $1 AND id = $2`, ws, keyID).Scan(&brand); err != nil {
+		return v, err
+	}
+	if brand != nil {
+		b, name, err := brands.Load(ctx, q, ws, *brand)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return v, err
+		}
+		v.Owner = b.Footer(name)
+	}
+	return v, nil
 }
 
 type cookiePolicyView struct {

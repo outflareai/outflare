@@ -115,7 +115,7 @@ func (s *Service) broadcastJob(ctx context.Context, job jobs.Job) error {
 // broadcast is a broadcast as its fan-out reads it.
 type broadcast struct {
 	ws, status, templateID, from, audience string
-	brandID, topicID, providerID           *string
+	brandID, topicID, providerID, ref      *string
 	version                                *int
 	recordIDs                              []string
 	data                                   map[string]any
@@ -127,6 +127,9 @@ type broadcast struct {
 	exclude                                customers.Exclusion
 	// The share of the audience held out on purpose, in percent.
 	holdout int
+	// A service message: a transactional template, sent whatever people
+	// chose about marketing email (suppressions still apply).
+	service bool
 }
 
 // broadcastStep makes the emails for the next batch of the audience, and
@@ -138,10 +141,12 @@ func (s *Service) broadcastStep(ctx context.Context, id string) (bool, error) {
 		var data, exclude []byte
 		err := tx.QueryRow(ctx, `SELECT b.workspace_id, b.status, b.template_id, b.from_address, b.audience_kind, b.brand_id, b.topic_id,
 			b.provider_id, b.template_version, b.record_ids::text[], b.data, b.track_opens, b.track_clicks, b.cursor_record::text, b.sent_by,
-			COALESCE(tp.key, ''), COALESCE(tp.name, ''), COALESCE(tp.subscribed_by_default, true), b.exclude, b.holdout_percent
+			COALESCE(tp.key, ''), COALESCE(tp.name, ''), COALESCE(tp.subscribed_by_default, true), b.exclude, b.holdout_percent,
+			b.audience_ref, b.service
 			FROM email_broadcasts b LEFT JOIN email_topics tp ON tp.id = b.topic_id WHERE b.id = $1 FOR UPDATE OF b`, id).
 			Scan(&b.ws, &b.status, &b.templateID, &b.from, &b.audience, &b.brandID, &b.topicID, &b.providerID, &b.version, &b.recordIDs,
-				&data, &b.trackOpens, &b.trackClicks, &b.cursor, &b.sentBy, &b.topicKey, &b.topicName, &b.topicDefault, &exclude, &b.holdout)
+				&data, &b.trackOpens, &b.trackClicks, &b.cursor, &b.sentBy, &b.topicKey, &b.topicName, &b.topicDefault, &exclude, &b.holdout,
+				&b.ref, &b.service)
 		if errors.Is(err, pgx.ErrNoRows) {
 			done = true
 			return nil
@@ -254,33 +259,65 @@ type person struct {
 	attributes                map[string]any
 }
 
+// Audience is who a broadcast goes to: Kind topic (everyone on customer
+// records the topic may go to), records (the RecordIDs) or list (the
+// people in the saved list or segment named by Ref, a smart list id).
+type Audience struct {
+	Kind      string
+	RecordIDs []string
+	Ref       string
+}
+
+// args are the audience's query arguments: $3 to $5.
+func (a Audience) args() []any {
+	ids := a.RecordIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	var ref *string
+	if a.Kind == "list" && a.Ref != "" {
+		ref = &a.Ref
+	}
+	return []any{a.Kind, ids, ref}
+}
+
 // audienceWhere picks a broadcast's audience: people on customer records
-// with a verified email address, of the broadcast's brand when it has one,
-// and, for a list of records, only those. $1 is the workspace, $2 the
-// brand, $3 the audience kind and $4 the record ids.
+// with an email address, of the broadcast's brand when it has one, and,
+// for a list of records or a saved list (smart, static or a lead list's
+// people), only those. A topic's audience
+// takes only verified addresses; people someone picked by hand or put in a
+// list (records, list) take their verified address first, then the one on
+// their record, since whoever picked them vouches for them. $1 is the
+// workspace, $2 the brand, $3 the audience kind, $4 the record ids and $5
+// the list.
 const audienceWhere = `
 	FROM records r
-	JOIN LATERAL (SELECT value FROM record_identities i WHERE i.record_id = r.id AND i.namespace = 'email' AND i.verified
-		AND i.valid_to IS NULL ORDER BY i.valid_from, i.id LIMIT 1) i ON true
-	WHERE r.workspace_id = $1 AND r.record_type = 'person' AND r.archived_at IS NULL AND r.merged_into IS NULL
+	JOIN LATERAL (SELECT value FROM record_identities i WHERE i.record_id = r.id AND i.namespace = 'email'
+		AND (i.verified OR $3 IN ('records', 'list'))
+		AND i.valid_to IS NULL ORDER BY i.verified DESC, i.valid_from, i.id LIMIT 1) i ON true
+	WHERE r.workspace_id = $1 AND r.record_type = 'person' AND r.archived_at IS NULL AND r.merged_into IS NULL AND r.deleted_at IS NULL
 	  AND ($2::uuid IS NULL OR r.brand_id = $2::uuid)
-	  AND ($3 <> 'records' OR r.id = ANY($4::uuid[]))`
+	  AND ($3 <> 'records' OR r.id = ANY($4::uuid[]))
+	  AND ($3 <> 'list' OR r.id IN (SELECT m.record_id FROM smart_list_members m WHERE m.list_id = $5::uuid
+		UNION ALL SELECT s.record_id FROM static_list_members s WHERE s.list_id = $5::uuid
+		UNION ALL SELECT l.record_id FROM lead_list_members lm JOIN leads l ON l.id = lm.lead_id
+			WHERE lm.list_id = $5::uuid AND l.workspace_id = $1 AND l.record_id IS NOT NULL))`
 
 // AudienceSize is how many people a broadcast's audience has now, before
 // what each of them chose.
-func AudienceSize(ctx context.Context, q jobs.Querier, ws string, brandID *string, kind string, recordIDs []string) (int, error) {
+func AudienceSize(ctx context.Context, q jobs.Querier, ws string, brandID *string, a Audience) (int, error) {
 	var n int
-	err := q.QueryRow(ctx, `SELECT count(*)::int`+audienceWhere, ws, brandID, kind, recordIDs).Scan(&n)
+	err := q.QueryRow(ctx, `SELECT count(*)::int`+audienceWhere, append([]any{ws, brandID}, a.args()...)...).Scan(&n)
 	return n, err
 }
 
 // AudienceExcluded is how many people of a broadcast's audience its
 // exclusion leaves out now.
-func AudienceExcluded(ctx context.Context, q jobs.Querier, ws string, brandID *string, kind string, recordIDs []string, x customers.Exclusion) (int, error) {
+func AudienceExcluded(ctx context.Context, q jobs.Querier, ws string, brandID *string, a Audience, x customers.Exclusion) (int, error) {
 	x = x.Clean()
 	var n int
-	err := q.QueryRow(ctx, `SELECT count(*)::int`+audienceWhere+` AND `+customers.ExcludedSQL("r.id", "$5::uuid[]", "$6::text[]"),
-		ws, brandID, kind, recordIDs, x.Lists, x.Tags).Scan(&n)
+	err := q.QueryRow(ctx, `SELECT count(*)::int`+audienceWhere+` AND `+customers.ExcludedSQL("r.id", "$6::uuid[]", "$7::text[]"),
+		append(append([]any{ws, brandID}, a.args()...), x.Lists, x.Tags)...).Scan(&n)
 	return n, err
 }
 
@@ -288,13 +325,13 @@ func AudienceExcluded(ctx context.Context, q jobs.Querier, ws string, brandID *s
 // (customers.Basis): opted_in, opted_out, customer, third_party, unknown.
 func AudienceBases(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
-}, ws string, brandID *string, kind string, recordIDs []string) (map[string]int, error) {
+}, ws string, brandID *string, a Audience) (map[string]int, error) {
 	rows, err := q.Query(ctx, `SELECT b, count(*)::int FROM (SELECT CASE
 			(SELECT c.status FROM consents c WHERE c.workspace_id = r.workspace_id AND c.record_id = r.id AND c.channel = 'email'
 				AND c.topic = '' AND c.purpose = 'marketing' ORDER BY c.occurred_at DESC, c.created_at DESC LIMIT 1)
 			WHEN 'granted' THEN 'opted_in' WHEN 'withdrawn' THEN 'opted_out'
 			ELSE CASE r.origin WHEN 'first_party' THEN 'customer' WHEN 'prospect' THEN 'third_party' ELSE 'unknown' END
-		END AS b`+audienceWhere+`) t GROUP BY b`, ws, brandID, kind, recordIDs)
+		END AS b`+audienceWhere+`) t GROUP BY b`, append([]any{ws, brandID}, a.args()...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -313,8 +350,9 @@ func AudienceBases(ctx context.Context, q interface {
 
 // audienceBatch is the next people after the cursor.
 func audienceBatch(ctx context.Context, tx pgx.Tx, b broadcast) ([]person, error) {
+	a := Audience{Kind: b.audience, RecordIDs: b.recordIDs, Ref: deref(b.ref)}
 	rows, err := tx.Query(ctx, `SELECT r.id::text, r.name, r.origin, i.value, r.attributes`+audienceWhere+`
-		AND ($5::uuid IS NULL OR r.id > $5::uuid) ORDER BY r.id LIMIT $6`, b.ws, b.brandID, b.audience, b.recordIDs, b.cursor, broadcastBatch)
+		AND ($6::uuid IS NULL OR r.id > $6::uuid) ORDER BY r.id LIMIT $7`, append(append([]any{b.ws, b.brandID}, a.args()...), b.cursor, broadcastBatch)...)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +373,12 @@ func broadcastSkip(ctx context.Context, tx pgx.Tx, b broadcast, p person) (strin
 			metrics.Excluded("broadcast")
 		}
 		return why, err
+	}
+	if b.service {
+		// A service message isn't marketing: what people chose about
+		// marketing email doesn't apply. The send-time policy check still
+		// stops suppressed addresses.
+		return "", nil
 	}
 	return skipFor(ctx, tx, b.ws, p.id, p.origin, b.topicKey, b.topicName, b.topicDefault)
 }
@@ -415,8 +459,12 @@ func (s *Service) broadcastEmail(ctx context.Context, tx pgx.Tx, who Who, id str
 		data[k] = v
 	}
 	data["person"] = PersonData(p.id, p.name, p.address, p.attributes)
-	d := Draft{NewEmail: NewEmail{WorkspaceID: b.ws, BrandID: b.brandID, From: b.from, To: []string{p.address}, Purpose: "lifecycle",
-		ProviderID: deref(b.providerID), TopicID: b.topicID, Trigger: "broadcast", TriggerRef: id, BroadcastID: id, Surface: "job"},
+	purpose, topic := "lifecycle", b.topicID
+	if b.service {
+		purpose, topic = "transactional", nil
+	}
+	d := Draft{NewEmail: NewEmail{WorkspaceID: b.ws, BrandID: b.brandID, From: b.from, To: []string{p.address}, Purpose: purpose,
+		ProviderID: deref(b.providerID), TopicID: topic, Trigger: "broadcast", TriggerRef: id, BroadcastID: id, Surface: "job"},
 		TemplateID: b.templateID, Version: b.version, Data: data, TopicSet: true, TrackOpens: b.trackOpens, TrackClicks: b.trackClicks}
 	e, err := s.Compose(ctx, tx, d)
 	var ce *ComposeError
@@ -427,9 +475,13 @@ func (s *Service) broadcastEmail(ctx context.Context, tx pgx.Tx, who Who, id str
 		return "", "", err
 	}
 	e.RecordID = p.id
-	g, err := s.Guard(ctx, tx, p.id, &e, GuardOptions{})
-	if err != nil || g.Capped != "" {
-		return "", g.Capped, err
+	// Guardrails keep marketing email from piling up; a service message
+	// isn't marketing.
+	if !b.service {
+		g, err := s.Guard(ctx, tx, p.id, &e, GuardOptions{})
+		if err != nil || g.Capped != "" {
+			return "", g.Capped, err
+		}
 	}
 	emailID, err := s.Queue(ctx, tx, who, e)
 	return emailID, "", err

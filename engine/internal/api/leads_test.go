@@ -134,6 +134,19 @@ func TestSuppressionAndPolicyCheck(t *testing.T) {
 	if out := owner.must(200, "GET", base+"/leads?suppressed=true", nil); out["total"] != 2.0 {
 		t.Fatalf("suppressed filter: %v", out)
 	}
+	// Each suppressed lead says why: its own address before its domain.
+	why := map[string]string{}
+	for _, l := range owner.must(200, "GET", base+"/leads", nil)["data"].([]any) {
+		l := l.(map[string]any)
+		if sup, ok := l["suppression"].(map[string]any); ok {
+			why[l["email"].(string)] = sup["kind"].(string) + ":" + sup["reason"].(string)
+		} else if l["suppressed"] == true {
+			t.Fatalf("suppressed with no reason: %v", l)
+		}
+	}
+	if why["ana@acme-io.example"] != "email:unsubscribed" || why["bo@rival-com.example"] != "domain:unsubscribed" || len(why) != 2 {
+		t.Fatalf("why = %v", why)
+	}
 	code, imp := owner.raw("POST", base+"/leads/import", "text/csv", "email\nnew@rival-com.example\n")
 	if code != 200 || imp["suppressed"] != 1.0 {
 		t.Fatalf("import suppressed count: %v", imp)

@@ -281,7 +281,7 @@ func TestDeliverAndProcess(t *testing.T) {
 	if err := s.process(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := statusOf(t, s, id); st != "processed" || got[len(got)-1].ForwarderID != user || got[len(got)-1].ForwardedBy != "bo@"+anaDomain {
+	if st, _ := statusOf(t, s, id); st != "processed" || got[len(got)-1].ForwarderID != "" || got[len(got)-1].ForwardedBy != "bo@"+anaDomain {
 		t.Fatalf("colleague: %s %+v", st, got[len(got)-1])
 	}
 	for i, to := range []string{"bo@elsewhere.test", "bo@gmail.com"} {

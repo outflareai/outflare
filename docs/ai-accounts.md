@@ -22,7 +22,7 @@ A workspace can change what its roles allow under Settings → Members → Roles
 
 ## Receipts (Outflare Cloud)
 
-Forward the receipts of your AI subscriptions to the workspace's [inbound address](inbound-email.md) and Outflare reads them: the AI company, plan, seats, amount and the period paid for. Only receipts signed by the company that sent them (or the Stripe, Apple or Google receipt naming it) are read.
+Forward the receipts of your AI subscriptions to the workspace's [inbound address](inbound-email.md) and Outflare reads them: the AI company, plan, seats, amount and the period paid for. Only receipts signed by the company that sent them (or the Stripe, Apple or Google receipt naming it) are read, and only when the subject says it is a receipt, invoice, payment or renewal, or the email shows a total; sign-in alerts and newsletters are ignored.
 
 Each receipt is matched to an account, in this order: the account email it names, the receipt number or card of an earlier receipt, the only account of that AI tool belonging to whoever forwarded it, and the only account due to renew around the charge. The account's next renewal, plan, seats and US price follow it. Receipts it can't place wait under **Needs review**: add a new account from one, assign it to an account (later receipts like it then match by themselves), or ignore it.
 

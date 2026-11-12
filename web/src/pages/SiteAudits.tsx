@@ -89,7 +89,7 @@ function Sites({ ws, canManage, onOpen, go }: Props) {
   const header = (
     <PageHeader
       title="Site audits"
-      description="OutflareBot crawls your websites politely, checks every page against 61 rules and gives each crawl a health score. What it finds goes on the fixes list."
+      description="OutflareBot crawls your websites politely, checks every page against the audit rules and gives each crawl a health score. Issue counts are distinct pages, not every time a rule fires. What it finds goes on the fixes list."
       action={sites && sites.length > 0 && <Button variant="ghost" onClick={() => go("fixes")}>Open fixes</Button>}
     />
   );
@@ -98,7 +98,7 @@ function Sites({ ws, canManage, onOpen, go }: Props) {
 
   const audited = sites.filter((s) => s.last_crawl?.health_score !== null && s.last_crawl?.health_score !== undefined);
   const avg = audited.length ? Math.round(audited.reduce((n, s) => n + (s.last_crawl!.health_score ?? 0), 0) / audited.length) : null;
-  const errors = sites.reduce((n, s) => n + (s.last_crawl?.issues.errors ?? 0), 0);
+  const errors = sites.reduce((n, s) => n + (s.last_crawl?.issues.error_pages ?? s.last_crawl?.issues.errors ?? 0), 0);
 
   return (
     <div className="space-y-6">
@@ -151,7 +151,7 @@ function Sites({ ws, canManage, onOpen, go }: Props) {
             {
               id: "issues",
               header: "Issues",
-              accessorFn: (s) => s.last_crawl?.issues.errors ?? 0,
+              accessorFn: (s) => s.last_crawl?.issues.error_pages ?? s.last_crawl?.issues.errors ?? 0,
               cell: ({ row: { original: s } }) => (s.last_crawl?.health_score === null || !s.last_crawl ? <span className="text-muted-foreground">–</span> : <IssueCounts crawl={s.last_crawl} />),
             },
             { id: "crawl", header: "Latest crawl", accessorFn: (s) => s.last_crawl?.finished_at ?? "", cell: ({ row: { original: s } }) => <span className="text-[13px] text-muted-foreground">{s.last_crawl ? crawlLine(s.last_crawl) : "Not crawled yet"}</span> },
@@ -170,14 +170,25 @@ function Health({ crawl }: { crawl?: Crawl | null }) {
   return <Badge tone={scoreTone(crawl.health_score)} title="The share of pages with no error">{crawl.health_score} / 100</Badge>;
 }
 
+function issuePages(crawl: Crawl) {
+  const i = crawl.issues;
+  return {
+    errors: i.error_pages ?? i.errors,
+    warnings: i.warning_pages ?? i.warnings,
+    notices: i.notice_pages ?? i.notices,
+    hits: i.errors + i.warnings + i.notices,
+  };
+}
+
 function IssueCounts({ crawl }: { crawl: Crawl }) {
-  const { errors, warnings, notices } = crawl.issues;
+  const { errors, warnings, notices, hits } = issuePages(crawl);
   if (errors + warnings + notices === 0) return <span className="text-[13px] text-green-700 dark:text-green-400">None</span>;
+  const title = hits !== errors + warnings + notices ? `${hits.toLocaleString()} rule hits across these pages` : undefined;
   return (
-    <span className="inline-flex flex-wrap gap-1">
-      {errors > 0 && <Badge tone="red">{plural(errors, "error")}</Badge>}
-      {warnings > 0 && <Badge tone="amber">{plural(warnings, "warning")}</Badge>}
-      {notices > 0 && <Badge>{plural(notices, "notice")}</Badge>}
+    <span className="inline-flex flex-wrap gap-1" title={title}>
+      {errors > 0 && <Badge tone="red">{plural(errors, "page")} with errors</Badge>}
+      {warnings > 0 && <Badge tone="amber">{plural(warnings, "page")} with warnings</Badge>}
+      {errors + warnings === 0 && notices > 0 && <Badge>{plural(notices, "page")} with notices</Badge>}
     </span>
   );
 }
@@ -623,22 +634,38 @@ function Code({ text }: { text: string }) {
 function LatestCrawl({ ws, site, crawl, siteVerified, go }: { ws: string; site: string; crawl: Crawl; siteVerified: boolean; go: (tab: Tab, item?: string) => void }) {
   const [issues, setIssues] = useState<CrawlIssue[] | null>(null);
   const [error, setError] = useState("");
+  const [showNotices, setShowNotices] = useState(false);
+  const [locale, setLocale] = useState("");
   const done = !running(crawl);
   useEffect(() => {
     if (!done) return;
-    api.GET("/v1/brands/{brand}/crawls/{crawl}/issues", { params: { path: { brand: pickedBrandId(), crawl: crawl.id } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/crawls/{crawl}/issues", { params: { path: { brand: pickedBrandId(), crawl: crawl.id }, query: { fold_locales: true } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setIssues(data.data);
     });
   }, [ws, crawl.id, done]);
+  const pages = issuePages(crawl);
+  const locales = Array.from(new Set((issues ?? []).flatMap((i) => (i.templates ?? []).flatMap((t) => (t.locales ?? []).map((l) => l.locale))))).sort();
+  const visible = (issues ?? []).filter((i) => showNotices || i.severity !== "notice").map((i) => {
+    if (!locale) return i;
+    const templates = (i.templates ?? []).map((t) => {
+      const loc = (t.locales ?? []).filter((l) => l.locale === locale);
+      if (loc.length) return { ...t, pages: loc.reduce((n, l) => n + l.pages, 0), locales: loc };
+      if (t.template === `/${locale}` || t.template.startsWith(`/${locale}/`)) return t;
+      return null;
+    }).filter(Boolean) as CrawlIssue["templates"];
+    const pages = templates.reduce((n, t) => n + t.pages, 0);
+    return { ...i, templates, pages };
+  }).filter((i) => i.pages > 0);
+  const hiddenNotices = (issues ?? []).filter((i) => i.severity === "notice").length;
 
   return (
     <>
       <Stats cols={5}>
-        <Stat label="Health" value={crawl.health_score ?? "–"} sub={done ? "of 100" : "when the crawl ends"} tone={crawl.health_score === null ? undefined : crawl.health_score >= 90 ? "green" : crawl.health_score >= 70 ? "amber" : "red"} />
+        <Stat label="Health" value={crawl.health_score ?? "–"} sub={done ? (pages.errors > 0 ? `of 100 · ${plural(pages.errors, "page")} with errors` : "of 100") : "when the crawl ends"} tone={crawl.health_score === null ? undefined : crawl.health_score >= 90 ? "green" : crawl.health_score >= 70 ? "amber" : "red"} />
         <Stat label="Pages read" value={crawl.pages_fetched.toLocaleString()} sub={`of ${crawl.pages_found.toLocaleString()} found`} />
-        <Stat label="Errors" value={crawl.issues.errors.toLocaleString()} tone={crawl.issues.errors > 0 ? "red" : undefined} />
-        <Stat label="Warnings" value={crawl.issues.warnings.toLocaleString()} tone={crawl.issues.warnings > 0 ? "amber" : undefined} />
+        <Stat label="Pages with errors" value={pages.errors.toLocaleString()} tone={pages.errors > 0 ? "red" : undefined} />
+        <Stat label="Pages with warnings" value={pages.warnings.toLocaleString()} tone={pages.warnings > 0 ? "amber" : undefined} />
         <Stat label="Blocked by robots.txt" value={crawl.pages_blocked.toLocaleString()} />
       </Stats>
       {!done && <p className="text-[13px] text-muted-foreground">{crawlLine(crawl)}. The audit runs when it ends.</p>}
@@ -660,14 +687,32 @@ function LatestCrawl({ ws, site, crawl, siteVerified, go }: { ws: string; site: 
         </div>
       )}
       {done && (
-        <Card title={issues ? `Issues (${issues.length})` : "Issues"} description="Grouped by URL template, so one template fix clears many pages. Each one is also on the fixes list." action={<Button variant="ghost" onClick={() => go("fixes")}>Open fixes</Button>}>
+        <Card title={issues ? `Issues (${visible.length})` : "Issues"} description="Grouped by URL template, with locales rolled up. Counts are distinct pages. Each one is also on the fixes list." action={<Button variant="ghost" onClick={() => go("fixes")}>Open fixes</Button>}>
           <ErrorText>{error}</ErrorText>
           {!issues && !error && <Loading />}
           {issues && issues.length === 0 && <p className="text-[13px] text-green-700 dark:text-green-400">No issues. Every page passed every rule.</p>}
           {issues && issues.length > 0 && (
-            <ul className="divide-y">
-              {issues.map((i) => <IssueRow key={i.id} ws={ws} crawl={crawl.id} issue={i} />)}
-            </ul>
+            <>
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+                {locales.length > 0 && (
+                  <select className={field} aria-label="Locale" value={locale} onChange={(e) => setLocale(e.target.value)}>
+                    <option value="">Every locale</option>
+                    {locales.map((l) => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                )}
+                {hiddenNotices > 0 && (
+                  <label className="flex items-center gap-2 text-muted-foreground">
+                    <input type="checkbox" checked={showNotices} onChange={(e) => setShowNotices(e.target.checked)} />
+                    Show {plural(hiddenNotices, "notice")}
+                  </label>
+                )}
+              </div>
+              {visible.length === 0 ? <p className="text-[13px] text-muted-foreground">Nothing to show with this filter.</p> : (
+                <ul className="divide-y">
+                  {visible.map((i) => <IssueRow key={i.id} ws={ws} crawl={crawl.id} issue={i} locale={locale} />)}
+                </ul>
+              )}
+            </>
           )}
         </Card>
       )}
@@ -677,7 +722,7 @@ function LatestCrawl({ ws, site, crawl, siteVerified, go }: { ws: string; site: 
 
 type IssuePage = { id: string; page_id: string; url: string; template: string; detail: string; http_status: number | null };
 
-function IssueRow({ ws, crawl, issue }: { ws: string; crawl: string; issue: CrawlIssue }) {
+function IssueRow({ ws, crawl, issue, locale }: { ws: string; crawl: string; issue: CrawlIssue; locale: string }) {
   const [open, setOpen] = useState(false);
   const [pages, setPages] = useState<IssuePage[] | null>(null);
   const [template, setTemplate] = useState("");
@@ -685,8 +730,8 @@ function IssueRow({ ws, crawl, issue }: { ws: string; crawl: string; issue: Craw
   useEffect(() => {
     if (!open) return;
     setPages(null);
-    api.GET("/v1/brands/{brand}/crawls/{crawl}/issues/{rule}", { params: { path: { brand: pickedBrandId(), crawl, rule: issue.id }, query: { ...(template ? { template } : {}), limit: 50 } } }).then(({ data }) => setPages(data?.data ?? []));
-  }, [open, ws, crawl, issue.id, template]);
+    api.GET("/v1/brands/{brand}/crawls/{crawl}/issues/{rule}", { params: { path: { brand: pickedBrandId(), crawl, rule: issue.id }, query: { ...(template ? { template } : {}), ...(locale ? { locale } : {}), limit: 50 } } }).then(({ data }) => setPages(data?.data ?? []));
+  }, [open, ws, crawl, issue.id, template, locale]);
 
   return (
     <li className="py-3">
@@ -695,7 +740,7 @@ function IssueRow({ ws, crawl, issue }: { ws: string; crawl: string; issue: Craw
         <span className="text-[13px] font-medium">{issue.title}</span>
         <span className="text-[13px] text-muted-foreground">{plural(issue.pages, "page")}</span>
         <span className="ml-auto flex flex-wrap gap-1">
-          {issue.templates.slice(0, 3).map((t) => <Badge key={t.template}>{t.template} · {t.pages}</Badge>)}
+          {issue.templates.slice(0, 3).map((t) => <Badge key={t.template}>{t.template} · {t.pages}{t.locales && t.locales.length > 1 ? ` · ${t.locales.length} locales` : ""}</Badge>)}
           {issue.templates.length > 3 && <Badge>+{issue.templates.length - 3}</Badge>}
         </span>
       </button>
@@ -706,7 +751,7 @@ function IssueRow({ ws, crawl, issue }: { ws: string; crawl: string; issue: Craw
           {issue.templates.length > 1 && (
             <select className={field} aria-label="URL template" value={template} onChange={(e) => setTemplate(e.target.value)}>
               <option value="">Every template</option>
-              {issue.templates.map((t) => <option key={t.template} value={t.template}>{t.template} ({t.pages})</option>)}
+              {issue.templates.map((t) => <option key={t.template} value={t.template}>{t.template} ({t.pages}{t.locales && t.locales.length ? `, ${t.locales.map((l) => l.locale).join(", ")}` : ""})</option>)}
             </select>
           )}
           {!pages && <Loading />}

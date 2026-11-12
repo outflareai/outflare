@@ -9,7 +9,7 @@ import { pickedBrandId } from "@/lib/brand";
 // snippet can't run (bio links, partner pages, QR codes).
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import type { Brand, TrackingCampaign, TrackingChannel, TrackingChannelID, TrackingLink } from "@outflare/sdk";
+import type { TrackingCampaign, TrackingChannel, TrackingChannelID, TrackingLink } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, toast } from "../ui";
 import { ago, plural } from "../format";
@@ -31,7 +31,6 @@ export function CampaignLinks(props: Props) {
 function CampaignLinksPage({ ws, canManage }: Props) {
   const [campaigns, setCampaigns] = useState<TrackingCampaign[] | null>(null);
   const [channels, setChannels] = useState<TrackingChannel[]>([]);
-  const [brands, setBrands] = useState<Brand[]>([]);
   const [status, setStatus] = useState<"active" | "archived">("active");
   const [channel, setChannel] = useState<TrackingChannelID | "">("");
   const [creating, setCreating] = useState(false);
@@ -48,11 +47,9 @@ function CampaignLinksPage({ ws, canManage }: Props) {
   }, [load]);
   useEffect(() => {
     api.GET("/v1/brands/{brand}/tracking-taxonomy", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setChannels(data?.channels ?? []));
-    api.GET("/v1/workspaces/{ws}/brands", { params: { path: { ws } } }).then(({ data }) => setBrands(data?.data ?? []));
   }, [ws]);
 
   const label = useMemo(() => Object.fromEntries(channels.map((c) => [c.id, c.label])) as Record<string, string>, [channels]);
-  const brandName = useMemo(() => Object.fromEntries(brands.map((b) => [b.id, b.name])) as Record<string, string>, [brands]);
 
   async function setArchived(c: TrackingCampaign, archived: boolean) {
     const { error } = await api.PATCH("/v1/brands/{brand}/tracking-campaigns/{id}", { params: { path: { brand: pickedBrandId(), id: c.id } }, body: { status: archived ? "archived" : "active" } });
@@ -73,7 +70,6 @@ function CampaignLinksPage({ ws, canManage }: Props) {
     },
     { id: "channel", header: "Channel", accessorFn: (c) => label[c.channel] ?? c.channel },
     { id: "source", header: "Source", accessorFn: (c) => c.source, cell: ({ row: { original: c } }) => <span className="font-mono text-[12px]">{c.source}</span> },
-    { id: "brand", header: "Brand", accessorFn: (c) => (c.brand_id ? brandName[c.brand_id] ?? "" : ""), cell: ({ getValue }) => (getValue() as string) || <span className="text-muted-foreground">All</span> },
     {
       id: "made", header: "Made by", accessorFn: (c) => c.object_kind,
       cell: ({ row: { original: c } }) => (c.object_kind ? <Badge tone="grey">{c.object_kind.replace(/_/g, " ")}</Badge> : "You"),
@@ -133,7 +129,7 @@ function CampaignLinksPage({ ws, canManage }: Props) {
         />
       )}
       {creating && (
-        <NewCampaign ws={ws} channels={channels} brands={brands} onClose={() => setCreating(false)}
+        <NewCampaign ws={ws} channels={channels} onClose={() => setCreating(false)}
           onSaved={(c) => { setCreating(false); load(); setOpen(c); }} />
       )}
       {open && <CampaignSheet ws={ws} campaign={open} channelLabel={label[open.channel] ?? open.channel} canManage={canManage} onClose={() => { setOpen(null); load(); }} />}
@@ -141,11 +137,10 @@ function CampaignLinksPage({ ws, canManage }: Props) {
   );
 }
 
-function NewCampaign({ channels, brands, onClose, onSaved }: { ws: string; channels: TrackingChannel[]; brands: Brand[]; onClose: () => void; onSaved: (c: TrackingCampaign) => void }) {
+function NewCampaign({ channels, onClose, onSaved }: { ws: string; channels: TrackingChannel[]; onClose: () => void; onSaved: (c: TrackingCampaign) => void }) {
   const [name, setName] = useState("");
   const [channel, setChannel] = useState<TrackingChannelID>("paid_ads");
   const [source, setSource] = useState("");
-  const [brand, setBrand] = useState("");
   const [landing, setLanding] = useState("");
   const [redirects, setRedirects] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -158,7 +153,7 @@ function NewCampaign({ channels, brands, onClose, onSaved }: { ws: string; chann
     setBusy(true);
     const { data, error } = await api.POST("/v1/brands/{brand}/tracking-campaigns", {
       params: { path: { brand: pickedBrandId() } },
-      body: { name: name.trim(), channel, source: source.trim() || undefined, brand: brand || undefined, landing_url: landing.trim() || undefined, redirect_links: redirects || undefined },
+      body: { name: name.trim(), channel, source: source.trim() || undefined, landing_url: landing.trim() || undefined, redirect_links: redirects || undefined },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -184,15 +179,6 @@ function NewCampaign({ channels, brands, onClose, onSaved }: { ws: string; chann
             placeholder={ch?.sources[0] ?? "google"} maxLength={60} required={(ch?.sources.length ?? 0) !== 1}
             hint="The platform, site or partner, such as google, linkedin or a partner's code." />
           <datalist id="campaign-sources">{ch?.sources.map((s) => <option key={s} value={s} />)}</datalist>
-          {brands.length > 0 && (
-            <label className="block space-y-1 text-[13px]">
-              <span className="font-medium">Brand</span>
-              <select className={`${field} w-full`} value={brand} onChange={(e) => setBrand(e.target.value)}>
-                <option value="">All brands</option>
-                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </label>
-          )}
           <Input label="Landing page" type="url" value={landing} onChange={(e) => setLanding(e.target.value)} placeholder="https://example.com/pricing" maxLength={2000}
             hint="Where links go unless you pick another page. Optional." />
           <label className="flex items-start gap-2 text-[13px]">

@@ -138,6 +138,7 @@ func (s *Server) PruneJobs(ctx context.Context) (int64, error) {
 // when nothing could queue the same key again after it finished.
 var prunableKeyedJobs = []string{
 	jobEventsProcess,            // "batch:<new id>", "more:<brand>:<now>", "stale:<brand>:<5-minute slot>", "replay:<new id>"
+	jobEventNameCheck,           // "event_names.check:<brand>:<minute slot>", "event_names.check:<brand>:after:<job id>"
 	customers.JobMetricEvent,    // "metric-event:<event id>", queued where the event is stored
 	customers.JobLifecycleEvent, // "lifecycle-event:<event id>"
 	customers.JobJourneyEvent,   // "journey-event:<event id>"

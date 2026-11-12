@@ -59,9 +59,10 @@ const (
 	siteKeyDailyEvents = 250_000
 	// And all of a workspace's keys together.
 	siteWorkspaceDailyEvents = 1_000_000
-	// Unapproved event names browsers can add to the catalog. Past it a
-	// browser can only send names the workspace already has.
-	maxBrowserQuarantined = 100
+	// New event names browsers can add to a brand's catalog in a day. Past
+	// it a browser can only send names the brand already has until the day
+	// is over, so a page can't flood the catalog.
+	maxBrowserNewNames = 100
 )
 
 var (
@@ -846,7 +847,7 @@ func (s *Server) queueSiteBatch(ctx context.Context, k siteKeyRow, ua string, ba
 
 // storeSiteBatch stores a browser's batch of events for site key k, as if
 // they arrived at now: each joins its visitor's session and its person.
-// An event that is refused (bad shape, too many unapproved names, a record
+// An event that is refused (bad shape, too many new names in a day, a record
 // conflict) is counted and skipped; any other error ends the transaction.
 func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua string, batch []json.RawMessage, now time.Time) (accepted, rejected int, anon string, err error) {
 	a := &access{principal: principal{ActorType: "site_key", TokenID: k.id}, WorkspaceID: k.workspaceID}
@@ -858,7 +859,7 @@ func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua
 	if err != nil {
 		return 0, 0, "", err
 	}
-	known, quarantined, err := browserNames(ctx, tx, k.workspaceID, c.Brand)
+	known, added, err := browserNames(ctx, tx, k.workspaceID, c.Brand)
 	if err != nil {
 		return 0, 0, "", err
 	}
@@ -891,11 +892,11 @@ func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua
 		if err == nil && m.text("type") == "track" {
 			name, _ := eventNameFor(m.text("event"))
 			if !known[name] {
-				if quarantined >= maxBrowserQuarantined {
-					err = errInvalid("this workspace has too many unapproved event names; approve or remove some in the catalog first")
+				if added >= maxBrowserNewNames {
+					err = errInvalid("this brand got too many new event names today; send names it already has, or try again tomorrow")
 				} else {
 					known[name] = true
-					quarantined++
+					added++
 				}
 			}
 		}
@@ -915,7 +916,7 @@ func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua
 			return 0, 0, "", err
 		}
 	}
-	return accepted, rejected, anon, saveEventNames(ctx, tx, k.workspaceID, c.Brand, totals.names)
+	return accepted, rejected, anon, saveEventNames(ctx, tx, k.workspaceID, c.Brand, totals.names, false)
 }
 
 // siteCookieRe is the shape of a visitor id the snippet makes.
@@ -981,6 +982,9 @@ func (s *Server) ingestSiteOne(ctx context.Context, tx pgx.Tx, a *access, c *cat
 	if err == nil {
 		isNew, err = siteSession(ctx, sp, a, v, m, now)
 	}
+	if err == nil && isNew {
+		err = s.directClick(ctx, sp, a, v, m, now)
+	}
 	if err == nil {
 		err = s.ingestOne(ctx, sp, a, c, v.brandID, siteSource, nil, m, now, &res, totals)
 	}
@@ -1008,26 +1012,26 @@ func (s *Server) ingestSiteOne(ctx context.Context, tx pgx.Tx, a *access, c *cat
 }
 
 // browserNames are the event names the brand has, and how many of them
-// wait for approval.
+// are new in the last day.
 func browserNames(ctx context.Context, tx pgx.Tx, ws, brand string) (map[string]bool, int, error) {
-	rows, err := tx.Query(ctx, `SELECT name, status = 'quarantined' FROM event_definitions WHERE workspace_id = $1
+	rows, err := tx.Query(ctx, `SELECT name, created_at > now() - interval '1 day' FROM event_definitions WHERE workspace_id = $1
 		AND brand_id IS NOT DISTINCT FROM NULLIF($2, '')::uuid`, ws, brand)
 	if err != nil {
 		return nil, 0, err
 	}
-	known, quarantined := map[string]bool{}, 0
+	known, added := map[string]bool{}, 0
 	for rows.Next() {
 		var name string
-		var q bool
-		if err := rows.Scan(&name, &q); err != nil {
+		var recent bool
+		if err := rows.Scan(&name, &recent); err != nil {
 			return nil, 0, err
 		}
 		known[name] = true
-		if q {
-			quarantined++
+		if recent {
+			added++
 		}
 	}
-	return known, quarantined, rows.Err()
+	return known, added, rows.Err()
 }
 
 // siteMessage keeps what a browser may say: a page view or a track call on
@@ -1098,9 +1102,13 @@ func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMess
 	} else {
 		delete(props, "click_ids")
 	}
-	// A redirect link's click key, on the page it landed on only.
+	// A redirect link's click key, on the page it landed on only, and
+	// whether the site script named it for a direct-mode visit.
 	if k, _ := props["ofclk"].(string); kind != "page" || !clickKeyRe.MatchString(k) {
 		delete(props, "ofclk")
+	}
+	if d, _ := props["direct"].(bool); !d || props["ofclk"] == nil {
+		delete(props, "direct")
 	}
 	// The ad the tracking template named, with the network's own ids. Only
 	// page views carry it: a track event's ad is the site's own property.

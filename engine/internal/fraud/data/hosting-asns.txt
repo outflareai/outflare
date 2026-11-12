@@ -1,0 +1,50 @@
+# Cloud and hosting providers' networks (ASNs), where people rarely browse
+# from and bots run: a click from one is flagged datacenter_network
+# (engine/internal/fraud). One network per line: ASN, the provider's name
+# and the page that shows the ASN is theirs, tab separated. Facts checked by
+# hand against the registry; add only what you have checked the same way.
+#
+# Never add networks that carry real people through privacy relays:
+# Cloudflare (13335; WARP, iCloud Private Relay), Akamai (20940, 36183,
+# 16625) and Fastly (54113), iCloud Private Relay egress
+# (https://mask-api.icloud.com/egress-ip-ranges.csv). The tests refuse them.
+#
+# Left out on purpose, though they are cloud networks, because real people
+# browse from them too: Microsoft 8075 (Windows 365 Cloud PCs run on Azure),
+# Tencent 132203 (QQ and WeChat) and Alibaba 37963 (Alibaba's own services);
+# Google 15169 is Google's own services and fetchers, not a hosting network.
+# Checked on 2026-11-11 against the registry (RIPEstat), PeeringDB and, for
+# the largest clouds, the provider's own published ranges.
+
+16509	Amazon Web Services (AMAZON-02 - Amazon.com, Inc.)	https://ip-ranges.amazonaws.com/ip-ranges.json
+14618	Amazon Web Services us-east-1 (AMAZON-AES - Amazon.com, Inc.)	https://ip-ranges.amazonaws.com/ip-ranges.json
+8987	Amazon Web Services GovCloud (GOVCLOUD - Amazon)	https://ip-ranges.amazonaws.com/ip-ranges.json
+396982	Google Cloud (GOOGLE-CLOUD-PLATFORM - Google LLC)	https://www.gstatic.com/ipranges/cloud.json
+19527	Google Cloud (GOOGLE-2 - Google LLC)	https://www.peeringdb.com/api/net?asn=19527
+14061	DigitalOcean (DIGITALOCEAN-ASN - DigitalOcean, LLC)	https://digitalocean.com/geo/google.csv
+393406	DigitalOcean (DIGITALOCEAN-AS393406 - DigitalOcean, LLC)	https://www.peeringdb.com/api/net?asn=393406
+24940	Hetzner (HETZNER-AS Hetzner Online GmbH)	https://www.peeringdb.com/api/net?asn=24940
+213230	Hetzner Cloud (HETZNER-CLOUD2-AS Hetzner Online GmbH)	https://www.peeringdb.com/api/net?asn=213230
+16276	OVHcloud (OVH OVH SAS)	https://www.peeringdb.com/api/net?asn=16276
+63949	Linode / Akamai Connected Cloud (AKAMAI-LINODE-AP - Akamai Connected Cloud)	https://geoip.linode.com/
+20473	Vultr / Choopa (AS-VULTR - The Constant Company, LLC)	https://www.peeringdb.com/api/net?asn=20473
+51167	Contabo (CONTABO Contabo GmbH)	https://www.peeringdb.com/api/net?asn=51167
+40021	Contabo USA (CONTABO-40021 - Contabo Inc.)	https://www.peeringdb.com/api/net?asn=40021
+12876	Scaleway (AS12876 Scaleway SAS)	https://www.peeringdb.com/api/net?asn=12876
+45102	Alibaba Cloud (ALIBABA-CN-NET - Alibaba (US) Technology Co., Ltd.)	https://www.peeringdb.com/api/net?asn=45102
+45090	Tencent Cloud China (TENCENT-NET-AP - Shenzhen Tencent Computer Systems Company Limited)	https://www.peeringdb.com/api/net?asn=45090
+31898	Oracle Cloud Infrastructure (ORACLE-BMC-31898 - Oracle Corporation)	https://docs.oracle.com/en-us/iaas/tools/public_ip_ranges.json
+36351	IBM Cloud / SoftLayer (SOFTLAYER - IBM Cloud)	https://www.peeringdb.com/api/net?asn=36351
+136907	Huawei Cloud (HWCLOUDS-AS-AP - HUAWEI CLOUDS)	https://www.peeringdb.com/api/net?asn=136907
+60781	Leaseweb Netherlands (LEASEWEB-NL-AMS-01 LeaseWeb Netherlands B.V.)	https://www.peeringdb.com/api/net?asn=60781
+30633	Leaseweb USA (LEASEWEB-USA-WDC - Leaseweb USA, Inc.)	https://www.peeringdb.com/api/net?asn=30633
+9009	M247 (M247 M247 Europe SRL)	https://www.peeringdb.com/api/net?asn=9009
+36352	ColoCrossing (AS-COLOCROSSING - HostPapa)	https://www.peeringdb.com/api/net?asn=36352
+8560	IONOS (IONOS-AS IONOS SE)	https://www.peeringdb.com/api/net?asn=8560
+47583	Hostinger (AS-HOSTINGER Hostinger International Limited)	https://www.peeringdb.com/api/net?asn=47583
+36007	Kamatera (KAMATERA - Kamatera, Inc.)	https://stat.ripe.net/data/as-overview/data.json?resource=AS36007
+202053	UpCloud (UPCLOUD UpCloud Ltd)	https://www.peeringdb.com/api/net?asn=202053
+197540	netcup (netcup-AS netcup GmbH)	https://www.peeringdb.com/api/net?asn=197540
+46606	Unified Layer / Bluehost, HostGator (UNIFIEDLAYER-AS-1 - Unified Layer)	https://www.peeringdb.com/api/net?asn=46606
+26347	DreamHost (DREAMHOST-AS - New Dream Network, LLC)	https://www.peeringdb.com/api/net?asn=26347
+22612	Namecheap hosting (NAMECHEAP-NET - Namecheap, Inc.)	https://www.peeringdb.com/api/net?asn=22612

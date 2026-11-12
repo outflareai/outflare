@@ -285,7 +285,14 @@ func TestLifecycleEmail(t *testing.T) {
 
 	// Lifecycle email carries a one-click unsubscribe; transactional email
 	// still reaches people who used it.
-	l := owner.must(202, "POST", base+"/emails", map[string]any{"to": "ben@example.org", "from": "news@mail.example.com", "subject": "Tips", "html": "<p>Welcome</p>", "purpose": "lifecycle"})
+	// with the brand's postal address in its footer.
+	var brandID string
+	if err := e.pool.QueryRow(ctx, `SELECT id FROM brands WHERE workspace_id = $1 ORDER BY created_at LIMIT 1`, ws).Scan(&brandID); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(200, "PATCH", base+"/brands/"+brandID+"/context", map[string]any{"legal_name": "Acme Example Ltd",
+		"address": map[string]any{"line1": "1 Example Way", "city": "Leeds", "postal_code": "LS1 1AA", "country": "GB"}})
+	l := owner.must(202, "POST", base+"/emails", map[string]any{"to": "ben@example.org", "from": "news@mail.example.com", "subject": "Tips", "html": "<p>Welcome</p>", "purpose": "lifecycle", "brand_id": brandID})
 	if err := svc.Send(ctx, l["id"].(string), false); err != nil {
 		t.Fatal(err)
 	}
@@ -294,6 +301,9 @@ func TestLifecycleEmail(t *testing.T) {
 	unsub, _ := strings.CutPrefix(strings.Trim(hdr["List-Unsubscribe"].(string), "<>"), "https://outflare.test")
 	if hdr["List-Unsubscribe-Post"] != "List-Unsubscribe=One-Click" || !strings.HasPrefix(unsub, "/u/e.") || !strings.Contains(m["html"].(string), "Unsubscribe</a>") {
 		t.Fatalf("lifecycle headers = %v", m)
+	}
+	if !strings.Contains(m["html"].(string), "Acme Example Ltd, 1 Example Way, Leeds LS1 1AA, United Kingdom<br><a") {
+		t.Fatalf("lifecycle footer without the brand's address: %v", m["html"])
 	}
 	anon := &client{t: t, h: e.h}
 	if code, _ := anon.raw("POST", unsub, "application/x-www-form-urlencoded", "List-Unsubscribe=One-Click"); code != 200 {
@@ -356,5 +366,50 @@ func TestLifecycleEmail(t *testing.T) {
 		if !names[n] {
 			t.Errorf("no %s event", n)
 		}
+	}
+}
+
+// TestSharedEmailProviders: a provider with no brand is shared, so a brand's
+// view lists it, and disconnecting the default hands the default on.
+func TestSharedEmailProviders(t *testing.T) {
+	e := freshEnv(t)
+	rs := httptest.NewServer(&fakeResend{})
+	defer rs.Close()
+	e.integrations.Client.BaseURLs["resend"] = rs.URL
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	acme := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "website": "https://acme.example/"})["id"].(string)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "https://northpeak.example/"})
+
+	first := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "resend", "name": "Resend test", "credentials": map[string]any{"api_key": "re_test_not_a_real_key"}})["id"].(string)
+	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "resend", "name": "Resend main", "credentials": map[string]any{"api_key": "re_test_not_a_real_key"}})
+
+	list := owner.must(200, "GET", base+"/email-providers?brand="+acme, nil)["data"].([]any)
+	if len(list) != 2 {
+		t.Fatalf("a brand's view = %v, want both shared providers", list)
+	}
+	var second string
+	for _, p := range list {
+		p := p.(map[string]any)
+		if p["brand_id"] != nil {
+			t.Fatalf("provider has a brand: %v", p)
+		}
+		if p["integration_id"] == first && p["is_default"] != true {
+			t.Fatalf("the first provider isn't the default: %v", p)
+		}
+		if p["integration_id"] != first {
+			second = p["id"].(string)
+		}
+	}
+
+	owner.must(201, "POST", base+"/email-provider-domains", map[string]any{"domain": "mail.acme.example", "provider_id": second})
+	if d := owner.must(200, "GET", base+"/email-provider-domains?brand="+acme, nil)["data"].([]any); len(d) != 1 {
+		t.Fatalf("a brand's view of shared domains = %v", d)
+	}
+
+	owner.must(204, "DELETE", base+"/integrations/"+first, nil)
+	list = owner.must(200, "GET", base+"/email-providers", nil)["data"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["id"] != second || list[0].(map[string]any)["is_default"] != true {
+		t.Fatalf("after disconnecting the default = %v", list)
 	}
 }

@@ -38,7 +38,7 @@ inputs:
     example: "20"
 steps:
   - say: Read the brand's context, and check its setup kit is applied so the Partnerships board and creator fields are there.
-    tools: [getBrandContext, listRecordTypes]
+    tools: [getBrandContext, listBrandRecordTypes]
   - say: Pick creators from the board at Found or Vetted who fit the offer, and suggest more from your own records who create, up to the number given.
     tools: [listBrandRecords, searchWorkspace]
   - say: Draft a short offer that says what they get and that there's no obligation to post, as a sequence held until a person approves it.
@@ -48,7 +48,7 @@ steps:
   - say: Two weeks later, check who posted, save the post link and move them to Live; suggest a friendly nudge for the rest.
     tools: [listBrandSocialItems, updateBrandRecord]
   - say: After a month, report visits, sign-ups and paying customers per creator, and say who to offer a paid deal.
-    tools: [getAnalyticsReport, outcomesReport]
+    tools: [getAnalyticsReport, getBrandOutcomesReport]
 guardrails:
   - Never send an offer or ship anything without a person's approval.
   - Never ask for a positive review or make posting a condition of the gift.

@@ -265,10 +265,12 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobCRMGoogleSync, s.crmGoogleSyncJob)
 	q.Handle(jobCRMMailPrivacy, s.crmMailPrivacyJob)
+	q.Handle(jobCRMCalendarWorkspace, s.crmCalendarWorkspaceJob)
 	q.Handle(jobCRMImport, s.crmImportJob)
 	q.Handle(jobBatchUndo, s.batchUndoJob)
 	q.Handle(jobBulkEdit, s.bulkEditJob)
 	q.Handle(jobEventsProcess, s.eventsProcessJob)
+	q.Handle(jobEventNameCheck, s.eventNameCheckJob)
 	q.Handle(jobPrivacyExport, s.privacyExportJob)
 	if s.inboundEmail != nil {
 		q.Handle(inboundemail.JobProcess, s.inboundEmail.Process)

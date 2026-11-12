@@ -34,8 +34,24 @@ func TestPartnershipPipelines(t *testing.T) {
 	if inSecond != 1 || inFirst != 0 {
 		t.Fatalf("link_partnership in second %d, first %d", inSecond, inFirst)
 	}
-	// A kit with rules or journeys is only for the workspace route.
-	owner.must(400, "POST", root+"/kits/trial-activation/apply", nil)
+	// A kit's smart lists, rules and journeys are the brand's own: the same
+	// kit set up for the second brand and then the first gives each its
+	// own parts, with the same names.
+	activation := map[string]any{"inputs": map[string]any{"activated_event": "project_created"}}
+	owner.must(200, "POST", root+"/kits/trial-activation/apply", activation)
+	owner.must(200, "POST", "/v1/brands/"+first+"/kits/trial-activation/apply", activation)
+	if again := owner.must(200, "POST", root+"/kits/trial-activation/apply", activation); again["changes"] != 0.0 {
+		t.Fatalf("second apply on the second brand: %v", again)
+	}
+	for _, table := range []string{"smart_lists", "rules", "journeys"} {
+		var second2, first2 int
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE brand_id=$2), count(*) FILTER (WHERE brand_id=$3) FROM `+table+` WHERE workspace_id=$1 AND kit_id='trial-activation'`, ws, second, first).Scan(&second2, &first2); err != nil {
+			t.Fatal(err)
+		}
+		if second2 == 0 || second2 != first2 {
+			t.Fatalf("%s from the kit: second brand %d, first %d", table, second2, first2)
+		}
+	}
 
 	// Add a prospect by website: company found or added, first stage.
 	add := owner.must(201, "POST", root+"/partnerships", map[string]any{

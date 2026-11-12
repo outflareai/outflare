@@ -100,6 +100,7 @@ import { SEO } from "./pages/SEO";
 import { SiteAudits } from "./pages/SiteAudits";
 import { Fixes } from "./pages/Fixes";
 import { Keywords } from "./pages/Keywords";
+import { OrganicConversions } from "./pages/OrganicConversions";
 import { Reddit } from "./pages/Reddit";
 import { RedditCampaigns } from "./pages/RedditCampaigns";
 import { Social } from "./pages/Social";
@@ -114,6 +115,8 @@ import { AIAccuracy, AICompetitors, AISources, AITraffic } from "./pages/ai-visi
 import { AIVisibilitySettings } from "./pages/ai-visibility/settings";
 import { AIPages } from "./pages/ai-visibility/pages";
 import { Backlinks } from "./pages/Backlinks";
+import { LinkOrders } from "./pages/LinkOrders";
+import { LinkROI } from "./pages/LinkROI";
 import { Competitors } from "./pages/Competitors";
 import { Competition } from "./pages/Competition";
 import { LinkBuilding } from "./pages/LinkBuilding";
@@ -461,8 +464,9 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   // building, for the brand picked in the sidebar, refreshed every 30
   // seconds.
   useEffect(() => {
-    if (!wsId) return;
-    const load = () => api.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws: wsId }, query: pickedBrand ? { brand: pickedBrand } : {} } }).then(({ data }) => {
+    const pickedId = brandState.brand?.id;
+    if (!wsId || !pickedId) return;
+    const load = () => api.GET("/v1/brands/{brand}/stats", { params: { path: { brand: pickedId } } }).then(({ data }) => {
       if (!data) return;
       setUnread(data.unread_replies);
       setPitchesWaiting(data.link_pitches_waiting);
@@ -671,7 +675,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             siblings that share a key are duplicated when the tab changes. */}
         {ready && ws && isAdmin && tab !== "connectors" && <UnassignedNotice key={`unassigned:${ws.id}`} ws={ws.id} onFix={() => setTab("connectors")} />}
         {!ready && <Loading />}
-        {ready && ws && tab === "overview" && <Overview key={ws.id} ws={ws.id} name={ws.name} isAdmin={isAdmin} go={(t) => { if (t === "get-started") setOpenedFrom("overview"); setTab(t); }} limited={(ws.brand_ids?.length ?? 0) > 0} agent={agentReady && BrandAgentPage && agentProps ? <BrandAgentPage key={`home:${ws.id}:${brandState.brand?.id ?? "all"}`} {...agentProps} variant="home" /> : undefined} />}
+        {ready && ws && tab === "overview" && <Overview key={ws.id} ws={ws.id} name={ws.name} isAdmin={isAdmin} go={(t, item) => { if (t === "get-started") setOpenedFrom("overview"); setTab(t, item); }} limited={(ws.brand_ids?.length ?? 0) > 0} agent={agentReady && BrandAgentPage && agentProps ? <BrandAgentPage key={`home:${ws.id}:${brandState.brand?.id ?? "all"}`} {...agentProps} variant="home" /> : undefined} />}
         {ready && ws && tab === "setup" && <BrandSetup key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "get-started" && !isAdmin && <p className="text-sm text-muted-foreground">An owner or admin of {ws.name} sets this up.</p>}
         {ready && ws && tab === "flags" && <Flags key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
@@ -694,6 +698,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "audits" && <SiteAudits key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(s) => setItem(s || undefined)} go={setTab} />}
         {ready && ws && tab === "search-insights" && <SearchDashboard key={ws.id} ws={ws.id} go={setTab} initialSite={item} canManage={can("seo.manage")} />}
         {ready && ws && tab === "keywords" && <Keywords key={ws.id} ws={ws.id} go={setTab} canManage={can("seo.manage")} />}
+        {ready && ws && tab === "organic-conversions" && <OrganicConversions key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-visibility" && <AIVisibility key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} item={item} />}
         {ready && ws && tab === "ai-questions" && <AIQuestions key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} item={item} />}
         {ready && ws && tab === "ai-competitors" && <AICompetitors key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
@@ -704,6 +709,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "ai-visibility-settings" && <AIVisibilitySettings key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "fixes" && <Fixes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "backlinks" && <Backlinks key={ws.id} ws={ws.id} go={setTab} />}
+        {ready && ws && tab === "link-orders" && <LinkOrders key={ws.id} ws={ws.id} myId={me.user.id ?? ""} can={can} go={setTab} item={item} />}
+        {ready && ws && tab === "link-roi" && <LinkROI key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "competition" && <Competition key={ws.id} ws={ws.id} go={setTab} item={item} />}
         {ready && ws && tab === "competitors" && <Competitors key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "social" && <Social key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
@@ -774,7 +781,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "knowledge" && <Knowledge key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "help-centre" && <HelpCentre key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "company" && <Company key={ws.id} ws={ws.id} canManage={writer} />}
-        {ready && ws && tab === "brands" && <Brands key={ws.id} ws={ws.id} canManage={writer} canEdit={writer} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "brands" && <Brands key={ws.id} ws={ws.id} canManage={writer} canEdit={writer} canDelete={isAdmin} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "workspace-brands" && <Brands key={`list:${ws.id}`} list ws={ws.id} canManage={writer} canEdit={writer} canDelete={isAdmin} open={item} setOpen={setItem} go={setTab} />}
         {isSettings(tab) && (
           <SettingsFrame groups={settings} tab={tab} onTab={go}>
             {ready && ws && tab === "workspace" && <WorkspaceSettings key={ws.id} ws={ws} canManage={isAdmin} onSaved={onReload} />}

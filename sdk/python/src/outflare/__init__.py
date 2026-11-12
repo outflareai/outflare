@@ -32,8 +32,13 @@ class Outflare(Operations, _Base):
 
 
 def is_held(answer: Any) -> bool:
-    """Whether a write made inside a mission was held (a dry run, or waiting for approval) instead of running."""
-    return isinstance(answer, dict) and "mission_action" in answer and "approval_required" in answer
+    """Whether a write was held for a person instead of running.
+
+    True for the action layer's answer, and for a mission's from before missions retired.
+    """
+    if not isinstance(answer, dict) or "approval_required" not in answer:
+        return False
+    return "action" in answer or "mission_action" in answer
 
 
 __all__ = [

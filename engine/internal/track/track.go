@@ -246,6 +246,27 @@ func Hold(ctx context.Context) (context.Context, func(send bool, base Event)) {
 	}
 }
 
+// Checkpoint marks the events held so far in ctx's hold. Calling the
+// returned func drops the ones held since, so a transaction that is rolled
+// back and run again (a deadlock retry) doesn't send its actions twice.
+// Without a hold it does nothing.
+func Checkpoint(ctx context.Context) (rewind func()) {
+	h, ok := ctx.Value(holdKey{}).(*hold)
+	if !ok {
+		return func() {}
+	}
+	h.mu.Lock()
+	n := len(h.events)
+	h.mu.Unlock()
+	return func() {
+		h.mu.Lock()
+		if len(h.events) > n {
+			h.events = h.events[:n]
+		}
+		h.mu.Unlock()
+	}
+}
+
 func fill(e, base Event) Event {
 	if e.Surface == "" {
 		e.Surface = base.Surface

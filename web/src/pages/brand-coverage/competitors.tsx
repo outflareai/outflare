@@ -1,5 +1,6 @@
 // Where the brand's competitors appear: each tracked competitor is scanned
-// on a cadence (monthly unless changed), through
+// on a cadence (the top 10 every 30 days and the rest every 90 days
+// unless changed), through
 // the workspace's own search results and SEO connections, plus pages AI
 // answers cite when they name it. Gaps are sites where the brand has no
 // publisher yet.
@@ -35,7 +36,7 @@ const evidenceNames: Record<string, string> = {
   title_promoted: "the title says promoted",
 };
 const why = (e: string) => evidenceNames[e] ?? e.replaceAll("_", " ");
-const cadence = (n: number) => (n === 7 ? "Weekly" : n === 30 ? "Monthly" : n === 1 ? "Daily" : `Every ${n} days`);
+const cadence = (n: number) => (n === 7 ? "Weekly" : n === 30 ? "Monthly" : n === 90 ? "Every 90 days" : n === 1 ? "Daily" : `Every ${n} days`);
 const number = (n: number | null | undefined) => (n == null ? "–" : Math.round(n).toLocaleString());
 
 export function CompetitorPresence({ ws, brand, manage }: { ws: string; brand: string; manage: boolean }) {
@@ -113,7 +114,7 @@ export function CompetitorPresence({ ws, brand, manage }: { ws: string; brand: s
             <a className="text-brand underline" href={appPath(ws, "competitors")}>
               Competitors page
             </a>
-            , ranked by the keywords you share.
+            , ranked by the keywords you share. By default the top 10 are scanned every 30 days and the rest every 90 days.
           </p>
         </div>
         {settings && (

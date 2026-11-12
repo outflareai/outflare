@@ -99,7 +99,7 @@ The same suggestion waits at most once, and one a person rejected isn't made aga
 | Folders | `GET`, `POST .../knowledge/collections`, `PATCH`, `DELETE .../knowledge/collections/{id}` | `list_knowledge_folders`, `add_knowledge_folder`, `update_knowledge_folder`, `delete_knowledge_folder` |
 
 ```sh
-curl "$OUTFLARE_URL/v1/workspaces/$WS/knowledge/items?q=refund" -H "Authorization: Bearer $OUTFLARE_TOKEN"
+curl "$OUTFLARE_URL/v1/brands/$BRAND/knowledge/items?q=refund" -H "Authorization: Bearer $OUTFLARE_TOKEN"
 ```
 
 - **Scopes**: reading needs `workspace.read`, changing needs `context.manage`, the same as company context and memories.

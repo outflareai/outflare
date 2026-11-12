@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { AnalyticsSiteBrand, Brand, BrandContext, BrandLinkSuggestion, SendingDomain } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, toast } from "../ui";
+import { ask, Badge, Button, Card, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, toast } from "../ui";
 import { DataTable } from "@/components/data-table";
 import { ConnectFor, geonodeWhy } from "@/components/connect-for";
 import { Check, LayoutGrid, List, Loader2, Plus, Search, X } from "lucide-react";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { setBrand, useBrand } from "@/lib/brand";
 import type { Tab } from "../App";
 import { NotInABrand } from "@/components/unassigned";
+import { parsePath } from "@/lib/paths";
 
 // Brands: the businesses one company markets from a single workspace, such
 // as Geonode and Repocket. Connectors and the team stay shared, so nothing is
@@ -56,8 +57,10 @@ function TextArea({ label, hint, className, ...props }: React.TextareaHTMLAttrib
   );
 }
 
-export function Brands({ ws, canManage, canEdit, open, setOpen, go }: { ws: string; canManage: boolean; canEdit: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab, item?: string) => void }) {
-  const { brands, loaded, reload } = useBrand(ws);
+// list is Settings → Brands: every brand of the workspace. Without it, this
+// is Company → Brands, the picked brand's own page.
+export function Brands({ ws, canManage, canEdit, canDelete, open, setOpen, go, list }: { ws: string; canManage: boolean; canEdit: boolean; canDelete?: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab, item?: string) => void; list?: boolean }) {
+  const { brand: picked, brands, loaded, reload } = useBrand(ws);
   const [adding, setAdding] = useState(false);
   const [view, setViewState] = useState<View>(savedView);
   const setView = (v: View) => {
@@ -70,8 +73,16 @@ export function Brands({ ws, canManage, canEdit, open, setOpen, go }: { ws: stri
   };
 
   if (!loaded) return <Loading />;
+  // Inside a brand, this page is that brand's own page: other brands are
+  // only in the switcher, never listed here.
+  if (picked && !list) {
+    // Deleting the brand you're in moves you to another one; your only
+    // brand can't be deleted.
+    const other = brands.find((b) => b.status === "active" && b.id !== picked.id);
+    return <BrandPage ws={ws} brand={picked} canManage={canManage} canEdit={canEdit} canDelete={canDelete && !!other} onChanged={reload} onDeleted={() => { if (other) setBrand(other.handle); void reload(); go("overview"); }} go={go} />;
+  }
   const current = open ? brands.find((b) => b.handle === open || b.id === open) : undefined;
-  if (open && current) return <BrandPage ws={ws} brand={current} canManage={canManage} canEdit={canEdit} onBack={() => setOpen()} onChanged={reload} go={go} />;
+  if (open && current) return <BrandPage ws={ws} brand={current} canManage={canManage} canEdit={canEdit} canDelete={canDelete} onBack={() => setOpen()} onChanged={reload} onDeleted={() => { setOpen(); reload(); }} go={go} />;
 
   const active = brands.filter((b) => b.status === "active");
   const archived = brands.filter((b) => b.status === "archived");
@@ -269,7 +280,7 @@ function splitDomains(s: string) {
   return s.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean);
 }
 
-function AddBrand({ ws, onClose, onAdded }: { ws: string; onClose: () => void; onAdded: (b: Brand) => void }) {
+export function AddBrand({ ws, onClose, onAdded }: { ws: string; onClose: () => void; onAdded: (b: Brand) => void }) {
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [picked, setPicked] = useState<Brand["platforms"]>(["web"]);
@@ -334,7 +345,7 @@ function PlatformPicker({ value, onChange, readOnly }: { value: Brand["platforms
   );
 }
 
-function BrandPage({ ws, brand: b, canManage, canEdit, onBack, onChanged, go }: { ws: string; brand: Brand; canManage: boolean; canEdit: boolean; onBack: () => void; onChanged: () => void; go: (t: Tab, item?: string) => void }) {
+function BrandPage({ ws, brand: b, canManage, canEdit, canDelete, onBack, onChanged, onDeleted, go }: { ws: string; brand: Brand; canManage: boolean; canEdit: boolean; canDelete?: boolean; onBack?: () => void; onChanged: () => void; onDeleted?: () => void; go: (t: Tab, item?: string) => void }) {
   async function setStatus(status: "active" | "archived") {
     const { error } = await api.PATCH("/v1/workspaces/{ws}/brands/{brand}", { params: { path: { ws, brand: b.id } }, body: { status } });
     if (error) return toast(errorMessage(error), "error");
@@ -342,16 +353,36 @@ function BrandPage({ ws, brand: b, canManage, canEdit, onBack, onChanged, go }: 
     onChanged();
   }
 
+  // Deleting is for good, after typing the brand's name.
+  async function remove() {
+    const r = await ask({
+      title: `Delete ${b.name} for good?`,
+      body: <p>This deletes {b.name} and everything in it: its people, lists, sequences, mailboxes, domains, sites, connections made for it, settings and history. Nothing moves to another brand, and it can't be undone.</p>,
+      input: { label: `Type ${b.name} to confirm`, placeholder: b.name },
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Delete brand", value: "ok", variant: "danger-solid" }],
+    });
+    if (!r) return;
+    if (r.value.trim() !== b.name) return toast(`That isn't ${b.name}. Nothing was deleted.`, "error");
+    const { error } = await api.DELETE("/v1/workspaces/{ws}/brands/{brand}", { params: { path: { ws, brand: b.id } } });
+    if (error) return toast(errorMessage(error), "error");
+    toast(`Deleting ${b.name}. It disappears once everything in it is gone.`);
+    onDeleted?.();
+  }
+  const actions = [
+    b.status === "active" ? { label: "Archive", onClick: () => setStatus("archived"), danger: true } : { label: "Restore", onClick: () => setStatus("active") },
+    ...(canDelete ? [{ label: "Delete brand", onClick: remove, danger: true }] : []),
+  ];
+
   return (
     <div className="max-w-3xl space-y-6">
       <PageHeader
-        back={{ label: "Brands", onClick: onBack }}
+        back={onBack && { label: "Brands", onClick: onBack }}
         title={<span className="flex items-center gap-2">{b.name} {b.status === "archived" && <Badge tone="amber">Archived</Badge>}</span>}
         description={b.website ? <span className="font-mono">{b.website}</span> : undefined}
         action={
           <div className="flex items-center gap-2">
-            {b.status === "active" && <Button variant="ghost" onClick={() => { setBrand(b.handle); go("overview"); }}>Show only {b.name}</Button>}
-            {canManage && <Menu aria={`Actions for ${b.name}`} items={[b.status === "active" ? { label: "Archive", onClick: () => setStatus("archived"), danger: true } : { label: "Restore", onClick: () => setStatus("active") }]} />}
+            {onBack && b.status === "active" && <Button variant="ghost" onClick={() => { setBrand(b.handle); go("overview"); }}>Show only {b.name}</Button>}
+            {canManage && <Menu aria={`Actions for ${b.name}`} items={actions} />}
           </div>
         }
       />
@@ -736,7 +767,8 @@ function DetailsCard({ ws, brand: b, canManage, onSaved, go }: { ws: string; bra
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast("Saved.");
-    if (form.handle.trim() !== b.handle) setBrand("");
+    // A new handle: keep showing this brand under it.
+    if (form.handle.trim() !== b.handle && parsePath(location.pathname).brand === b.handle) setBrand(form.handle.trim());
     onSaved();
   }
 

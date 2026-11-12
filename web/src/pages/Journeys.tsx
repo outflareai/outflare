@@ -138,12 +138,15 @@ function JourneysPage({ ws, canManage, open, onOpen, go }: { ws: string; canMana
 // useEvents is the approved events in the catalog, for picking a trigger
 // or goal.
 function useEvents(ws: string) {
+  const { brand: picked, brands } = useBrand(ws);
+  const brand = picked?.id ?? brands[0]?.id ?? "";
   const [events, setEvents] = useState<string[]>([]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/catalog/events", { params: { path: { ws }, query: { status: "approved" } } }).then(({ data }) =>
+    if (!brand) return;
+    api.GET("/v1/brands/{brand}/catalog/events", { params: { path: { brand }, query: { status: "approved" } } }).then(({ data }) =>
       setEvents((data?.data ?? []).map((e) => e.name)),
     );
-  }, [ws]);
+  }, [brand]);
   return events;
 }
 

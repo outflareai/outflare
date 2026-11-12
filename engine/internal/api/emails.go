@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/brands"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/jobs"
@@ -32,6 +33,7 @@ import (
 func (s *Server) routesEmails(mux *http.ServeMux) {
 	read, send, manage := auth.ScopeEmailsRead, auth.ScopeEmailsSend, auth.ScopeEmailsManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-overview", s.inWorkspace(read, s.emailOverview))
+	mux.HandleFunc("GET /v1/brands/{brand}/email-overview", s.onBrand(read, s.emailOverview))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-provider-guides", s.inWorkspace(read, s.emailGuides))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-providers", s.inWorkspace(read, s.listEmailProviders))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-providers/{id}", s.inWorkspace(read, s.getEmailProvider))
@@ -94,6 +96,7 @@ func (s *Server) routesEmails(mux *http.ServeMux) {
 		mux.HandleFunc("POST "+b.path+"/{id}/cancel", b.on(send, s.cancelEmail))
 	}
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-recipients/{address}", s.inWorkspace(read, s.getEmailRecipient))
+	mux.HandleFunc("GET /v1/brands/{brand}/email-recipients/{address}", s.onBrand(read, s.getEmailRecipient))
 	// The open pixel in emails that track opens.
 	mux.HandleFunc("GET /o/{token}", s.openPixel)
 
@@ -293,7 +296,9 @@ func (s *Server) listEmailProviders(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	list = slices.DeleteFunc(list, func(p emailProviderView) bool { return !sel.matches(p.BrandID) })
+	// A provider with no brand is shared: every brand sends through it
+	// (the workspace default), so a brand's view lists it too.
+	list = slices.DeleteFunc(list, func(p emailProviderView) bool { return p.BrandID != nil && !sel.matches(p.BrandID) })
 	if list == nil {
 		list = []emailProviderView{}
 	}
@@ -652,7 +657,9 @@ func (s *Server) listEmailDomains(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	list = slices.DeleteFunc(list, func(d emailDomainView) bool { return !sel.matches(d.BrandID) })
+	// A domain with no brand is shared, like its provider: a brand's view
+	// lists it too, so nobody is told to add a domain that's already set up.
+	list = slices.DeleteFunc(list, func(d emailDomainView) bool { return d.BrandID != nil && !sel.matches(d.BrandID) })
 	if list == nil {
 		list = []emailDomainView{}
 	}
@@ -1359,6 +1366,15 @@ func (s *Server) previewEmailTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	data["unsubscribe_url"] = s.publicURL + "/u/preview"
 	data["email_id"] = "00000000-0000-4000-8000-000000000000"
+	// The brand's own address and legal name, as a send fills them in.
+	if a := accessFrom(r.Context()); a.Brand != "" {
+		b, name, err := brands.Load(r.Context(), s.pool, a.WorkspaceID, a.Brand)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			s.internal(w, r, err)
+			return
+		}
+		data[emails.VarBrandAddress], data[emails.VarBrandLegalName] = b.Address.String(), b.Name(name)
+	}
 	out, err := emails.Render(req.Subject, req.HTML, req.Text, req.Variables, data)
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "the template has a mistake in "+err.Error())

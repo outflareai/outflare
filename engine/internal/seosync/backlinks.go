@@ -399,8 +399,9 @@ func (s Settings) LinkRowsOrDefault() int {
 }
 
 // noteSiteRead keeps whether an SEO site's weekly read (competitors or
-// backlinks) through a connection failed, so the hourly schedule tries it
-// again soon (retry.After); a read that works clears it.
+// backlinks) through a connection failed, so the hourly schedule tries a
+// transient failure again soon (retry.After); a permanent refusal waits
+// for next week, and a read that works clears it.
 func (s *Syncer) noteSiteRead(ctx context.Context, ws, integrationID, siteID, kind string, err error) {
 	var dbErr error
 	if err == nil {
@@ -436,7 +437,9 @@ func (s *Syncer) retrySiteReads(ctx context.Context, ws, integrationID string) e
 	if !ok {
 		return nil
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT site_id::text, kind FROM seo_site_read_failures WHERE integration_id = $1 AND workspace_id = $2`, integrationID, ws)
+	rows, err := s.Pool.Query(ctx, `SELECT site_id::text, kind FROM seo_site_read_failures
+		WHERE integration_id = $1 AND workspace_id = $2
+		  AND COALESCE(last_error_code, '') NOT IN `+permanentErrorCodeSQL, integrationID, ws)
 	if err != nil {
 		return err
 	}

@@ -7,13 +7,17 @@ import type { Scope } from "@outflare/sdk";
 export type Area = { id: string; label: string; help: string; read: Scope[]; write: Scope[] };
 
 // Each area can be seen, or seen and changed. An area with no write scopes
-// is read only.
+// is read only. Every scope is in an area or extras, except the ones only a
+// signed-in person may have (personOnly): a scope missing here could never be
+// given to an app or token. TestEveryScopeIsOnThePermissionsScreen checks it.
 export const areas: Area[] = [
   { id: "context", label: "Company context and memories", help: "What Outflare knows about your company.", read: ["workspace.read"], write: ["context.manage"] },
   { id: "leads", label: "Leads and lists", help: "Import leads, build lists and record outcomes.", read: ["leads.read", "outcomes.read"], write: ["leads.manage", "outcomes.manage"] },
   { id: "sequences", label: "Sequences and customer profiles", help: "Write, start and pause sequences, and describe who you sell to.", read: ["sequences.read", "profiles.read"], write: ["sequences.manage", "profiles.manage"] },
   { id: "replies", label: "Replies", help: "Answer and label replies in your inbox.", read: ["inbox.read"], write: ["inbox.manage"] },
   { id: "infra", label: "Mailboxes, domains and connectors", help: "Plan and set up sending infrastructure.", read: ["mailboxes.read", "infrastructure.read", "integrations.read"], write: ["mailboxes.manage", "infrastructure.manage", "integrations.manage"] },
+  { id: "emails", label: "Lifecycle email", help: "Email templates, broadcasts, topics and journeys, and sending email to your customers. Every send passes the suppression list and send policy.", read: ["emails.read"], write: ["emails.manage", "emails.send"] },
+  { id: "coverage", label: "Coverage", help: "Placements, publishers and their tasks, and the agreements, invoices and payments behind them.", read: ["coverage.read", "coverage.finance.read"], write: ["coverage.manage", "coverage.finance.manage"] },
   { id: "customers", label: "Customers", help: "People, companies and other records, their emails and ids, product events and consent, and the fields they share.", read: ["customers.read"], write: ["customers.manage", "catalog.manage"] },
   { id: "seo", label: "SEO", help: "Add sites, check ownership, run crawls and work through the fixes list.", read: ["seo.read"], write: ["seo.manage"] },
   { id: "social", label: "Social", help: "Watch Reddit for posts the brand can help with and draft replies. Only a person approves a reply, in Outflare.", read: ["social.read"], write: ["social.manage"] },
@@ -37,6 +41,7 @@ export const extras: { scope: Scope; label: string; help: string }[] = [
   { scope: "infrastructure.approve", label: "Spend money", help: "Buy domains and mailboxes without asking. Off means a person approves each purchase." },
   { scope: "missions.approve", label: "Approve missions", help: "Approve missions and their held changes." },
   { scope: "actions.approve", label: "Approve agents' changes", help: "Approve or reject changes agents hold for a person. Never their own." },
+  { scope: "coverage.approve", label: "Approve coverage agreements", help: "Record approval of commercial terms with publishers." },
   { scope: "query.endpoints", label: "Call published query endpoints", help: "Read the rows of the brand's published query endpoints, and nothing else. All another system's token needs to pull a report." },
   { scope: "partners.conversions", label: "Report partner conversions", help: "Send sign-ups, sales and refunds from your backend, and mark action rewards done. All a server token for partners needs." },
   { scope: "suppressions.manage", label: "Remove from the suppression list", help: "Let mail reach people who were suppressed." },
@@ -45,6 +50,11 @@ export const extras: { scope: Scope; label: string; help: string }[] = [
   { scope: "tokens.manage", label: "Manage API tokens", help: "Create, change and revoke tokens." },
   { scope: "workspace.manage", label: "Workspace settings", help: "Rename the workspace and change its URL." },
 ];
+
+// Scopes an app or token never gets from these screens: only a signed-in
+// person removes people, edits roles, sets what agents may do or posts to
+// social accounts.
+export const personOnly: Scope[] = ["members.remove", "roles.manage", "actions.manage", "social.post"];
 
 export type Level = "none" | "read" | "write";
 

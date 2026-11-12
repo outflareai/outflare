@@ -103,17 +103,8 @@ func (p *productEventSink) Send(ctx context.Context, events []track.Event) {
 		if rejected > 0 {
 			p.s.log.Warn("product events not stored", "count", rejected)
 		}
-		if err := saveEventNames(ctx, tx, p.ws, c.Brand, totals.names); err != nil {
-			return err
-		}
-		// Outflare's code names these events, so they need no approval.
-		names := make([]string, 0, len(totals.names))
-		for n := range totals.names {
-			names = append(names, n)
-		}
-		_, err = tx.Exec(ctx, `UPDATE event_definitions SET status = 'approved'
-			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($3, '')::uuid AND name = ANY($2) AND status = 'quarantined'`, p.ws, names, c.Brand)
-		return err
+		// Outflare's code names these events, so they need no check.
+		return saveEventNames(ctx, tx, p.ws, c.Brand, totals.names, true)
 	})
 	if err != nil {
 		p.s.log.Warn("product events: store", "err", err, "count", len(events))

@@ -78,7 +78,7 @@ outflare.showConsent();                   // open the banner on its categories
 outflare.onConsent(function (c) { ... }); // now, and on every change
 ```
 
-These calls work without Outflare's banner too: a site with its own banner can keep it and still have each choice kept in Outflare. Add `data-banner="off"` to the snippet if Outflare's banner should never show on a page.
+These calls work without Outflare's banner too: a site with its own banner can keep it and still have each choice kept in Outflare. Add `data-banner="off"` to the snippet if Outflare's banner should never show on a page, or `data-reopen="off"` to leave out only the corner button that reopens it, when the page has its own "Cookie settings" link.
 
 ## Proof of consent
 

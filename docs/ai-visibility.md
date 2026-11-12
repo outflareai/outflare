@@ -269,7 +269,7 @@ questions they answered and the competitors they named; the site's domain
 rating, page rating and traffic (from Presence's reads on the workspace's
 own SEO connection, or null); the links to the page, from its latest link
 read (counting them is a paid read on the workspace's own SEO connection,
-estimated and confirmed first, `POST /v1/workspaces/{ws}/link-reads`); and
+estimated and confirmed first, `POST /v1/brands/{brand}/link-reads`); and
 who is on the page. OutflareBot reads the page (obeying robots.txt and
 opt-outs) and says, for the brand and each tracked competitor, whether it
 links to their website (with nofollow and the link text), names them

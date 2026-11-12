@@ -426,7 +426,7 @@ function VisitorSheet({ ws, v, canManage, onClose, onChanged, go }: {
 
   async function addToCRM() {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/visitors/companies", { params: { path: { ws } }, body: { domain: v.domain ?? "" } });
+    const { error } = await api.POST("/v1/brands/{brand}/visitors/companies", { params: { path: { brand: brand ?? "" } }, body: { domain: v.domain ?? "" } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(`${v.name || v.domain} is in your CRM, marked as found by an IP lookup.`);

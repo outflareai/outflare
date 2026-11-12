@@ -7,10 +7,12 @@
 
 import { useEffect, useState } from "react";
 import type { AdCampaign, AdConversionAction, AdItem, AdKeyword, AdSearchTerm, AdSummaryRow, AttributionAdRow } from "@outflare/sdk";
-import { DataTable } from "@/components/data-table";
+import { DataTable, type ColumnMeta } from "@/components/data-table";
+import { csvMoney, csvName, downloadCsv, toCsv } from "@/lib/csv";
+import { track } from "@/lib/analytics";
 import { api, errorMessage } from "../api";
-import { Badge, Card, ErrorText, Stat, Stats } from "../ui";
-import { deliveryColumns, metricColumns, money, n, platformName } from "./Ads";
+import { Badge, Button, Card, confirmAction, ErrorText, Menu, Stat, Stats, toast } from "../ui";
+import { deliveryColumns, metricColumns, money, n, platformName, reportDownload, statusColumn } from "./Ads";
 import { CampaignTargeting } from "./AdTargeting";
 import { pickedBrandId } from "@/lib/brand";
 
@@ -105,7 +107,7 @@ export function outflareColumns<T extends { external_id: string }>(by: Record<st
 // ConversionActions lists the conversions the platforms counted, by their
 // own action: all campaigns, or the one campaign, ad set or ad entity.
 // With card, it is a card of its own, shown only when there is something.
-export function ConversionActions({ ws, from, to, brand, entity, card }: { ws: string; from: string; to: string; brand?: string; entity?: string; card?: boolean }) {
+export function ConversionActions({ ws, from, to, brand, entity, card, download }: { ws: string; from: string; to: string; brand?: string; entity?: string; card?: boolean; download?: boolean }) {
   const [rows, setRows] = useState<AdConversionAction[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -129,11 +131,37 @@ export function ConversionActions({ ws, from, to, brand, entity, card }: { ws: s
     </div>
   );
   if (!card) return list;
+  const save = () => {
+    downloadCsv(csvName("outflare-ads", "conversion-actions", from, to), toCsv(["Conversion action", "Platform", "Conversions", "Value"],
+      rows.map((r) => [label(r.action), platformName(r.connector), Number(r.conversions.toFixed(2)), csvMoney(r.value_micros, r.currency)])));
+    track("ui.ads_report_downloaded", { report: "conversion_actions", rows: rows.length });
+  };
   return (
-    <Card title="Conversions by type" description="What each platform counted, by its own action: purchases, leads, sign-ups and the rest. Meta reports a purchase several ways; each kind counts once here.">
+    <Card title="Conversions by type" description="What each platform counted, by its own action: purchases, leads, sign-ups and the rest. Meta reports a purchase several ways; each kind counts once here."
+      action={download ? <Button variant="ghost" onClick={save}>Download CSV</Button> : undefined}>
       {list}
     </Card>
   );
+}
+
+// matchWord is how a search matched its keyword, in Google's words.
+const matchWord = (m: string) => ({ exact: "Exact", near_exact: "Exact (close variant)", phrase: "Phrase", near_phrase: "Phrase (close variant)", broad: "Broad" } as Record<string, string>)[m] ?? (m || "—");
+
+// bidColumns are Google's estimates of what a keyword must bid to show on
+// the first page, at the top and first, and its quality score.
+function bidColumns() {
+  const mono = (s: string) => <span className="font-mono tabular-nums">{s}</span>;
+  const bid = (id: string, header: string, f: (k: AdKeyword) => number | null, title: string) => ({
+    id, header, accessorFn: (k: AdKeyword) => f(k) ?? -1, meta: { csv: (k: AdKeyword) => csvMoney(f(k), k.currency) } satisfies ColumnMeta<AdKeyword>,
+    cell: ({ row: { original: k } }: { row: { original: AdKeyword } }) => <span title={title}>{mono(money(f(k), k.currency))}</span>,
+  });
+  return [
+    bid("first_page_bid", "First page bid", (k) => k.first_page_cpc_micros, "Google's estimate of the bid to show on the first page of results"),
+    bid("top_of_page_bid", "Top of page bid", (k) => k.top_of_page_cpc_micros, "Google's estimate of the bid to show above the results"),
+    bid("first_position_bid", "First position bid", (k) => k.first_position_cpc_micros, "Google's estimate of the bid to show first, above the results"),
+    { id: "quality_score", header: "Quality score", accessorFn: (k: AdKeyword) => k.quality_score ?? -1, meta: { csv: (k: AdKeyword) => k.quality_score ?? "" } satisfies ColumnMeta<AdKeyword>,
+      cell: ({ row: { original: k } }: { row: { original: AdKeyword } }) => mono(k.quality_score == null ? "—" : `${k.quality_score}/10`) },
+  ];
 }
 
 function status(s: AdItem["status"], word: string) {
@@ -152,7 +180,7 @@ const host = (u: string) => {
 // CampaignDetail is a campaign's own page, or one of its ad groups' when
 // groupId is set: the level's numbers, its trend by day, and the level
 // below it, each row opening the next level the way the ad platforms do.
-export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: { ws: string; campaign: AdCampaign; groupId?: string; from: string; to: string; open: (groupId?: string) => void; back: () => void }) {
+export function CampaignDetail({ ws, campaign, groupId, from, to, open, back, canManage = false }: { ws: string; campaign: AdCampaign; groupId?: string; from: string; to: string; open: (groupId?: string) => void; back: () => void; canManage?: boolean }) {
   const [trend, setTrend] = useState<AdSummaryRow[] | null>(null);
   const [groups, setGroups] = useState<AdItem[]>([]);
   const [ads, setAds] = useState<AdItem[]>([]);
@@ -162,7 +190,24 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
   const [terms, setTerms] = useState<AdSearchTerm[]>([]);
   const [search, setSearch] = useState<"keywords" | "terms">("keywords");
   const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
   const google = campaign.connector === "google_ads";
+  // Removing an ad or a keyword can't be undone in Google Ads: it asks
+  // first, naming what goes, and only a person's own session can do it.
+  async function remove(kind: "ad" | "keyword", id: string, name: string) {
+    const what = kind === "ad" ? "ad" : "keyword";
+    if (!(await confirmAction(`Remove ${kind === "ad" ? "the ad" : "the keyword"} ${name}?`, <>
+      <p>Google Ads can't undo a removal: the {what} stops for good and can't be turned on again. To stop it for now, pause it instead.</p>
+      <p>Its numbers stay here and in Google Ads.</p>
+    </>, `Remove ${what}`))) return;
+    const path = { brand: pickedBrandId(), id };
+    const { error } = kind === "ad"
+      ? await api.POST("/v1/brands/{brand}/ads/items/{id}/remove", { params: { path }, body: { confirm: true } })
+      : await api.POST("/v1/brands/{brand}/ads/keywords/{id}/remove", { params: { path }, body: { confirm: true } });
+    if (error) return toast(errorMessage(error), "error");
+    toast(`Removal sent to Google Ads. The ${what} shows as removed once Google confirms it.`);
+    setTimeout(() => setReload((v) => v + 1), 3000);
+  }
   // Meta's delivery numbers show where Meta has them.
   const hidden = campaign.connector === "meta_ads" ? [] : deliveryColumns;
   const below = campaign.connector === "meta_ads" || campaign.connector === "google_ads";
@@ -200,7 +245,7 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
       setKeywords(k?.data?.data ?? []);
       setTerms(t?.data?.data ?? []);
     });
-  }, [ws, campaign.id, from, to, below, google]);
+  }, [ws, campaign.id, from, to, below, google, reload]);
 
   const shown = groupId ? ads.filter((a) => a.parent_id === groupId) : ads;
   const level = group ?? campaign;
@@ -261,11 +306,13 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
             searchPlaceholder={`Search ${groupWord.toLowerCase()}`}
             empty={`No ${groupWord.toLowerCase()} spent or ran in this range.`}
             initialSort={[{ id: "spend", desc: true }]}
+            download={reportDownload("ad_groups", campaign.name, from, to)}
             columns={[
               {
                 id: "name",
                 header: groupWord.slice(0, -1),
                 accessorFn: (g) => g.name,
+                meta: { csv: (g: AdItem) => g.name || g.external_id } satisfies ColumnMeta<AdItem>,
                 cell: ({ row: { original: g } }) => (
                   <div className="space-y-0.5">
                     <div className="font-medium text-blue-700 underline-offset-2 hover:underline dark:text-blue-400">{g.name || g.external_id}</div>
@@ -275,6 +322,7 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
                   </div>
                 ),
               },
+              statusColumn<AdItem>(),
               ...metricColumns<AdItem>((g) => g.totals, (g) => g.currency),
               ...outflareColumns<AdItem>(setsBy),
             ]}
@@ -288,14 +336,16 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
                 data={shown}
                 rowId={(a) => a.id}
                 searchPlaceholder="Search ads"
-                hidden={hidden}
+                hidden={[...hidden, "all_conversions"]}
                 empty="No ads spent or ran in this range."
                 initialSort={[{ id: "spend", desc: true }]}
+                download={reportDownload("ads", campaign.name, from, to)}
                 columns={[
                   {
                     id: "ad",
                     header: "Ad",
                     accessorFn: (a) => `${a.name} ${a.details.headline ?? ""} ${a.external_id}`,
+                    meta: { csv: (a: AdItem) => a.name || a.details.headline || a.external_id } satisfies ColumnMeta<AdItem>,
                     cell: ({ row: { original: a } }) => (
                       <div className="flex max-w-md gap-3">
                         {a.details.thumbnail_url && <img src={a.details.thumbnail_url} alt="" className="size-10 shrink-0 rounded object-cover" loading="lazy" referrerPolicy="no-referrer" />}
@@ -311,8 +361,15 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
                       </div>
                     ),
                   },
+                  statusColumn<AdItem>(),
                   ...metricColumns<AdItem>((a) => a.totals, (a) => a.currency),
                   ...outflareColumns<AdItem>(adsBy),
+                  {
+                    id: "manage", header: "", enableSorting: false,
+                    cell: ({ row: { original: a } }) => canManage && google && a.status !== "removed" && (
+                      <Menu label="Manage" aria={`Manage ${a.name || a.external_id}`} items={[{ label: "Remove", onClick: () => remove("ad", a.id, a.name || a.details.headline || a.external_id), danger: true }]} />
+                    ),
+                  },
                 ]}
                 mobile={(a) => (
                   <span className="block min-w-0">
@@ -339,9 +396,10 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
                     data={groupId ? keywords.filter((k) => k.ad_group_id === groupId) : keywords}
                     rowId={(k) => k.id}
                     searchPlaceholder="Search keywords"
-                    hidden={deliveryColumns}
+                    hidden={[...deliveryColumns, "all_conversions", "roas", "quality_score"]}
                     empty="No keyword showed an ad in this range."
                     initialSort={[{ id: "spend", desc: true }]}
+                    download={reportDownload("keywords", campaign.name, from, to)}
                     columns={[
                       {
                         id: "keyword",
@@ -354,7 +412,17 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
                           </div>
                         ),
                       },
+                      { id: "match_type", header: "Match type", accessorFn: (k) => k.match_type },
+                      { id: "ad_group", header: "Ad group", accessorFn: (k) => k.ad_group_name },
+                      statusColumn<AdKeyword>(),
                       ...metricColumns<AdKeyword>((k) => k.totals, (k) => k.currency),
+                      ...bidColumns(),
+                      {
+                        id: "manage", header: "", enableSorting: false,
+                        cell: ({ row: { original: k } }) => canManage && k.status !== "removed" && (
+                          <Menu label="Manage" aria={`Manage ${k.text}`} items={[{ label: "Remove", onClick: () => remove("keyword", k.id, k.text), danger: true }]} />
+                        ),
+                      },
                     ]}
                   />
                 ) : (
@@ -362,14 +430,16 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
                     data={groupId ? terms.filter((t) => t.ad_group_id === groupId) : terms}
                     rowId={(t) => `${t.ad_group_id}|${t.term}|${t.keyword_text}|${t.keyword_match_type}`}
                     searchPlaceholder="Search what people searched"
-                    hidden={deliveryColumns}
+                    hidden={[...deliveryColumns, "all_conversions", "roas"]}
                     empty="No searches in this range. Google leaves out searches too few people made."
                     initialSort={[{ id: "spend", desc: true }]}
+                    download={reportDownload("search_terms", campaign.name, from, to)}
                     columns={[
                       {
                         id: "term",
                         header: "Search",
                         accessorFn: (t) => `${t.term} ${t.keyword_text}`,
+                        meta: { csv: (t: AdSearchTerm) => t.term } satisfies ColumnMeta<AdSearchTerm>,
                         cell: ({ row: { original: t } }) => (
                           <div className="space-y-0.5">
                             <div className="font-medium">{t.term}</div>
@@ -377,6 +447,8 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
                           </div>
                         ),
                       },
+                      { id: "match_type", header: "Match type", accessorFn: (t) => matchWord(t.match_type), cell: ({ row: { original: t } }) => <span title="How the search matched the keyword">{matchWord(t.match_type)}</span> },
+                      { id: "keyword", header: "Keyword", accessorFn: (t) => t.keyword_text ? `${t.keyword_text} (${t.keyword_match_type})` : "" },
                       ...metricColumns<AdSearchTerm>((t) => t.totals, (t) => t.currency),
                     ]}
                   />

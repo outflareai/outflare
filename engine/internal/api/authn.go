@@ -498,6 +498,12 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request) (*princip
 	if p.TokenID != "" && !s.rateLimit.allow(w, r, p.TokenID) {
 		return nil, false
 	}
+	// A signed-in browser gets a much higher limit than a token: the app
+	// makes many calls a page, and the limit is only there so one session
+	// can't be used to flood the server.
+	if p.TokenID == "" && p.SessionID != "" && !s.sessionLimit.allow(w, r, p.SessionID) {
+		return nil, false
+	}
 	return p, true
 }
 

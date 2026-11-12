@@ -37,7 +37,7 @@ inputs:
     example: Demo follow-up
 steps:
   - say: Check which meeting and intent events the workspace receives, and find the sequence for high-intent people.
-    tools: [listEventDefinitions, listBrandCustomerEvents, listBrandSequences]
+    tools: [listBrandEventDefinitions, listBrandCustomerEvents, listBrandSequences]
   - say: Check what the setup kit would add, then add it with those events and the sequence's id. Its list and two journeys arrive as drafts.
     tools: [previewKit, applyKit]
   - say: Test both journeys with a recent prospect, then ask a person to turn them on.

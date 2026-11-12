@@ -30,6 +30,8 @@ const contributeURL = "https://github.com/outflareai/outflare/tree/main/playbook
 const needKey = (n: PlaybookConnectionNeed) => n.capability ?? n.category ?? n.label;
 
 export function Playbooks({ ws, canManage, go }: Props) {
+  // Automations are the picked brand's.
+  const autoBrand = useBrand(ws).brand?.id;
   const [list, setList] = useState<WorkspacePlaybook[] | null>(null);
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("all");
@@ -43,9 +45,9 @@ export function Playbooks({ ws, canManage, go }: Props) {
     if (error || !data) return setError(errorMessage(error));
     setError("");
     setList(data.data);
-    const a = await api.GET("/v1/workspaces/{ws}/playbook-automations", { params: { path: { ws } } });
+    const a = autoBrand ? await api.GET("/v1/brands/{brand}/playbook-automations", { params: { path: { brand: autoBrand } } }) : { data: undefined };
     setAutos(a.data?.data ?? []);
-  }, [ws]);
+  }, [ws, autoBrand]);
   useEffect(() => {
     load();
   }, [load]);
@@ -121,7 +123,9 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
   const [mode, setMode] = useState<AgentRun["mode"]>("copilot");
   const [budget, setBudget] = useState("");
   // The run works for the brand in view.
-  const brand = useBrand(ws).brand?.handle;
+  const picked = useBrand(ws).brand;
+  const brand = picked?.handle;
+  const brandId = picked?.id;
   const missing = new Set(p.readiness.missing_connections.map(needKey));
   const missingOptional = new Set(p.readiness.missing_optional.map(needKey));
   const missingData = new Set(p.readiness.missing_data.map((d) => d.check));
@@ -129,12 +133,16 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
 
   useEffect(() => {
     if (!p.kit) return;
-    api.GET("/v1/workspaces/{ws}/kits/{id}/preview", { params: { path: { ws, id: p.kit } } }).then(({ data }) => {
+    // The kit is set up for the brand the run works for.
+    (brandId
+      ? api.GET("/v1/brands/{brand}/kits/{id}/preview", { params: { path: { brand: brandId, id: p.kit } } })
+      : api.GET("/v1/workspaces/{ws}/kits/{id}/preview", { params: { path: { ws, id: p.kit } } })
+    ).then(({ data }) => {
       if (!data) return;
       setKit(data);
       setApplyKit(data.changes > 0 && data.conflicts === 0);
     });
-  }, [ws, p.kit]);
+  }, [ws, p.kit, brandId]);
 
   async function start(e: FormEvent) {
     e.preventDefault();

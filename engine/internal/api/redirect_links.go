@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/outflareai/outflare/engine/internal/fraud"
 	"github.com/outflareai/outflare/engine/internal/geoip"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/tokens"
@@ -103,6 +104,13 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 		// A keyed hash per workspace: the same visitor's clicks match, and
 		// the address can't be read back from it.
 		c.ipHash = s.box.Sign("click_ip", t.ws+"|"+ip.Unmap().String())
+	}
+	// First-party fraud signals (B7a): a hosting provider's network, or an
+	// address and browser clicking the link again and again. The click is
+	// kept and goes on, but counts against no cap.
+	c.fraud = fraud.ClickReasons(c.detail.place.ASN, s.repeats.Count(t.link.ID, c.ipHash, r.UserAgent(), now))
+	for _, reason := range c.fraud {
+		metrics.TrackerFraudFlag("click", reason)
 	}
 	// The traffic source's parameters fill the click's custom fields; a
 	// destination with tokens ({click_id}, {field1}) gets this click's

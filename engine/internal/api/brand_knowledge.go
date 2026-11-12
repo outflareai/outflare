@@ -18,6 +18,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/llm"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -153,6 +154,7 @@ func (s *Server) routesBrandKnowledge(mux *http.ServeMux) {
 	manage := auth.ScopeContextManage
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/brands/{brand}/knowledge", s.inBrand(manage, s.putBrandKnowledge))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/brands/{brand}/knowledge/read", s.inBrand(manage, s.readBrandKnowledge))
+	s.routesBrandKnowledgeReview(mux)
 }
 
 func (s *Server) registerBrandKnowledgeJobs(q *jobs.Queue) {
@@ -160,11 +162,16 @@ func (s *Server) registerBrandKnowledgeJobs(q *jobs.Queue) {
 }
 
 // enqueueBrandKnowledge queues reading a brand's website, when the
-// workspace has a page reader. It reports whether it queued one.
+// workspace has a page reader. It reports whether it queued one. Without
+// a page reader nothing is queued, and the brand's sheet says so
+// (knowledge_error connector_needed) rather than staying silently empty.
 func (s *Server) enqueueBrandKnowledge(ctx context.Context, tx pgx.Tx, ws, brandID, key string) (bool, error) {
 	readers, err := s.pageReaders(ctx, tx, ws)
-	if err != nil || len(readers) == 0 {
+	if err != nil {
 		return false, err
+	}
+	if len(readers) == 0 {
+		return false, s.brandKnowledgeNotRead(ctx, tx, ws, brandID, "connector_needed", errNoPageReader)
 	}
 	_, err = jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobBrandKnowledge, WorkspaceID: &ws, Payload: map[string]string{"brand_id": brandID},
 		IdempotencyKey: jobBrandKnowledge + ":" + brandID + ":" + key, MaxAttempts: 3})
@@ -299,6 +306,22 @@ func (s *Server) ReadBrandKnowledge(ctx context.Context, ws, brandID string) err
 				_, err := tx.Exec(ctx, `UPDATE brand_context SET knowledge_read_at = now(), knowledge_error = $2 WHERE brand_id = $1`, brandID, code)
 				return err
 			}
+			// A read that changed what the brand sells (products,
+			// services, prices or the summary) clears the review, so
+			// the owner looks at the sheet again before more ads are
+			// written from it.
+			prev, _, _, _, err := loadBrandKnowledge(ctx, tx, ws, brandID)
+			if err != nil {
+				return err
+			}
+			changed := knowledgeOfferChanged(prev, *k)
+			if _, err := tx.Exec(ctx, `UPDATE brand_context SET
+				knowledge_changed_at = CASE WHEN $2 THEN now() ELSE knowledge_changed_at END,
+				knowledge_reviewed_at = CASE WHEN $2 THEN NULL ELSE knowledge_reviewed_at END,
+				knowledge_reviewed_by = CASE WHEN $2 THEN NULL ELSE knowledge_reviewed_by END
+				WHERE brand_id = $1`, brandID, changed); err != nil {
+				return err
+			}
 			// A summary fills in the brand's own About and Who it's for
 			// when they are empty, never over what a person wrote.
 			audience := ""
@@ -309,7 +332,7 @@ func (s *Server) ReadBrandKnowledge(ctx context.Context, ws, brandID string) err
 				}
 				audience = truncate(strings.Join(texts, "; "), 4000)
 			}
-			_, err := tx.Exec(ctx, `UPDATE brand_context SET knowledge = $2, knowledge_read_at = now(), knowledge_pages = $3, knowledge_error = '',
+			_, err = tx.Exec(ctx, `UPDATE brand_context SET knowledge = $2, knowledge_read_at = now(), knowledge_pages = $3, knowledge_error = '',
 				about = CASE WHEN about = '' THEN $4 ELSE about END, audience = CASE WHEN audience = '' THEN $5 ELSE audience END,
 				version = version + 1, updated_at = now(), updated_by = NULL WHERE brand_id = $1`, brandID, k, pages, k.Summary, audience)
 			return err
@@ -322,8 +345,18 @@ func (s *Server) ReadBrandKnowledge(ctx context.Context, ws, brandID string) err
 			ev.Outcome = track.Failure
 		}
 		track.Fail(ctx, s.log, ev, code, err)
+		if ev.Outcome == track.Failure {
+			metrics.BrandKnowledgeRead("failed")
+		} else {
+			metrics.BrandKnowledgeRead("error")
+		}
 		if err := readDone(code, nil, 0); err != nil {
 			return err
+		}
+		// A missing AI model or budget is the workspace's to fix: the
+		// sheet says so, and retrying can't help.
+		if e := (errAI{}); errors.As(err, &e) {
+			return nil
 		}
 		if k := connectors.KindOf(err); k == connectors.ErrUnavailable || k == connectors.ErrQuota {
 			return err
@@ -335,7 +368,14 @@ func (s *Server) ReadBrandKnowledge(ctx context.Context, ws, brandID string) err
 		err = s.checkAIBudget(ctx, ws, ai, brandKnowledgeCents)
 	}
 	if e := (errAI{}); errors.As(err, &e) {
-		return fail(e.code, err)
+		// On the sheet, connector_needed means the page reader; no AI
+		// model connected at all reads as ai_model_needed, so the two
+		// can be told apart.
+		code := e.code
+		if code == "connector_needed" {
+			code = "ai_model_needed"
+		}
+		return fail(code, err)
 	}
 	if err != nil {
 		return err
@@ -480,6 +520,7 @@ func (s *Server) ReadBrandKnowledge(ctx context.Context, ws, brandID string) err
 	}
 	ev.Props["items"], ev.Props["duration_ms"] = k.count(), time.Since(start).Milliseconds()
 	track.Emit(ctx, ev)
+	metrics.BrandKnowledgeRead("success")
 	return nil
 }
 

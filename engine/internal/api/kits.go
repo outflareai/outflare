@@ -23,9 +23,9 @@ import (
 // the preview says what applying it would add, reuse or extend, and what
 // conflicts with what is there; applying it only adds, in one
 // transaction, with the same rows and audit events as doing each step by
-// hand. A kit sets up the workspace's first brand from the workspace
-// routes, and the brand in the path from the brand routes; a kit with
-// smart lists, rules or journeys sets those up for the first brand only.
+// hand. A kit sets up the brand in the path from the brand routes, smart
+// lists, rules and journeys included, and the workspace's first brand from
+// the workspace routes.
 
 func (s *Server) routesKits(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/kits", s.listKitCatalog)
@@ -235,7 +235,7 @@ func planKit(ctx context.Context, tx pgx.Tx, ws, brand string, k playbooks.Kit) 
 		}
 		plan.add(it)
 	}
-	if err := planFlows(ctx, tx, ws, k, plan); err != nil {
+	if err := planFlows(ctx, tx, ws, brand, k, plan); err != nil {
 		return nil, err
 	}
 	return plan, nil
@@ -273,7 +273,7 @@ func (e errKitConflict) Error() string { return string(e) }
 // brand when brand is ""), in tx, with inputs for a flow kit's inputs. It
 // stops with errKitConflict when anything conflicts, errDenied when the
 // kit adds what the caller may not manage, and errInvalid for inputs that
-// don't fit or a flow kit applied to a brand.
+// don't fit.
 func applyKit(ctx context.Context, tx pgx.Tx, a *access, brand string, k playbooks.Kit, inputs map[string]string, source string) (*kitPlan, error) {
 	values, err := k.CheckInputs(inputs)
 	if err != nil {
@@ -288,11 +288,6 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, brand string, k playboo
 	if err != nil {
 		return nil, err
 	}
-	if brand != "" && slices.ContainsFunc(plan.Items, func(it kitItem) bool {
-		return it.Kind == "smart_list" || it.Kind == "journey" || it.Kind == "rule"
-	}) {
-		return plan, errInvalid("the kit " + k.ID + " adds smart lists, rules or journeys, which kits set up for the workspace's first brand: apply it with POST /v1/workspaces/{ws}/kits/" + k.ID + "/apply")
-	}
 	if plan.Conflicts > 0 {
 		var msgs []string
 		for _, it := range plan.Items {
@@ -305,7 +300,7 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, brand string, k playboo
 	if plan.addsTemplates() && !a.has(auth.ScopeEmailsManage) {
 		return plan, errDenied("this kit adds email drafts, which needs the emails.manage scope")
 	}
-	if err := flowScopes(plan, a); err != nil {
+	if err := flowScopes(plan, a, brand); err != nil {
 		return plan, err
 	}
 	p := &a.principal
@@ -397,7 +392,7 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, brand string, k playboo
 			return nil, err
 		}
 	}
-	if err := applyFlows(ctx, tx, a, k, plan, values); err != nil {
+	if err := applyFlows(ctx, tx, a, brand, k, plan, values); err != nil {
 		return nil, err
 	}
 	count := map[string]int{}

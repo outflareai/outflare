@@ -619,7 +619,7 @@ function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
     Promise.all([
       api.GET("/v1/workspaces/{ws}/reply-rules", { params: { path: { ws } } }),
       api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: brandId } } }),
-      api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws } } }),
+      api.GET("/v1/brands/{brand}/catalog", { params: { path: { brand: brandId } } }),
     ]).then(([r, q, c]) => {
       if (r.error) return setError(errorMessage(r.error));
       const own = r.data.data.find((s) => !s.sequence_id);

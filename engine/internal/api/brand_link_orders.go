@@ -28,12 +28,17 @@ func (s *Server) routesLinkOrders(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/summary", s.onBrand(auth.ScopeCoverageRead, s.getLinkOrderSummary))
 	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/budget", s.onBrand(auth.ScopeCoverageFinanceRead, s.getLinkOrderBudget))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/candidates", s.onBrand(auth.ScopeCoverageRead, s.listLinkOrderCandidates))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/candidates/{domain}/add-to-catalog", s.onBrand(auth.ScopeCoverageManage, s.addLinkOrderCandidateToCatalog))
 
 	mux.HandleFunc("GET /v1/brands/{brand}/link-orders", s.onBrand(auth.ScopeCoverageRead, s.listLinkOrders))
 	mux.HandleFunc("POST /v1/brands/{brand}/link-orders", s.onBrand(auth.ScopeCoverageManage, s.createLinkOrder))
 	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/{id}", s.onBrand(auth.ScopeCoverageRead, s.getLinkOrder))
 	mux.HandleFunc("PATCH /v1/brands/{brand}/link-orders/{id}", s.onBrand(auth.ScopeCoverageManage, s.updateLinkOrder))
 	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/{id}/history", s.onBrand(auth.ScopeCoverageRead, s.listLinkOrderHistory))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/{id}/equivalents", s.onBrand(auth.ScopeCoverageRead, s.listLinkOrderEquivalents))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/{id}/impact", s.onBrand(auth.ScopeCoverageRead, s.getLinkOrderImpact))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-roi", s.onBrand(auth.ScopeCoverageRead, s.getLinkROI))
 
 	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/{id}/quote", s.onBrand(auth.ScopeCoverageManage, s.quoteLinkOrder))
 	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/{id}/negotiate", s.onBrand(auth.ScopeCoverageManage, s.negotiateLinkOrder))

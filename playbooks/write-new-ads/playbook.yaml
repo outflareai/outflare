@@ -30,13 +30,13 @@ inputs:
     label: Brand
     example: Northpeak
 steps:
-  - say: Read what the brand says about itself, its offers and the words its customers use.
-    tools: [getBrandContext, findBrandKnowledgePassages]
+  - say: Read the brand's knowledge sheet (what its website says it offers) and whether a person has reviewed it; if not, or its read failed, stop and ask the person to check it under Paid ads, Set up. Then read what the brand says about itself and the words its customers use.
+    tools: [getBrandKnowledge, getBrandContext, findBrandKnowledgePassages]
   - say: Read the brand's campaigns, their ads, keywords and the searches people made, and the drafts already written, so nothing is written twice.
     tools: [listBrandAdCampaigns, listBrandAdItems, listBrandAdKeywords, listBrandAdSearchTerms, listAdDrafts]
-  - say: For an ad group whose ads are old or far behind the others, write a new ad in the brand's own words.
+  - say: For an ad group whose ads are old or far behind the others, write one evergreen responsive search ad with nothing pinned, 11 or more distinct headlines across the keywords, benefits, features, calls to action and authority, in sentence case and short, every claim from the sheet. Fix what the answer's checks warn about before leaving it for the person.
     tools: [createAdDraft]
-  - say: For searches that convert with no ad group of their own, write a new ad group with those keywords and an ad for them.
+  - say: For searches that convert with no ad group of their own, write a new ad group with those keywords and an evergreen ad for them; where an evergreen ad already runs well, at most one challenger with partial pins and three variants a position.
     tools: [createAdDraft]
   - say: A few weeks after a person turns a draft on, compare it with the ads beside it.
     tools: [listAdDrafts, listBrandAdItems]
@@ -44,17 +44,26 @@ automation:
   schedule: weekly
 guardrails:
   - Writes drafts only; a person approves each one, it is made paused, and a person turns it on.
-  - Every claim in an ad comes from the brand's own knowledge or site; no prices, numbers or promises it can't point to.
+  - Writes only from a knowledge sheet a person has reviewed; while it is unreviewed or its read failed, the draft is refused and the person is asked to check the sheet, never to skip it.
+  - Every claim in an ad comes from the brand's knowledge sheet; no prices, numbers or promises it can't point to, no superlatives (best, #1, cheapest, guaranteed, leading), no competitor's name.
+  - One evergreen unpinned ad per ad group, 11 or more distinct headlines in sentence case; at most one challenger with partial pins.
   - At most three drafts a week per campaign, and none for an ad group that already has one waiting.
 measure:
   - { metric: Drafts approved, how: "Drafts a person approved divided by drafts written." }
   - { metric: New ads' click-through and cost per conversion, how: "Each live draft's ad against the other ads in its ad group over the same weeks." }
 prompt: |
-  Read {{brand}}'s ad campaigns, ads, keywords and search terms. Where an
-  ad group's ads are old or weak, or searches convert with no ad group of
-  their own, write new ads (or a new ad group) as drafts from what
-  {{brand}} says about itself, each with why it should do better. Don't
-  approve or turn anything on: leave the drafts for me.
+  First read {{brand}}'s knowledge sheet and check a person has reviewed
+  it; if not, or its read failed, tell me and stop. Then read {{brand}}'s
+  ad campaigns, ads, keywords and search terms. Where an ad group's ads
+  are old or weak, or searches convert with no ad group of their own,
+  write new ads (or a new ad group) as drafts: one evergreen responsive
+  search ad per ad group with nothing pinned, 11 or more distinct
+  headlines across the keywords, benefits, features, calls to action and
+  authority, in sentence case and short, every claim from the sheet (no
+  prices or promises it lacks, no superlatives, no competitor names), and
+  at most one challenger with partial pins. Fix what the checks warn
+  about, and say why each should do better. Don't approve or turn
+  anything on: leave the drafts for me.
 example: |
   Northpeak's "CRM software" ad group had two ads from last year with a
   click-through rate half the account's. The agent wrote a new ad from the

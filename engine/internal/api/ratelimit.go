@@ -14,8 +14,13 @@ import (
 // and reports where a caller stands in the IETF RateLimit and
 // RateLimit-Policy headers on every answer, so clients can slow down
 // before they are refused. Counts are per server process.
+// sessionLimitFactor is how many times a token's limit a signed-in browser
+// session may use: the web app makes many calls a page.
+const sessionLimitFactor = 4
+
 type rateLimiter struct {
 	name   string // the limit's name in outflare_http_rate_limited_total
+	who    string // what is counted, in the 429's message; "token" when empty
 	limit  int    // requests per window; 0 turns limiting off
 	window time.Duration
 	mu     sync.Mutex
@@ -67,15 +72,19 @@ func (l *rateLimiter) allow(w http.ResponseWriter, r *http.Request, key string) 
 	reset := max(1, int(l.start.Add(l.window).Sub(now).Seconds()+0.999))
 	l.mu.Unlock()
 
+	who := l.who
+	if who == "" {
+		who = "token"
+	}
 	h := w.Header()
-	h.Set("RateLimit-Policy", fmt.Sprintf(`"token";q=%d;w=%d`, l.limit, int(l.window.Seconds())))
-	h.Set("RateLimit", fmt.Sprintf(`"token";r=%d;t=%d`, max(0, l.limit-n), reset))
+	h.Set("RateLimit-Policy", fmt.Sprintf(`"%s";q=%d;w=%d`, who, l.limit, int(l.window.Seconds())))
+	h.Set("RateLimit", fmt.Sprintf(`"%s";r=%d;t=%d`, who, max(0, l.limit-n), reset))
 	if n <= l.limit {
 		return true
 	}
 	h.Set("Retry-After", strconv.Itoa(reset))
 	metrics.RateLimited(l.name)
 	writeError(w, r, http.StatusTooManyRequests, "rate_limited",
-		fmt.Sprintf("this token made more than %d requests in a minute; wait %d seconds (Retry-After) and slow down", l.limit, reset))
+		fmt.Sprintf("this %s made more than %d requests in a minute; wait %d seconds (Retry-After) and slow down", who, l.limit, reset))
 	return false
 }

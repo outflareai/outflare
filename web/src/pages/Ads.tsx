@@ -1,27 +1,39 @@
-import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useState } from "react";
-import type { AdAccount, AdCampaign, AdChange, AdConnection, AdSummaryRow, AdTotals, AttributionAdRow } from "@outflare/sdk";
+import type { AdAccount, AdCampaign, AdChange, AdConnection, AdSummaryRow, AdTotals } from "@outflare/sdk";
 import { useBrand, pickedBrandId } from "@/lib/brand";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrandBadge } from "@/components/brand-badge";
-import { DataTable } from "@/components/data-table";
+import { DataTable, type ColumnMeta, type TableDownload } from "@/components/data-table";
+import { csvMoney, csvName, downloadCsv, toCsv } from "@/lib/csv";
 import { api, errorMessage } from "../api";
 import { track } from "@/lib/analytics";
-import { ask, Badge, Button, Card, confirmAction, ErrorText, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
+import { ask, Badge, Button, Card, confirmAction, ErrorText, Input, Loading, Menu, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago } from "../format";
 import type { Tab } from "../App";
 import { AdConversions } from "./AdConversions";
 import { AdTrackingFix, AdTrackingHealthCard, AdTrackingTemplates } from "./AdTracking";
 import { AdResults } from "./AdResults";
-import { AdSuggestions } from "./AdSuggestions";
-import { AdDrafts } from "./AdDrafts";
 import { AdTests } from "./AdTests";
-import { AdTrend, CampaignDetail, ConversionActions, outflareColumns } from "./AdDrilldown";
+import { AdTrend, CampaignDetail, ConversionActions } from "./AdDrilldown";
 import { AdsPanels } from "@/components/insight-panels";
+import { PickBrand } from "@/components/pick-brand";
+import { customerBuckets, useBrandAds, windows, type Customers as CustomerBucket } from "./ads/api";
+import { Hero } from "./ads/Hero";
+import { Inbox } from "./ads/Inbox";
+import { Results } from "./ads/Results";
+import { Customers } from "./ads/Customers";
+import { Verdicts } from "./ads/Verdicts";
+import { SetUp } from "./ads/SetUp";
+import { BiddingStrategyReport, GoogleAccountTools, GoogleConversionActions } from "./ads/Google";
 
-// Paid ads: spend, clicks and what each platform says it brought in, read
-// every six hours from the workspace's own ad accounts. Conversions and ROAS
-// are the platform's own claims, so they are never added across platforms.
+// Paid ads: a brand's ad accounts managed toward cost per new paying
+// customer, measured on Outflare's own attribution (plans/paid-ads/plan.md).
+// The screens under web/src/pages/ads/ are the number, the decision inbox,
+// results, customers, verdicts and set-up; this file is the shell, the
+// header's switches, the campaign actions and the older tabs (changes,
+// tracking, conversions, accounts, tests). Spend and the networks' own
+// conversion counts are read from the workspace's own ad accounts; the
+// networks' claims are never added across platforms.
 
 // item opens one campaign ({campaign id}) or one of its ad groups
 // ({campaign id}/{ad group id}) as a page of its own.
@@ -58,14 +70,6 @@ export const accountLink = (connector: string, id: string) => {
   return null;
 };
 
-// A platform's own word (performance_max, maximize_conversions) as words.
-const words = (v: string) => (v && v !== "unknown" && v !== "unspecified" ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, " ") : "");
-
-const targetTone = { over: "red", under: "green", on_target: "blue", no_target: "grey", no_spend: "grey" } as const;
-const targetWord = { over: "Over target", under: "Under target", on_target: "On target", no_target: "", no_spend: "No spend" } as const;
-const trendWord = { scaling_up: "Scaling up", scaling_down: "Scaling down", steady: "Steady", new: "New", stopped: "Stopped", idle: "" } as const;
-const trendTone = { scaling_up: "green", scaling_down: "amber", steady: "grey", new: "blue", stopped: "grey", idle: "grey" } as const;
-
 function AccountName({ a }: { a: AdAccount }) {
   const link = accountLink(a.connector, a.external_id);
   return (
@@ -81,8 +85,17 @@ function AccountName({ a }: { a: AdAccount }) {
   );
 }
 
-const ranges = [7, 28, 90] as const;
+// The date ranges: the last 7, 28, 30 or 90 days, or any from and to.
+const ranges = [7, 28, 30, 90] as const;
 const day = (d: Date) => d.toISOString().slice(0, 10);
+const spanDays = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
+
+// reportDownload is a Paid ads report's "Download CSV": its file is named
+// after the report and its dates, and each download is recorded.
+export const reportDownload = (report: string, ...parts: string[]): TableDownload => ({
+  file: csvName("outflare-ads", report.replace(/_/g, "-"), ...parts),
+  onDownload: (rows) => track("ui.ads_report_downloaded", { report, rows }),
+});
 
 // Money arrives in micros (millionths) of the account's currency.
 export const money = (micros: number | null | undefined, currency: string) => {
@@ -100,8 +113,31 @@ const roas = (v: number | null | undefined) => (v === null || v === undefined ? 
 // The platforms whose campaigns Outflare can change (connectors.AdsManager).
 const manageable = new Set(["google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads"]);
 
-// The page's tabs, as the item in its URL (the overview has none).
-const adsTabs = ["overview", "suggestions", "tests", "campaigns", "changes", "tracking", "conversions", "accounts"] as const;
+// The page's screens, as the item in its URL (the overview has none): the
+// six of plans/paid-ads first, then the older tabs in a second row.
+const adsTabs = ["overview", "inbox", "results", "customers", "verdicts", "setup", "changes", "tracking", "conversions", "accounts", "tests"] as const;
+type AdsTab = (typeof adsTabs)[number];
+const primaryTabs: { id: AdsTab; label: string }[] = [
+  { id: "overview", label: "The number" },
+  { id: "inbox", label: "Needs you" },
+  { id: "results", label: "Results" },
+  { id: "customers", label: "Customers" },
+  { id: "verdicts", label: "Verdicts" },
+  { id: "setup", label: "Set up" },
+];
+const secondaryTabs: { id: AdsTab; label: string }[] = [
+  { id: "changes", label: "Changes" },
+  { id: "tracking", label: "Tracking" },
+  { id: "conversions", label: "Send conversions" },
+  { id: "accounts", label: "Accounts" },
+  { id: "tests", label: "Tests" },
+];
+// The screens that need one brand picked: its number, decisions, results,
+// customers, verdicts and set-up are one brand's.
+const brandNeeded: readonly AdsTab[] = ["inbox", "results", "customers", "verdicts", "setup"];
+// Older links: the suggestions tab is now the inbox, the campaigns tab the
+// results.
+const legacyTabs: Record<string, AdsTab> = { suggestions: "inbox", campaigns: "results" };
 
 // The level the page shows: every network, one network, or one account
 // of it. The same page narrows; the breadcrumb widens it again. It is
@@ -119,7 +155,6 @@ function readScope(ws: string): AdScope {
 }
 // The query a level adds to every ads request.
 export const scopeQuery = (s: AdScope) => ({ ...(s.network ? { connector: s.network } : {}), ...(s.account ? { account_id: s.account } : {}) });
-type AdsTab = (typeof adsTabs)[number];
 
 // Ads belong to one brand.
 export function Ads(props: Props) {
@@ -131,12 +166,26 @@ export function Ads(props: Props) {
 function AdsPage({ ws, canManage, go, item }: Props) {
   // The item is a tab, or a campaign's id (and its ad group's) for its
   // own page.
-  const tab: AdsTab = (adsTabs as readonly string[]).includes(item ?? "") ? (item as AdsTab) : "overview";
-  const [openId, openGroup] = tab === "overview" && item ? item.split("/") : [];
+  const tab: AdsTab = (adsTabs as readonly string[]).includes(item ?? "") ? (item as AdsTab) : legacyTabs[item ?? ""] ?? "overview";
+  const [openId, openGroup] = tab === "overview" && item && !legacyTabs[item] ? item.split("/") : [];
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
   const brandId = brand.brand?.id ?? "";
-  const [days, setDays] = useState<(typeof ranges)[number]>(28);
+  // The range: the last days, or a custom from and to (end is its last
+  // day, which the brand screens count back from).
+  const [lastDays, setLastDays] = useState<number>(28);
+  const [custom, setCustom] = useState<{ from: string; to: string } | null>(null);
+  const [picking, setPicking] = useState(false);
+  const days = custom ? spanDays(custom.from, custom.to) : lastDays;
+  const end = custom?.to;
+  const rangeWord = custom ? `${custom.from} to ${custom.to}` : `the last ${lastDays} days`;
+  // The acquisition window (days after an ad click a sign-up or first
+  // payment still counts for it) and which customers' revenue the numbers
+  // keep, for the number, the results and the customers.
+  const [windowDays, setWindowDays] = useState<(typeof windows)[number]>(30);
+  const [customers, setCustomers] = useState<CustomerBucket>("all");
+  // Bumped after a sync so the brand screens read again.
+  const [version, setVersion] = useState(0);
   const [scope, setScopeState] = useState<AdScope>(() => readScope(ws));
   const setScope = (next: AdScope) => {
     setScopeState(next);
@@ -157,26 +206,33 @@ function AdsPage({ ws, canManage, go, item }: Props) {
   const [byPlatform, setByPlatform] = useState<AdSummaryRow[]>([]);
   const [totals, setTotals] = useState<AdSummaryRow[]>([]);
   const [byDay, setByDay] = useState<AdSummaryRow[]>([]);
-  // What Outflare's own attribution credits each campaign, by its id.
-  const [credited, setCredited] = useState<Record<string, AttributionAdRow>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const brandAds = useBrandAds(brandId);
+  const windowFromBrand = brandAds.economics?.acquisition_window_days;
+  useEffect(() => {
+    // The brand's own window is the default until the person switches it.
+    if (windowFromBrand && (windows as readonly number[]).includes(windowFromBrand)) setWindowDays(windowFromBrand as (typeof windows)[number]);
+  }, [windowFromBrand]);
+  const openScreen = (v: string) => {
+    if (!v) return;
+    track("ui.ads_screen_opened", { screen: v });
+    go("ads", v === "overview" ? undefined : v);
+  };
 
   const load = useCallback(async () => {
     const path = { brand: brandId };
     const narrow = scopeQuery(scope);
     const to = new Date();
-    const range = { from: day(new Date(to.getTime() - (days - 1) * 86_400_000)), to: day(to) };
+    const range = custom ?? { from: day(new Date(to.getTime() - (days - 1) * 86_400_000)), to: day(to) };
     // Every brand's accounts and those with none yet, for assigning.
     const all = await api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path: { ws }, query: { brand: "all" } } });
-    const [c, a, cp, s, d, at, ba] = await Promise.all([
+    const [c, a, cp, s, d, ba] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/ads/connections", { params: { path: { ws } } }),
       api.GET("/v1/brands/{brand}/ads/accounts", { params: { path } }),
       api.GET("/v1/brands/{brand}/ads/campaigns", { params: { path, query: { ...narrow, ...range, limit: 200 } } }),
       api.GET("/v1/brands/{brand}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "connector" } } }),
       api.GET("/v1/brands/{brand}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "day" } } }),
-      // What Outflare credits is a brand's, so only with one picked.
-      api.GET("/v1/brands/{brand}/attribution/ads", { params: { path, query: range } }),
       api.GET("/v1/brands/{brand}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "account" } } }),
     ]);
     if (c.error || !c.data) return setError(errorMessage(c.error));
@@ -189,8 +245,7 @@ function AdsPage({ ws, canManage, go, item }: Props) {
     setTotals(s.data?.totals ?? []);
     setByDay(d.data?.data ?? []);
     setByAccount(ba.data?.data ?? []);
-    setCredited(Object.fromEntries((at?.data?.data ?? []).map((r) => [r.id, r])));
-  }, [ws, brandKey, days, scope.network, scope.account]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws, brandKey, days, custom?.from, custom?.to, scope.network, scope.account]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     load();
   }, [load]);
@@ -201,7 +256,10 @@ function AdsPage({ ws, canManage, go, item }: Props) {
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast("Syncing your ad accounts now. Numbers update in a minute or two.");
-    setTimeout(load, 8000);
+    setTimeout(() => {
+      load();
+      setVersion((v) => v + 1);
+    }, 8000);
   }
 
   // Managing campaigns: each change is queued and read back from the
@@ -277,19 +335,65 @@ function AdsPage({ ws, canManage, go, item }: Props) {
     load();
   }
 
-  const range = { from: day(new Date(Date.now() - (days - 1) * 86_400_000)), to: day(new Date()) };
+  const range = custom ?? { from: day(new Date(Date.now() - (days - 1) * 86_400_000)), to: day(new Date()) };
+
+  // Removing can't be undone in Google Ads, so it asks first, naming what
+  // goes. Only a person's own session can remove (the server refuses an
+  // agent or token).
+  async function removeCampaign(c: AdCampaign) {
+    if (!(await confirmAction(`Remove ${c.name}?`, <>
+      <p>Google Ads can't undo a removal: the campaign stops for good and can't be turned on again. Its ad groups, ads and keywords go with it.</p>
+      <p>Its numbers stay here and in Google Ads. To stop it for now, pause it instead.</p>
+    </>, "Remove campaign"))) return;
+    setBusy(true);
+    const { error } = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/remove", { params: { path: { brand: brandId, id: c.id } }, body: { confirm: true } });
+    setBusy(false);
+    if (error) return toast(errorMessage(error), "error");
+    toast("Removal sent to Google Ads. The campaign shows as removed once Google confirms it.");
+    setTimeout(load, 3000);
+  }
+  function pickRange(r: number | "custom") {
+    if (r === "custom") return setPicking((p) => !p);
+    setCustom(null);
+    setPicking(false);
+    setLastDays(r);
+    track("ui.ads_range_changed", { days: r });
+  }
+  function applyCustom(from: string, to: string) {
+    if (!from || !to || from > to) return toast("Pick a from date on or before the to date.", "error");
+    if (spanDays(from, to) > 3 * 366) return toast("A range is at most three years.", "error");
+    setCustom({ from, to });
+    setPicking(false);
+    track("ui.ads_range_changed", { days: spanDays(from, to), custom: true });
+  }
 
   const header = (
     <PageHeader
       title="Paid ads"
-      description="Spend, clicks and the conversions each platform reports, from your own ad accounts, by brand. Outflare changes a campaign only when you, or an agent you allow, ask it to."
+      description="What a new paying customer costs you, measured on your own sign-ups and payments, and what to do about it. Every change waits for you to approve it; where Outflare Cloud allows it, savings can apply on their own."
       action={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-md border" role="group" aria-label="Date range">
             {ranges.map((r) => (
-              <button key={r} type="button" className={`px-2.5 py-1 text-[13px] ${r === days ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => setDays(r)}>{r} days</button>
+              <button key={r} type="button" aria-pressed={!custom && r === lastDays} className={`px-2.5 py-1 text-[13px] ${!custom && r === lastDays ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => pickRange(r)}>{r} days</button>
             ))}
+            <button type="button" aria-pressed={!!custom} aria-expanded={picking} className={`px-2.5 py-1 text-[13px] ${custom ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => pickRange("custom")}>{custom ? `${custom.from} – ${custom.to}` : "Custom"}</button>
           </div>
+          {picking && <CustomRange from={range.from} to={range.to} apply={applyCustom} />}
+          {brand.brand && (
+            <>
+              <div className="flex rounded-md border" role="group" aria-label="Attribution window" title="Days after an ad click a sign-up or first payment still counts for it">
+                {windows.map((w) => (
+                  <button key={w} type="button" aria-pressed={w === windowDays} className={`px-2.5 py-1 text-[13px] ${w === windowDays ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => { setWindowDays(w); track("ui.ads_window_changed", { days: w }); }}>{w}-day window</button>
+                ))}
+              </div>
+              <div className="flex rounded-md border" role="group" aria-label="Customers" title="New: a person's first ever payment. Returning: any later payment.">
+                {customerBuckets.map((c) => (
+                  <button key={c.id} type="button" aria-pressed={c.id === customers} className={`px-2.5 py-1 text-[13px] ${c.id === customers ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => { setCustomers(c.id); track("ui.ads_customers_filter_changed", { customers: c.id }); }}>{c.label}</button>
+                ))}
+              </div>
+            </>
+          )}
           {canManage && conns && conns.length > 0 && <Button variant="ghost" disabled={busy} onClick={syncNow}>Sync now</Button>}
           {canManage && brand.brand && campaigns.some((c) => c.status === "active") && <Button variant="danger" disabled={busy} onClick={pauseAll}>Pause all ads</Button>}
         </div>
@@ -306,11 +410,11 @@ function AdsPage({ ws, canManage, go, item }: Props) {
       <div className="space-y-6">
         {header}
         {c ? (
-          <CampaignDetail key={c.id} ws={ws} campaign={c} groupId={openGroup || undefined} from={range.from} to={range.to}
-            open={(g) => go("ads", g ? `${c.id}/${g}` : c.id)} back={() => go("ads", "campaigns")} />
+          <CampaignDetail key={c.id} ws={ws} campaign={c} groupId={openGroup || undefined} from={range.from} to={range.to} canManage={canManage}
+            open={(g) => go("ads", g ? `${c.id}/${g}` : c.id)} back={() => go("ads", "results")} />
         ) : (
-          <Card title="Campaign not found" description={`It didn't spend or run in the last ${days} days, or belongs to another brand.`}>
-            <Button variant="ghost" onClick={() => go("ads", "campaigns")}>All campaigns</Button>
+          <Card title="Campaign not found" description={`It didn't spend or run from ${range.from} to ${range.to}, or belongs to another brand.`}>
+            <Button variant="ghost" onClick={() => go("ads", "results")}>All results</Button>
           </Card>
         )}
       </div>
@@ -331,64 +435,74 @@ function AdsPage({ ws, canManage, go, item }: Props) {
   return (
     <div className="space-y-6">
       {header}
-      <Tabs value={tab} onValueChange={(v) => go("ads", v === "overview" ? undefined : v)}>
-        <TabsList className="h-8">
-          <TabsTrigger value="overview" className="px-3 text-[12px]">Overview</TabsTrigger>
-          <TabsTrigger value="suggestions" className="px-3 text-[12px]">Suggestions</TabsTrigger>
-          <TabsTrigger value="tests" className="px-3 text-[12px]">Tests</TabsTrigger>
-          <TabsTrigger value="campaigns" className="px-3 text-[12px]">Campaigns</TabsTrigger>
-          <TabsTrigger value="changes" className="px-3 text-[12px]">Changes</TabsTrigger>
-          <TabsTrigger value="tracking" className="px-3 text-[12px]">Tracking</TabsTrigger>
-          <TabsTrigger value="conversions" className="px-3 text-[12px]">Send conversions</TabsTrigger>
-          <TabsTrigger value="accounts" className="px-3 text-[12px]">Accounts</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Tabs value={primaryTabs.some((t) => t.id === tab) ? tab : ""} onValueChange={openScreen}>
+          <TabsList className="h-auto! flex-wrap justify-start" aria-label="Paid ads screens">
+            {primaryTabs.map((t) => <TabsTrigger key={t.id} value={t.id} className="px-3 text-[12px]">{t.label}</TabsTrigger>)}
+          </TabsList>
+        </Tabs>
+        <nav aria-label="More on paid ads" className="flex flex-wrap items-center gap-1 text-[12px]">
+          <span className="text-muted-foreground">More:</span>
+          {secondaryTabs.map((t) => (
+            <button key={t.id} type="button" aria-current={tab === t.id ? "page" : undefined} className={`rounded px-1.5 py-0.5 hover:bg-muted ${tab === t.id ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => openScreen(t.id)}>{t.label}</button>
+          ))}
+        </nav>
+      </div>
       <Levels scope={scope} setScope={setScope} accounts={allAccounts} />
       {error && <ErrorText>{error}</ErrorText>}
+      {brandAds.error && brandId && <ErrorText>{brandAds.error}</ErrorText>}
 
       {conns.filter((c) => c.setup_needed.length > 0).map((c) => <Setup key={c.id} ws={ws} conn={c} canManage={canManage} done={load} />)}
 
+      {brandNeeded.includes(tab) && !brand.brand && <PickBrand what="A brand's ad numbers, decisions and customers" brands={brand.active.length} />}
+
       {tab === "overview" && (
         <>
+      {brand.brand && <Hero brand={brand.brand.id} days={days} end={end} windowDays={windowDays} customers={customers} economics={brandAds.economics} setup={brandAds.setup} canManage={canManage} reload={brandAds.reload} go={go} version={version} />}
+
       {totals.length === 0 ? null : totals.map((t) => (
         <Stats key={t.currency} cols={5}>
-          <Stat label={totals.length > 1 ? `Spend, ${t.currency}` : `Spend, ${days} days`} value={money(t.totals.spend_micros, t.currency)} />
+          <Stat label={totals.length > 1 ? `Spend, ${t.currency}` : custom ? "Spend" : `Spend, ${days} days`} value={money(t.totals.spend_micros, t.currency)} sub={custom ? rangeWord : undefined} />
           <Stat label="Clicks" value={n(t.totals.clicks)} sub={`${n(t.totals.impressions)} impressions`} />
           <Stat label="CTR" value={pct(t.totals.ctr)} />
           <Stat label="Cost per click" value={money(t.totals.cpc_micros, t.currency)} />
-          <Stat label="Platform conversions" value={n(t.totals.conversions)} sub="as each platform counts them" />
+          <Stat label="Platform conversions" value={n(t.totals.conversions)} sub={t.totals.all_conversions != null ? `${n(t.totals.all_conversions)} all conversions` : "as each platform counts them"} />
         </Stats>
       ))}
 
       {brand.brand && <AdsPanels brand={brand.brand.id} days={days} go={go} />}
 
-      <Card title="By day" description="Every platform's spend, clicks, impressions and conversions per day, as each reports them.">
+      <Card title="By day" description="Every platform's spend, clicks, impressions and conversions per day, as each reports them."
+        action={byDay.length > 0 ? <Button variant="ghost" onClick={() => downloadByDay(byDay, range.from, range.to)}>Download CSV</Button> : undefined}>
         <AdTrend rows={byDay} from={range.from} to={range.to} />
       </Card>
 
-      <Card title="By platform" description={`The last ${days} days. Conversions and ROAS are what each platform reports, with its own attribution window, so they are not added up across platforms.`}>
+      <Card title="By platform" description={`From ${range.from} to ${range.to}. Conversions and ROAS are what each platform reports, with its own attribution window, so they are not added up across platforms. All conversions also count each platform's secondary conversion actions.`}>
         <DataTable
           data={byPlatform}
           rowId={(r) => `${r.key}-${r.currency}`}
           onRowClick={scope.network ? undefined : (r) => setScope({ network: r.key })}
           columnsMenu={false}
           hidden={deliveryColumns}
+          download={reportDownload("by_platform", range.from, range.to)}
           empty="Nothing spent in this range yet."
           initialSort={[{ id: "spend", desc: true }]}
           columns={[
             { id: "platform", header: "Platform", accessorFn: (r) => platformName(r.key), cell: ({ row: { original: r } }) => <span className="font-medium">{platformName(r.key)}</span> },
+            { id: "currency", header: "Currency", accessorFn: (r) => r.currency, cell: ({ row: { original: r } }) => <span className="text-muted-foreground">{r.currency}</span> },
             ...metricColumns<AdSummaryRow>((r) => r.totals, (r) => r.currency),
           ]}
         />
       </Card>
 
       {!scope.account && byAccount.length > 0 && (
-        <Card title="By account" description={`The last ${days} days, each ad account on its own. Open one to see only its campaigns, changes and suggestions.`}>
+        <Card title="By account" description={`From ${range.from} to ${range.to}, each ad account on its own, as each platform reports it. Open one to see only its campaigns, changes and suggestions.`}>
           <DataTable
             data={byAccount}
             rowId={(r) => `${r.key}-${r.currency}`}
             columnsMenu={false}
             hidden={deliveryColumns}
+            download={reportDownload("by_account", range.from, range.to)}
             empty="Nothing spent in this range yet."
             initialSort={[{ id: "spend", desc: true }]}
             onRowClick={(r) => {
@@ -396,7 +510,10 @@ function AdsPage({ ws, canManage, go, item }: Props) {
               setScope({ network: acc?.connector ?? scope.network, account: r.key });
             }}
             columns={[
-              { id: "account", header: "Account", accessorFn: (r) => allAccounts.find((x) => x.id === r.key)?.name ?? r.key, cell: ({ row: { original: r } }) => {
+              { id: "account", header: "Account", accessorFn: (r) => allAccounts.find((x) => x.id === r.key)?.name ?? r.key, meta: { csv: (r: AdSummaryRow) => {
+                const acc = allAccounts.find((x) => x.id === r.key);
+                return acc ? `${acc.name} (${platformName(acc.connector)} ${accountId(acc.connector, acc.external_id)})` : r.key;
+              } }, cell: ({ row: { original: r } }) => {
                 const acc = allAccounts.find((x) => x.id === r.key);
                 return acc ? <AccountName a={acc} /> : <span className="font-mono">{r.key}</span>;
               } },
@@ -406,103 +523,27 @@ function AdsPage({ ws, canManage, go, item }: Props) {
         </Card>
       )}
 
-      <ConversionActions ws={ws} from={range.from} to={range.to} brand={brandKey || undefined} card />
+      <ConversionActions ws={ws} from={range.from} to={range.to} brand={brandKey || undefined} card download />
 
         </>
       )}
 
-      {tab === "campaigns" && (
+      {tab === "results" && brand.brand && (
         <>
-      <Card title="Campaigns" description={`Ranked by spend over the last ${days} days. Open a campaign for its own page: its numbers by day, its ad groups or ad sets and its ads (Google and Meta), each of which opens in turn. Pause, resume or set the daily budget of a Google Ads, Meta, Microsoft, LinkedIn or TikTok campaign; each change is read back from the platform.`}>
-        <DataTable
-          data={campaigns}
-          rowId={(c) => c.id}
-          onRowClick={(c) => go("ads", c.id)}
-          searchPlaceholder="Search campaigns"
-          hidden={deliveryColumns}
-          empty="Campaigns appear after the first sync."
-          initialSort={[{ id: "spend", desc: true }]}
-          columns={[
-            {
-              id: "campaign",
-              header: "Campaign",
-              accessorFn: (c) => `${c.name} ${c.account_name}`,
-              cell: ({ row: { original: c } }) => (
-                <div className="min-w-56 space-y-0.5">
-                  <div className="font-medium text-blue-700 underline-offset-2 hover:underline dark:text-blue-400">{c.name || c.external_id}</div>
-                  <div className="text-[12px] text-muted-foreground">
-                    {platformName(c.connector)}{allAccounts.length > 1 && <> · {c.account_name}</>}
-                    {words(c.objective) && <> · {words(c.objective)}</>}
-                    {words(c.bidding_strategy) && <> · <span title="How the platform bids">{words(c.bidding_strategy)}</span></>}
-                    {c.status !== "active" && <> · <Badge tone={c.status === "removed" ? "red" : "grey"} title={c.provider_status}>{c.status === "paused" ? "Paused" : c.status === "removed" ? "Removed" : c.provider_status || "Other"}</Badge></>}
-                  </div>
-                </div>
-              ),
-            },
-            {
-              id: "target",
-              header: "Target / conv.",
-              accessorFn: (c) => c.target_cost_per_conversion_micros ?? -1,
-              cell: ({ row: { original: c } }) => (
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono tabular-nums">{money(c.target_cost_per_conversion_micros, c.currency)}</span>
-                    {targetWord[c.target_status] && <Badge tone={targetTone[c.target_status]} title="Cost per conversion over this range against the target, within a tenth either way is on target">{targetWord[c.target_status]}</Badge>}
-                  </div>
-                  {c.target_from === "account" && <div className="text-[11px] text-muted-foreground">The account's target</div>}
-                  {c.platform_target_cpa_micros != null && <div className="text-[11px] text-muted-foreground">{platformName(c.connector)} bids to {money(c.platform_target_cpa_micros, c.currency)}</div>}
-                  {c.platform_target_roas != null && <div className="text-[11px] text-muted-foreground">{platformName(c.connector)} bids to {Math.round(c.platform_target_roas * 100)}% return</div>}
-                </div>
-              ),
-            },
-            {
-              id: "trend",
-              header: "Trend",
-              accessorFn: (c) => c.spend_change ?? (c.trend === "new" ? 99 : c.trend === "stopped" ? -99 : 0),
-              cell: ({ row: { original: c } }) =>
-                trendWord[c.trend] && (
-                  <span title={`Spend against the ${days} days before: ${money(c.previous_totals.spend_micros, c.currency)}, ${n(c.previous_totals.conversions)} conversions`}>
-                    <Badge tone={trendTone[c.trend]}>
-                      {c.trend === "scaling_up" ? "↑ " : c.trend === "scaling_down" ? "↓ " : ""}
-                      {trendWord[c.trend]}
-                      {c.spend_change != null && ` ${c.spend_change > 0 ? "+" : ""}${Math.round(c.spend_change * 100)}%`}
-                    </Badge>
-                  </span>
-                ),
-            },
-            { id: "budget", header: "Daily budget", accessorFn: (c) => c.daily_budget_micros ?? -1, cell: ({ row: { original: c } }) => <span className="font-mono tabular-nums">{money(c.daily_budget_micros, c.currency)}</span> },
-            ...metricColumns<AdCampaign>((c) => c.totals, (c) => c.currency),
-            ...outflareColumns<AdCampaign>(credited),
-            { id: "brand", header: "Brand", accessorFn: (c) => brand.byId(c.brand_id)?.name ?? "", cell: ({ row: { original: c } }) => <BrandBadge id={c.brand_id} /> },
-            {
-              id: "manage",
-              header: "",
-              enableSorting: false,
-              cell: ({ row: { original: c } }) =>
-                canManage && (
-                  <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                    <Button variant="ghost" disabled={busy} onClick={() => setTarget("campaigns", c.id, c.name, c.currency, c.target_cost_per_conversion_micros, c.target_from === "campaign")}>Target</Button>
-                    {manageable.has(c.connector) && c.status !== "removed" && (
-                      <>
-                        {c.status === "active" ? <Button variant="ghost" disabled={busy} onClick={() => change(c, "pause")}>Pause</Button> : <Button variant="ghost" disabled={busy} onClick={() => change(c, "resume")}>Resume</Button>}
-                        <Button variant="ghost" disabled={busy} onClick={() => setBudget(c)}>Budget</Button>
-                      </>
-                    )}
-                  </div>
-                ),
-            },
-          ]}
-        />
-      </Card>
-
-      <AdResults ws={ws} from={range.from} to={range.to} brand={brandId} go={go} />
-
+          <Results brand={brand.brand.id} days={days} end={end} windowDays={windowDays} customers={customers} scope={scope} canManage={canManage} go={go} version={version}
+            manage={{ campaigns, busy, manageable: (c) => manageable.has(c), pause: (c) => change(c, "pause"), resume: (c) => change(c, "resume"), budget: setBudget, target: (c) => setTarget("campaigns", c.id, c.name, c.currency, c.target_cost_per_conversion_micros, c.target_from === "campaign"), remove: removeCampaign }} />
+          <CampaignReport campaigns={campaigns} from={range.from} to={range.to} canManage={canManage} busy={busy} open={(c) => go("ads", c.id)}
+            manage={{ pause: (c) => change(c, "pause"), resume: (c) => change(c, "resume"), budget: setBudget, remove: removeCampaign }} />
+          <BiddingStrategyReport brand={brand.brand.id} from={range.from} to={range.to} account={scope.account} />
+          <AdResults ws={ws} from={range.from} to={range.to} brand={brandId} go={go} />
         </>
       )}
 
-      {tab === "suggestions" && <AdSuggestions ws={ws} brand={brandKey} scope={scope} canManage={canManage} />}
-      {tab === "suggestions" && (brand.brand ? <AdDrafts key={brand.brand.id} brand={brand.brand.id} canManage={canManage} />
-        : <Card title="New ads"><p className="text-[13px] text-muted-foreground">Pick a brand to see the new ads its agent wrote.</p></Card>)}
+      {tab === "inbox" && brand.brand && <Inbox ws={ws} brand={brand.brand.id} scope={scope} canManage={canManage} economics={brandAds.economics} reloadBrand={brandAds.reload} />}
+      {tab === "customers" && brand.brand && <Customers brand={brand.brand.id} days={days} end={end} customers={customers} campaigns={campaigns} go={go} version={version} />}
+      {tab === "verdicts" && brand.brand && <Verdicts brand={brand.brand.id} scope={scope} />}
+      {tab === "setup" && brand.brand && <SetUp brand={brand.brand.id} setup={brandAds.setup} economics={brandAds.economics} error={brandAds.error} canManage={canManage} reload={brandAds.reload} go={go} />}
+
       {tab === "tests" && <AdTests ws={ws} brand={brandKey} scope={scope} campaigns={campaigns} canManage={canManage} />}
       {tab === "changes" && <AdChanges ws={ws} brand={brandKey} scope={scope} />}
 
@@ -515,7 +556,12 @@ function AdsPage({ ws, canManage, go, item }: Props) {
         </>
       )}
 
-      {tab === "conversions" && <AdConversions ws={ws} canManage={canManage} accounts={accounts} />}
+      {tab === "conversions" && (
+        <>
+          {brand.brand && accounts.filter((a) => a.connector === "google_ads" && a.status === "active").map((a) => <GoogleConversionActions key={a.id} brand={brandId} account={a} canManage={canManage} />)}
+          <AdConversions ws={ws} canManage={canManage} accounts={accounts} />
+        </>
+      )}
 
       {tab === "accounts" && (
         <>
@@ -600,6 +646,7 @@ function AdsPage({ ws, canManage, go, item }: Props) {
           {canManage && <Button variant="ghost" onClick={() => go("connectors", "ads")}>Connect another</Button>}
         </div>
       </Card>
+      {brand.brand && <GoogleAccountTools brand={brandId} accounts={accounts} canManage={canManage} />}
         </>
       )}
     </div>
@@ -610,25 +657,124 @@ function AdsPage({ ws, canManage, go, item }: Props) {
 // platform and campaign tables.
 export function metricColumns<T>(totals: (r: T) => AdTotals, currency: (r: T) => string) {
   const mono = (s: string) => <span className="font-mono tabular-nums">{s}</span>;
+  type Cell = { row: { original: T } };
+  // In a download, money is a decimal with its currency's code and a
+  // missing number is empty.
+  const money$ = (f: (t: AdTotals) => number | null | undefined) => ({ csv: (r: T) => csvMoney(f(totals(r)), currency(r)) }) satisfies ColumnMeta<T>;
+  const num$ = (f: (t: AdTotals) => number | null | undefined, digits = 2) => ({ csv: (r: T) => { const v = f(totals(r)); return v == null ? "" : Number(v.toFixed(digits)); } }) satisfies ColumnMeta<T>;
   return [
-    { id: "spend", header: "Spend", accessorFn: (r: T) => totals(r).spend_micros, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(money(totals(r).spend_micros, currency(r))) },
-    { id: "clicks", header: "Clicks", accessorFn: (r: T) => totals(r).clicks, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).clicks)) },
-    { id: "ctr", header: "CTR", accessorFn: (r: T) => totals(r).ctr ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(pct(totals(r).ctr)) },
-    { id: "cpc", header: "CPC", accessorFn: (r: T) => totals(r).cpc_micros ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(money(totals(r).cpc_micros, currency(r))) },
-    { id: "conversions", header: "Conv.", accessorFn: (r: T) => totals(r).conversions ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).conversions)) },
-    { id: "cpa", header: "Cost / conv.", accessorFn: (r: T) => totals(r).cost_per_conversion_micros ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(money(totals(r).cost_per_conversion_micros, currency(r))) },
-    { id: "roas", header: "Platform ROAS", accessorFn: (r: T) => totals(r).platform_roas ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(roas(totals(r).platform_roas)) },
-    { id: "impressions", header: "Impressions", accessorFn: (r: T) => totals(r).impressions, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).impressions)) },
-    { id: "link_clicks", header: "Link clicks", accessorFn: (r: T) => totals(r).link_clicks ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).link_clicks)) },
-    { id: "landing_page_views", header: "Page views", accessorFn: (r: T) => totals(r).landing_page_views ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).landing_page_views)) },
-    { id: "video_views", header: "Video views", accessorFn: (r: T) => totals(r).video_views ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).video_views)) },
-    { id: "frequency", header: "Frequency", accessorFn: (r: T) => totals(r).frequency ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(totals(r).frequency == null ? "—" : totals(r).frequency!.toFixed(2)) },
+    { id: "spend", header: "Spend", meta: money$((t) => t.spend_micros), accessorFn: (r: T) => totals(r).spend_micros, cell: ({ row: { original: r } }: Cell) => mono(money(totals(r).spend_micros, currency(r))) },
+    { id: "clicks", header: "Clicks", accessorFn: (r: T) => totals(r).clicks, cell: ({ row: { original: r } }: Cell) => mono(n(totals(r).clicks)) },
+    { id: "impressions", header: "Impressions", accessorFn: (r: T) => totals(r).impressions, cell: ({ row: { original: r } }: Cell) => mono(n(totals(r).impressions)) },
+    { id: "ctr", header: "CTR", meta: num$((t) => t.ctr, 4), accessorFn: (r: T) => totals(r).ctr ?? -1, cell: ({ row: { original: r } }: Cell) => mono(pct(totals(r).ctr)) },
+    { id: "cpc", header: "CPC", meta: money$((t) => t.cpc_micros), accessorFn: (r: T) => totals(r).cpc_micros ?? -1, cell: ({ row: { original: r } }: Cell) => mono(money(totals(r).cpc_micros, currency(r))) },
+    { id: "conversions", header: "Conv.", meta: num$((t) => t.conversions), accessorFn: (r: T) => totals(r).conversions ?? -1, cell: ({ row: { original: r } }: Cell) => mono(n(totals(r).conversions)) },
+    { id: "all_conversions", header: "All conv.", meta: num$((t) => t.all_conversions), accessorFn: (r: T) => totals(r).all_conversions ?? -1, cell: ({ row: { original: r } }: Cell) => <span title="Every conversion the platform counted, its secondary conversion actions included">{mono(n(totals(r).all_conversions))}</span> },
+    { id: "cpa", header: "Cost / conv.", meta: money$((t) => t.cost_per_conversion_micros), accessorFn: (r: T) => totals(r).cost_per_conversion_micros ?? -1, cell: ({ row: { original: r } }: Cell) => mono(money(totals(r).cost_per_conversion_micros, currency(r))) },
+    { id: "roas", header: "Platform ROAS", meta: num$((t) => t.platform_roas), accessorFn: (r: T) => totals(r).platform_roas ?? -1, cell: ({ row: { original: r } }: Cell) => mono(roas(totals(r).platform_roas)) },
+    { id: "link_clicks", header: "Link clicks", meta: num$((t) => t.link_clicks, 0), accessorFn: (r: T) => totals(r).link_clicks ?? -1, cell: ({ row: { original: r } }: Cell) => mono(n(totals(r).link_clicks)) },
+    { id: "landing_page_views", header: "Page views", meta: num$((t) => t.landing_page_views, 0), accessorFn: (r: T) => totals(r).landing_page_views ?? -1, cell: ({ row: { original: r } }: Cell) => mono(n(totals(r).landing_page_views)) },
+    { id: "video_views", header: "Video views", meta: num$((t) => t.video_views, 0), accessorFn: (r: T) => totals(r).video_views ?? -1, cell: ({ row: { original: r } }: Cell) => mono(n(totals(r).video_views)) },
+    { id: "frequency", header: "Frequency", meta: num$((t) => t.frequency), accessorFn: (r: T) => totals(r).frequency ?? -1, cell: ({ row: { original: r } }: Cell) => mono(totals(r).frequency == null ? "—" : totals(r).frequency!.toFixed(2)) },
   ];
 }
 
 // deliveryColumns are metricColumns' Meta delivery numbers, hidden until
-// the viewer turns them on where most rows won't have them.
-export const deliveryColumns = ["impressions", "link_clicks", "landing_page_views", "video_views", "frequency"];
+// the viewer turns them on where most rows won't have them. Clicks, cost,
+// impressions, conversions and all conversions show by default: Google's
+// Required Minimum Functionality wants them on its account and campaign
+// reports (docs/paid-media.md).
+export const deliveryColumns = ["link_clicks", "landing_page_views", "video_views", "frequency"];
+
+// statusColumn shows whether a campaign, ad group, ad or keyword is active,
+// paused or removed, by default wherever a report lists them all.
+export function statusColumn<T extends { status: string }>() {
+  const tone = { active: "green", paused: "grey", removed: "red", other: "grey" } as const;
+  return {
+    id: "status",
+    header: "Status",
+    accessorFn: (r: T) => r.status.charAt(0).toUpperCase() + r.status.slice(1),
+    cell: ({ row: { original: r } }: { row: { original: T } }) => <Badge tone={tone[r.status as keyof typeof tone] ?? "grey"}>{r.status.charAt(0).toUpperCase() + r.status.slice(1)}</Badge>,
+  };
+}
+
+// downloadByDay saves the by-day numbers, one row per day and currency.
+function downloadByDay(rows: AdSummaryRow[], from: string, to: string) {
+  const sorted = [...rows].sort((a, b) => a.key.localeCompare(b.key) || a.currency.localeCompare(b.currency));
+  downloadCsv(csvName("outflare-ads", "by-day", from, to), toCsv(
+    ["Date", "Currency", "Spend", "Clicks", "Impressions", "Conv.", "All conv.", "Cost / conv."],
+    sorted.map((r) => [r.key, r.currency, csvMoney(r.totals.spend_micros, r.currency), r.totals.clicks, r.totals.impressions, r.totals.conversions ?? "", r.totals.all_conversions ?? "",
+      csvMoney(r.totals.cost_per_conversion_micros, r.currency)]),
+  ));
+  track("ui.ads_report_downloaded", { report: "by_day", rows: sorted.length });
+}
+
+// CustomRange picks any from and to.
+function CustomRange({ from, to, apply }: { from: string; to: string; apply: (from: string, to: string) => void }) {
+  const [f, setF] = useState(from);
+  const [t, setT] = useState(to);
+  return (
+    <form className="flex flex-wrap items-center gap-1.5 text-[13px]" aria-label="Custom date range" onSubmit={(e) => { e.preventDefault(); apply(f, t); }}>
+      <label className="flex items-center gap-1">From <input type="date" className="h-7 rounded-md border bg-background px-1.5" value={f} max={t} onChange={(e) => setF(e.target.value)} aria-label="From" required /></label>
+      <label className="flex items-center gap-1">to <input type="date" className="h-7 rounded-md border bg-background px-1.5" value={t} min={f} onChange={(e) => setT(e.target.value)} aria-label="To" required /></label>
+      <Button type="submit" variant="ghost">Apply</Button>
+    </form>
+  );
+}
+
+// CampaignReport is every campaign as its network reports it: status,
+// clicks, cost, impressions, conversions and all conversions by default
+// (Google's campaign report), with the actions a person can take.
+function CampaignReport({ campaigns, from, to, canManage, busy, open, manage }: {
+  campaigns: AdCampaign[]; from: string; to: string; canManage: boolean; busy: boolean; open: (c: AdCampaign) => void;
+  manage: { pause: (c: AdCampaign) => void; resume: (c: AdCampaign) => void; budget: (c: AdCampaign) => void; remove: (c: AdCampaign) => void };
+}) {
+  if (campaigns.length === 0) return null;
+  return (
+    <Card title="Campaigns as each network reports them" description={`From ${from} to ${to}: what each platform says every campaign spent and got, active, paused and removed alike. Conversions are the platform's own claim.`}>
+      <DataTable
+        data={campaigns}
+        rowId={(c) => c.id}
+        onRowClick={open}
+        searchPlaceholder="Search campaigns"
+        hidden={[...deliveryColumns, "roas", "ctr"]}
+        initialSort={[{ id: "spend", desc: true }]}
+        download={reportDownload("campaigns", from, to)}
+        empty="No campaigns in this range."
+        mobile={(c) => (
+          <span className="block min-w-0">
+            <span className="block truncate font-medium">{c.name}</span>
+            <span className="block truncate text-[12px] text-muted-foreground">{c.status} · {money(c.totals.spend_micros, c.currency)} · {n(c.totals.clicks)} clicks · {n(c.totals.conversions)} conv.</span>
+          </span>
+        )}
+        columns={[
+          {
+            id: "campaign", header: "Campaign", accessorFn: (c) => c.name,
+            cell: ({ row: { original: c } }) => <div className="min-w-40 font-medium">{c.name}</div>,
+          },
+          { id: "network", header: "Network", accessorFn: (c) => `${platformName(c.connector)} · ${c.account_name}`, cell: ({ row: { original: c } }) => <span className="text-[12px] text-muted-foreground">{platformName(c.connector)} · {c.account_name}</span> },
+          statusColumn<AdCampaign>(),
+          ...metricColumns<AdCampaign>((c) => c.totals, (c) => c.currency),
+          {
+            id: "manage", header: "", enableSorting: false,
+            cell: ({ row: { original: c } }) => {
+              if (!canManage || c.status === "removed" || !manageable.has(c.connector)) return null;
+              return (
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Menu label="Manage" aria={`Manage ${c.name}`} items={[
+                    !busy && { label: "Daily budget", onClick: () => manage.budget(c) },
+                    !busy && (c.status === "active" ? { label: "Pause", onClick: () => manage.pause(c) } : { label: "Resume", onClick: () => manage.resume(c) }),
+                    !busy && c.connector === "google_ads" && { label: "Remove", onClick: () => manage.remove(c), danger: true },
+                  ]} />
+                </div>
+              );
+            },
+          },
+        ]}
+      />
+    </Card>
+  );
+}
 
 // A connection that still needs a field before it can sync, such as the
 // workspace's own Google Ads or Microsoft Advertising developer token. The
@@ -692,20 +838,25 @@ function Levels({ scope, setScope, accounts }: { scope: AdScope; setScope: (s: A
   );
 }
 
-const changeWord = {
+const changeWord: Record<AdChange["kind"], string> = {
   pause: "Paused", resume: "Resumed", budget: "Daily budget", keyword_add: "Keyword added", negative_add: "Negative keyword added", keyword_split: "Keyword given its own ad group",
   bidding: "Bidding", audience_add: "Audience added", audience_remove: "Audience taken out", country_add: "Country added", country_remove: "Country taken out",
-} as const;
+  keyword_pause: "Keyword paused", keyword_resume: "Keyword resumed", ad_pause: "Ad paused", ad_resume: "Ad resumed", negative_remove: "Negative keyword taken out",
+  target: "Target moved", exclusion_add: "Exclusion added", exclusion_remove: "Exclusion taken out",
+  campaign_remove: "Campaign removed", ad_remove: "Ad removed", keyword_remove: "Keyword removed",
+};
 
 // changeDetail is what a change names: a keyword, an audience, a country or a bidding target.
 function changeDetail(r: AdChange) {
   const a = r.after;
   if (a.keyword) return <span className="font-mono">[{a.keyword}]</span>;
+  if (r.kind === "ad_remove") return <span>{a.name || a.ad_id}</span>;
   if (a.country) return <span>{a.country}</span>;
   if (a.audience_id) return <span>{a.audience_name || a.audience_id}</span>;
   if (a.bidding) {
     const b = a.bidding;
     const target = b.target_cpa_micros != null ? ` to ${(b.target_cpa_micros / 1e6).toFixed(2)} a conversion` : b.target_roas != null ? ` to ${b.target_roas}× return` : "";
+    if (b.strategy === "portfolio") return <span>Portfolio strategy {b.bidding_strategy_id}</span>;
     return <span>{b.strategy === "maximize_conversion_value" ? "Maximise value" : "Maximise conversions"}{target}</span>;
   }
   return null;

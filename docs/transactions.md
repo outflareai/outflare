@@ -37,7 +37,7 @@ Revenue, [attribution](attribution.md) and the [conversions sent back to ad netw
 **When the same payment arrives twice**, from two of these, it is kept once and counted once. Outflare takes them as the same payment when:
 
 1. **They share an id.** The event's `order_id` (or `transaction_id`, or `payment_id`) is the transaction's `source_id`, or a connector's charge id. This is the reliable way: **send the same id in both.**
-2. **Or, with no shared id,** the same person paid the same amount in the same currency within 15 minutes.
+2. **Or, with no shared id,** the same person paid the same amount in the same currency within 15 minutes, and that payment is still waiting for its copy from this way. A payment that already has its copy from this way, under another id, is a different payment.
 
 The two can arrive at the same moment: each way takes turns on the payment's id, so the second waits for the first and is kept as it, with its person. A guess (2) can miss, when the amounts or currencies differ or the two come more than 15 minutes apart, or join two real payments of the same amount, so [Developer setup](developer-setup.md#payments-sent-from-your-server) shows every payment matched by a guess, and every one whose two copies disagree on the amount.
 

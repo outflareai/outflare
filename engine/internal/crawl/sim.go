@@ -20,9 +20,10 @@ var simPages = map[string]struct {
 }{
 	"/robots.txt":  {200, "User-agent: *\nDisallow: /private/\nSitemap: {base}/sitemap.xml\n", "text/plain"},
 	"/sitemap.xml": {200, `<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{base}/</loc></url><url><loc>{base}/pricing</loc></url><url><loc>{base}/blog/</loc></url></urlset>`, "application/xml"},
-	"/": {200, `<html><head><title>Home</title></head><body><a href="/pricing">Pricing</a> <a href="/about">About</a> ` +
+	"/": {200, `<html><head><title>Home</title><link rel="icon" type="image/svg+xml" href="/logo.svg"><meta name="theme-color" content="#0F766E"></head><body><a href="/pricing">Pricing</a> <a href="/about">About</a> ` +
 		`<a href="/blog/">Blog</a> <a href="/private/report">Report</a> <a href="/old-about">Old about</a> <a href="/missing">Missing</a> ` +
 		`<a href="https://elsewhere.example/">Elsewhere</a></body></html>`, "text/html; charset=utf-8"},
+	"/logo.svg":  {200, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#0f766e"/></svg>`, "image/svg+xml"},
 	"/pricing":   {200, `<html><head><title>Pricing</title></head><body><a href="/">Home</a></body></html>`, "text/html"},
 	"/about":     {200, `<html><head><title>About</title></head><body><a href="/">Home</a></body></html>`, "text/html"},
 	"/blog/":     {200, `<html><head><title>Blog</title><meta name="robots" content="noindex"></head><body><a href="/">Home</a></body></html>`, "text/html"},

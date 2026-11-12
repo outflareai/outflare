@@ -1689,8 +1689,8 @@ func createWorkspace(ctx context.Context, tx pgx.Tx, name, ownerID string) (stri
 	// Brands own a workspace's data (plans/brands/README.md), so every
 	// workspace starts with one, named after it. It comes first, so the
 	// catalog rows below belong to it.
-	if _, err := tx.Exec(ctx, `INSERT INTO brands (workspace_id, name, handle, presence_top_every_days) VALUES ($1, $2, $3, $4)`,
-		id, truncate(name, 100), firstBrandHandle(name), presenceDefaultEveryDays); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO brands (workspace_id, name, handle, presence_top_every_days, presence_rest_every_days) VALUES ($1, $2, $3, $4, $5)`,
+		id, truncate(name, 100), firstBrandHandle(name), presenceDefaultEveryDays, presenceDefaultRestEveryDays); err != nil {
 		return "", err
 	}
 	// New workspaces start with the Deal type, like Attio's Deals.

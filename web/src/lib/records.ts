@@ -39,38 +39,25 @@ export const namespaces: Record<string, string> = {
 
 // catalogWrite sends a catalog change to the brand whose catalog the page
 // shows (useCatalog): the brand picked in the switcher, or, with all
-// brands picked, the workspace's first brand, which the workspace routes
-// write to. Each brand has its own catalog, so a change must never land on
-// another brand's.
+// brands picked, the workspace's first brand. Each brand has its own
+// catalog, so a change must never land on another brand's.
 export function useCatalogWrite(ws: string) {
-  const { brand: picked } = useBrand(ws);
-  const brand = picked?.id ?? "";
+  const { brand: picked, brands } = useBrand(ws);
+  const brand = picked?.id ?? brands[0]?.id ?? "";
   return useMemo(() => ({
     createType: (body: Schemas["RecordTypeInput"]) =>
-      brand
-        ? api.POST("/v1/brands/{brand}/catalog/types", { params: { path: { brand } }, body })
-        : api.POST("/v1/workspaces/{ws}/catalog/types", { params: { path: { ws } }, body }),
+      api.POST("/v1/brands/{brand}/catalog/types", { params: { path: { brand } }, body }),
     createOptionSet: (body: Schemas["OptionSetInput"]) =>
-      brand
-        ? api.POST("/v1/brands/{brand}/catalog/option-sets", { params: { path: { brand } }, body })
-        : api.POST("/v1/workspaces/{ws}/catalog/option-sets", { params: { path: { ws } }, body }),
+      api.POST("/v1/brands/{brand}/catalog/option-sets", { params: { path: { brand } }, body }),
     updateOptionSet: (set: string, body: Schemas["OptionSetInput"]) =>
-      brand
-        ? api.PATCH("/v1/brands/{brand}/catalog/option-sets/{set}", { params: { path: { brand, set } }, body })
-        : api.PATCH("/v1/workspaces/{ws}/catalog/option-sets/{set}", { params: { path: { ws, set } }, body }),
+      api.PATCH("/v1/brands/{brand}/catalog/option-sets/{set}", { params: { path: { brand, set } }, body }),
     createField: (type: string, body: Schemas["FieldInput"]) =>
-      brand
-        ? api.POST("/v1/brands/{brand}/catalog/types/{type}/fields", { params: { path: { brand, type } }, body })
-        : api.POST("/v1/workspaces/{ws}/catalog/types/{type}/fields", { params: { path: { ws, type } }, body }),
+      api.POST("/v1/brands/{brand}/catalog/types/{type}/fields", { params: { path: { brand, type } }, body }),
     updateField: (type: string, field: string, body: Schemas["FieldInput"]) =>
-      brand
-        ? api.PATCH("/v1/brands/{brand}/catalog/types/{type}/fields/{field}", { params: { path: { brand, type, field } }, body })
-        : api.PATCH("/v1/workspaces/{ws}/catalog/types/{type}/fields/{field}", { params: { path: { ws, type, field } }, body }),
+      api.PATCH("/v1/brands/{brand}/catalog/types/{type}/fields/{field}", { params: { path: { brand, type, field } }, body }),
     updateEvent: (event: string, body: Schemas["EventDefinitionInput"]) =>
-      brand
-        ? api.PATCH("/v1/brands/{brand}/catalog/events/{event}", { params: { path: { brand, event } }, body })
-        : api.PATCH("/v1/workspaces/{ws}/catalog/events/{event}", { params: { path: { ws, event } }, body }),
-  }), [ws, brand]);
+      api.PATCH("/v1/brands/{brand}/catalog/events/{event}", { params: { path: { brand, event } }, body }),
+  }), [brand]);
 }
 
 // The catalog's fields and option labels, read once per page. Each brand
@@ -78,18 +65,16 @@ export function useCatalogWrite(ws: string) {
 // in the switcher, else, with all brands picked, the workspace's first
 // brand's.
 export function useCatalog(ws: string, brandId?: string | null) {
-  const { brand: picked } = useBrand(ws);
-  const brand = brandId || picked?.id || "";
+  const { brand: picked, brands } = useBrand(ws);
+  const brand = brandId || picked?.id || brands[0]?.id || "";
   const [catalog, setCatalog] = useState<Schemas["Catalog"] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
     setCatalog(null);
     setError("");
-    const req = brand
-      ? api.GET("/v1/brands/{brand}/catalog", { params: { path: { brand }, query: { archived: true } }, signal: controller.signal })
-      : api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws }, query: { brand: "all", archived: true } }, signal: controller.signal });
-    req.then(({ data, error }) => {
+    if (!brand) return () => controller.abort();
+    api.GET("/v1/brands/{brand}/catalog", { params: { path: { brand }, query: { archived: true } }, signal: controller.signal }).then(({ data, error }) => {
       if (controller.signal.aborted) return;
       if (data) setCatalog(data);
       else setError(errorMessage(error));

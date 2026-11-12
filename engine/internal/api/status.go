@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/adsync"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emails"
@@ -333,19 +334,19 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 
 	// Scheduled broadcasts going to people who look like they never asked
 	// for it: a warning, not a stop, saying what to do instead.
-	rows, err := s.pool.Query(ctx, `SELECT id::text, name, brand_id::text, audience_kind, record_ids::text[] FROM email_broadcasts
-		WHERE workspace_id = $1 AND status = 'scheduled' ORDER BY send_at NULLS LAST, created_at LIMIT 20`, ws)
+	rows, err := s.pool.Query(ctx, `SELECT id::text, name, brand_id::text, audience_kind, record_ids::text[], audience_ref FROM email_broadcasts
+		WHERE workspace_id = $1 AND status = 'scheduled' AND NOT service ORDER BY send_at NULLS LAST, created_at LIMIT 20`, ws)
 	if err != nil {
 		return v, err
 	}
 	type scheduled struct {
 		id, name, kind string
-		brand          *string
+		brand, ref     *string
 		ids            []string
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (scheduled, error) {
 		var b scheduled
-		return b, r.Scan(&b.id, &b.name, &b.brand, &b.kind, &b.ids)
+		return b, r.Scan(&b.id, &b.name, &b.brand, &b.kind, &b.ids, &b.ref)
 	})
 	if err != nil {
 		return v, err
@@ -357,7 +358,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 			return v, err
 		}
 		for _, b := range list {
-			bases, err := emails.AudienceBases(ctx, s.pool, ws, b.brand, b.kind, b.ids)
+			bases, err := emails.AudienceBases(ctx, s.pool, ws, b.brand, emails.Audience{Kind: b.kind, RecordIDs: b.ids, Ref: deref(b.ref)})
 			if err != nil {
 				return v, err
 			}
@@ -400,12 +401,14 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 			Fix: statusFix{Tool: "list_link_pitches", Page: page("link-building"), Who: "person"}})
 	}
 
-	// Customer data: possible duplicates to decide, new event names held
-	// until approved, and CRM imports that failed.
-	var dupes, quarantined int
+	// Customer data: possible duplicates to decide, new event names that
+	// look like a typo of another, names a person paused, and CRM imports
+	// that failed.
+	var dupes, quarantined, typos int
 	if err := s.pool.QueryRow(ctx, `SELECT
 			(SELECT count(*) FROM record_merge_candidates WHERE workspace_id = $1 AND status = 'open'),
-			(SELECT count(*) FROM event_definitions WHERE workspace_id = $1 AND status = 'quarantined')`, ws).Scan(&dupes, &quarantined); err != nil {
+			(SELECT count(*) FROM event_definitions WHERE workspace_id = $1 AND status = 'quarantined'),
+			(SELECT count(*) FROM event_definitions WHERE workspace_id = $1 AND name_check = 'asked')`, ws).Scan(&dupes, &quarantined, &typos); err != nil {
 		return v, err
 	}
 	if dupes > 0 {
@@ -413,9 +416,14 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 			Detail: "list_record_duplicates shows each pair side by side; merge, link or dismiss each with merge_records, link_record_duplicate or dismiss_record_duplicate.", Count: dupes,
 			Fix: statusFix{Tool: "list_record_duplicates", Page: page("ai"), Who: "agent"}})
 	}
+	if typos > 0 {
+		add(statusBlocker{Code: "event_names_to_check", Severity: "info", Area: "customers", Title: countOf(typos, "new product event name looks", "new product event names look") + " like a typo",
+			Detail: "Their events are stored and usable already. get_brand_events_summary lists each with the name it looks like; answer_event_name_check merges it into that name or keeps both.", Count: typos,
+			Fix: statusFix{Tool: "answer_event_name_check", Page: page("people"), Who: "person"}})
+	}
 	if quarantined > 0 {
-		add(statusBlocker{Code: "events_quarantined", Severity: "info", Area: "customers", Title: countOf(quarantined, "new product event name is", "new product event names are") + " held for review",
-			Detail: "Events with a new name are stored but kept out of journeys and reports until approved. get_catalog lists them; update_event_definition approves or deprecates each.", Count: quarantined,
+		add(statusBlocker{Code: "events_quarantined", Severity: "info", Area: "customers", Title: countOf(quarantined, "product event name is", "product event names are") + " paused",
+			Detail: "Someone paused these names in the catalog, so their events are held, kept out of journeys and reports. update_event_definition approves one again; then replay_brand_events processes what was held.", Count: quarantined,
 			Fix: statusFix{Tool: "update_event_definition", Page: page("ai"), Who: "agent"}})
 	}
 	imports, nImports, err := s.statusItems(ctx, `
@@ -519,6 +527,63 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 		add(b)
 	}
 
+	// ---- Paid ads (plans/paid-ads/plan.md): open alerts from the alert
+	// job (adsync/alerts.go). Critical when one says money or data is
+	// going wrong now (tracking broken, conversions refused, a campaign
+	// paused for overspending, spend far off its usual); a warning for
+	// the rest (pacing, flatline, no conversions, disapprovals,
+	// auto-apply). Another workstream adds ads_decisions_waiting,
+	// ads_over_target, ads_economics_missing and ads_knowledge_unreviewed
+	// here. ----
+	alerts, nAlerts, err := s.statusItems(ctx, `
+		SELECT x.id::text, e.name, x.kind, count(*) OVER ()::int FROM ad_suggestions x JOIN ad_entities e ON e.id = x.ad_entity_id
+		WHERE x.workspace_id = $1 AND x.status = 'open' AND x.autonomy = 'alert' AND `+bf("x.brand_id")+`
+		ORDER BY (x.kind = ANY($3)) DESC, x.created_at LIMIT 5`, ws, brandArg, adsync.CriticalAlertKinds)
+	if err != nil {
+		return v, err
+	}
+	if nAlerts > 0 {
+		sev := "warning"
+		for _, it := range alerts {
+			if slices.Contains(adsync.CriticalAlertKinds, it.Reason) {
+				sev = "critical"
+				break
+			}
+		}
+		var critical int
+		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM ad_suggestions x WHERE x.workspace_id = $1 AND x.status = 'open' AND x.autonomy = 'alert'
+			AND x.kind = ANY($3) AND `+bf("x.brand_id"), ws, brandArg, adsync.CriticalAlertKinds).Scan(&critical); err != nil {
+			return v, err
+		}
+		// A protective pause Outflare made today counts as an alert too:
+		// a person should know and may revert it.
+		var paused int
+		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM ad_suggestions x WHERE x.workspace_id = $1 AND x.status = 'measuring' AND x.applied_auto
+			AND x.kind = $3 AND x.reverted_at IS NULL AND x.created_at >= now() - interval '24 hours' AND `+bf("x.brand_id"), ws, brandArg, adsync.OverspendPause).Scan(&paused); err != nil {
+			return v, err
+		}
+		if paused > 0 {
+			sev, critical = "critical", critical+paused
+		}
+		detail := "Spend, tracking, pacing or the platform's own changes need a look. list_ad_suggestions with autonomy alert lists them with the numbers behind each; acknowledge one once it is handled."
+		if critical > 0 {
+			detail = countOf(critical, "says", "say") + " money or data is going wrong now (tracking broken, conversions refused, a campaign paused for overspending, or spend far off its usual). " + detail
+		}
+		add(statusBlocker{Code: "ads_alert", Severity: sev, Area: "ads", Title: countOf(nAlerts+paused, "paid ads alert needs", "paid ads alerts need") + " a look",
+			Detail: detail, Count: nAlerts + paused, Items: alerts, Fix: statusFix{Tool: "list_ad_suggestions", Page: page("ads"), Who: "person"}})
+	}
+	// Paid ads (plans/paid-ads): brands with an ad account and no target
+	// cost per new paying customer, and brands whose ads cost more than
+	// their target over the last 7 days.
+	if err := s.adsBlockers(ctx, ws, brandArg, page, add); err != nil {
+		return v, err
+	}
+	// ---- Paid ads findings (ad_findings.go): proposed changes that wait
+	// for a person's decision. ----
+	if err := s.adFindingsBlocker(ctx, ws, brandArg, bf, page, add); err != nil {
+		return v, err
+	}
+
 	// The brand's context (each brand's is its own): the brand picked, or
 	// the workspace's first.
 	ctxBrand := ""
@@ -533,6 +598,32 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 		add(statusBlocker{Code: "context_missing", Severity: "info", Area: "context", Title: "Outflare doesn't know the brand yet",
 			Detail: "Missing: " + strings.Join(cv.Missing, ", ") + ". Ask the person for these in one message (or offer to read the website), then save them with update_context so no one asks again.",
 			Count:  len(cv.Missing), Fix: statusFix{Tool: "update_context", Page: page("company"), Who: "agent"}})
+	}
+
+	// ---- Paid ads: the knowledge sheet ads are written from ----
+	// A brand with a connected ad account whose sheet nobody has reviewed,
+	// whose website changed what it sells since the review, or whose last
+	// read failed: the draft writer refuses until a person looks.
+	unreviewed, nUnreviewed, err := s.statusItems(ctx, `
+		SELECT b.id::text, b.name,
+		       CASE WHEN COALESCE(c.knowledge_error, '') <> '' THEN 'the last read of the website failed (' || c.knowledge_error || ')'
+		            WHEN c.knowledge_changed_at IS NOT NULL AND (c.knowledge_reviewed_at IS NULL OR c.knowledge_changed_at > c.knowledge_reviewed_at)
+		              THEN 'a read changed what the brand sells and nobody has reviewed the sheet since'
+		            ELSE 'nobody has reviewed the sheet yet' END,
+		       count(*) OVER ()::int
+		FROM brands b LEFT JOIN brand_context c ON c.brand_id = b.id
+		WHERE b.workspace_id = $1 AND b.status = 'active' AND ($2::uuid IS NULL OR b.id = $2::uuid)
+		  AND EXISTS (SELECT 1 FROM ad_accounts a WHERE a.workspace_id = $1 AND a.brand_id = b.id AND a.status = 'active')
+		  AND (c.knowledge_reviewed_at IS NULL OR COALESCE(c.knowledge_error, '') <> ''
+		       OR (c.knowledge_changed_at IS NOT NULL AND c.knowledge_changed_at > c.knowledge_reviewed_at))
+		ORDER BY b.created_at LIMIT 5`, ws, brandArg)
+	if err != nil {
+		return v, err
+	}
+	if nUnreviewed > 0 {
+		add(statusBlocker{Code: "ads_knowledge_unreviewed", Severity: "warning", Area: "ads", Title: countOf(nUnreviewed, "brand's knowledge sheet needs", "brands' knowledge sheets need") + " a person's review before ads are written",
+			Detail: "Ads are written only from what the brand's website says it offers (its knowledge sheet). Each item says why: nobody reviewed it, the website changed what it sells, or the read failed (connect a page reader or an AI model). A person checks the sheet under Paid ads, Set up, and marks it reviewed (review_brand_knowledge).",
+			Count:  nUnreviewed, Items: unreviewed, Fix: statusFix{Tool: "review_brand_knowledge", Page: page("ads"), Who: "person"}})
 	}
 
 	slices.SortStableFunc(v.Blockers, func(x, y statusBlocker) int { return severityRank[x.Severity] - severityRank[y.Severity] })

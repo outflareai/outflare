@@ -133,7 +133,7 @@ A workspace created with `"test": true` is the sandbox. Code that talks to the o
 
 ## Rate limits
 
-Each API token may make `API_RATE_LIMIT` requests a minute (600 by default). Every answer to a token carries the IETF `RateLimit-Policy` and `RateLimit` headers; over the limit it is `429 rate_limited` with `Retry-After`, and the CLI backs off on it. Sessions (the web app) are not limited this way; sign-in and account emails have their own limits. Counts are per server process. **Next:** shared counts across processes, and per-workspace limits for the Cloud's plans.
+Each API token may make `API_RATE_LIMIT` requests a minute (600 by default). Every answer to a token carries the IETF `RateLimit-Policy` and `RateLimit` headers; over the limit it is `429 rate_limited` with `Retry-After`, and the CLI backs off on it. A signed-in session (the web app) may make four times as many, with the same headers and `429`; sign-in and account emails have their own limits. Counts are per server process. **Next:** shared counts across processes, and per-workspace limits for the Cloud's plans.
 
 ## Security
 

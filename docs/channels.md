@@ -16,7 +16,7 @@ The brand agent works across channels: paid ads, content on the brand's website,
 
 ## Readiness
 
-`GET /v1/workspaces/{ws}/channels` (scope `workspace.read`, `brand` to count only the connections serving one brand) and `GET /v1/brands/{brand}/channels` list the channels with their readiness:
+`GET /v1/brands/{brand}/channels` (scope `workspace.read`) lists the channels with their readiness for one brand (the workspace route answers 410 `route_moved`):
 
 - `ready`: every required connection is connected and the data is there.
 - `connect_first`: a required connection is missing; `missing_connections` names it with recommended connectors. An optional connection (`missing_optional`) never holds a channel back.

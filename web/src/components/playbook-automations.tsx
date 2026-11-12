@@ -48,23 +48,26 @@ export function PlaybookAutomations({ ws, playbook: p, inputs, canManage, go }: 
   const [list, setList] = useState<PlaybookAutomation[] | null>(null);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
+  // Automations belong to the brand picked in the sidebar.
+  const brand = useBrand(ws).brand?.id ?? "";
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/playbook-automations", { params: { path: { ws }, query: { playbook_id: p.id } } });
+    if (!brand) return;
+    const { data, error } = await api.GET("/v1/brands/{brand}/playbook-automations", { params: { path: { brand }, query: { playbook_id: p.id } } });
     if (error || !data) return setError(errorMessage(error));
     setList(data.data);
-  }, [ws, p.id]);
+  }, [brand, p.id]);
   useEffect(() => {
     load();
   }, [load]);
 
   async function act(a: PlaybookAutomation, action: "approve" | "pause" | "run") {
     setError("");
-    const path = { params: { path: { ws, id: a.id } } };
+    const path = { params: { path: { brand, id: a.id } } };
     const { data, error } =
-      action === "approve" ? await api.POST("/v1/workspaces/{ws}/playbook-automations/{id}/approve", path)
-      : action === "pause" ? await api.POST("/v1/workspaces/{ws}/playbook-automations/{id}/pause", path)
-      : await api.POST("/v1/workspaces/{ws}/playbook-automations/{id}/run", path);
+      action === "approve" ? await api.POST("/v1/brands/{brand}/playbook-automations/{id}/approve", path)
+      : action === "pause" ? await api.POST("/v1/brands/{brand}/playbook-automations/{id}/pause", path)
+      : await api.POST("/v1/brands/{brand}/playbook-automations/{id}/run", path);
     if (error || !data) return setError(errorMessage(error));
     if (action === "run" && "id" in data) {
       toast("Started a run now.");
@@ -78,7 +81,7 @@ export function PlaybookAutomations({ ws, playbook: p, inputs, canManage, go }: 
 
   async function remove(a: PlaybookAutomation) {
     if (!(await confirmAction(`Delete ${a.name}?`, "No more runs start. The runs it already started carry on until they end.", "Delete"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/playbook-automations/{id}", { params: { path: { ws, id: a.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/playbook-automations/{id}", { params: { path: { brand, id: a.id } } });
     if (error) return setError(errorMessage(error));
     load();
   }
@@ -162,11 +165,10 @@ function AutomationForm({ ws, playbook: p, inputs, onDone }: { ws: string; playb
     const body: PlaybookAutomationInput = {
       playbook_id: p.id, inputs, kind, mode, runner: "builtin", run_hour: runHour,
       max_spend_cents_per_run: run, max_spend_cents_per_month: month,
-      ...(brandID ? { brand_id: brandID } : {}),
       ...(kind === "schedule" ? { cadence } : { event_type: event, gather }),
     };
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/playbook-automations", { params: { path: { ws } }, body });
+    const { data, error } = await api.POST("/v1/brands/{brand}/playbook-automations", { params: { path: { brand: brandID ?? "" } }, body });
     setBusy(false);
     if (error || !data || !("id" in data)) return setError(errorMessage(error));
     toast("Set up. Approve it to turn it on.");

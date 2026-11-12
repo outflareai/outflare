@@ -65,7 +65,8 @@ func (s *Server) listAdConversionActions(w http.ResponseWriter, r *http.Request)
 // searchSums are adSums for keyword and search term rows, which have no
 // delivery numbers beside clicks.
 const searchSums = `COALESCE(sum(m.spend_micros), 0)::bigint, COALESCE(sum(m.impressions), 0)::bigint, COALESCE(sum(m.clicks), 0)::bigint,
-	sum(m.conversions)::float8, sum(m.conversion_value_micros)::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint`
+	sum(m.conversions)::float8, sum(m.conversion_value_micros)::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint,
+	NULL::float8, NULL::bigint`
 
 // searchFilter adds campaign_id and ad_group_id to f's filters, on g (the
 // ad group) and its parent, and reads limit.
@@ -107,6 +108,14 @@ type adKeywordOut struct {
 	CampaignName string   `json:"campaign_name"`
 	Currency     string   `json:"currency"`
 	Totals       adTotals `json:"totals"`
+	// What Google estimates the keyword must bid to show on the first
+	// page, at the top of the page and in the first position, in micros,
+	// and its quality score (1 to 10), as of the last sync; null where
+	// Google said nothing.
+	FirstPageCPCMicros     *int64 `json:"first_page_cpc_micros"`
+	TopOfPageCPCMicros     *int64 `json:"top_of_page_cpc_micros"`
+	FirstPositionCPCMicros *int64 `json:"first_position_cpc_micros"`
+	QualityScore           *int   `json:"quality_score"`
 }
 
 func (s *Server) listAdKeywords(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +130,8 @@ func (s *Server) listAdKeywords(w http.ResponseWriter, r *http.Request) {
 	f.args = append(f.args, limit)
 	// e is the campaign, as adQuery's brand filter expects.
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT k.id, k.external_id, k.text, k.match_type, k.status, g.id, g.name, e.id, COALESCE(e.name, ''), a.currency, `+searchSums+`
+		SELECT k.id, k.external_id, k.text, k.match_type, k.status, g.id, g.name, e.id, COALESCE(e.name, ''), a.currency,
+			k.first_page_cpc_micros, k.top_of_page_cpc_micros, k.first_position_cpc_micros, k.quality_score::int, `+searchSums+`
 		FROM ad_keywords k JOIN ad_entities g ON g.id = k.ad_group_id LEFT JOIN ad_entities e ON e.id = g.parent_id
 		JOIN ad_accounts a ON a.id = k.ad_account_id
 		JOIN ad_keyword_metrics_daily m ON m.keyword_id = k.id AND m.day BETWEEN $2 AND $3
@@ -138,7 +148,8 @@ func (s *Server) listAdKeywords(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var x adKeywordOut
 		t := &x.Totals
-		if err := rows.Scan(append([]any{&x.ID, &x.ExternalID, &x.Text, &x.MatchType, &x.Status, &x.AdGroupID, &x.AdGroupName, &x.CampaignID, &x.CampaignName, &x.Currency},
+		if err := rows.Scan(append([]any{&x.ID, &x.ExternalID, &x.Text, &x.MatchType, &x.Status, &x.AdGroupID, &x.AdGroupName, &x.CampaignID, &x.CampaignName, &x.Currency,
+			&x.FirstPageCPCMicros, &x.TopOfPageCPCMicros, &x.FirstPositionCPCMicros, &x.QualityScore},
 			t.dest()...)...); err != nil {
 			s.internal(w, r, err)
 			return
@@ -154,15 +165,19 @@ func (s *Server) listAdKeywords(w http.ResponseWriter, r *http.Request) {
 }
 
 type adSearchTermOut struct {
-	Term             string   `json:"term"`
-	KeywordText      string   `json:"keyword_text"`
-	KeywordMatchType string   `json:"keyword_match_type"`
-	AdGroupID        string   `json:"ad_group_id"`
-	AdGroupName      string   `json:"ad_group_name"`
-	CampaignID       *string  `json:"campaign_id"`
-	CampaignName     string   `json:"campaign_name"`
-	Currency         string   `json:"currency"`
-	Totals           adTotals `json:"totals"`
+	Term             string `json:"term"`
+	KeywordText      string `json:"keyword_text"`
+	KeywordMatchType string `json:"keyword_match_type"`
+	// MatchType is how the search matched the keyword (Google: exact,
+	// near_exact, phrase, near_phrase, broad), the way with the most
+	// impressions; empty when the platform didn't say.
+	MatchType    string   `json:"match_type"`
+	AdGroupID    string   `json:"ad_group_id"`
+	AdGroupName  string   `json:"ad_group_name"`
+	CampaignID   *string  `json:"campaign_id"`
+	CampaignName string   `json:"campaign_name"`
+	Currency     string   `json:"currency"`
+	Totals       adTotals `json:"totals"`
 }
 
 func (s *Server) listAdSearchTerms(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +191,9 @@ func (s *Server) listAdSearchTerms(w http.ResponseWriter, r *http.Request) {
 	}
 	f.args = append(f.args, limit)
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT m.term, m.keyword_text, m.keyword_match_type, g.id, g.name, e.id, COALESCE(e.name, ''), a.currency, `+searchSums+`
+		SELECT m.term, m.keyword_text, m.keyword_match_type,
+			COALESCE((array_agg(m.search_term_match_type ORDER BY m.impressions DESC) FILTER (WHERE m.search_term_match_type <> ''))[1], ''),
+			g.id, g.name, e.id, COALESCE(e.name, ''), a.currency, `+searchSums+`
 		FROM ad_search_terms_daily m JOIN ad_entities g ON g.id = m.ad_group_id LEFT JOIN ad_entities e ON e.id = g.parent_id
 		JOIN ad_accounts a ON a.id = m.ad_account_id
 		WHERE m.workspace_id = $1 AND m.day BETWEEN $2 AND $3`+f.where+`
@@ -192,7 +209,7 @@ func (s *Server) listAdSearchTerms(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var x adSearchTermOut
 		t := &x.Totals
-		if err := rows.Scan(append([]any{&x.Term, &x.KeywordText, &x.KeywordMatchType, &x.AdGroupID, &x.AdGroupName, &x.CampaignID, &x.CampaignName, &x.Currency},
+		if err := rows.Scan(append([]any{&x.Term, &x.KeywordText, &x.KeywordMatchType, &x.MatchType, &x.AdGroupID, &x.AdGroupName, &x.CampaignID, &x.CampaignName, &x.Currency},
 			t.dest()...)...); err != nil {
 			s.internal(w, r, err)
 			return

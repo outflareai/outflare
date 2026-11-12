@@ -28,8 +28,9 @@ const (
 
 // DonorSource is how a catalog row was last written.
 const (
-	SourceManual = "manual"
-	SourceCSV    = "csv"
+	SourceManual        = "manual"
+	SourceCSV           = "csv"
+	SourceCompetitorGap = "competitor_gap"
 )
 
 // DefaultGuaranteeDays is used when a new order does not set a window and

@@ -122,7 +122,7 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 			t.Fatalf("tracked links: %v", urls)
 		}
 	}
-	tot := owner.must(200, "GET", base+"/reports?to="+clock.Now().Add(time.Hour).Format(time.RFC3339), nil)["totals"].(map[string]any)
+	tot := owner.must(200, "GET", base+"/reports?brand=acme&to="+clock.Now().Add(time.Hour).Format(time.RFC3339), nil)["totals"].(map[string]any)
 	if tot["clicks"] != 2.0 || tot["clicked_leads"] != 1.0 || tot["click_rate"] != 100.0 {
 		t.Fatalf("report clicks: %v", tot)
 	}

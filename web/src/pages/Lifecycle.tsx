@@ -167,12 +167,12 @@ export function Lifecycle({ ws, canManage, canSend, go, myEmail }: { ws: string;
   // brands picked: emails belong to one brand).
   const load = useCallback(async () => {
     const [o, p, g, r] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/email-overview", { params: { path: { ws } } }),
+      brandId ? api.GET("/v1/brands/{brand}/email-overview", { params: { path: { brand: brandId } } }) : null,
       api.GET("/v1/workspaces/{ws}/email-providers", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/email-provider-guides", { params: { path: { ws } } }),
       brandId ? api.GET("/v1/brands/{brand}/emails", { params: { path: { brand: brandId }, query: { limit: 6 } } }) : null,
     ]);
-    if (o.data) setOverview(o.data);
+    if (o?.data) setOverview(o.data);
     setProviders(p.data?.data ?? []);
     setGuides(g.data?.data ?? []);
     setRecent(r?.data?.data ?? []);
@@ -456,13 +456,13 @@ export function Providers({ ws, canManage, open, onOpen, go }: { ws: string; can
           onRowClick={(p) => onOpen(p.id)}
           mobile={(p) => (
             <span className="block space-y-1">
-              <span className="flex items-center gap-2 font-medium"><ConnectorLogo id={p.connector} size="sm" />{p.name}{p.is_default && <Badge tone="blue">default</Badge>}</span>
+              <span className="flex items-center gap-2 font-medium"><ConnectorLogo id={p.connector} size="sm" />{p.name}{p.is_default && <Badge tone="blue">default</Badge>}{!p.brand_id && <Badge>Shared</Badge>}</span>
               <span className="block text-[12px] text-muted-foreground">{p.domains_verified}/{p.domains} domains verified · {plural(p.sent_30d, "email")} in 30 days</span>
               <Status tone={eventsLabel(p).tone}>{eventsLabel(p).text}</Status>
             </span>
           )}
           columns={[
-            { id: "name", header: "Provider", accessorFn: (p) => p.name, cell: ({ row: { original: p } }) => <span className="flex items-center gap-2 font-medium"><ConnectorLogo id={p.connector} size="sm" />{p.name}{p.is_default && <Badge tone="blue">default</Badge>}{p.status === "paused" && <Badge>Paused</Badge>}</span> },
+            { id: "name", header: "Provider", accessorFn: (p) => p.name, cell: ({ row: { original: p } }) => <span className="flex items-center gap-2 font-medium"><ConnectorLogo id={p.connector} size="sm" />{p.name}{p.is_default && <Badge tone="blue">default</Badge>}{!p.brand_id && <Badge>Shared</Badge>}{p.status === "paused" && <Badge>Paused</Badge>}</span> },
             { id: "account", header: "Account", accessorFn: (p) => p.account.mode ?? "", cell: ({ row: { original: p } }) => p.connection === "error" ? <Status tone="red">Key refused</Status> : p.account.mode === "sandbox" ? <Status tone="amber">SES sandbox</Status> : <Status tone="green">{p.account.mode === "production" ? "Production" : "Connected"}</Status> },
             { id: "events", header: "Delivery events", accessorFn: (p) => p.events_status, cell: ({ row: { original: p } }) => <Status tone={eventsLabel(p).tone}>{eventsLabel(p).text}</Status> },
             { id: "domains", header: "Domains", accessorFn: (p) => p.domains, cell: ({ row: { original: p } }) => <span className="font-mono text-[12px]">{p.domains_verified}/{p.domains} verified</span> },

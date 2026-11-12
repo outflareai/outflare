@@ -171,8 +171,11 @@ type tokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	IDToken      string `json:"id_token"`
 	ExpiresIn    int64  `json:"expires_in"`
-	Error        string `json:"error"`
-	Description  string `json:"error_description"`
+	// Scope is what the provider granted (Google says), kept so a feature
+	// that needs a scope added later can tell the person to connect again.
+	Scope       string `json:"scope"`
+	Error       string `json:"error"`
+	Description string `json:"error_description"`
 }
 
 // Exchange trades a code for tokens, returned as credentials.
@@ -268,6 +271,9 @@ func tokenCall(ctx context.Context, cl *Client, d Definition, form url.Values, o
 	}
 	if d.OAuth.IDToken && t.IDToken != "" {
 		out["id_token"] = t.IDToken
+	}
+	if t.Scope != "" {
+		out["scope"] = t.Scope
 	}
 	life := time.Duration(t.ExpiresIn) * time.Second
 	if life <= 0 {

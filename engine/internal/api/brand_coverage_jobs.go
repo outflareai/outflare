@@ -26,6 +26,12 @@ func (s *Server) QueueDueCoverage(ctx context.Context) (int, error) {
 	if err := s.queueCoverageCommercialDeadlines(ctx); err != nil {
 		return 0, err
 	}
+	if err := s.queueLinkOrderChecks(ctx); err != nil {
+		return 0, err
+	}
+	if err := s.queueLinkOrderReminders(ctx); err != nil {
+		return 0, err
+	}
 	if err := s.queueCoverageDeadlines(ctx); err != nil {
 		return 0, err
 	}
@@ -302,6 +308,9 @@ func (s *Server) coverageCheckJob(ctx context.Context, j jobs.Job) error {
 			if err = coverageResolveTask(ctx, tx, a, req.ID, "publication_overdue", "Publication verified by a successful page check"); err != nil {
 				return err
 			}
+		}
+		if err = s.applyLinkOrderCheck(ctx, tx, a, req.ID, health, evidence); err != nil {
+			return err
 		}
 		return coverageHistory(ctx, tx, a, "placements", req.ID, "checked", map[string]any{"health": health})
 	})

@@ -6,6 +6,80 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.93.0] - 2026-11-12
+
+### Added
+
+- Business details on About your company: save each brand's legal name, tax or company number and postal address once. Lifecycle email adds the address to its footer (or place it with {{brand_address}}), sequences can use it too, and the brand's help centre, cookie policy and agents show it.
+- Broadcasts can go to a saved list, and you can upload a CSV of people (by email or your own user id) into a list from the broadcast editor. A broadcast can also be a service message, which skips marketing choices and the unsubscribe link but never reaches suppressed addresses.
+- With a Google Workspace connection, the CRM now also reads enabled members' calendars: meetings with a CRM contact or company appear on its timeline and in the relationship check. Internal and personal meetings are never copied.
+- Admins can now read the team's work email into the CRM through their own Google Workspace connection, so nobody has to sign in one by one. The same filters, sharing rules and AI privacy check apply, and it can start from each mailbox's whole history.
+- Delete a brand for good: on the brand's page (Company → Brand), choose Delete brand and type its name. Everything in the brand goes with it, and nothing moves to your other brands. Owners and admins only; your only brand can't be deleted.
+- The app now has a Link orders page in the SEO section, next to Backlinks, for paid placements from the brand's own donor catalog. Amounts are the donor price only; Approve and Paid are limited to the brand's designated approver, and recording Paid does not send money.
+- Link ROI: see the donor price of each published link against already-stored Search Console, ranking and referring-domain changes on the target page, 30, 60 and 90 days around publication. The figures do not show that the link caused a change.
+- Organic conversions: see first-touch Organic Search signups and revenue by landing page and search group, from your PostHog events, without counting the same payment twice.
+- Paid ads: one click sets up Outflare's conversion feed on a Google Ads account: three conversion actions (sign-up, first payment, repeat payment) sent through Google's Data Manager API with each person's new or returning customer type, a daily-refreshed Customer Match list of paying customers, and the new customer acquisition goal. Google Ads no longer asks for a developer token.
+- Paid ads are now scored in cost per new paying customer: set what a new customer and a sign-up may cost each brand, and Outflare ties every sign-up, first payment and later payment to the ad click that brought it, so each campaign, ad group and ad shows its cost per new customer against your target, with new, returning and lifetime revenue beside the network's own numbers.
+- Google Ads: create a website conversion and copy its tag, manage account callouts and portfolio Target CPA and Target ROAS strategies, remove campaigns, ads and keywords (you only, after a confirmation), see all conversions, keyword bid estimates and search term match types, pick 30 days or any dates, and download every report as CSV.
+- Every CRM card now opens with a relationship check: whether the company is already a customer, has an open deal or sits in another pipeline, which teammate has emailed them for a warm intro, and whether the last conversation went quiet.
+- Direct tracking for tracker campaigns: an ad can link straight to your page with the campaign's code, and the site script records the click itself, with the traffic source's click id, cost and fields. outflare.clickId() and {ofclk} in your links pass the click id on to offers, so postbacks still find the click.
+- Suspect tracker clicks are flagged: clicks from cloud and hosting networks, an address clicking the same link over and over, and conversions within seconds of their click. Flagged clicks still go on but don't use up your caps. Links show how many there were, and conversions say why they're suspect.
+- Tracker links and flows suggest weights for their landers, offers and pages: each one's chance to be the best on revenue or conversion rate, from the last days' clicks without bots or suspect ones. Review the change and apply it in one step; nothing changes on its own.
+
+### Changed
+
+- The API panel's examples are ready to paste: they carry the page's real brand, workspace and item ids, and **Create a token for this** puts a new read-only token for just that call and brand into the example, shown once.
+- Site audits now count distinct pages with errors, warnings and notices, so a crawl card is no longer inflated by rules that fire once per language pair. Notices are hidden until you choose to show them, and URL templates that differ only by a locale (such as /de and /fr) are rolled up into one row with a locale breakdown.
+- Each brand's catalog (record types, fields, option lists and events), channels, alert settings, record lookup, recipient checks and mailbox senders are now only on the brand's own routes. The old workspace routes answer 410 with the route to call instead.
+- New ads are written only from a brand knowledge sheet you have reviewed: check what Outflare read from your website and mark it "Looks right". A read that can't run says which connection to add, the website is read again daily once an ad account is connected, and each draft lists warnings (a price the sheet lacks, a superlative, a competitor's name, too few headlines).
+- A brand's logo and main colour now fill in from its own website: when you add a brand or change its website, and when Company → Logo and colours has no logo yet. Outflare uses the logo the site names, else its icon, and never replaces one you set. The Logo field no longer shows an example address.
+- Inside a brand, Company → Brand now shows only that brand's own settings, never a list of your other brands. Switch brands, or add a new one, from the brand switcher at the top.
+- "All brands" is gone: the app always shows one brand, and its stats, reports, outcomes, attribution and email pages read only that brand. Every brand, archived brands and records in no brand are under Settings → Brands.
+- Making a broadcast is now a full page in four steps (kind, email, who gets it, name) with a preview of the email beside it, and it can go to a lead list as well as a saved list or segment. Uploading a CSV of people moved to Lists, New list, with an example file and a check of what was read before anything is saved.
+- Consent banner: add `data-reopen="off"` to the tracking script to leave out the round button in the corner, when your site has its own "Cookie settings" link that calls `outflare.showConsent()`.
+- Desktop app: the account menu at the bottom of the sidebar now shows which version of the Outflare app you have, with Check for updates. A waiting update still shows as Update available in the sidebar.
+- New product event names no longer wait for approval: events are usable straight away in segments, lists, journeys and reports. Outflare checks each new name, with your own AI model when one is connected, and asks only when one looks like a typo of a name you already send, such as sign_up for signed_up.
+- Importing leads into a list is simpler: **Import leads** on a list's page uploads a CSV straight into that list, and the import on Leads picks a list from a menu (or makes a new one) instead of typing its name.
+- Kits with smart lists, rules and journeys can now be set up for any brand, and each brand gets its own copies. Two brands can also have smart lists with the same name.
+- Paid link orders can now start from the brand's already-saved competitor link gap, stay in sync with live-link checks, and suggest equivalent catalog donors when a link is lost. A passing check is what allows pay (the donor price only; no money is sent).
+- Paid link orders can now be queried as `coverage_link_orders` and `coverage_donor_profiles` (with `coverage.read`), and the product guide is in the docs. Catalog import is CSV only; a Google Sheet is not imported. SE Ranking does not feed referring-domain candidates.
+- Paid ads findings are now judged in cost per new paying customer: rules for budgets, pauses, targets, negatives, keywords, ads and exclusions read Outflare's own sign-ups and payers. Every change waits for you to approve it (in Outflare Cloud, savings can apply on their own with an undo), and shadow mode shows what the rules would do first.
+- Paid ads sync every hour and re-read longer windows as the platforms revise their numbers. Outflare alerts you when spend is far off its usual, the month is off pace, a campaign stops serving or brings no sign-ups, ads are disapproved, conversions are refused or tracking breaks, and it keeps Google's own change history beside its changes.
+- Playbook automations belong to a brand: each brand sets up, approves and runs its own, and an event automation starts only on its own brand's events. Automations that covered every brand now belong to the first brand. Adding a website visitor's company to the CRM, and the company IP lookups find, stay within the visitor's brand.
+- Presence now scans a brand's top 10 competitors every 30 days by default, and the rest every 90 days. Brands still on the previous monthly default for the rest move to 90 days; a cadence you set yourself is left as it is. Change either on the Presence competitors page.
+- The workspace routes for stats, reports, outcomes, lifecycle email, email recipients, attribution and install health are retired and answer 410 `route_moved`: call the same route under `/v1/brands/{brand}/`.
+- The SEO overview shows each number on its own row with a full chart: values on the y-axis, each week on hover, the period before drawn beside it, and the biggest weekly rise and drop. Pick any dates, from 4 weeks to 2 years, and the API's `period` compares them with the weeks before.
+- SEO overview now leads with non-branded clicks (with CTR and position), search conversions, keywords in the top 3 and top 10, AI mention rate, and share of voice versus tracked competitors, all from stored data. Snapshot tiles stay on one SEO connector so the arrows compare like with like, and missing query history is no longer read as zero branded clicks.
+- Sidebar pages are now real links: right-click, Ctrl/Cmd-click or middle-click any of them to open it in a new tab.
+- In a keyword gap's "who ranks" panel, sites marked "Not a competitor" now have a Track button too, so one click makes any ranking site a competitor.
+- Connections with no brand now show what tells whose they are: the account they signed in to, what the provider reports (such as Google Tag Manager's containers and the sites they tag, or Cloudflare's zones), who connected them and when, and a suggested brand you can assign in one click.
+- The "Won't be emailed" badge on leads and lists now says why: unsubscribed, bounced, marked as spam, on a blocklist and so on, whether it is the address or its whole domain, and where the entry came from. The API returns the same as `suppression` on each lead.
+
+### Fixed
+
+- AI receipts now only counts real receipts: emails that say receipt, invoice, payment or renewal in the subject, or that show a total. Sign-in alerts and newsletters from AI companies are ignored. A colleague's receipt copied by a Google Workspace rule is no longer credited to the member whose domain let it in.
+- The screen where you approve an AI app, and the API token and connected app settings, now include Lifecycle email (templates, broadcasts, journeys and sending) and Coverage. Before, an app like ChatGPT or Claude could never be given these permissions, so its email template and send tools failed. Turn Lifecycle email on for an app you already connected in Connect your AI.
+- Campaign links always belong to the brand you are in, so the brand picker on a new campaign is gone, and a few leftover "All brands" and "missions" labels are corrected. The Python SDK's `is_held` now recognises a change that waits for a person on the Agents page. The demo workspace scripts work with brands again.
+- Desktop app: email previews (in email templates, sent emails and the help centre) show again instead of a blank box.
+- When one person makes two payments of the same amount minutes apart, a copy of the second that arrives before its twin is now kept as its own payment. Before, a guess could join it to the first payment, which already had both copies, and Developer setup reported a payment matched only by a guess.
+- Every Outflare tool now works in ChatGPT and other apps that cap how many tools they show. Apps see about 50 core tools, including email templates, send email and broadcasts, plus `find_tools` to search all of Outflare's tools and `call_tool` to run any of them. Connect to `/mcp?tools=all` to list every tool instead. The MCP server now reports the Outflare version it runs.
+- Sending transactions or customer events at the same time for the same people no longer fails now and then with a 500 error: a write that loses a database deadlock is retried instead.
+- Failed Ahrefs (and other SEO) reads no longer count against the connection's budget, and a refused report is not retried and billed again every hour. Competitor suggestions run weekly with the snapshot, not every day.
+- Competitor suggestions are fetched once per weekly cycle: the weekly snapshot still asks the provider, and a second suggest job is no longer queued in the same cycle.
+- Email providers and sending domains that belong to no brand are shared, so every brand's Email providers page now lists them, marked Shared, instead of asking you to connect a provider. Disconnecting the default provider makes the next one the default, so sends always have a sender.
+
+### Security
+
+- Security improvements to sign-in sessions.
+
+### Upgrading
+
+- names that were waiting for approval are approved, and their held events are processed within a few minutes of the upgrade.
+- this version adds migration 0521, which creates the two Query views.
+- workspaces that connected Google Ads before this release connect it again under Connectors, so the sign-in carries the Data Manager permission; the feed says so under setup_needed until then.
+- runs migration 0533. Copies of site.js you host yourself need the new version (17) for direct mode.
+- runs migration 0534.
+
 ## [0.92.0] - 2026-11-11
 
 ### Added

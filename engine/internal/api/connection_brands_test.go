@@ -52,6 +52,43 @@ func TestConnectionKinds(t *testing.T) {
 	if u["connections"] != 1.0 || u["accounts"] != 2.0 {
 		t.Fatalf("unassigned: %v", u)
 	}
+	whole := func() map[string]any {
+		for _, x := range owner.must(200, "GET", base+"/connections/unassigned", nil)["data"].([]any) {
+			if x := x.(map[string]any); x["account"] == nil {
+				return x
+			}
+		}
+		t.Fatal("no whole connection unassigned")
+		return nil
+	}
+	if w := whole(); w["connected_by"] == nil || w["connected_at"] == "" || w["suggested_brand_id"] != nil || w["suggested_because"] != nil {
+		t.Fatalf("who connected it and when, no clue to its brand yet: %v", w)
+	}
+	// What the provider reports says whose it is: a container named after
+	// the brand, then a site on its domain.
+	for details, why := range map[string]string{
+		`{"email": "ana@gmail.example", "details": {"containers": "Northpeak web (GTM-N1)"}}`:                         "name",
+		`{"email": "ana@gmail.example", "details": {"containers": "Web (GTM-N1)", "sites": "www.northpeak.example"}}`: "site",
+		`{"email": "ana@northpeak.example", "details": {}}`:                                                           "email_domain",
+	} {
+		if _, err := e.pool.Exec(ctx, `UPDATE integrations SET account = $2 WHERE id = $1`, loose["id"], details); err != nil {
+			t.Fatal(err)
+		}
+		if w := whole(); w["suggested_brand_id"] != north || w["suggested_because"] != why || w["signed_in_as"] == "" {
+			t.Fatalf("%s: %v", why, w)
+		}
+	}
+	// The same Google sign-in is the first brand's in another connection,
+	// made by the same person just before: it was signed in together.
+	if _, err := e.pool.Exec(ctx, `UPDATE integrations SET auth_method = 'oauth2', account = '{"id": "g-1", "email": "ana@gmail.example"}' WHERE id IN ($1, $2)`, loose["id"], stripe["id"]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE integrations SET connector = 'google_analytics' WHERE id = $1`, stripe["id"]); err != nil {
+		t.Fatal(err)
+	}
+	if w := whole(); w["suggested_brand_id"] != first || w["suggested_because"] != "same_sign_in" || w["connected_with"] != "Plausible" {
+		t.Fatalf("same sign-in: %v", w)
+	}
 	accts := owner.must(200, "GET", base+"/integrations/"+ga+"/accounts", nil)["data"].([]any)
 	for _, a := range accts {
 		a := a.(map[string]any)

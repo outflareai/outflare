@@ -63,7 +63,7 @@ for i, (delay, subj, body) in enumerate(steps):
     out.append(f"INSERT INTO sequence_steps (sequence_id, position, delay_days, subject, body) VALUES ('{seq}', {i}, {delay}, {q(subj)}, {q(body)});")
 out.append(f"INSERT INTO sequence_steps (sequence_id, position, delay_days, subject, body) VALUES ('{seq2}', 0, 0, 'Partnering with {{{{company}}}}', 'Hi {{{{first_name}}}},\n\nWe work with agencies like {{{{company}}}} on outbound for their clients.\n\n{{{{sender_first_name}}}}');")
 
-sending = [m for m in active]
+sending = [m for m in mailboxes if m[3] == "active"]
 sent24 = sent7 = 0
 for n, (lid, email, f, l, c) in enumerate(leads[:215]):
     m = sending[n % len(sending)]
@@ -112,6 +112,11 @@ out.append(f"""WITH c AS (INSERT INTO oauth_clients (name, uri, redirect_uris) V
 t AS (INSERT INTO api_tokens (workspace_id, actor_id, name, prefix, token_hash, scopes) SELECT '{ws}', actor_id, 'Claude', 'oft_demo', '\\x01'::bytea, ARRAY['workspace:read'] FROM users WHERE id = '{user}' RETURNING id)
 INSERT INTO oauth_grants (workspace_id, client_id, user_id, api_token_id, refresh_hash, expires_at)
 SELECT '{ws}', c.id, '{user}', t.id, '\\x02'::bytea, now() + interval '30 days' FROM c, t;""")
+
+# Everything belongs to the workspace's first brand (Northpeak), so each page
+# shows it with that brand picked.
+for table in ("sending_domains", "mailboxes", "sequences"):
+    out.append(f"UPDATE {table} SET brand_id = (SELECT id FROM brands WHERE workspace_id = '{ws}' ORDER BY created_at LIMIT 1) WHERE workspace_id = '{ws}' AND brand_id IS NULL;")
 
 print("BEGIN;")
 print("\n".join(out))

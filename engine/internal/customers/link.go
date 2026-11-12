@@ -385,6 +385,9 @@ var Follows = []Ref{
 	{"partner_lead_submissions", "record_id"},
 	// Privacy exports made for the person.
 	{"privacy_exports", "record_id"},
+	// The paid ads ledger: the click that acquired them and their payments
+	// as the ads' revenue (engine/internal/paidads).
+	{"ad_acquisitions", "record_id"}, {"ad_revenue", "record_id"},
 }
 
 // followOnce are Follows tables that hold one row per record and parent

@@ -121,6 +121,10 @@ var queryTables = []queryTable{
 	{"review_page_days", auth.ScopeSocialRead, "Each review page's numbers by day: the platform's score and count, new reviews, stars and Outflare's review score."},
 	{"backlinks", auth.ScopeSEORead, "Links from other sites to the brands' websites: status live or lost, the linking domain's strength (source_rating, 0 to 100), traffic and spam score, and when each was found, lost or regained."},
 	{"link_prospects", auth.ScopeSEORead, "Pages that could link to a website (link building): how each was found (method), its score, and where its pitch stands (stage: prospect, excluded, pitched, replied, agreed, live, declined, removed) with when."},
+	{"seo_organic_conversions_by_page", auth.ScopeSEORead, "First-touch Organic Search signups and payments by landing page and day, from PostHog. organic_sessions are sessions that started on the page; signups and payments are attributed to the person's first organic landing page. revenue_usd is USD only. A payment is counted once across payment_succeeded and paid service_purchased."},
+	{"seo_organic_conversions_by_cluster", auth.ScopeSEORead, "The same organic conversions rolled up by the brand's current content search groups (and Ungrouped). Groups can overlap, so do not add group totals together; use seo_organic_conversions_by_page or the API totals for a unique sum."},
+	{"coverage_donor_profiles", auth.ScopeCoverageRead, "The brand's paid-link donor catalog: domain, PBN flag, niches and stored metrics, without notes."},
+	{"coverage_link_orders", auth.ScopeCoverageRead, "Paid link orders: status, donor price (minor units and currency), live-check result and Coverage placement, without notes."},
 }
 
 type queryColumn struct {

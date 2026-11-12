@@ -30,6 +30,9 @@ export function GoogleMailSetup({
   const { brand } = useBrand(ws);
   const [status, setStatus] = useState<Connection | null>(null);
   const [rollout, setRollout] = useState<Rollout | null>(null);
+  const [workspaces, setWorkspaces] = useState<{ id: string; name: string }[]>(
+    [],
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -98,8 +101,24 @@ export function GoogleMailSetup({
       .catch((e) => {
         if (!c.signal.aborted) setError(errorMessage(e));
       });
+    // The company's Google Workspace connections, to read everyone's
+    // mailbox without each person signing in.
+    void api
+      .GET("/v1/workspaces/{ws}/integrations", {
+        params: { path: { ws }, query: { connector: "google_workspace" } },
+        signal: c.signal,
+      })
+      .then((r) => {
+        if (c.signal.aborted || !r.data) return;
+        setWorkspaces(
+          r.data.data
+            .filter((i) => i.status === "connected")
+            .map((i) => ({ id: i.id, name: i.name })),
+        );
+      })
+      .catch(() => {});
     return () => c.abort();
-  }, [brand?.id, canManagePolicy]);
+  }, [brand?.id, canManagePolicy, ws]);
   async function saveRollout() {
     if (!brand || !rollout || busy) return;
     setBusy(true);
@@ -201,15 +220,17 @@ export function GoogleMailSetup({
         <div className="space-y-3 rounded-lg border p-4">
           <h3 className="text-sm font-medium">My Google account</h3>
           <p className="text-sm">
-            {status.status === "not_configured"
-              ? "Google app setup is required."
-              : status.status === "not_eligible"
-                ? "Your administrator needs to enable you and configure internal domains."
-                : status.status === "reconnect_required"
-                  ? "Reconnect Google to restore read-only capture."
-                  : status.connected
-                    ? "Connected with individual consent."
-                    : "Ready to connect your own Google account."}
+            {status.via === "workspace"
+              ? "Your administrator reads your work mail through your company's Google Workspace. You don't need to connect anything."
+              : status.status === "not_configured"
+                ? "Google app setup is required."
+                : status.status === "not_eligible"
+                  ? "Your administrator needs to enable you and configure internal domains."
+                  : status.status === "reconnect_required"
+                    ? "Reconnect Google to restore read-only capture."
+                    : status.connected
+                      ? "Connected with individual consent."
+                      : "Ready to connect your own Google account."}
           </p>
           <p className="text-xs text-muted-foreground">
             {status.capture_count} selected records ·{" "}
@@ -250,7 +271,7 @@ export function GoogleMailSetup({
                     Capture now
                   </Button>
                 )}
-              {status.connected && (
+              {status.connected && status.via !== "workspace" && (
                 <Button
                   variant="ghost"
                   disabled={busy}
@@ -337,6 +358,59 @@ export function GoogleMailSetup({
                 })
               }
             />
+          </div>
+          <div className="space-y-2 rounded-lg border p-3">
+            <label
+              htmlFor="crm-mail-workspace"
+              className="block text-xs font-medium"
+            >
+              Read their mail through Google Workspace
+            </label>
+            <select
+              id="crm-mail-workspace"
+              className={`${field} w-full`}
+              value={rollout.workspace_integration_id ?? ""}
+              onChange={(e) =>
+                setRollout({
+                  ...rollout,
+                  workspace_integration_id: e.target.value || null,
+                })
+              }
+            >
+              <option value="">
+                No: each person connects their own Google account
+              </option>
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  Yes, with {w.name}
+                </option>
+              ))}
+            </select>
+            {rollout.workspace_integration_id && (
+              <label className="block text-xs">
+                Start from
+                <select
+                  className={`${field} mt-1 block w-full`}
+                  value={rollout.history_days ?? 0}
+                  onChange={(e) =>
+                    setRollout({
+                      ...rollout,
+                      history_days: Number(e.target.value),
+                    })
+                  }
+                >
+                  <option value={0}>Their whole mailbox history</option>
+                  <option value={365}>The last year</option>
+                  <option value={90}>The last 90 days</option>
+                  <option value={7}>The last week</option>
+                </select>
+              </label>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {workspaces.length === 0
+                ? "Add a Google Workspace connection (your own service account with domain-wide delegation for read-only Gmail) under Connections to read everyone's mail without each person signing in."
+                : "Every selected member's mailbox is read with your company's own service account, under the same filters and privacy rules. Anyone who connected their own Google account keeps it."}
+            </p>
           </div>
           <p className="text-xs text-muted-foreground">
             Exclusions always win. Removing eligibility or disabling this

@@ -45,7 +45,17 @@ const (
 	ChangeAudienceRemove = "audience_remove"
 	ChangeCountryAdd     = "country_add"
 	ChangeCountryRemove  = "country_remove"
+	// Removing a campaign, an ad or a keyword, which can't be undone on
+	// the platform: only a person's own session asks for one.
+	ChangeCampaignRemove = "campaign_remove"
+	ChangeAdRemove       = "ad_remove"
+	ChangeKeywordRemove  = "keyword_remove"
 )
+
+// RemoveKind reports whether k removes a campaign, an ad or a keyword.
+func RemoveKind(k string) bool {
+	return k == ChangeCampaignRemove || k == ChangeAdRemove || k == ChangeKeywordRemove
+}
 
 // TargetingKind reports whether k changes the campaign's bidding or whom
 // it reaches.
@@ -63,7 +73,9 @@ func KeywordKind(k string) bool {
 }
 
 type changePayload struct {
-	Change string `json:"change_id"`
+	Change string `json:"change_id,omitempty"`
+	// AccountChange is an ad_account_changes row instead (accountchange.go).
+	AccountChange string `json:"account_change_id,omitempty"`
 }
 
 // EnqueueChange queues the job for an ad_changes row, once: a retry of
@@ -94,12 +106,20 @@ type ChangeState struct {
 	AudienceID   string                `json:"audience_id,omitempty"`
 	AudienceName string                `json:"audience_name,omitempty"`
 	Country      string                `json:"country,omitempty"`
+	// A removal: the platform's ids of the ad or keyword (with AdGroupID),
+	// and the name of what was removed, as it was.
+	AdID      string `json:"ad_id,omitempty"`
+	KeywordID string `json:"keyword_id,omitempty"`
+	Name      string `json:"name,omitempty"`
 }
 
 func (s *Syncer) changeJob(ctx context.Context, job jobs.Job) error {
 	var p changePayload
 	if err := json.Unmarshal(job.Payload, &p); err != nil || job.WorkspaceID == nil {
 		return nil
+	}
+	if p.AccountChange != "" {
+		return s.ApplyAccountChange(ctx, *job.WorkspaceID, p.AccountChange, job.Attempt >= job.MaxAttempts)
 	}
 	return s.ApplyChange(ctx, *job.WorkspaceID, p.Change, job.Attempt >= job.MaxAttempts)
 }
@@ -162,6 +182,9 @@ func (s *Syncer) ApplyChange(ctx context.Context, ws, changeID string, last bool
 	}
 	if TargetingKind(kind) {
 		return s.applyTargeting(ctx, ws, changeID, kind, connector, o, acct, entityExternal, want, last, ev, fail)
+	}
+	if RemoveKind(kind) {
+		return s.applyRemove(ctx, ws, changeID, kind, connector, o, acct, entityExternal, want, last, ev, fail)
 	}
 	m, ok := o.Connector.(connectors.AdsManager)
 	if !ok {
@@ -257,7 +280,8 @@ func budgetWord(b *int64) string {
 
 // ChangeKinds lists the kinds, for the API's checks.
 var ChangeKinds = []string{ChangePause, ChangeResume, ChangeBudget, ChangeKeywordAdd, ChangeNegativeAdd, ChangeKeywordSplit,
-	ChangeBidding, ChangeAudienceAdd, ChangeAudienceRemove, ChangeCountryAdd, ChangeCountryRemove}
+	ChangeBidding, ChangeAudienceAdd, ChangeAudienceRemove, ChangeCountryAdd, ChangeCountryRemove,
+	ChangeCampaignRemove, ChangeAdRemove, ChangeKeywordRemove}
 
 // applyKeyword makes a keyword change. Keywords aren't read back here: the
 // next sync lists them.
@@ -349,4 +373,79 @@ func ChangeKind(k string) bool {
 		}
 	}
 	return false
+}
+
+// applyRemove removes a campaign, an ad or a keyword, then reads it back:
+// the change is verified when the platform shows it removed, and only
+// then is the mirror (ad_entities, ad_keywords) marked removed. A read
+// that fails leaves the mirror at what was asked for; the next sync
+// corrects it.
+func (s *Syncer) applyRemove(ctx context.Context, ws, changeID, kind, connector string, o *connectors.Opened, acct account, campaignExternal string,
+	want ChangeState, last bool, ev track.Event, fail func(outcome, code string, err error) error) error {
+	rm, ok := o.Connector.(connectors.AdRemover)
+	if !ok {
+		return fail("failed", "connector_invalid", fmt.Errorf("%s cannot remove campaigns, ads or keywords here", o.Connector.Definition().Name))
+	}
+	ad := acct.ad()
+	what, id := connectors.RemoveCampaign, campaignExternal
+	switch kind {
+	case ChangeAdRemove:
+		what, id = connectors.RemoveAd, want.AdID
+	case ChangeKeywordRemove:
+		what, id = connectors.RemoveKeyword, want.KeywordID
+	}
+	if err := rm.Remove(ctx, o.Client, o.Creds, ad, what, want.AdGroupID, id); err != nil {
+		if connectors.KindOf(err) == connectors.ErrUnavailable && !last {
+			return err
+		}
+		return fail("failed", "connector_"+connectors.KindOf(err), err)
+	}
+	now := s.now()
+	got, readErr := rm.RemovedStatus(ctx, o.Client, o.Creds, ad, what, want.AdGroupID, id)
+	verified, note := false, ""
+	switch {
+	case readErr != nil:
+		note = "could not read it back: " + trim(readErr.Error(), 300)
+	case got != connectors.AdRemoved:
+		note = "the platform shows it as " + got
+	default:
+		verified = true
+	}
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		var verifiedAt *time.Time
+		if verified {
+			verifiedAt = &now
+		}
+		if _, err := tx.Exec(ctx, `UPDATE ad_changes SET status = 'applied', applied_at = $3, verified_at = $4, verify_note = $5
+			WHERE workspace_id = $1 AND id = $2 AND status = 'queued'`, ws, changeID, now, verifiedAt, note); err != nil {
+			return err
+		}
+		if !verified && readErr == nil {
+			return nil
+		}
+		var err error
+		switch what {
+		case connectors.RemoveCampaign:
+			_, err = tx.Exec(ctx, `UPDATE ad_entities SET status = 'removed', provider_status = 'REMOVED', updated_at = now()
+				WHERE ad_account_id = $1 AND level = 'campaign' AND external_id = $2`, acct.id, id)
+		case connectors.RemoveAd:
+			_, err = tx.Exec(ctx, `UPDATE ad_entities SET status = 'removed', provider_status = 'REMOVED', updated_at = now()
+				WHERE ad_account_id = $1 AND level = 'ad' AND external_id = $2`, acct.id, id)
+		case connectors.RemoveKeyword:
+			_, err = tx.Exec(ctx, `UPDATE ad_keywords SET status = 'removed', updated_at = now() WHERE ad_account_id = $1 AND external_id = $2
+				AND ad_group_id IN (SELECT g.id FROM ad_entities g WHERE g.ad_account_id = $1 AND g.level = 'ad_group' AND g.external_id = $3)`, acct.id, id, want.AdGroupID)
+		}
+		return err
+	})
+	if err != nil {
+		return fail("error", "internal", err)
+	}
+	outcome := "applied"
+	if !verified {
+		outcome = "unverified"
+		ev.Props["unverified"] = true
+	}
+	metrics.AdChanged(connector, kind, outcome)
+	track.Emit(ctx, ev)
+	return nil
 }

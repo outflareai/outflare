@@ -1,6 +1,6 @@
 // A data table for list pages: sortable columns, a search box, column
-// visibility, clickable rows, and a card list on phones. Built on TanStack
-// Table and the shadcn Table.
+// visibility, clickable rows, a card list on phones, and a CSV download of
+// the rows and columns shown. Built on TanStack Table and the shadcn Table.
 
 import { useState, type ReactNode } from "react";
 import {
@@ -13,13 +13,20 @@ import {
   type SortingState,
   type VisibilityState,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ChevronsUpDown, Columns3, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, Columns3, Download, Search } from "lucide-react";
+import { downloadCsv, toCsv, type CsvValue } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 
 export type { ColumnDef };
+
+/** A column's meta. csv is the column's value in a download (default its accessor's value); csvHeader names a column whose header isn't text; csv false leaves it out. */
+export type ColumnMeta<T> = { align?: "right"; mono?: boolean; pin?: "right"; csv?: ((row: T) => CsvValue) | false; csvHeader?: string };
+
+/** What a "Download CSV" button saves: the file's name and what to record when it is pressed (rows is how many). */
+export type TableDownload = { file: string; label?: string; onDownload?: (rows: number) => void };
 
 // Opaque versions of the row's colors, so cells scrolled under a pinned column don't show through.
 const pinHead = "sticky right-0 z-[1] border-l bg-[color-mix(in_oklab,var(--card),var(--muted)_40%)]";
@@ -45,10 +52,12 @@ type Props<T> = {
   hidden?: string[];
   /** Offer the "Columns" menu when there are more than three columns to hide. */
   columnsMenu?: boolean;
+  /** Shows a "Download CSV" button that saves exactly the rows and columns shown, in their order. */
+  download?: TableDownload;
   className?: string;
 };
 
-export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlaceholder, search, toolbar, mobile, empty = "Nothing here yet.", initialSort = [], hidden = [], columnsMenu = true, className }: Props<T>) {
+export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlaceholder, search, toolbar, mobile, empty = "Nothing here yet.", initialSort = [], hidden = [], columnsMenu = true, download, className }: Props<T>) {
   const [sorting, setSorting] = useState<SortingState>(initialSort);
   const [localFilter, setLocalFilter] = useState("");
   const filter = search ? search.value : localFilter;
@@ -71,7 +80,27 @@ export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlacehold
   });
   const rows = table.getRowModel().rows;
   const hideable = !columnsMenu ? [] : table.getAllLeafColumns().filter((c) => c.getCanHide() && typeof c.columnDef.header === "string");
-  const showToolbar = searchPlaceholder || toolbar || hideable.length > 3;
+  const showToolbar = searchPlaceholder || toolbar || hideable.length > 3 || download;
+  // The download is what the table shows: its visible columns with a text
+  // header, and its rows as filtered and sorted.
+  const save = () => {
+    if (!download) return;
+    const cols = table.getVisibleLeafColumns().filter((c) => {
+      const meta = c.columnDef.meta as ColumnMeta<T> | undefined;
+      return meta?.csv !== false && (meta?.csvHeader || (typeof c.columnDef.header === "string" && c.columnDef.header !== ""));
+    });
+    const headers = cols.map((c) => (c.columnDef.meta as ColumnMeta<T> | undefined)?.csvHeader || (c.columnDef.header as string));
+    const out = rows.map((r) =>
+      cols.map((c) => {
+        const meta = c.columnDef.meta as ColumnMeta<T> | undefined;
+        if (typeof meta?.csv === "function") return meta.csv(r.original);
+        const v = r.getValue(c.id);
+        return typeof v === "string" || typeof v === "number" || typeof v === "boolean" ? v : v == null ? "" : String(v);
+      }),
+    );
+    downloadCsv(download.file, toCsv(headers, out));
+    download.onDownload?.(out.length);
+  };
 
   return (
     <div className={cn("space-y-3", className)}>
@@ -91,6 +120,12 @@ export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlacehold
             </label>
           )}
           {toolbar}
+          {download && (
+            <Button variant="outline" size="sm" className={cn("text-[13px]", hideable.length <= 3 && "ml-auto")} onClick={save} disabled={rows.length === 0} title={`Save these ${rows.length} rows as a CSV file`}>
+              <Download className="size-3.5" />
+              {download.label ?? "Download CSV"}
+            </Button>
+          )}
           {hideable.length > 3 && (
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>

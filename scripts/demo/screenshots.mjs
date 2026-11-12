@@ -19,12 +19,16 @@ const email = 'maya@northpeak.example';
 // The local demo owner's password from README.md: made up, and only ever on localhost.
 const password = 'demo-password-not-real';
 
+// Pages are /{workspace}/{brand}/{page}; the demo's workspace and its first
+// brand are both "northpeak".
+const at = '/northpeak/northpeak';
 const pages = {
-	overview: '/northpeak/overview',
-	'inbox-item': `/northpeak/inbox/${reply}`,
-	'sequences-item': `/northpeak/sequences/${seq}`,
-	mailboxes: '/northpeak/mailboxes',
-	domains: '/northpeak/domains',
+	overview: `${at}/overview`,
+	'inbox-item': `${at}/inbox/${reply}`,
+	'sequences-item': `${at}/sequences/${seq}`,
+	mailboxes: `${at}/mailboxes`,
+	domains: `${at}/domains`,
+	agents: `${at}/agents`,
 };
 
 const browser = await chromium.launch();

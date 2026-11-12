@@ -6,14 +6,17 @@ import { pageIsAvailable } from "./lib/extensions";
 import { Fragment, useEffect, useState, useSyncExternalStore } from "react";
 import type { Workspace } from "@outflare/sdk";
 import { Icon, isIconName, type IconName } from "./icons";
+import type { Scope } from "@outflare/sdk";
+import { api, errorMessage } from "./api";
 import { CopyButton, Kbd, Logo, toast } from "./ui";
 import type { Tab } from "./App";
-import { appTabs } from "./lib/paths";
+import { appPath, appTabs } from "./lib/paths";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
-import { desktop, isDesktopApp, onUpdateReady, type UpdateState } from "@/lib/desktop";
+import { desktop, desktopInfo, isDesktopApp, onUpdateReady, type UpdateState } from "@/lib/desktop";
 import { pickedBrandId, setBrand, useBrand } from "@/lib/brand";
 import { useAgentApps } from "@/lib/agentApps";
+import { AddBrand } from "./pages/Brands";
 import {
   Sidebar as UISidebar,
   SidebarContent,
@@ -70,6 +73,7 @@ export const tabNames: Record<Tab, string> = {
   experiments: "Experiments",
   "search-insights": "Search insights",
   keywords: "Keywords",
+  "organic-conversions": "Organic conversions",
   "ai-visibility": "Overview",
   "ai-questions": "Questions",
   "ai-competitors": "Competitors",
@@ -79,6 +83,8 @@ export const tabNames: Record<Tab, string> = {
   "ai-traffic": "Traffic",
   "ai-visibility-settings": "Settings",
   backlinks: "Backlinks",
+  "link-orders": "Link orders",
+  "link-roi": "Link ROI",
   competition: "Overview",
   competitors: "Competitors",
   "link-building": "Link building",
@@ -127,7 +133,7 @@ export const tabNames: Record<Tab, string> = {
   knowledge: "Library",
   "help-centre": "Help centre",
   company: "About your company",
-  brands: "Brands",
+  brands: "Brand",
   "ideal-customers": "Ideal customers",
   "brand-accounts": "Accounts",
   workspace: "General",
@@ -135,6 +141,7 @@ export const tabNames: Record<Tab, string> = {
   team: "Team",
   telegram: "Telegram",
   "team-activity": "Team activity",
+  "workspace-brands": "Brands",
   alerts: "Alerts",
   digests: "Digests",
   connectors: "Connectors",
@@ -214,7 +221,10 @@ export const tabBlurbs: Record<Tab, string> = {
   fixes: "Everything worth fixing, one ticket per problem, written up by your AI model and reviewed by you.",
   "search-insights": "Investigate search performance, organise work, save report snapshots and schedule data collection.",
   keywords: "What Google shows each page for, the keyword each page targets, where it ranks, pages that compete for one search, and how Google indexed them, from your Search Console.",
+  "organic-conversions": "First-touch Organic Search signups and revenue by landing page and search group, from your PostHog events, without counting the same payment twice.",
   backlinks: "Who links to your sites, what you gained and lost, and which links are worth getting back.",
+  "link-orders": "Paid placements from our own donor catalog: requests, live-link checks and donor prices, with Approve and Paid reserved for the brand approver.",
+  "link-roi": "Cost per published link against stored Search Console, ranking and referring-domain changes on the target page, 30, 60 and 90 days around publication.",
   "ai-visibility": "How often AI assistants name and recommend your brand against its competitors, and what to do next.",
   "ai-questions": "The questions your buyers ask AI, by topic, awareness and question type, and what each assistant answered.",
   "ai-competitors": "Who AI assistants name and recommend for your questions, and brands they name that you don't count yet.",
@@ -226,7 +236,7 @@ export const tabBlurbs: Record<Tab, string> = {
   competition: "Who is dominating: your rank against every competitor you track, where you lead, where you trail, and whether you are catching up.",
   competitors: "Who you compete with in search, and the keywords and links they have that you don't.",
   visitors: "The companies and people on your website, scored for buying intent, from your site snippet and clicks on your emails.",
-  ads: "Spend, clicks and platform-reported conversions from your own Google, Meta, Microsoft, Reddit, X and LinkedIn ad accounts, by brand.",
+  ads: "What a new paying customer costs you from your own Google, Meta, Microsoft and other ad accounts, measured on your own sign-ups and payments, with the decisions that need you, the people the ads brought and the set-up that makes it count.",
   social: "Confirm your brands' X and LinkedIn accounts, then follow their followers, posts and engagement every day.",
   reviews: "Every review of your brands on Trustpilot, G2, Capterra, SourceForge and Google, your review score and its direction, and answers drafted for you to post.",
   reddit: "Find threads where your brand can help, reply with a disclosure from its own account, and count the sign-ups.",
@@ -238,7 +248,7 @@ export const tabBlurbs: Record<Tab, string> = {
   knowledge: "Articles and quick answers your team writes once: products, prices, policies and stock answers. Your team and every AI in Outflare answer from them.",
   "help-centre": "A public site where customers read and search what you've marked for the help centre, styled like your brand.",
   company: "What Outflare knows about your company, so people and agents never have to repeat it.",
-  brands: "The businesses you market from this workspace, each with its own website, context, links and mailboxes.",
+  brands: "The brand's own website, context, links and team.",
   "ideal-customers": "Who you sell to, described once for lead lists and the lead finder.",
   "brand-accounts": "The external accounts your brand's agent acts through: how each signs in, whether access works, the vault, incidents, and the takeovers waiting for a person.",
   workspace: "The workspace's name and its address in the app.",
@@ -246,6 +256,7 @@ export const tabBlurbs: Record<Tab, string> = {
   telegram: "Chats from the company's Telegram accounts, and the ones to link to a customer.",
   team: "Everyone who works here, their departments and teams, and the accounts the company gives them.",
   "team-activity": "Changes, agent runs and API calls about the team rather than one brand, such as invites and connections.",
+  "workspace-brands": "Every brand in this workspace: add, archive and restore brands, sort records that belong to no brand, and the rule for contacting one person from two brands.",
   alerts: "What needs someone now, such as hot replies and hot website visitors, and who hears about it by email.",
   digests: "A daily or weekly summary of the whole workspace, kept here and emailed through your own provider.",
   tokens: "Tokens for scripts and agents, with scopes and send budgets.",
@@ -312,6 +323,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   competition: "/docs/guides/competitors/#who-is-dominating",
   competitors: "/docs/guides/competitors/",
   keywords: "/docs/guides/keywords/",
+  "organic-conversions": "/docs/search-intelligence/",
   reddit: "/docs/guides/reddit/",
   "ai-visibility": "/docs/guides/ai-visibility/",
   "ai-questions": "/docs/guides/ai-visibility/",
@@ -362,7 +374,7 @@ export const modules: Module[] = [
   { id: "presence", label: "Presence", icon: "coverage", tabs: ["coverage"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
-  { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "seo", "backlinks"] },
+  { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "seo", "backlinks", "link-orders", "link-roi"] },
   // AI visibility: how AI assistants answer the questions buyers ask, against competitors.
   { id: "ai-visibility", label: "AI visibility", icon: "ai-visibility", tabs: ["ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings"] },
   // Competitors: how the brand stands against everyone it competes with,
@@ -389,7 +401,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "telegram"];
+const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "telegram"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -504,7 +516,7 @@ export function PinButton({ tab, from, className }: { tab: Tab; from: string; cl
 // the workspace, its AI, and what developers and agents use.
 export function settingsGroups(isAdmin: boolean, ws?: Workspace): NavGroup[] {
   const groups: NavGroup[] = [
-    { label: "Workspace", tabs: ["workspace", "members", "team", "team-activity"] },
+    { label: "Workspace", tabs: ["workspace", "workspace-brands", "members", "team", "team-activity"] },
     { label: "AI", tabs: ["ai", "ai-usage", "ai-accounts"] },
     { label: "Notifications", tabs: ["alerts", "digests"] },
     { label: "Developers", tabs: isAdmin ? ["tokens", "webhooks", "logs", "audit", "tools"] : ["webhooks", "tools"] },
@@ -514,7 +526,7 @@ export function settingsGroups(isAdmin: boolean, ws?: Workspace): NavGroup[] {
   return groups.map((g) => ({ ...g, tabs: g.tabs.filter((t) => canOpen(ws, t)) })).filter((g) => g.tabs.length > 0);
 }
 
-export const settingsTabs: readonly Tab[] = ["workspace", "members", "team", "team-activity", "ai", "ai-usage", "ai-accounts", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "account", "instance"];
+export const settingsTabs: readonly Tab[] = ["workspace", "workspace-brands", "members", "team", "team-activity", "ai", "ai-usage", "ai-accounts", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "account", "instance"];
 export const isSettings = (t: Tab) => settingsTabs.includes(t);
 
 // ---- Theme ----
@@ -570,12 +582,17 @@ export function Sidebar(p: SidebarProps) {
   const pins = prefs.pins.filter(shown);
   const modules = allModules.map((m) => ({ ...m, tabs: m.tabs.filter(shown) })).filter((m) => m.tabs.length > 0);
   useEffect(() => visited(p.tab), [p.tab]);
+  useBrand(p.ws?.id); // links below carry the brand picked
+  // Each page is a real link, so right-click, Ctrl/Cmd-click and middle-click
+  // open it in a new tab; a plain click still switches page in place.
+  const href = (t: Tab) => (p.ws ? appPath(p.ws.id, t) : undefined);
+  const go = (t: Tab) => () => { p.onTab(t); close(); };
   return (
     <UISidebar collapsible="icon">
       <SidebarHeader className="gap-2 pt-3">
         <div className="grid gap-px">
           <WorkspaceSwitcher workspaces={p.workspaces} ws={p.ws} onChange={(id) => { p.onWorkspace(id); close(); }} onCreate={() => { close(); p.onCreateWorkspace(); }} />
-          {p.ws && <BrandSwitcher ws={p.ws} onManage={() => p.onTab("brands")} onPicked={close} />}
+          {p.ws && <BrandSwitcher ws={p.ws} onAdded={() => p.onTab("brands")} onManage={() => p.onTab("workspace-brands")} onPicked={close} />}
         </div>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -592,14 +609,14 @@ export function Sidebar(p: SidebarProps) {
       <SidebarContent className="gap-0">
         <SidebarGroup className="py-1">
           <SidebarMenu className="gap-px">
-            {everyday.filter(shown).map((t) => <NavItem key={t} tab={t} active={p.tab === t} unread={t === "inbox" ? p.unread : p.counts?.[t] ?? 0} unreadLabel={t === "inbox" ? "unread" : "waiting for you"} onClick={() => { p.onTab(t); close(); }} />)}
+            {everyday.filter(shown).map((t) => <NavItem key={t} tab={t} active={p.tab === t} unread={t === "inbox" ? p.unread : p.counts?.[t] ?? 0} unreadLabel={t === "inbox" ? "unread" : "waiting for you"} href={href(t)} onClick={go(t)} />)}
           </SidebarMenu>
         </SidebarGroup>
         {pins.length > 0 && (
           <SidebarGroup className="py-1">
             <SidebarGroupLabel className="h-5 font-mono text-[10px] tracking-wider uppercase">Pinned</SidebarGroupLabel>
             <SidebarMenu className="gap-px">
-              {pins.map((t) => <NavItem key={t} tab={t} active={p.tab === t} pin="pinned" onClick={() => { p.onTab(t); close(); }} />)}
+              {pins.map((t) => <NavItem key={t} tab={t} active={p.tab === t} pin="pinned" href={href(t)} onClick={go(t)} />)}
             </SidebarMenu>
           </SidebarGroup>
         )}
@@ -630,11 +647,11 @@ export function Sidebar(p: SidebarProps) {
                         {m.tabs.map((t) => (
                           <SidebarMenuSubItem key={t} className="flex items-center">
                             <SidebarMenuSubButton asChild isActive={p.tab === t}>
-                              <button onClick={() => { p.onTab(t); close(); }} aria-current={p.tab === t ? "page" : undefined} className="group/nav h-9 w-full flex-1 text-[13px] md:h-7">
+                              <a href={href(t)} onClick={(e) => inPlace(e, go(t))} aria-current={p.tab === t ? "page" : undefined} className="group/nav h-9 w-full flex-1 text-[13px] md:h-7">
                                 <span className="flex-1 text-left">{tabNames[t]}</span>
                                 <CountBadge n={p.counts?.[t] ?? 0} />
                                 {shortcuts[t] && !p.counts?.[t] && <span className="hidden font-mono text-[10px] text-muted-foreground md:group-hover/nav:inline">G {shortcuts[t]!.toUpperCase()}</span>}
-                              </button>
+                              </a>
                             </SidebarMenuSubButton>
                             <PinButton tab={t} from="sidebar" className="ml-0.5 group-hover/menu-sub-item:opacity-100" />
                           </SidebarMenuSubItem>
@@ -651,8 +668,8 @@ export function Sidebar(p: SidebarProps) {
 
       <SidebarFooter className="gap-1 border-t pt-1.5 pb-3">
         <SidebarMenu className="gap-px">
-          {shown("connectors") && <NavItem tab="connectors" pin="sidebar" active={p.tab === "connectors"} onClick={() => { p.onTab("connectors"); close(); }} />}
-          <NavItem tab="workspace" label="Settings" icon="settings" active={isSettings(p.tab)} onClick={() => { p.onTab(isSettings(p.tab) ? p.tab : "workspace"); close(); }} />
+          {shown("connectors") && <NavItem tab="connectors" pin="sidebar" active={p.tab === "connectors"} href={href("connectors")} onClick={go("connectors")} />}
+          <NavItem tab="workspace" label="Settings" icon="settings" active={isSettings(p.tab)} href={href("workspace")} onClick={go(isSettings(p.tab) ? p.tab : "workspace")} />
           {(p.links ?? []).map((l) => (
             <SidebarMenuItem key={l.id}>
               <SidebarMenuButton asChild tooltip={l.label} className="h-10 text-[13px] md:h-7">
@@ -711,19 +728,33 @@ function CountBadge({ n }: { n: number }) {
   );
 }
 
-function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, unread = 0, unreadLabel = "unread", pin, onClick }: { tab: Tab; label?: string; icon?: IconName; active: boolean; unread?: number; unreadLabel?: string; pin?: "pinned" | "sidebar"; onClick: () => void }) {
+// inPlace runs a link's in-app switch on a plain left click, and leaves
+// Ctrl/Cmd/Shift/Alt-clicks to the browser so they open a new tab or window.
+function inPlace(e: React.MouseEvent, go: () => void) {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  go();
+}
+
+function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, unread = 0, unreadLabel = "unread", pin, href, onClick }: { tab: Tab; label?: string; icon?: IconName; active: boolean; unread?: number; unreadLabel?: string; pin?: "pinned" | "sidebar"; href?: string; onClick: () => void }) {
+  const inner = (
+    <>
+      <Icon name={icon} className={cn("size-4", active && "text-brand-strong dark:text-brand")} />
+      <span className="flex-1">{label}</span>
+      {shortcuts[tab] && label === tabNames[tab] && unread === 0 && !pin && <span className="hidden font-mono text-[10px] text-muted-foreground md:group-hover/nav:inline">G {shortcuts[tab]!.toUpperCase()}</span>}
+    </>
+  );
   return (
     <SidebarMenuItem className={cn(pin && "flex items-center")}>
       <SidebarMenuButton
+        asChild={!!href}
         isActive={active}
         tooltip={label}
-        onClick={onClick}
+        onClick={href ? undefined : onClick}
         aria-current={active ? "page" : undefined}
         className="group/nav h-10 text-[13px] md:h-7 data-[active=true]:shadow-xs data-[active=true]:ring-1 data-[active=true]:ring-sidebar-border"
       >
-        <Icon name={icon} className={cn("size-4", active && "text-brand-strong dark:text-brand")} />
-        <span className="flex-1">{label}</span>
-        {shortcuts[tab] && label === tabNames[tab] && unread === 0 && !pin && <span className="hidden font-mono text-[10px] text-muted-foreground md:group-hover/nav:inline">G {shortcuts[tab]!.toUpperCase()}</span>}
+        {href ? <a href={href} onClick={(e) => inPlace(e, onClick)}>{inner}</a> : inner}
       </SidebarMenuButton>
       {pin && <PinButton tab={tab} from={pin} className={cn("ml-0.5 group-hover/menu-item:opacity-100", pin === "pinned" && "opacity-0")} />}
       {unread > 0 && (
@@ -747,7 +778,10 @@ function AppUpdate() {
     let gone = false;
     desktop.updateState().then((s) => { if (!gone && s.available) setUpdate(s); }).catch(() => {});
     const stop = onUpdateReady((s) => { if (!gone) setUpdate(s); });
-    return () => { gone = true; stop(); };
+    // "Check for updates" in the account menu found one.
+    const found = (e: Event) => { if (!gone) setUpdate((e as CustomEvent<UpdateState>).detail); };
+    window.addEventListener(UPDATE_FOUND, found);
+    return () => { gone = true; stop(); window.removeEventListener(UPDATE_FOUND, found); };
   }, []);
   useEffect(() => {
     if (update?.available) track("ui.app_update_offered", { version: update.version });
@@ -778,6 +812,65 @@ function AppUpdate() {
   );
 }
 
+const UPDATE_FOUND = "outflare:update-found";
+
+// Where the operator's own website tracking runs on this app (Outflare
+// Cloud adds its tag), its cookie banner reopens from here instead of a
+// button floating over the sidebar. Without the tag it renders nothing.
+function CookieSettings() {
+  const site = (window as { outflare?: { showConsent?: () => void } }).outflare;
+  if (typeof site?.showConsent !== "function") return null;
+  return (
+    <DropdownMenuItem className="text-[13px]" onSelect={() => { track("ui.cookie_settings_opened"); site.showConsent?.(); }}>
+      <Icon name="shield" className="size-3.5" />
+      Cookie settings
+    </DropdownMenuItem>
+  );
+}
+
+// In the desktop app the account menu says which version is installed and
+// can look for a newer one now, as in other desktop apps. A found update
+// shows as the Update available button above.
+function AppVersion() {
+  const [checking, setChecking] = useState(false);
+  if (!isDesktopApp()) return null;
+  const version = desktopInfo()?.version;
+  const check = async (e: Event) => {
+    e.preventDefault(); // keep the menu open while it looks
+    if (checking) return;
+    setChecking(true);
+    try {
+      const s = await desktop.checkForUpdates();
+      if (!s.enabled) {
+        track("ui.app_update_checked", { result: "off" });
+        toast("This build doesn't update itself. Download the latest from outflare.ai/downloads.", "error");
+      } else if (s.available) {
+        track("ui.app_update_checked", { result: "available", version: s.version });
+        window.dispatchEvent(new CustomEvent<UpdateState>(UPDATE_FOUND, { detail: s }));
+        toast(`${s.version ? `Outflare ${s.version}` : "An update"} is ready: click Update available in the sidebar.`);
+      } else {
+        track("ui.app_update_checked", { result: "none" });
+        toast(`You're on the latest version${version ? ` (${version})` : ""}.`);
+      }
+    } catch {
+      track("ui.app_update_checked", { outcome: "error", error_code: "check_failed" });
+      toast("Couldn't check for updates. Try again from the Outflare menu.", "error");
+    } finally {
+      setChecking(false);
+    }
+  };
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem className="text-[13px]" onSelect={check} disabled={checking}>
+        <Icon name="refresh" className={cn("size-3.5", checking && "animate-spin")} />
+        {checking ? "Checking…" : "Check for updates"}
+      </DropdownMenuItem>
+      {version && <DropdownMenuLabel className="text-[11px] font-normal tabular-nums text-muted-foreground">Outflare app {version}</DropdownMenuLabel>}
+    </>
+  );
+}
+
 function Account({ email, theme, onTheme, onSignOut, onAccount }: { email?: string; theme: Theme; onTheme: () => void; onSignOut: () => void; onAccount: () => void }) {
   return (
     <SidebarMenu>
@@ -801,10 +894,12 @@ function Account({ email, theme, onTheme, onSignOut, onAccount }: { email?: stri
               <Icon name={theme === "dark" ? "sun" : "moon"} className="size-3.5" />
               {theme === "dark" ? "Light theme" : "Dark theme"}
             </DropdownMenuItem>
+            <CookieSettings />
             <DropdownMenuItem className="text-[13px]" onSelect={onSignOut}>
               <Icon name="logout" className="size-3.5" />
               Sign out
             </DropdownMenuItem>
+            <AppVersion />
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
@@ -816,14 +911,19 @@ function Account({ email, theme, onTheme, onSignOut, onAccount }: { email?: stri
 // PostHog. It sits under the workspace at the top of the sidebar, so the
 // scope is above everything it scopes, as in Cloudflare; on a phone, where
 // the sidebar is behind the menu button, the top bar shows it as a chip.
-// Hidden until the workspace has a brand. "All brands" is a deliberate
-// pick, for comparing them side by side.
-function BrandSwitcher({ ws, onManage, chip, onPicked }: { ws: Workspace; onManage: () => void; chip?: boolean; onPicked?: () => void }) {
-  const { brand, active } = useBrand(ws.id);
+// Hidden until the workspace has a brand. There is no "All brands": each
+// brand is its own, and one is always picked.
+function BrandSwitcher({ ws, onAdded, onManage, chip, onPicked }: { ws: Workspace; onAdded: () => void; onManage: () => void; chip?: boolean; onPicked?: () => void }) {
+  const { brand, active, reload } = useBrand(ws.id);
+  const [adding, setAdding] = useState(false);
   if (active.length === 0) return null;
+  const canAdd = (ws.scopes ?? []).includes("context.manage");
+  // Other brands are only reached from here; adding one opens it.
+  const addSheet = adding && <AddBrand ws={ws.id} onClose={() => setAdding(false)} onAdded={(b) => { setAdding(false); void reload(); setBrand(b.handle); onAdded(); onPicked?.(); }} />;
   const limited = (ws.brand_ids?.length ?? 0) > 0;
-  const all = limited ? "All your brands" : "All brands";
-  const label = `Brand: ${brand ? brand.name : all.toLowerCase()}. Switch brand`;
+  // Shown for the moment between the brands loading and one being picked.
+  const all = "Brand";
+  const label = `Brand: ${brand ? brand.name : "none"}. Switch brand`;
   const pick = (handle: string) => { setBrand(handle); onPicked?.(); };
   const menu = (
     <DropdownMenuContent align="start" className={cn("min-w-60", !chip && "w-(--radix-dropdown-menu-trigger-width)")}>
@@ -834,24 +934,24 @@ function BrandSwitcher({ ws, onManage, chip, onPicked }: { ws: Workspace; onMana
           {b.id === brand?.id ? <Icon name="check" className="size-3.5" /> : <span className="truncate font-mono text-[11px] text-muted-foreground">{b.website}</span>}
         </DropdownMenuItem>
       ))}
-      {active.length > 1 && (
-        <>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem className="text-[13px]" onSelect={() => pick("")}>
-            <span className="flex-1">{all}</span>
-            {!brand && <Icon name="check" className="size-3.5" />}
-          </DropdownMenuItem>
-        </>
-      )}
       <DropdownMenuSeparator />
-      <DropdownMenuItem className="text-[13px]" onSelect={() => { onManage(); onPicked?.(); }}>
-        <Icon name="workspace" className="size-3.5" />
-        Manage brands
-      </DropdownMenuItem>
+      {canAdd && (
+        <DropdownMenuItem className="text-[13px]" onSelect={() => setAdding(true)}>
+          <Icon name="plus" className="size-3.5" />
+          Add a brand
+        </DropdownMenuItem>
+      )}
+      {!limited && (
+        <DropdownMenuItem className="text-[13px]" onSelect={() => { onManage(); onPicked?.(); }}>
+          <Icon name="settings" className="size-3.5" />
+          Manage brands
+        </DropdownMenuItem>
+      )}
     </DropdownMenuContent>
   );
   if (chip) {
     return (
+      <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button aria-label={label} className="inline-flex h-7 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2 text-[13px] font-medium shadow-xs hover:bg-accent data-[state=open]:bg-accent md:hidden dark:bg-input/30">
@@ -861,6 +961,8 @@ function BrandSwitcher({ ws, onManage, chip, onPicked }: { ws: Workspace; onMana
         </DropdownMenuTrigger>
         {menu}
       </DropdownMenu>
+      {addSheet}
+      </>
     );
   }
   return (
@@ -877,6 +979,7 @@ function BrandSwitcher({ ws, onManage, chip, onPicked }: { ws: Workspace; onMana
           </DropdownMenuTrigger>
           {menu}
         </DropdownMenu>
+        {addSheet}
       </SidebarMenuItem>
     </SidebarMenu>
   );
@@ -992,7 +1095,7 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent
       <SidebarTrigger className="-ml-1 size-7 text-muted-foreground" />
       <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
       <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
-        {ws && <BrandSwitcher ws={ws} chip onManage={() => onTab("brands")} />}
+        {ws && <BrandSwitcher ws={ws} chip onAdded={() => onTab("brands")} onManage={() => onTab("workspace-brands")} />}
         {ws && <BrandSlash ws={ws.id} />}
         {moduleOf(tab) && (
           <>
@@ -1041,19 +1144,21 @@ type Call = { title: string; path: string; params: Record<string, string>; query
 
 function callFor(tab: Tab, ws: string, item?: string): Call {
   const base = { ws };
-  // A brand's data is under its own route: the picked brand's.
-  const brandBase = { brand: pickedBrandId() || "BRAND_ID" };
+  // A brand's data is under its own route: the picked brand's real id, so
+  // the example can be pasted as it is.
+  const brand = pickedBrandId() || "BRAND_ID";
+  const brandBase = { brand };
   switch (tab) {
     case "agent-mail":
-      return { title: "Agent Mail inboxes", path: "/v1/workspaces/{ws}/cloud/agent-mail/brands/{brand}/inboxes", params: { ws, brand: "BRAND_ID" }, scope: "inbox.read" };
+      return { title: "Agent Mail inboxes", path: "/v1/workspaces/{ws}/cloud/agent-mail/brands/{brand}/inboxes", params: { ws, brand }, scope: "inbox.read" };
     case "crm":
       return { title: "CRM records", path: "/v1/brands/{brand}/records", params: brandBase, query: { type: item?.split(":")[0] ?? "person", limit: 50 }, mcp: "list_records", ask: "Show my sales relationships and the next follow-ups.", scope: "customers.read" };
     case "overview":
-      return { title: "Workspace stats", path: "/v1/workspaces/{ws}/stats", params: base, mcp: "get_overview", ask: "How is sending going this week?", scope: "workspace.read" };
+      return { title: "Brand stats", path: "/v1/brands/{brand}/stats", params: brandBase, mcp: "get_overview", ask: "How is sending going this week?", scope: "workspace.read" };
     case "get-started":
       return { title: "Getting-started steps", path: "/v1/workspaces/{ws}/onboarding", params: base, mcp: "get_onboarding", ask: "Help me finish setting up Outflare: what is left, and can you do it for me?", scope: "workspace.read" };
     case "setup":
-      return { title: "A brand's setup checklist, and GET .../install-health for what is out of date", path: "/v1/workspaces/{ws}/brands/{brand}/setup", params: { ...base, brand: item ?? "{brand}" }, mcp: "get_brand_setup", ask: "What is left to set up for this brand, and can you do the next step for me?", scope: "workspace.read" };
+      return { title: "A brand's setup checklist, and GET /v1/brands/{brand}/install-health for what is out of date", path: "/v1/workspaces/{ws}/brands/{brand}/setup", params: { ...base, brand: item ?? brand }, mcp: "get_brand_setup", ask: "What is left to set up for this brand, and can you do the next step for me?", scope: "workspace.read" };
     case "ai":
       return { title: "AI apps connected with OAuth", path: "/v1/workspaces/{ws}/agent-apps", params: base, ask: "What can you do for me in Outflare?", scope: "workspace.read" };
     case "ai-usage":
@@ -1073,9 +1178,11 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         ? { title: "One site and its latest crawl", path: "/v1/brands/{brand}/seo-sites/{site}", params: { ...brandBase, site: item }, ask: "What are the worst issues on this site, and which URL templates cause them?", scope: "seo.read" }
         : { title: "Sites OutflareBot audits", path: "/v1/brands/{brand}/seo-sites", params: brandBase, mcp: "list_seo_sites", ask: "Which of my sites has the lowest health score, and what should I fix first?", scope: "seo.read" };
     case "search-insights":
-      return { title: "Search workspace", path: "/v1/brands/{brand}/seo-sites/{site}/insights/workspace", params: { brand: "{brand}", site: item ?? "{site}" }, mcp: "get_search_workspace", ask: "Which search findings should we act on, and did the latest collections succeed?", scope: "seo.read" };
+      return { title: "Search workspace", path: "/v1/brands/{brand}/seo-sites/{site}/insights/workspace", params: { brand, site: item ?? "{site}" }, mcp: "get_search_workspace", ask: "Which search findings should we act on, and did the latest collections succeed?", scope: "seo.read" };
     case "keywords":
       return { title: "Sites, then GET .../seo-sites/{site}/search for each one's pages and queries", path: "/v1/brands/{brand}/seo-sites", params: brandBase, mcp: "get_site_search", ask: "Which pages get the most search impressions but few clicks, and what should I change on them?", scope: "seo.read" };
+    case "organic-conversions":
+      return { title: "Organic signups and payments by landing page and search group", path: "/v1/brands/{brand}/seo-sites/{site}/organic-conversions", params: { ...brandBase, site: item ?? "{site}" }, mcp: "get_organic_conversions", ask: "Which landing pages and search groups brought the most Organic Search signups and revenue, and how is that revenue counted?", scope: "seo.read" };
     case "ai-visibility":
     case "ai-competitors":
     case "ai-sources":
@@ -1086,13 +1193,13 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "ai-perception":
       return { title: "The brand's facts and how often AI answers get them right", path: "/v1/brands/{brand}/ai-facts", params: brandBase, mcp: "list_ai_facts", ask: "Which of our facts do AI answers get wrong, and what do they say instead?", scope: "seo.read" };
     case "ai-pages":
-      return { title: "How ready the brand's own pages are for AI answers", path: "/v1/brands/{brand}/ai-visibility/pages", params: { brand: "{brand}" }, mcp: "get_ai_visibility_pages", ask: "Which of our pages can't AI answers quote or trust, and which of those do they cite?", scope: "seo.read" };
+      return { title: "How ready the brand's own pages are for AI answers", path: "/v1/brands/{brand}/ai-visibility/pages", params: { brand }, mcp: "get_ai_visibility_pages", ask: "Which of our pages can't AI answers quote or trust, and which of those do they cite?", scope: "seo.read" };
     case "ai-visibility-settings":
-      return { title: "Which assistants answer the brand's questions", path: "/v1/brands/{brand}/ai-visibility/settings", params: { brand: "{brand}" }, mcp: "get_ai_visibility_settings", ask: "Which assistants do we ask, and how much have we spent this month?", scope: "seo.read" };
+      return { title: "Which assistants answer the brand's questions", path: "/v1/brands/{brand}/ai-visibility/settings", params: { brand }, mcp: "get_ai_visibility_settings", ask: "Which assistants do we ask, and how much have we spent this month?", scope: "seo.read" };
     case "fixes":
       return { title: "Fix tickets", path: "/v1/brands/{brand}/fix-tickets", params: brandBase, query: { status: "todo" }, mcp: "list_fix_tickets", ask: "Take the three worst fix tickets, read each with get_fix_ticket, and tell me which to approve and why.", scope: "seo.read" };
     case "competition":
-      return { title: "Who is dominating", path: "/v1/brands/{brand}/competition", params: { brand: "{brand}" }, mcp: "get_competition", ask: "Who is dominating our market, where are we behind, and are we closing the gap?", scope: "seo.read" };
+      return { title: "Who is dominating", path: "/v1/brands/{brand}/competition", params: { brand }, mcp: "get_competition", ask: "Who is dominating our market, where are we behind, and are we closing the gap?", scope: "seo.read" };
     case "competitors":
       return { title: "Sites you compete with", path: "/v1/brands/{brand}/seo-competitors", params: brandBase, query: { status: "tracked" }, mcp: "list_seo_competitors", ask: "What did my tracked competitors publish this month, and whose domain rating is rising?", scope: "seo.read" };
     case "link-building":
@@ -1107,6 +1214,10 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Your stories", path: "/v1/brands/{brand}/stories", params: brandBase, mcp: "list_stories", ask: "Suggest three stories we could pitch this week from our coverage and the news, and draft the best one from facts we can source.", scope: "seo.read" };
     case "backlinks":
       return { title: "Links to your sites", path: "/v1/brands/{brand}/backlinks", params: brandBase, query: { status: "live" }, mcp: "list_backlinks", ask: "Which strong links did we lose this month, and where did our new links come from?", scope: "seo.read" };
+    case "link-orders":
+      return { title: "Paid link orders from the brand's own donor catalog", path: "/v1/brands/{brand}/link-orders", params: brandBase, mcp: "list_link_orders", ask: "Which published link orders are waiting to be marked Paid, and which lost links still need a replacement?", scope: "coverage.read" };
+    case "link-roi":
+      return { title: "Cost per published link against stored changes on the target page", path: "/v1/brands/{brand}/link-roi", params: brandBase, mcp: "get_link_roi", ask: "What did published links cost, and how did the target pages' clicks, rank and referring domains change after 30, 60 and 90 days?", scope: "coverage.read" };
     case "reddit":
       return { title: "Reddit drafts waiting for approval", path: "/v1/brands/{brand}/social/actions", params: brandBase, query: { channel: "reddit", status: "draft" }, mcp: "list_social_replies", ask: "Find Reddit threads this week where we can genuinely help, and draft replies that disclose we work here.", scope: "social.read" };
     case "reddit-campaigns":
@@ -1122,7 +1233,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "warmup":
       return { title: "Mailboxes and their warm-up", path: "/v1/workspaces/{ws}/mailboxes", params: base, mcp: "list_mailboxes", ask: "Which mailboxes are still warming, and which have a low warm-up score?", scope: "mailboxes.read" };
     case "reports":
-      return { title: "Report by day", path: "/v1/workspaces/{ws}/reports", params: base, query: { group_by: "day" }, mcp: "get_report", ask: "Which sequence and step get the most replies this month, and which mailboxes bounce most?", scope: "sequences.read" };
+      return { title: "Report by day", path: "/v1/brands/{brand}/reports", params: brandBase, query: { group_by: "day" }, mcp: "get_report", ask: "Which sequence and step get the most replies this month, and which mailboxes bounce most?", scope: "sequences.read" };
     case "analytics":
       return { title: "Traffic from every analytics tool", path: "/v1/brands/{brand}/analytics/summary", params: brandBase, mcp: "get_analytics_summary", ask: "How did the website do over the last 28 days, and which pages and searches bring people in?", scope: "analytics.read" };
     case "live":
@@ -1136,15 +1247,15 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "ab-tests":
       return { title: "A/B tests", path: "/v1/brands/{brand}/ab-tests", params: brandBase, mcp: "list_ab_tests", ask: "How is our pricing headline test doing, and is it safe to stop?", scope: "analytics.read" };
     case "trends":
-      return { title: "Your saved trends", path: "/v1/brands/{brand}/insights", params: { brand: "BRAND_ID" }, mcp: "run_trend", ask: "Plot visits, sign-ups and ad spend by week for the last 90 days, and the cost per sign-up.", scope: "analytics.read" };
+      return { title: "Your saved trends", path: "/v1/brands/{brand}/insights", params: { brand }, mcp: "run_trend", ask: "Plot visits, sign-ups and ad spend by week for the last 90 days, and the cost per sign-up.", scope: "analytics.read" };
     case "paths":
-      return { title: "Your saved paths questions", path: "/v1/brands/{brand}/insights", params: { brand: "BRAND_ID" }, mcp: "run_paths", ask: "Where do people go after landing on the pricing page, and where do most of them leave?", scope: "analytics.read" };
+      return { title: "Your saved paths questions", path: "/v1/brands/{brand}/insights", params: { brand }, mcp: "run_paths", ask: "Where do people go after landing on the pricing page, and where do most of them leave?", scope: "analytics.read" };
     case "retention":
-      return { title: "Your saved retention questions", path: "/v1/brands/{brand}/insights", params: { brand: "BRAND_ID" }, mcp: "run_retention", ask: "Of the people who signed up each week this quarter, what share came back the week after, and which cohort sticks best?", scope: "analytics.read" };
+      return { title: "Your saved retention questions", path: "/v1/brands/{brand}/insights", params: { brand }, mcp: "run_retention", ask: "Of the people who signed up each week this quarter, what share came back the week after, and which cohort sticks best?", scope: "analytics.read" };
     case "dashboards":
-      return { title: "Your dashboards", path: "/v1/brands/{brand}/dashboards", params: { brand: "BRAND_ID" }, mcp: "list_dashboards", ask: "Make a Weekly numbers dashboard with the sign-up funnel and a cost-per-sign-up trend on it.", scope: "analytics.read" };
+      return { title: "Your dashboards", path: "/v1/brands/{brand}/dashboards", params: { brand }, mcp: "list_dashboards", ask: "Make a Weekly numbers dashboard with the sign-up funnel and a cost-per-sign-up trend on it.", scope: "analytics.read" };
     case "funnels":
-      return { title: "Your saved funnels", path: "/v1/brands/{brand}/insights", params: { brand: "BRAND_ID" }, mcp: "run_funnel", ask: "Of the people who visited from Google ads last month, how many signed up within 7 days and paid within 3 days of signing up, by campaign?", scope: "analytics.read" };
+      return { title: "Your saved funnels", path: "/v1/brands/{brand}/insights", params: { brand }, mcp: "run_funnel", ask: "Of the people who visited from Google ads last month, how many signed up within 7 days and paid within 3 days of signing up, by campaign?", scope: "analytics.read" };
     case "channels":
       return { title: "Visits, conversions, revenue and cost per channel", path: "/v1/brands/{brand}/attribution/channels", params: brandBase, mcp: "get_attribution_channels", ask: "Which channel brought the most revenue this month, and what did each sign-up cost us per channel?", scope: "analytics.read" };
     case "partners":
@@ -1153,8 +1264,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Campaign links", path: "/v1/brands/{brand}/tracking-campaigns", params: brandBase, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Make a tagged link for our spring launch on LinkedIn ads, pointing at the pricing page.", scope: "analytics.read" };
     case "inbox":
       return item
-        ? { title: "One conversation", path: "/v1/brands/{brand}/inbox/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_inbox_message", ask: "Summarise this reply and draft an answer.", scope: "inbox.read" }
-        : { title: "Unread replies", path: "/v1/brands/{brand}/inbox", params: { brand: "BRAND_ID" }, query: { unread: true }, mcp: "list_inbox", ask: "Which replies are interested and need an answer?", scope: "inbox.read" };
+        ? { title: "One conversation", path: "/v1/brands/{brand}/inbox/{id}", params: { brand, id: item }, mcp: "get_inbox_message", ask: "Summarise this reply and draft an answer.", scope: "inbox.read" }
+        : { title: "Unread replies", path: "/v1/brands/{brand}/inbox", params: { brand }, query: { unread: true }, mcp: "list_inbox", ask: "Which replies are interested and need an answer?", scope: "inbox.read" };
     case "playbooks":
       return item
         ? { title: "One playbook", path: "/v1/workspaces/{ws}/playbooks/{id}", params: { ...base, id: item }, mcp: "get_playbook", ask: "Run this playbook for my brand.", scope: "agents.read" }
@@ -1166,31 +1277,31 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         ? { title: "One mission", path: "/v1/workspaces/{ws}/missions/{id}", params: { ...base, id: item }, mcp: "get_mission", ask: "What has this mission done so far, and what is it waiting on?", scope: "missions.read" }
         : { title: "Missions", path: "/v1/workspaces/{ws}/missions", params: base, mcp: "list_missions", ask: "Start a mission to book 10 meetings with fintech CFOs in Australia by 30 November.", scope: "missions.read" };
     case "outcomes":
-      return { title: "Cost per meeting", path: "/v1/workspaces/{ws}/outcomes/report", params: base, query: { group_by: "sequence" }, mcp: "get_outcomes_report", ask: "Which sequences have the lowest cost per meeting this month?", scope: "outcomes.read" };
+      return { title: "Cost per meeting", path: "/v1/brands/{brand}/outcomes/report", params: brandBase, query: { group_by: "sequence" }, mcp: "get_outcomes_report", ask: "Which sequences have the lowest cost per meeting this month?", scope: "outcomes.read" };
     case "sequences":
       return item
-        ? { title: "One sequence", path: "/v1/brands/{brand}/sequences/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_sequence", ask: "How is this sequence performing by step?", scope: "sequences.read" }
-        : { title: "All sequences", path: "/v1/brands/{brand}/sequences", params: { brand: "BRAND_ID" }, mcp: "list_sequences", ask: "List my active sequences and their reply rates.", scope: "sequences.read" };
+        ? { title: "One sequence", path: "/v1/brands/{brand}/sequences/{id}", params: { brand, id: item }, mcp: "get_sequence", ask: "How is this sequence performing by step?", scope: "sequences.read" }
+        : { title: "All sequences", path: "/v1/brands/{brand}/sequences", params: { brand }, mcp: "list_sequences", ask: "List my active sequences and their reply rates.", scope: "sequences.read" };
     case "people":
       return item && /^[0-9a-f-]{36}$/.test(item)
-        ? { title: "One record", path: "/v1/brands/{brand}/records/{record}", params: { brand: "BRAND_ID", record: item }, mcp: "get_record", ask: "Summarise this person's history with us and what to do next.", scope: "customers.read" }
+        ? { title: "One record", path: "/v1/brands/{brand}/records/{record}", params: { brand, record: item }, mcp: "get_record", ask: "Summarise this person's history with us and what to do next.", scope: "customers.read" }
         : item === "events"
-          ? { title: "A brand's received product events", path: "/v1/brands/{brand}/events/summary", params: { brand: "BRAND_ID" }, mcp: "get_brand_events_summary", ask: "Which of our product events were rejected or held this week, and what should we fix?", scope: "customers.read" }
+          ? { title: "A brand's received product events", path: "/v1/brands/{brand}/events/summary", params: { brand }, mcp: "get_brand_events_summary", ask: "Which of our product events were rejected or held this week, and what should we fix?", scope: "customers.read" }
           : item === "products"
-          ? { title: "A brand's products and lifecycle stages", path: "/v1/brands/{brand}/lifecycle", params: { brand: "BRAND_ID" }, mcp: "get_lifecycle", ask: "Which companies are partly churned, and which product did they leave?", scope: "customers.read" }
+          ? { title: "A brand's products and lifecycle stages", path: "/v1/brands/{brand}/lifecycle", params: { brand }, mcp: "get_lifecycle", ask: "Which companies are partly churned, and which product did they leave?", scope: "customers.read" }
           : item === "duplicates"
-          ? { title: "Possible duplicates", path: "/v1/brands/{brand}/records/duplicates", params: { brand: "BRAND_ID" }, mcp: "list_record_duplicates", ask: "Which possible duplicates are safe to merge, and which look like two different people?", scope: "customers.read" }
-          : { title: item === "companies" ? "Companies" : "People", path: "/v1/brands/{brand}/records", params: { brand: "BRAND_ID" }, query: { type: item === "companies" ? "account" : "person", limit: 50 }, mcp: "list_records", ask: "Which customers at fintech companies haven't heard from us this month?", scope: "customers.read" };
+          ? { title: "Possible duplicates", path: "/v1/brands/{brand}/records/duplicates", params: { brand }, mcp: "list_record_duplicates", ask: "Which possible duplicates are safe to merge, and which look like two different people?", scope: "customers.read" }
+          : { title: item === "companies" ? "Companies" : "People", path: "/v1/brands/{brand}/records", params: { brand }, query: { type: item === "companies" ? "account" : "person", limit: 50 }, mcp: "list_records", ask: "Which customers at fintech companies haven't heard from us this month?", scope: "customers.read" };
     case "query":
       return item && /^[0-9a-f-]{36}$/.test(item)
-        ? { title: "One saved query", path: "/v1/brands/{brand}/queries/{saved_query}", params: { brand: "BRAND_ID", saved_query: item }, mcp: "get_saved_query", ask: "Run this saved query and tell me what changed since last month.", scope: "customers.read" }
-        : { title: "Saved queries", path: "/v1/brands/{brand}/queries", params: { brand: "BRAND_ID" }, mcp: "list_saved_queries", ask: "How many people signed up each week this quarter, by plan? Save the query for the team.", scope: "customers.read" };
+        ? { title: "One saved query", path: "/v1/brands/{brand}/queries/{saved_query}", params: { brand, saved_query: item }, mcp: "get_saved_query", ask: "Run this saved query and tell me what changed since last month.", scope: "customers.read" }
+        : { title: "Saved queries", path: "/v1/brands/{brand}/queries", params: { brand }, mcp: "list_saved_queries", ask: "How many people signed up each week this quarter, by plan? Save the query for the team.", scope: "customers.read" };
     case "leads":
-      return { title: "Leads", path: "/v1/brands/{brand}/leads", params: { brand: "BRAND_ID" }, query: { limit: 50 }, mcp: "list_leads", ask: "Find leads at companies in fintech.", scope: "leads.read" };
+      return { title: "Leads", path: "/v1/brands/{brand}/leads", params: { brand }, query: { limit: 50 }, mcp: "list_leads", ask: "Find leads at companies in fintech.", scope: "leads.read" };
     case "lists":
       return item
-        ? { title: "One lead list", path: "/v1/brands/{brand}/lead-lists/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_lead_list", ask: "How many leads did the last refresh add, and what did it skip?", scope: "leads.read" }
-        : { title: "Lead lists", path: "/v1/brands/{brand}/lead-lists", params: { brand: "BRAND_ID" }, mcp: "list_lead_lists", ask: "Build a list of 200 heads of growth at 50-200 person SaaS companies.", scope: "leads.read" };
+        ? { title: "One lead list", path: "/v1/brands/{brand}/lead-lists/{id}", params: { brand, id: item }, mcp: "get_lead_list", ask: "How many leads did the last refresh add, and what did it skip?", scope: "leads.read" }
+        : { title: "Lead lists", path: "/v1/brands/{brand}/lead-lists", params: { brand }, mcp: "list_lead_lists", ask: "Build a list of 200 heads of growth at 50-200 person SaaS companies.", scope: "leads.read" };
     case "link-autopilot":
       return { title: "Link autopilots", path: "/v1/workspaces/{ws}/cloud/link-autopilot", params: base, ask: "Get us 5 new live links a month for northpeak.example, spending at most $100 a month.", scope: "agents.read" };
     case "lead-finder":
@@ -1198,7 +1309,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "email-finder":
       return { title: "Find a work email", path: "/v1/workspaces/{ws}/email-finder/find", params: base, mcp: "find_emails", ask: "Find the work email for Alice Nguyen at acme.example.", scope: "leads.read" };
     case "suppression":
-      return { title: "Suppression list", path: "/v1/brands/{brand}/suppressions", params: { brand: "BRAND_ID" }, mcp: "list_suppressions", ask: "Is anyone at acme-com.example suppressed?", scope: "leads.read" };
+      return { title: "Suppression list", path: "/v1/brands/{brand}/suppressions", params: { brand }, mcp: "list_suppressions", ask: "Is anyone at acme-com.example suppressed?", scope: "leads.read" };
     case "mailboxes":
       return { title: "Mailboxes", path: "/v1/workspaces/{ws}/mailboxes", params: base, mcp: "list_mailboxes", ask: "Which mailboxes are failing to sign in?", scope: "mailboxes.read" };
     case "domains":
@@ -1218,29 +1329,29 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         ? { title: "One server", path: "/v1/workspaces/{ws}/sending-servers/{id}", params: { ...base, id: item }, mcp: "get_sending_server", ask: "Is this server's IP on any blocklist, and what should I do about it?", scope: "mailboxes.read" }
         : { title: "Sending servers", path: "/v1/workspaces/{ws}/sending-servers", params: base, mcp: "list_sending_servers", ask: "Are any of my sending servers' IPs blocklisted?", scope: "mailboxes.read" };
     case "lifecycle":
-      return { title: "Lifecycle email setup and sending", path: "/v1/workspaces/{ws}/email-overview", params: base, mcp: "get_email_overview", ask: "Set up Amazon SES so my app can send password resets and receipts from example.com.", scope: "emails.read" };
+      return { title: "Lifecycle email setup and sending", path: "/v1/brands/{brand}/email-overview", params: brandBase, mcp: "get_email_overview", ask: "Set up Amazon SES so my app can send password resets and receipts from example.com.", scope: "emails.read" };
     case "emails":
       return item
-        ? { title: "One email and its delivery", path: "/v1/brands/{brand}/emails/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_email", ask: "Why did this email not reach the person?", scope: "emails.read" }
-        : { title: "Sent emails", path: "/v1/brands/{brand}/emails", params: { brand: "BRAND_ID" }, query: { limit: 50 }, mcp: "list_emails", ask: "Which receipts bounced this week, and why?", scope: "emails.read" };
+        ? { title: "One email and its delivery", path: "/v1/brands/{brand}/emails/{id}", params: { brand, id: item }, mcp: "get_email", ask: "Why did this email not reach the person?", scope: "emails.read" }
+        : { title: "Sent emails", path: "/v1/brands/{brand}/emails", params: { brand }, query: { limit: 50 }, mcp: "list_emails", ask: "Which receipts bounced this week, and why?", scope: "emails.read" };
     case "templates":
       return item
-        ? { title: "One template", path: "/v1/brands/{brand}/email-templates/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_email_template", ask: "Rewrite this template to be shorter and friendlier, keeping its variables.", scope: "emails.read" }
-        : { title: "Email templates", path: "/v1/brands/{brand}/email-templates", params: { brand: "BRAND_ID" }, mcp: "list_email_templates", ask: "Write a welcome email template for new sign-ups with a first_name variable.", scope: "emails.read" };
+        ? { title: "One template", path: "/v1/brands/{brand}/email-templates/{id}", params: { brand, id: item }, mcp: "get_email_template", ask: "Rewrite this template to be shorter and friendlier, keeping its variables.", scope: "emails.read" }
+        : { title: "Email templates", path: "/v1/brands/{brand}/email-templates", params: { brand }, mcp: "list_email_templates", ask: "Write a welcome email template for new sign-ups with a first_name variable.", scope: "emails.read" };
     case "broadcasts":
-      return { title: "Email broadcasts", path: "/v1/brands/{brand}/email-broadcasts", params: { brand: "BRAND_ID" }, mcp: "list_email_broadcasts", ask: "Draft our October newsletter to everyone in the newsletter topic, using the monthly template, and tell me how many people it will reach.", scope: "emails.read" };
+      return { title: "Email broadcasts", path: "/v1/brands/{brand}/email-broadcasts", params: { brand }, mcp: "list_email_broadcasts", ask: "Draft our October newsletter to everyone in the newsletter topic, using the monthly template, and tell me how many people it will reach.", scope: "emails.read" };
     case "journeys":
       return item
-        ? { title: "One journey", path: "/v1/brands/{brand}/journeys/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_journey", ask: "How is this journey doing, and where do people drop out?", scope: "emails.read" }
-        : { title: "Journeys", path: "/v1/brands/{brand}/journeys", params: { brand: "BRAND_ID" }, mcp: "list_journeys", ask: "Build an onboarding journey: when someone signs up, send the welcome email, wait two days, and send tips unless they upgraded.", scope: "emails.read" };
+        ? { title: "One journey", path: "/v1/brands/{brand}/journeys/{id}", params: { brand, id: item }, mcp: "get_journey", ask: "How is this journey doing, and where do people drop out?", scope: "emails.read" }
+        : { title: "Journeys", path: "/v1/brands/{brand}/journeys", params: { brand }, mcp: "list_journeys", ask: "Build an onboarding journey: when someone signs up, send the welcome email, wait two days, and send tips unless they upgraded.", scope: "emails.read" };
     case "rules":
       return item
-        ? { title: "One rule", path: "/v1/brands/{brand}/rules/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_rule", ask: "What would this rule have done over the last 30 days, and which journeys start on its event?", scope: "customers.read" }
-        : { title: "Rules", path: "/v1/brands/{brand}/rules", params: { brand: "BRAND_ID" }, mcp: "list_rules", ask: "Make a rule that emits customer.stalled when someone signs up and doesn't activate within 7 days, unless they're on enterprise, and dry-run it.", scope: "customers.read" };
+        ? { title: "One rule", path: "/v1/brands/{brand}/rules/{id}", params: { brand, id: item }, mcp: "get_rule", ask: "What would this rule have done over the last 30 days, and which journeys start on its event?", scope: "customers.read" }
+        : { title: "Rules", path: "/v1/brands/{brand}/rules", params: { brand }, mcp: "list_rules", ask: "Make a rule that emits customer.stalled when someone signs up and doesn't activate within 7 days, unless they're on enterprise, and dry-run it.", scope: "customers.read" };
     case "automations":
-      return { title: "The automation map", path: "/v1/brands/{brand}/automation-map", params: { brand: "BRAND_ID" }, mcp: "get_automation_map", ask: "Walk me through how my rules and journeys fit together, and what I should fix first.", scope: "emails.read" };
+      return { title: "The automation map", path: "/v1/brands/{brand}/automation-map", params: { brand }, mcp: "get_automation_map", ask: "Walk me through how my rules and journeys fit together, and what I should fix first.", scope: "emails.read" };
     case "topics":
-      return { title: "Email topics", path: "/v1/brands/{brand}/email-topics", params: { brand: "BRAND_ID" }, mcp: "list_email_topics", ask: "Add topics for product updates and our monthly newsletter, and put my lifecycle templates in the right one.", scope: "emails.read" };
+      return { title: "Email topics", path: "/v1/brands/{brand}/email-topics", params: { brand }, mcp: "list_email_topics", ask: "Add topics for product updates and our monthly newsletter, and put my lifecycle templates in the right one.", scope: "emails.read" };
     case "providers":
       return { title: "Email providers", path: "/v1/workspaces/{ws}/email-providers", params: base, mcp: "list_email_providers", ask: "Is my email provider still in the SES sandbox, and are my sending domains verified?", scope: "emails.read" };
     case "support":
@@ -1260,9 +1371,11 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "ideal-customers":
       return { title: "Ideal customer profiles", path: "/v1/brands/{brand}/ideal-customer-profiles", params: brandBase, mcp: "list_ideal_customer_profiles", ask: "Write an ideal customer profile from our best customers and use it for the AU lead list.", scope: "profiles.read" };
     case "content":
-      return { title: "The brand's posts and pages", path: "/v1/brands/{brand}/content", params: { brand: "BRAND_ID" }, mcp: "list_content", ask: "Write a comparison page against our main competitor, in Australian English, for review.", scope: "content.read" };
+      return { title: "The brand's posts and pages", path: "/v1/brands/{brand}/content", params: { brand }, mcp: "list_content", ask: "Write a comparison page against our main competitor, in Australian English, for review.", scope: "content.read" };
     case "brand-accounts":
-      return { title: "The brand's accounts", path: "/v1/brands/{brand}/accounts", params: { brand: "BRAND_ID" }, mcp: "list_accounts", ask: "Which of our accounts need attention, and is anything waiting for a person?", scope: "accounts.read" };
+      return { title: "The brand's accounts", path: "/v1/brands/{brand}/accounts", params: { brand }, mcp: "list_accounts", ask: "Which of our accounts need attention, and is anything waiting for a person?", scope: "accounts.read" };
+    case "workspace-brands":
+      return { title: "Brands", path: "/v1/workspaces/{ws}/brands", params: base, query: { status: "all" }, mcp: "list_brands", ask: "Which brands do we market, and what belongs to each?", scope: "workspace.read" };
     case "workspace":
       return { title: "The workspace", path: "/v1/workspaces/{ws}", params: base, scope: "workspace.read" };
     case "team-activity":
@@ -1270,20 +1383,20 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "members":
       return { title: "Members", path: "/v1/workspaces/{ws}/members", params: base, scope: "members.read" };
     case "telegram":
-      return { title: "Telegram chats", path: "/v1/brands/{brand}/telegram-chats", params: { brand: "BRAND_ID" }, mcp: "list_telegram_chats", ask: "Which Telegram chats still need linking to a customer, and who are they probably?", scope: "customers.read" };
+      return { title: "Telegram chats", path: "/v1/brands/{brand}/telegram-chats", params: { brand }, mcp: "list_telegram_chats", ask: "Which Telegram chats still need linking to a customer, and who are they probably?", scope: "customers.read" };
     case "team":
       return { title: "The team directory", path: "/v1/workspaces/{ws}/staff", params: base, mcp: "list_staff", ask: "Who is leaving and still holds a company Telegram account?", scope: "members.read" };
     case "alerts":
-      return { title: "Alerts", path: "/v1/brands/{brand}/alerts", params: { brand: "BRAND_ID" }, mcp: "list_alerts", ask: "What needs me right now?", scope: "workspace.read" };
+      return { title: "Alerts", path: "/v1/brands/{brand}/alerts", params: { brand }, mcp: "list_alerts", ask: "What needs me right now?", scope: "workspace.read" };
     case "digests":
-      return { title: "Digests", path: "/v1/brands/{brand}/digests", params: { brand: "BRAND_ID" }, mcp: "preview_digest", ask: "Summarise how the brand did this week, and what needs me first.", scope: "workspace.read" };
+      return { title: "Digests", path: "/v1/brands/{brand}/digests", params: { brand }, mcp: "preview_digest", ask: "Summarise how the brand did this week, and what needs me first.", scope: "workspace.read" };
     case "connectors":
       if (item) return { title: "A supplier's mailboxes", path: "/v1/workspaces/{ws}/integrations/{id}/mailboxes", params: { ...base, id: item }, mcp: "list_supplier_mailboxes", ask: "Import every active mailbox from my supplier that isn't imported yet, and tell me how long the Google ones will take.", scope: "mailboxes.read" };
       return { title: "Connected services", path: "/v1/workspaces/{ws}/integrations", params: base, mcp: "list_integrations", ask: "Which of my connected services need attention, and how many verification credits are left?", scope: "integrations.read" };
     case "webhooks":
       return item
-        ? { title: "A webhook's deliveries", path: "/v1/brands/{brand}/webhooks/{id}/deliveries", params: { brand: "BRAND_ID", id: item }, mcp: "list_webhook_deliveries", ask: "Which deliveries to this webhook failed this week, and why?", scope: "webhooks.read" }
-        : { title: "Webhooks", path: "/v1/brands/{brand}/webhooks", params: { brand: "BRAND_ID" }, mcp: "list_webhooks", ask: "Are any of my webhooks failing?", scope: "webhooks.read" };
+        ? { title: "A webhook's deliveries", path: "/v1/brands/{brand}/webhooks/{id}/deliveries", params: { brand, id: item }, mcp: "list_webhook_deliveries", ask: "Which deliveries to this webhook failed this week, and why?", scope: "webhooks.read" }
+        : { title: "Webhooks", path: "/v1/brands/{brand}/webhooks", params: { brand }, mcp: "list_webhooks", ask: "Are any of my webhooks failing?", scope: "webhooks.read" };
     case "tokens":
       return { title: "API tokens", path: "/v1/workspaces/{ws}/api-tokens", params: base, scope: "tokens.manage" };
     case "logs":
@@ -1317,13 +1430,41 @@ export function ApiPanel({ ws, tab, item, onClose }: { ws: string; tab: Tab; ite
 
   const call = callFor(tab, ws, item);
   const origin = location.origin;
+  // A token made here is shown once, in this panel only: it lives in memory,
+  // is never stored, and goes when the page or brand changes. Existing
+  // tokens are never shown again (the server keeps only their hash).
+  const [made, setMade] = useState<{ key: string; token: string; brandName?: string }>();
+  const [making, setMaking] = useState(false);
+  const [tokenError, setTokenError] = useState("");
+  const brandName = useBrand(ws).brand?.name;
+  const brandId = call.params.brand && call.params.brand !== "BRAND_ID" ? call.params.brand : undefined;
+  const callKey = `${ws}:${brandId ?? ""}:${call.path}:${call.scope}`;
+  const token = made?.key === callKey ? made.token : undefined;
+  const canMake = /^[a-z_]+(\.[a-z_]+)+$/.test(call.scope) && !call.path.startsWith("/v1/me/") && !call.path.startsWith("/v1/instance/");
+  useEffect(() => setTokenError(""), [callKey]);
+
+  async function makeToken() {
+    setMaking(true);
+    setTokenError("");
+    // Read-only, this one scope, this brand only, 30 days: the least a
+    // pasted example needs.
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/api-tokens", {
+      params: { path: { ws } },
+      body: { name: `${call.title} (API panel)`.slice(0, 80), scopes: [call.scope as Scope], expires_in_days: 30, brand: call.path.startsWith("/v1/brands/") ? brandId ?? null : null },
+    });
+    setMaking(false);
+    if (error || !data?.token) return setTokenError(error ? errorMessage(error) : "The token wasn't returned. Try again.");
+    setMade({ key: callKey, token: data.token, brandName: call.path.startsWith("/v1/brands/") && brandId ? brandName : undefined });
+  }
+
+  const bearer = token ?? "$OUTFLARE_TOKEN";
   const qs = call.query ? new URLSearchParams(Object.entries(call.query).map(([k, v]) => [k, String(v)])).toString() : "";
   const url = call.path.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(call.params[k])) + (qs ? `?${qs}` : "");
   const tsQuery = call.query ? `, query: { ${Object.entries(call.query).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")} }` : "";
   const pathParams = Object.entries(call.params).map(([k, v]) => `${k}: "${v}"`).join(", ");
   const snippets: Record<Lang, string> = {
-    curl: `curl "${origin}${url}" \\\n  -H "Authorization: Bearer $OUTFLARE_TOKEN"`,
-    ts: `import { createClient, ok } from "@outflare/sdk";\n\nconst gtm = createClient({\n  baseUrl: "${origin}",\n  token: process.env.OUTFLARE_TOKEN,\n});\n\nconst data = ok(await gtm.GET("${call.path}", {\n  params: { path: { ${pathParams} }${tsQuery} },\n}));`,
+    curl: `curl "${origin}${url}" \\\n  -H "Authorization: Bearer ${bearer}"`,
+    ts: `import { createClient, ok } from "@outflare/sdk";\n\nconst gtm = createClient({\n  baseUrl: "${origin}",\n  token: ${token ? JSON.stringify(token) : "process.env.OUTFLARE_TOKEN"},\n});\n\nconst data = ok(await gtm.GET("${call.path}", {\n  params: { path: { ${pathParams} }${tsQuery} },\n}));`,
     mcp: call.mcp
       ? `claude mcp add --transport http outflare ${origin}/mcp\n\n# Tool: ${call.mcp}\n# Ask: "${call.ask}"`
       : "# No MCP tool for this page yet.\n# Use the REST call instead.",
@@ -1369,6 +1510,23 @@ export function ApiPanel({ ws, tab, item, onClose }: { ws: string; tab: Tab; ite
           ))}
         </Tabs>
 
+        {lang !== "mcp" && canMake && (token ? (
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-[12px] text-amber-900 dark:text-amber-200">
+            <span className="font-medium">Copy it now: this token won't be shown again.</span> It can only read ({call.scope}){made?.brandName ? `, only ${made.brandName}` : ""}, and expires in 30 days. Revoke it any time under Settings → API tokens.
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
+            <span>
+              Uses <span className="font-mono text-foreground">$OUTFLARE_TOKEN</span>. No token yet?
+            </span>
+            <button type="button" onClick={makeToken} disabled={making} className="inline-flex h-7 items-center gap-1.5 rounded-md border bg-card px-2 font-medium text-foreground shadow-xs hover:bg-accent disabled:opacity-60">
+              <Icon name="passkey" className="size-3.5" />
+              {making ? "Creating…" : "Create a token for this"}
+            </button>
+            {tokenError && <span role="alert" className="w-full text-red-600 dark:text-red-400">{tokenError}</span>}
+          </div>
+        ))}
+
         <dl className="space-y-2 text-[12px]">
           <div className="flex items-center justify-between gap-2">
             <dt className="text-muted-foreground">Workspace ID</dt>
@@ -1382,7 +1540,7 @@ export function ApiPanel({ ws, tab, item, onClose }: { ws: string; tab: Tab; ite
 
         <ul className="space-y-1 border-t pt-3 text-[12px]">
           <li><a className="text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground" href="/v1/openapi.yaml" target="_blank" rel="noreferrer">OpenAPI spec for this instance</a></li>
-          <li className="text-muted-foreground">Create a token under <span className="font-medium text-foreground">Settings → API tokens</span>.</li>
+          <li className="text-muted-foreground">Manage tokens under <span className="font-medium text-foreground">Settings → API tokens</span>.</li>
         </ul>
       </div>
     </aside>

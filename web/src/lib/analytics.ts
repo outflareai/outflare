@@ -64,7 +64,7 @@ export function cleanURL(href: string): string {
 export function identify(user: { id?: string; name?: string; email?: string }, ws?: { id: string; name: string }) {
   load().then((ph) => {
     if (!ph || !user.id) return;
-    ph.identify(user.id, { email: user.email, name: user.name });
+    ph.identify(user.id);
     if (ws) ph.group("workspace", ws.id, { name: ws.name });
   });
 }
@@ -91,6 +91,13 @@ export function page(name: string) {
 // server's; add new ones to this list (AGENTS.md, "Events").
 export type UiEvent =
   | "ui.ads_level_opened" // paid ads narrowed to one network or account, or widened (level)
+  | "ui.ads_window_changed" // Paid ads: the attribution window switched (days)
+  | "ui.ads_customers_filter_changed" // Paid ads: the customers switch changed (customers: all, new, returning)
+  | "ui.ads_setup_step_opened" // Paid ads: a set-up step's fix page opened (step, done)
+  | "ui.ads_shadow_viewed" // Paid ads: the "What the rules would have done" section opened (rows)
+  | "ui.ads_screen_opened" // Paid ads: a screen of the page opened (screen)
+  | "ui.ads_report_downloaded" // Paid ads: a report table saved as CSV (report, rows)
+  | "ui.ads_range_changed" // Paid ads: the date range changed (days, custom)
   | "ui.funnel_people_opened" // the people behind a funnel step or drop-off opened (dropped, breakdown)
   | "ui.funnel_correlation_opened" // what converters did differently asked for on a funnel
   | "ui.annotation_started" // the add-a-note form opened on a trend chart
@@ -135,6 +142,8 @@ export type UiEvent =
   | "ui.app_external_link_opened" // in the desktop app, a link that leaves Outflare opened in the browser
   | "ui.app_update_offered" // in the desktop app, the Update button appeared (version)
   | "ui.app_update_started" // in the desktop app, the person clicked Update; the app installs it and reopens (version)
+  | "ui.cookie_settings_opened" // Cookie settings in the account menu reopened the cookie banner (where the app runs the operator's own tracking tag)
+  | "ui.app_update_checked" // in the desktop app, Check for updates in the account menu (result: available, none, off; version)
   | "ui.app_update_failed" // in the desktop app, installing the update failed (error_code)
   | "ui.error_shown" // an error message was shown to the person (error_code)
   | "ui.crashed" // a script error or a page that failed to render

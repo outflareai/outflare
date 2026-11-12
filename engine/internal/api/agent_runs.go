@@ -735,7 +735,11 @@ func (s *Server) runPlaybook(w http.ResponseWriter, r *http.Request) {
 					kitInputs[ki.Name] = v
 				}
 			}
-			if _, err := applyKit(ctx, tx, a, "", kit, kitInputs, kitFromCatalog); err != nil {
+			kitBrand := ""
+			if brand != nil {
+				kitBrand = *brand
+			}
+			if _, err := applyKit(ctx, tx, a, kitBrand, kit, kitInputs, kitFromCatalog); err != nil {
 				return err
 			}
 		}

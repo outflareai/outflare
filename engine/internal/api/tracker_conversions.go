@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/affiliatenetworks"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/customers"
+	"github.com/outflareai/outflare/engine/internal/fraud"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/tracking"
 )
@@ -311,6 +313,8 @@ type postbackClick struct {
 	key, brand, country            string
 	campaign, link, session, offer *string
 	at                             time.Time
+	// fraud are the click's fraud reasons, which its conversions inherit.
+	fraud []string
 }
 
 // findPostbackClick finds the click a postback names, writing this
@@ -320,9 +324,9 @@ func (s *Server) findPostbackClick(ctx context.Context, ws, key string) (postbac
 	var c postbackClick
 	lookup := func() error {
 		return s.pool.QueryRow(ctx, `SELECT k.id, k.click_key, COALESCE(k.brand_id::text, ''), l.campaign_id::text, k.link_id::text, k.session_id::text, k.clicked_at,
-				k.offer_id::text, k.country
+				k.offer_id::text, k.country, k.fraud_reasons
 			FROM tracking_link_clicks k LEFT JOIN tracking_links l ON l.id = k.link_id
-			WHERE k.workspace_id = $1 AND k.click_key = $2`, ws, key).Scan(&c.id, &c.key, &c.brand, &c.campaign, &c.link, &c.session, &c.at, &c.offer, &c.country)
+			WHERE k.workspace_id = $1 AND k.click_key = $2`, ws, key).Scan(&c.id, &c.key, &c.brand, &c.campaign, &c.link, &c.session, &c.at, &c.offer, &c.country, &c.fraud)
 	}
 	err := lookup()
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -362,6 +366,9 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 		txid = click.key + ":" + in.typ
 	}
 	var offerTotal int64 = -1
+	// First-party fraud signals (B7a): the click's, and a conversion too
+	// soon after it. Flagged, never refused.
+	reasons := fraud.ConversionReasons(click.fraud, click.at, in.at)
 	params, err := json.Marshal(in.params)
 	if err != nil {
 		return res, err
@@ -414,10 +421,11 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 			}
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO tracker_conversions (workspace_id, brand_id, source_id, click_id, click_key, campaign_id, link_id, clicked_at,
-				transaction_id, type, status, payout_micros, currency, params, record_id, converted_at, offer_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, (SELECT id FROM tracker_offers WHERE id = $17::uuid)) RETURNING id::text`,
+				transaction_id, type, status, payout_micros, currency, params, record_id, converted_at, offer_id, fraud_reasons)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, (SELECT id FROM tracker_offers WHERE id = $17::uuid), $18)
+			RETURNING id::text`,
 			src.ws, src.brand, src.id, click.id, click.key, click.campaign, click.link, click.at, txid, in.typ, in.status, in.payoutMicros, in.currency,
-			params, rec, in.at, click.offer).Scan(&res.ConversionID); err != nil {
+			params, rec, in.at, click.offer, reasons).Scan(&res.ConversionID); err != nil {
 			return err
 		}
 		res.Outcome = "accepted"
@@ -453,6 +461,9 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 			map[string]any{"source_id": src.id, "campaign_id": click.campaign, "offer_id": click.offer, "type": in.typ, "status": in.status,
 				"person": rec != nil}, nil, hook)
 	})
+	if err == nil && res.Outcome == "accepted" && slices.Contains(reasons, fraud.FastConversion) {
+		metrics.TrackerFraudFlag("conversion", fraud.FastConversion)
+	}
 	if err == nil && offerTotal >= 0 {
 		s.caps.seed(conversionCapKey(*click.offer), capDay(in.at), offerTotal)
 	}
@@ -464,17 +475,18 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 func conversionWebhook(ctx context.Context, tx pgx.Tx, id string) (map[string]any, error) {
 	var source, key, txid, typ, status, currency string
 	var campaign, link, rec, offer *string
+	var reasons []string
 	var micros int64
 	var postbacks int
 	var at, clicked time.Time
 	if err := tx.QueryRow(ctx, `SELECT source_id::text, click_key, campaign_id::text, link_id::text, transaction_id, type, status, payout_micros, currency,
-			record_id::text, postbacks, converted_at, clicked_at, offer_id::text FROM tracker_conversions WHERE id = $1`, id).
-		Scan(&source, &key, &campaign, &link, &txid, &typ, &status, &micros, &currency, &rec, &postbacks, &at, &clicked, &offer); err != nil {
+			record_id::text, postbacks, converted_at, clicked_at, offer_id::text, fraud_reasons FROM tracker_conversions WHERE id = $1`, id).
+		Scan(&source, &key, &campaign, &link, &txid, &typ, &status, &micros, &currency, &rec, &postbacks, &at, &clicked, &offer, &reasons); err != nil {
 		return nil, err
 	}
 	return map[string]any{"conversion_id": id, "source_id": source, "click_key": key, "campaign_id": campaign, "link_id": link,
 		"transaction_id": txid, "type": typ, "status": status, "payout": strconv.FormatFloat(float64(micros)/1e6, 'f', -1, 64), "currency": currency,
-		"record_id": rec, "postbacks": postbacks, "converted_at": at, "clicked_at": clicked, "offer_id": offer}, nil
+		"record_id": rec, "postbacks": postbacks, "converted_at": at, "clicked_at": clicked, "offer_id": offer, "fraud_reasons": reasons}, nil
 }
 
 // Postback sources.
@@ -812,12 +824,15 @@ func (s *Server) rotatePostbackSource(w http.ResponseWriter, r *http.Request) {
 // The ledger.
 
 type trackerConversionView struct {
-	ID            string            `json:"id"`
-	SourceID      string            `json:"source_id"`
-	ClickKey      string            `json:"click_key"`
-	CampaignID    *string           `json:"campaign_id"`
-	LinkID        *string           `json:"link_id"`
-	OfferID       *string           `json:"offer_id"`
+	ID         string  `json:"id"`
+	SourceID   string  `json:"source_id"`
+	ClickKey   string  `json:"click_key"`
+	CampaignID *string `json:"campaign_id"`
+	LinkID     *string `json:"link_id"`
+	OfferID    *string `json:"offer_id"`
+	// FraudReasons are why it is suspect (its click's, and fast_conversion);
+	// empty when it isn't.
+	FraudReasons  []string          `json:"fraud_reasons"`
 	ClickedAt     time.Time         `json:"clicked_at"`
 	TransactionID string            `json:"transaction_id"`
 	Type          string            `json:"type"`
@@ -835,8 +850,11 @@ type trackerConversionView struct {
 func (s *Server) listTrackerConversions(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
-	source, campaign, status, before, offer := q.Get("source"), q.Get("campaign"), q.Get("status"), q.Get("before"), q.Get("offer")
+	source, campaign, status, before, offer, suspect := q.Get("source"), q.Get("campaign"), q.Get("status"), q.Get("before"), q.Get("offer"), q.Get("suspect")
 	switch {
+	case suspect != "" && suspect != "true" && suspect != "false":
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "suspect is true (only flagged conversions) or false (only unflagged ones)")
+		return
 	case offer != "" && !validUUID(offer):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "offer is an offer's id")
 		return
@@ -859,12 +877,13 @@ func (s *Server) listTrackerConversions(w http.ResponseWriter, r *http.Request) 
 		}
 		cursor = &t
 	}
-	rows, err := s.pool.Query(r.Context(), `SELECT id::text, source_id::text, click_key, campaign_id::text, link_id::text, offer_id::text, clicked_at, transaction_id,
-			type, status, payout_micros, currency, params, record_id::text, postbacks, converted_at, updated_at
+	rows, err := s.pool.Query(r.Context(), `SELECT id::text, source_id::text, click_key, campaign_id::text, link_id::text, offer_id::text, fraud_reasons, clicked_at,
+			transaction_id, type, status, payout_micros, currency, params, record_id::text, postbacks, converted_at, updated_at
 		FROM tracker_conversions WHERE workspace_id = $1 AND brand_id = $2
 		  AND ($3 = '' OR source_id = $3::uuid) AND ($4 = '' OR campaign_id = $4::uuid) AND ($5 = '' OR status = $5)
 		  AND ($6::timestamptz IS NULL OR converted_at < $6) AND ($7 = '' OR offer_id = $7::uuid)
-		ORDER BY converted_at DESC LIMIT 100`, a.WorkspaceID, a.Brand, source, campaign, status, cursor, offer)
+		  AND ($8 = '' OR (cardinality(fraud_reasons) > 0) = ($8 = 'true'))
+		ORDER BY converted_at DESC LIMIT 100`, a.WorkspaceID, a.Brand, source, campaign, status, cursor, offer, suspect)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -873,7 +892,7 @@ func (s *Server) listTrackerConversions(w http.ResponseWriter, r *http.Request) 
 		var v trackerConversionView
 		var micros int64
 		var params []byte
-		err := row.Scan(&v.ID, &v.SourceID, &v.ClickKey, &v.CampaignID, &v.LinkID, &v.OfferID, &v.ClickedAt, &v.TransactionID, &v.Type, &v.Status,
+		err := row.Scan(&v.ID, &v.SourceID, &v.ClickKey, &v.CampaignID, &v.LinkID, &v.OfferID, &v.FraudReasons, &v.ClickedAt, &v.TransactionID, &v.Type, &v.Status,
 			&micros, &v.Currency, &params, &v.RecordID, &v.Postbacks, &v.ConvertedAt, &v.UpdatedAt)
 		v.Payout = strconv.FormatFloat(float64(micros)/1e6, 'f', -1, 64)
 		if err == nil {

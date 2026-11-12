@@ -282,7 +282,7 @@ func Render(subject, htmlBody, text string, defs []Variable, vars map[string]any
 }
 
 // Variables Outflare fills itself.
-var builtins = map[string]bool{"unsubscribe_url": true, "email_id": true}
+var builtins = map[string]bool{"unsubscribe_url": true, "email_id": true, "brand_address": true, "brand_legal_name": true}
 
 // Used returns every variable name the parts use, sorted, so a new
 // template's variables can be listed for it.

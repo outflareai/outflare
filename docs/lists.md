@@ -40,12 +40,12 @@ Each run reports what it found, added and enriched, what it left out and why (`a
 
 ```sh
 # Preview a search (free)
-curl -X POST "localhost:8080/v1/workspaces/$WS/lead-lists/preview" \
+curl -X POST "localhost:8080/v1/brands/$BRAND/lead-lists/preview" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
   -d '{"search_integration_id": "'$APOLLO'", "filters": {"titles": ["Head of Growth"], "locations": ["Australia"], "employee_ranges": ["51-200"]}}'
 
 # Create the list and build it
-curl -X POST "localhost:8080/v1/workspaces/$WS/lead-lists" \
+curl -X POST "localhost:8080/v1/brands/$BRAND/lead-lists" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
   -d '{"name": "AU growth leaders", "profile_id": "'$PROFILE'", "search_integration_id": "'$APOLLO'",
        "filters": {"titles": ["Head of Growth"], "locations": ["Australia"], "employee_ranges": ["51-200"]},
@@ -53,11 +53,11 @@ curl -X POST "localhost:8080/v1/workspaces/$WS/lead-lists" \
        "min_score": 40, "refresh_every_days": 7, "build": true}'
 
 # Follow the run, then read the leads, best fit first
-curl "localhost:8080/v1/workspaces/$WS/list-runs/$RUN" -H "Authorization: Bearer $OUTFLARE_TOKEN"
-curl "localhost:8080/v1/workspaces/$WS/lead-lists/$LIST/members" -H "Authorization: Bearer $OUTFLARE_TOKEN"
+curl "localhost:8080/v1/brands/$BRAND/list-runs/$RUN" -H "Authorization: Bearer $OUTFLARE_TOKEN"
+curl "localhost:8080/v1/brands/$BRAND/lead-lists/$LIST/members" -H "Authorization: Bearer $OUTFLARE_TOKEN"
 
 # Refresh now, or fill in missing fields on the leads already there
-curl -X POST "localhost:8080/v1/workspaces/$WS/lead-lists/$LIST/runs" \
+curl -X POST "localhost:8080/v1/brands/$BRAND/lead-lists/$LIST/runs" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" -d '{"kind": "refresh"}'
 ```
 
@@ -70,6 +70,10 @@ Every lead in a searched list gets a 0 to 100 fit score, with the reasons. It is
 ## Where a lead came from
 
 `GET /v1/brands/{brand}/leads/{id}/sources` shows each provider that supplied or filled in a lead, its id there and when. Useful for data requests and for knowing which provider's data replies best.
+
+## Importing a CSV into a list
+
+On a manual list's page, **Import leads** opens the CSV import right there, and every lead in the file goes into that list. On **Leads**, the import's **Add them to a list** menu offers the brand's manual lists, **New list…** to name a new one, or **No list**; it starts on the list the table is filtered to. Lists built from a search fill themselves, so they aren't offered.
 
 ## Clay, spreadsheets and other tools
 
@@ -134,18 +138,18 @@ Lists fill straight away when saved, and refresh on their own every 15 minutes, 
 
 ```sh
 # How many people would these rules pick? Nothing is saved.
-curl -X POST "localhost:8080/v1/workspaces/$WS/smart-lists/preview" \
+curl -X POST "localhost:8080/v1/brands/$BRAND/smart-lists/preview" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
   -d '{"rules": [{"attribute": "billing_plan", "op": "eq", "value": "pro"}, {"event": "payment_succeeded", "op": "exists", "within_days": 90}]}'
 
 # Save it; it fills in a few seconds
-curl -X POST "localhost:8080/v1/workspaces/$WS/smart-lists" \
+curl -X POST "localhost:8080/v1/brands/$BRAND/smart-lists" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
   -d '{"name": "Paying customers", "brand_id": "northpeak", "rules": [{"attribute": "billing_plan", "op": "eq", "value": "pro"},
        {"event": "payment_succeeded", "op": "exists", "within_days": 90}]}'
 
 # Who is in it now, newest to join first
-curl "localhost:8080/v1/workspaces/$WS/smart-lists/$LIST/members" -H "Authorization: Bearer $OUTFLARE_TOKEN"
+curl "localhost:8080/v1/brands/$BRAND/smart-lists/$LIST/members" -H "Authorization: Bearer $OUTFLARE_TOKEN"
 ```
 
 Reading smart lists needs `customers.read`; making, changing, refreshing and deleting them needs `customers.manage`. A token or member limited to some brands sees lists for its brands and those for every brand, but only its brands' people in them, and can only change its brands' lists. Deleting a list never deletes the people.

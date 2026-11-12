@@ -641,7 +641,7 @@ func (s *Server) listLeadListMembers(w http.ResponseWriter, r *http.Request) {
 		var reasons []byte
 		l := &m.leadView
 		if err := rows.Scan(&l.ID, &l.Email, &l.Domain, &l.FirstName, &l.LastName, &l.Company, &l.Title, &l.Phone,
-			&l.LinkedInURL, &l.Website, &l.Custom, &l.Source, &l.Suppressed, &l.Verification, &l.ListIDs, &l.CreatedAt, &l.UpdatedAt, &l.RecordID, &l.BrandID,
+			&l.LinkedInURL, &l.Website, &l.Custom, &l.Source, &l.Suppressed, &l.Suppression, &l.Verification, &l.ListIDs, &l.CreatedAt, &l.UpdatedAt, &l.RecordID, &l.BrandID,
 			&m.Score, &reasons, &m.AddedAt, &m.RunID); err != nil {
 			rows.Close()
 			s.internal(w, r, err)

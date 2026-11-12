@@ -42,6 +42,8 @@
 // outflare.onConsent(fn) runs fn(choices) now and on every change. Each
 // choice is kept in Outflare as the visitor's consent, and joins their
 // record when they sign up. data-banner="off" keeps the banner off.
+// data-reopen="off" leaves out the corner button that reopens it, for a
+// page with its own "Cookie settings" link.
 //
 // Page speed: each page load reports how long it took to load, respond to
 // clicks and settle (Core Web Vitals), with no visitor id, for Page speed
@@ -83,7 +85,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "16";
+  var VERSION = "17";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -206,7 +208,7 @@
     return c;
   }
   var choice = readChoice(), gpc = !!navigator.globalPrivacyControl, lang = (navigator.language || "en").toLowerCase();
-  var bannerOff = script.getAttribute("data-banner") === "off", cfg = null, CFG = "of_cb";
+  var bannerOff = script.getAttribute("data-banner") === "off", reopenOff = script.getAttribute("data-reopen") === "off", cfg = null, CFG = "of_cb";
   try {
     var cached = JSON.parse(localStorage.getItem(CFG) || "null");
     if (cached && cached.key === key && cached.lang === lang && cached.cfg) cfg = cached;
@@ -314,6 +316,31 @@
     }
     return any;
   }
+  var clickKey = "";
+  // directKey is this tab's click key for a direct-mode campaign: 16
+  // random letters and digits, as a redirect's.
+  function directKey(ofc) {
+    var name = "of_dclk_" + ofc, v = "";
+    try { v = sessionStorage.getItem(name) || ""; } catch (e) {}
+    if (/^[a-z0-9]{16}$/.test(v)) return v;
+    var c = w.crypto, abc = "abcdefghijklmnopqrstuvwxyz0123456789", out = "";
+    if (!c || !c.getRandomValues) return "";
+    var a = new Uint8Array(48);
+    c.getRandomValues(a);
+    for (var i = 0; i < a.length && out.length < 16; i++) if (a[i] < 252) out += abc.charAt(a[i] % 36);
+    if (out.length < 16) return "";
+    try { sessionStorage.setItem(name, out); } catch (e) {}
+    return out;
+  }
+  // fillClickKey puts the click key in the page's links that ask for it
+  // with {ofclk}, such as an offer's sub id.
+  function fillClickKey() {
+    if (!clickKey) return;
+    var links = d.querySelectorAll('a[href*="{ofclk}"], a[href*="%7Bofclk%7D"], a[href*="%7bofclk%7d"]');
+    for (var i = 0; i < links.length; i++) {
+      links[i].setAttribute("href", links[i].getAttribute("href").replace(/\{ofclk\}|%7Bofclk%7D/gi, clickKey));
+    }
+  }
   function landing(q) {
     var p = {}, ids = {}, ad = {}, any = cookieIDs(ids), anyAd = false;
     clickIDs.forEach(function (k) {
@@ -332,6 +359,14 @@
     if (q.get("ofc")) p.ofc = q.get("ofc");
     // A redirect link's click key, so the visit can claim the click.
     if (/^[a-z0-9]{16}$/.test(q.get("ofclk") || "")) p.ofclk = q.get("ofclk");
+    // Direct mode: an ad straight to this page with a tracker campaign's
+    // ofc and no click key gets one named here, kept for this tab's visit,
+    // so the visit records the click and the page's links can carry it.
+    else if (p.ofc) {
+      var dk = directKey(p.ofc);
+      if (dk) { p.ofclk = dk; p.direct = true; }
+    }
+    if (p.ofclk) clickKey = p.ofclk;
     var ref = q.get("ref") || q.get("via");
     if (ref) p.ref = ref;
     return p;
@@ -430,6 +465,7 @@
   }
   function page(name, properties) {
     var q = new URLSearchParams(location.search), props = landing(q);
+    if (clickKey) whenLoaded(fillClickKey);
     for (var k in properties || {}) props[k] = properties[k];
     if (visitToken) { props.ofvisit = visitToken; visitToken = ""; }
     if (flagsWanted && lastURL && lastURL !== location.href) loadFlags();
@@ -981,7 +1017,7 @@
   }
   function hideBanner() { if (host) { host.parentNode && host.parentNode.removeChild(host); host = root = null; } }
   function showReopen() {
-    if (!cfg.cfg.reopen_button) return hideBanner();
+    if (!cfg.cfg.reopen_button || reopenOff) return hideBanner();
     mount('<button type="button" class="of-cb-reopen" data-of-consent="settings" aria-label="' + esc(cfg.cfg.texts.settings) + '" title="' + esc(cfg.cfg.texts.settings) +
       '"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/><circle cx="8.5" cy="8.5" r="1"/><circle cx="16" cy="15.5" r="1"/><circle cx="11" cy="16" r="1"/></svg></button>');
   }
@@ -1111,6 +1147,10 @@
     // The visitor's id, to send with identify from your server when they
     // sign up or sign in, so their earlier visits join their record.
     anonymousId: function () { return anon; },
+    // The tracker click id of this visit (a redirect link's ofclk, or the
+    // one named for a direct-mode ad), "" without one: pass it to an
+    // offer as its sub id. Links with {ofclk} in their address get it.
+    clickId: function () { return clickKey; },
     // The visitor signed up with this email: the partner whose link they
     // came from gets the lead at once. For sites whose backend reports
     // nothing; sales still come from your server or billing. Resolves to

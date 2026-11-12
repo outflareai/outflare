@@ -327,6 +327,17 @@ Each PostHog project's conversions sync is `page_conversions.synced`, with
 `error` with `error_code` `connector_auth`, `connector_quota`,
 `connector_invalid` or `connector_unavailable`, and the error is logged.
 
+Each PostHog project's organic conversions sync is `organic_conversions.synced`,
+with `integration_id`, `days`, `rows` and `backfilled`. It stores first-touch
+Organic Search signups (`user_signed_up`) and payments: `payment_succeeded` when
+it exists, and a paid `service_purchased` (not a trial, not a wallet top-up)
+only when no `payment_succeeded` has the same person, calendar day and amount.
+The dashboard and `GET .../seo-sites/{site}/organic-conversions` read what was
+stored, then map each landing page to the brand's current search groups.
+Query views `seo_organic_conversions_by_page` and
+`seo_organic_conversions_by_cluster` show the same rows. Search groups can
+overlap, so cluster totals must not be added together.
+
 A check after a rank check or a conversions sync is
 `seo_regressions.checked`, with `trigger` (`rank_check` or `conversions`),
 `sites`, `found`, `resolved`, `fixes_new`, `fixes_reopened` and

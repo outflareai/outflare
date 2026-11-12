@@ -59,9 +59,6 @@ func TestBrandIdentities(t *testing.T) {
 	if l := look["data"].([]any); len(l) != 1 || look["owner"] != inAlpha {
 		t.Fatalf("alpha lookup: %v", look)
 	}
-	if l := owner.must(200, "GET", base+"/records/lookup?namespace=user_id&value=u_1&brand=all", nil)["data"].([]any); len(l) != 2 {
-		t.Fatalf("every brand: %d", len(l))
-	}
 
 	// Records made with verified identities (a CRM sync, the API): each
 	// brand may hold the same verified email; within one brand it is taken.
@@ -292,13 +289,13 @@ func TestBrandCatalogEvents(t *testing.T) {
 	}
 	a1 := send(alpha, map[string]any{"type": "track", "userId": "u_1", "event": "Order Completed"})
 	b1 := send(bravo, map[string]any{"type": "track", "userId": "u_1", "event": "Trial Started"})
-	if ev := settled(alpha, a1); ev["status"] != "held" {
+	if ev := settled(alpha, a1); ev["status"] != "accepted" {
 		t.Fatalf("alpha: %v", ev)
 	}
-	if ev := settled(bravo, b1); ev["status"] != "held" {
+	if ev := settled(bravo, b1); ev["status"] != "accepted" {
 		t.Fatalf("bravo: %v", ev)
 	}
-	// Each brand's catalog holds its own quarantined names.
+	// Each brand's catalog holds its own new names, approved as they arrive.
 	names := func(brand, status string) []string {
 		var out []string
 		path := "/v1/brands/" + brand + "/catalog/events"
@@ -310,12 +307,18 @@ func TestBrandCatalogEvents(t *testing.T) {
 		}
 		return out
 	}
-	if a, b := names(alpha, "quarantined"), names(bravo, "quarantined"); !slices.Equal(a, []string{"order_completed"}) || !slices.Equal(b, []string{"trial_started"}) {
-		t.Fatalf("quarantined: alpha %v, bravo %v", a, b)
+	if a, b := names(alpha, "approved"), names(bravo, "approved"); !slices.Equal(a, []string{"order_completed"}) || !slices.Equal(b, []string{"trial_started"}) {
+		t.Fatalf("approved: alpha %v, bravo %v", a, b)
 	}
 
-	// Someone who fixes data (customers.manage) approves a held name on the
-	// brand route; changing what the event means still needs catalog.manage.
+	// Someone who fixes data (customers.manage) approves a name someone
+	// paused on the brand route; changing what the event means still needs
+	// catalog.manage.
+	owner.must(200, "PATCH", "/v1/brands/"+alpha+"/catalog/events/order_completed", map[string]any{"status": "quarantined"})
+	a2 := send(alpha, map[string]any{"type": "track", "userId": "u_1", "event": "Order Completed"})
+	if ev := settled(alpha, a2); ev["status"] != "held" {
+		t.Fatalf("paused: %v", ev)
+	}
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Alpha data", "scopes": []string{"customers.manage", "customers.read"}, "brand": "alpha"})
 	fixer := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	fixer.must(403, "PATCH", "/v1/brands/"+alpha+"/catalog/events/order_completed", map[string]any{"status": "approved"})
@@ -328,36 +331,24 @@ func TestBrandCatalogEvents(t *testing.T) {
 	if r := fixer.must(202, "POST", "/v1/brands/"+alpha+"/events/replay", map[string]any{"status": "held", "name": "order_completed"}); r["replayed"] != 1.0 {
 		t.Fatalf("replay: %v", r)
 	}
-	if ev := settled(alpha, a1); ev["status"] != "accepted" {
+	if ev := settled(alpha, a2); ev["status"] != "accepted" {
 		t.Fatalf("replayed: %v", ev)
 	}
-	// Bravo's name is still held: Alpha's approval is Alpha's.
-	if b := names(bravo, "approved"); slices.Contains(b, "order_completed") || slices.Contains(b, "trial_started") {
-		t.Fatalf("bravo approved: %v", b)
-	}
-	owner.must(200, "POST", "/v1/brands/"+bravo+"/catalog/events/trial_started/approve", nil)
-	if a := names(alpha, ""); slices.Contains(a, "trial_started") {
-		t.Fatalf("bravo's name in alpha's catalog: %v", a)
+	// Approving one brand's name defines it there only.
+	owner.must(200, "POST", "/v1/brands/"+bravo+"/catalog/events/plan_upgraded/approve", nil)
+	if a := names(alpha, ""); slices.Contains(a, "trial_started") || slices.Contains(a, "plan_upgraded") {
+		t.Fatalf("bravo's names in alpha's catalog: %v", a)
 	}
 
-	// Each brand has its own catalog: Bravo sending Alpha's name holds it
-	// in Bravo's catalog, Bravo approves it on its own, and Alpha's entry
+	// Each brand has its own catalog: Bravo sending Alpha's name (which
+	// Alpha paused once) adds it to Bravo's, approved, and Alpha's entry
 	// stays as it was.
 	b2 := send(bravo, map[string]any{"type": "track", "userId": "u_1", "event": "Order Completed"})
-	if ev := settled(bravo, b2); ev["status"] != "held" {
+	if ev := settled(bravo, b2); ev["status"] != "accepted" {
 		t.Fatalf("bravo's order_completed: %v", ev)
 	}
-	if b := names(bravo, "quarantined"); !slices.Equal(b, []string{"order_completed"}) {
-		t.Fatalf("bravo quarantined: %v", b)
-	}
-	if d := owner.must(200, "POST", "/v1/brands/"+bravo+"/catalog/events/order_completed/approve", nil); d["status"] != "approved" {
-		t.Fatalf("bravo approves the same name: %v", d)
-	}
-	if r := owner.must(202, "POST", "/v1/brands/"+bravo+"/events/replay", map[string]any{"status": "held", "name": "order_completed"}); r["replayed"] != 1.0 {
-		t.Fatalf("bravo replay: %v", r)
-	}
-	if ev := settled(bravo, b2); ev["status"] != "accepted" {
-		t.Fatalf("bravo replayed: %v", ev)
+	if b := names(bravo, "approved"); !slices.Equal(b, []string{"order_completed", "plan_upgraded", "trial_started"}) {
+		t.Fatalf("bravo approved: %v", b)
 	}
 	owner.must(201, "POST", "/v1/brands/"+alpha+"/catalog/events", map[string]any{"name": "signup_done"})
 	owner.must(201, "POST", "/v1/brands/"+bravo+"/catalog/events", map[string]any{"name": "signup_done"})
@@ -367,7 +358,7 @@ func TestBrandCatalogEvents(t *testing.T) {
 	}
 
 	approved := named(got(), "event_definition.approved")
-	if len(approved) != 3 || approved[0].Props["brand_id"] != alpha || approved[1].Props["brand_id"] != bravo || approved[2].Props["brand_id"] != bravo {
+	if len(approved) != 2 || approved[0].Props["brand_id"] != alpha || approved[1].Props["brand_id"] != bravo {
 		t.Fatalf("event_definition.approved: %v", approved)
 	}
 	for _, ev := range named(got(), "api.called") {

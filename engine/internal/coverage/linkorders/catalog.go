@@ -91,8 +91,8 @@ func UpsertDonor(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID,
 	if source == "" {
 		source = SourceManual
 	}
-	if source != SourceManual && source != SourceCSV {
-		return nil, false, fmt.Errorf("%w: source must be manual or csv", ErrInvalid)
+	if source != SourceManual && source != SourceCSV && source != SourceCompetitorGap {
+		return nil, false, fmt.Errorf("%w: source must be manual, csv, or competitor_gap", ErrInvalid)
 	}
 
 	var existingID uuid.UUID

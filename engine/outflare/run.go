@@ -81,6 +81,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/oauth"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
 	"github.com/outflareai/outflare/engine/internal/ownkeys"
+	"github.com/outflareai/outflare/engine/internal/paidads"
 	"github.com/outflareai/outflare/engine/internal/pipeline"
 	"github.com/outflareai/outflare/engine/internal/platforms"
 	"github.com/outflareai/outflare/engine/internal/ranks"
@@ -311,7 +312,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	rankChecks.Register(queue)
 	adSync := &adsync.Syncer{Pool: pool, Store: integrations, Log: log}
 	adSync.Register(queue)
-	(&adsuggest.Runner{Pool: pool, Log: log}).Register(queue)
+	(&adsuggest.Runner{Pool: pool, Store: integrations, Log: log}).Register(queue)
 	contentPublish := &cmspublish.Publisher{Pool: pool, Store: integrations, Log: log}
 	contentPublish.Register(queue)
 	// Browser tasks run only where there is a browser: a browser-role
@@ -430,6 +431,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		log.Info("extension loaded", "name", ext.Name())
 	}
 	send.Quota = host.quota
+	// The one decision point for a paid ads change made without a person
+	// (paidads.AutoApprove): the rules' savings (adsuggest), the protective
+	// overspend pause (adsync) and an agent's approval (the API, through
+	// Options.AdAutoApprove below) all ask the extension's hook. Without
+	// one, every change waits for a person.
+	paidads.SetAutoApprove(host.adAutoApprove)
 	// The hosted MCP server, when the build ships one (the Docker image does).
 	var mcpHost *mcphost.Host
 	var mcpUpstream *api.MCPUpstream
@@ -698,6 +705,13 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			apiServer.RunTransactionRates(ctx, time.Hour)
 		}()
+		// Brands with an ad account have their website read again every
+		// day for the knowledge sheet ads are written from.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunBrandKnowledgeRefresh(ctx, time.Hour)
+		}()
 		// Running A/B tests' checks: alerts when one is ready, its split
 		// breaks or a guardrail is hurt.
 		wg.Add(1)
@@ -716,6 +730,13 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			(&attribution.Runner{Pool: pool, Log: log}).Run(ctx, time.Minute)
+		}()
+		// The paid ads ledger: sign-ups, payments and refunds tied to the
+		// ad click that brought them (plans/paid-ads).
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			(&paidads.Ledger{Pool: pool, Log: log}).Run(ctx, time.Minute)
 		}()
 		// Meetings on people's timelines, as customer events.
 		wg.Add(1)

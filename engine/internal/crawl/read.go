@@ -44,6 +44,8 @@ type Read struct {
 	Emails []string
 	// Text is the start of its visible text, for the AI page reader.
 	Text string
+	// Look is the logo and colour the page offers.
+	Look PageLook
 }
 
 // readText is how much of a page's text a read keeps.
@@ -157,6 +159,7 @@ func ReadPage(ctx context.Context, f Fetcher, wait func(context.Context, time.Du
 			}
 			text := strings.TrimSpace(spaces.ReplaceAllString(tags.ReplaceAllString(string(resp.Body), " "), " "))
 			read.Text = clip(text, readText)
+			read.Look = ReadLook(cur, resp.Body)
 		}
 		return read, nil
 	}

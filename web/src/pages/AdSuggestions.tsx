@@ -11,7 +11,7 @@ import { pickedBrandId } from "@/lib/brand";
 // Suggestions at the level the page shows: open ones wait for a person,
 // approved ones are measured over a window and then judged.
 
-const kindWord = { budget_up: "Raise budget", budget_down: "Lower budget", pause: "Pause", resume: "Resume", keyword_add: "Add keyword", negative_add: "Add negative keyword", keyword_split: "Own ad group", bidding_target: "Bid to a target" } as const;
+const kindWord = { budget_up: "Raise budget", budget_down: "Lower budget", pause: "Pause", resume: "Resume", keyword_add: "Add keyword", negative_add: "Add negative keyword", keyword_split: "Own ad group", bidding_target: "Bid to a target" } as Record<string, string>;
 const verdictWord = { worked: "Worked", did_not_work: "Didn't work", not_sure: "Not sure", "": "" } as const;
 const verdictTone = { worked: "green", did_not_work: "red", not_sure: "grey", "": "grey" } as const;
 
@@ -20,7 +20,7 @@ function Change({ s }: { s: AdSuggestion }) {
   const after = typeof s.proposed.daily_budget_micros === "number" ? s.proposed.daily_budget_micros : null;
   return (
     <span>
-      {kindWord[s.kind]}
+      {kindWord[s.kind] ?? s.kind.replace(/^alert\./, "Alert: ").replaceAll("_", " ")}
       {typeof s.proposed.keyword === "string" && <> <span className="font-mono">[{s.proposed.keyword}]</span></>}
       {after !== null && <> {before !== null && <>{money(before, s.currency)} → </>}{money(after, s.currency)}</>}
     </span>
@@ -37,7 +37,7 @@ function Campaign({ s }: { s: AdSuggestion }) {
 }
 
 // What the platform itself recommends for one account, read live.
-function Recommendations({ ws, account }: { ws: string; account: string }) {
+export function Recommendations({ ws, account }: { ws: string; account: string }) {
   const [rows, setRows] = useState<AdRecommendation[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {

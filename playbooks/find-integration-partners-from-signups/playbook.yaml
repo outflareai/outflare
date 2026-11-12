@@ -40,7 +40,7 @@ inputs:
     example: the last 7 days
 steps:
   - say: Read the brand context and confirm the sign-up event and available customer data.
-    tools: [getBrandContext, listEventDefinitions]
+    tools: [getBrandContext, listBrandEventDefinitions]
   - say: Read sign-up events in the requested window and resolve their existing people and companies; deduplicate by record ID.
     tools: [listBrandCustomerEvents, getBrandRecord]
   - say: Research relevant public business websites and profiles linked to those records; cite source URLs and dates, and record unresolved identity matches as unknown.

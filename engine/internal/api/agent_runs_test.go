@@ -156,13 +156,15 @@ func TestAgentRunsPlaybook(t *testing.T) {
 	if len(grants) != 1 || grants[0].(map[string]any)["total_spend_cents"] != 1500.0 {
 		t.Fatalf("automation run grants: %v", grants)
 	}
+	// The automation's run is its brand's, on the brand's routes.
+	rb := "/v1/brands/" + fired["brand_id"].(string)
 	// Another agent on the action layer can't manage or instruct a run.
 	other, _ := gatedAgent(t, owner, base, "Other agent", "missions.read", "missions.run")
-	other.must(403, "POST", base+"/agent-runs/"+fired["id"].(string)+"/stop", nil)
-	other.must(403, "POST", base+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "Stop everything"})
+	other.must(403, "POST", rb+"/agent-runs/"+fired["id"].(string)+"/stop", nil)
+	other.must(403, "POST", rb+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "Stop everything"})
 	// A person's own app on a plain token instructs like a person.
 	app := agentToken(t, owner, base, "App", "missions.read", "missions.run")
-	app.must(201, "POST", base+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "Only fintech leads."})
+	app.must(201, "POST", rb+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "Only fintech leads."})
 	// The agents scopes are the runs' own: reading lists and reads them,
 	// running starts one and writes to it; the mission scopes above stand
 	// for them while missions retire.
@@ -170,10 +172,10 @@ func TestAgentRunsPlaybook(t *testing.T) {
 	reader.must(200, "GET", base+"/agent-runs", nil)
 	reader.must(200, "GET", base+"/playbooks/"+pb, nil)
 	reader.must(403, "POST", base+"/playbooks/"+pb+"/agent-runs", map[string]any{"inputs": inputs})
-	reader.must(403, "POST", base+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "x"})
+	reader.must(403, "POST", rb+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "x"})
 	runner := agentToken(t, owner, base, "Runner", "agents.run")
-	runner.must(200, "GET", base+"/agent-runs/"+fired["id"].(string), nil)
-	runner.must(201, "POST", base+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "Only fintech leads."})
+	runner.must(200, "GET", rb+"/agent-runs/"+fired["id"].(string), nil)
+	runner.must(201, "POST", rb+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "Only fintech leads."})
 	if r := runner.must(201, "POST", base+"/playbooks/"+pb+"/agent-runs", map[string]any{"inputs": inputs}); r["status"] != "running" {
 		t.Fatalf("run on agents.run: %v", r)
 	}

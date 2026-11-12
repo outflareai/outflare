@@ -113,6 +113,10 @@ type siteTouch struct {
 	// doesn't start a visit by itself: the page it lands on carries the
 	// campaign's tags, which do.
 	ofclk string
+	// direct says the site script named ofclk itself for a direct-mode
+	// visit (an ad straight to the page with ofc): the visit records the
+	// click rather than claiming one (direct_clicks.go).
+	direct bool
 	// cookies are the network pixels' cookies (adtrack.Cookies). They are
 	// kept with the click ids but say who the browser is, not how it
 	// arrived, so they never start a visit.
@@ -171,6 +175,7 @@ func touchOf(props, ctxObj map[string]any) siteTouch {
 	t := siteTouch{source: str(camp, "source"), medium: str(camp, "medium"), campaign: str(camp, "name"),
 		term: str(camp, "term"), content: str(camp, "content"), ref: cutUTF8(str(props, "ref"), 200), ofc: cutUTF8(str(props, "ofc"), 200),
 		ofclk: str(props, "ofclk")}
+	t.direct, _ = props["direct"].(bool)
 	strs := func(key string) map[string]string {
 		obj, _ := props[key].(map[string]any)
 		var out map[string]string
@@ -334,7 +339,7 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 			return false, err
 		}
 	}
-	if touch.ofclk != "" {
+	if touch.ofclk != "" && !touch.direct {
 		if err := claimRedirectClick(ctx, tx, a.WorkspaceID, touch.ofclk, id, now); err != nil {
 			return false, err
 		}

@@ -2,7 +2,7 @@
 
 Screenshots and demos of Outflare come only from this workspace, never from app.outflare.ai or anyone's real workspace, even blurred (AGENTS.md, "What may go in a public repository"). Northpeak and everyone in it are made up: every person, company and domain ends in `.example`.
 
-1. Start a fresh local engine (`make run`, with an empty database).
+1. Start a fresh local engine with an empty database and no job workers, so nothing tries to sign in to the made-up mailboxes: `OUTFLARE_ROLE=api make run`.
 2. Create the owner and the workspace:
 
    ```sh

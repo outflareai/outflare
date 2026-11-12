@@ -96,6 +96,7 @@ var aiTasks = []aiTask{
 	{tgsession.MatchTask, "Telegram matching", "Matching chats from company Telegram accounts to people and companies in the CRM, for the account's holder to confirm."},
 	{tgsession.SummaryTask, "Telegram summaries", "Summaries of chats from company Telegram accounts: on request, and for the new holder when an account is handed over."},
 	{taskMailPrivacy, "Email privacy check", "Reading the subject and first lines of a work email before team email sharing shows it to colleagues, so anything about pay, a job offer, HR, a legal dispute, health or family stays private."},
+	{taskEventNames, "Event name check", "Comparing new event names your product sends with the names it already sends, to ask you only when one looks like a typo, such as sign_up for signed_up."},
 	{taskBrandKnowledge, "Brand knowledge", "Reading a brand's own website and writing what it offers: products, services, features, integrations, capabilities, who it serves and use cases, for a person to edit."},
 }
 
@@ -104,7 +105,7 @@ func taskTier(task string, p llm.Provider) string {
 	switch task {
 	case taskCoverageReview, taskCheckIn, taskAIVisibility, taskSocialReplies, taskSocialPosts, taskReviewReplies, taskFixTickets, taskABTests, taskLinkPitches, taskKnowledge, taskSupport, taskJourneys, taskStories, taskBrandKnowledge:
 		return p.LightModel
-	case taskReplyLabelling, taskDomainResearch, taskEmailVerification, taskLinkPages, tgsession.MatchTask, taskMailPrivacy:
+	case taskReplyLabelling, taskDomainResearch, taskEmailVerification, taskLinkPages, tgsession.MatchTask, taskMailPrivacy, taskEventNames:
 		if p.CheapModel != "" {
 			return p.CheapModel
 		}

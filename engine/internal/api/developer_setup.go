@@ -571,6 +571,9 @@ func mergeDuplicate(ctx context.Context, tx pgx.Tx, a *access, class, sourceID s
 		if err := recordDeleted(ctx, tx, a, "transaction.deleted", "transaction", gone.ID, d, data); err != nil {
 			return 0, "", err
 		}
+		if err := addCopy(ctx, tx, keep.ID, gone.Source, gone.SourceID); err != nil {
+			return 0, "", err
+		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "transaction.merged", "transaction", keep.ID, map[string]any{"brand_id": a.Brand,
 			"kind": keep.Kind, "matched_by": "duplicate", "source": gone.Source, "source_id": gone.SourceID, "amount_minor": gone.AmountMinor,
 			"currency": gone.Currency, "kept_source": keep.Source, "kept_source_id": keep.SourceID, "kept_amount_minor": keep.AmountMinor,

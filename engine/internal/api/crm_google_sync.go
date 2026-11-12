@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/outflareai/outflare/engine/internal/audit"
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/crmmail"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/oauth"
@@ -81,9 +82,6 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 	if json.Unmarshal(job.Payload, &payload) != nil || job.WorkspaceID == nil || !validUUID(payload.ID) {
 		return jobs.ErrPermanent
 	}
-	if !s.crmGoogleConfigured() {
-		return errors.New("personal Google OAuth is not configured")
-	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	ws := *job.WorkspaceID
@@ -108,7 +106,8 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 	var sealed []byte
 	var generation int
 	var last *time.Time
-	err = s.pool.QueryRow(ctx, `SELECT brand_id::text,owner_id::text,status,credentials_sealed,version,last_synced_at FROM crm_google_connections WHERE workspace_id=$1 AND id=$2`, ws, payload.ID).Scan(&brand, &owner, &status, &sealed, &generation, &last)
+	var viaWorkspace *string
+	err = s.pool.QueryRow(ctx, `SELECT brand_id::text,owner_id::text,status,credentials_sealed,version,last_synced_at,workspace_integration_id::text FROM crm_google_connections WHERE workspace_id=$1 AND id=$2`, ws, payload.ID).Scan(&brand, &owner, &status, &sealed, &generation, &last, &viaWorkspace)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -117,6 +116,11 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 	}
 	if status != "connected" {
 		return nil
+	}
+	// A person's own connection needs the server's Google app; one read
+	// through the company's Workspace connection doesn't.
+	if viaWorkspace == nil && !s.crmGoogleConfigured() {
+		return errors.New("personal Google OAuth is not configured")
 	}
 	allowed, err := eligibleCRMMail(ctx, s.pool, ws, brand, owner)
 	if err != nil {
@@ -207,12 +211,27 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 	}
 	if credentials.Query == "" {
 		since := time.Now().Add(-7 * 24 * time.Hour)
+		if viaWorkspace != nil && last == nil {
+			// A mailbox read through Workspace starts as far back as the
+			// rollout says: its whole history by default.
+			rollout, err := readMailRollout(ctx, s.pool, ws, brand)
+			if err != nil {
+				return err
+			}
+			since = time.Time{}
+			if rollout.HistoryDays > 0 {
+				since = time.Now().Add(-time.Duration(rollout.HistoryDays) * 24 * time.Hour)
+			}
+		}
 		if last != nil && last.Add(-time.Hour).After(since) {
 			since = last.Add(-time.Hour)
 		}
 		// Mail under a private label (Personal, HR, ...) is never fetched.
 		exclude := crmmail.ExcludeLabels(base.brand, base.personal)
-		credentials.Query = "after:" + strconv.FormatInt(since.Unix(), 10) + " -in:spam -in:trash -in:drafts -in:scheduled " + exclude
+		credentials.Query = "-in:spam -in:trash -in:drafts -in:scheduled " + exclude
+		if !since.IsZero() {
+			credentials.Query = "after:" + strconv.FormatInt(since.Unix(), 10) + " " + credentials.Query
+		}
 		if all {
 			// Every contact: newsletters and notifications never match one.
 			credentials.Query += " -category:promotions -category:social -category:forums"
@@ -224,7 +243,21 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 	if len(credentials.Query) > 16000 {
 		return s.crmGoogleFailed(ctx, ws, payload.ID, "capture_too_broad", false)
 	}
-	token, rotated, err := s.oauth.RefreshPersonalGoogle(ctx, credentials.Grant.RefreshToken)
+	var token, rotated string
+	if viaWorkspace != nil {
+		token, err = s.workspaceMailToken(ctx, ws, *viaWorkspace, credentials.Grant.Email)
+		if err != nil {
+			// The admin can fix delegation in Google; keep trying on the
+			// next poll and say why on the connection meanwhile.
+			_ = s.crmGoogleFailed(ctx, ws, payload.ID, "workspace_access_denied", false)
+			if connectors.KindOf(err) == connectors.ErrAuth || connectors.KindOf(err) == connectors.ErrInvalid {
+				return nil
+			}
+			return errors.New("Google Workspace token could not be read")
+		}
+	} else {
+		token, rotated, err = s.oauth.RefreshPersonalGoogle(ctx, credentials.Grant.RefreshToken)
+	}
 	if err != nil {
 		var denied *oauth.Error
 		permanent := (errors.As(err, &denied) && slices.Contains([]string{"invalid_grant", "unauthorized_client", "invalid_client", "access_denied", "consent_required", "interaction_required"}, denied.Code)) || errors.Is(err, oauth.ErrPersonalGoogleScope)

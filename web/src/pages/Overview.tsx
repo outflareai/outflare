@@ -15,7 +15,7 @@ import { tabNames } from "../shell";
 import { money, num, totals } from "./Channels";
 import { HomeTiles } from "@/components/insight-panels";
 
-type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup" | "brands" | "channels" | "stories" | "funnels" | "trends" | "retention" | "paths" | "dashboards") => void;
+type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup" | "brands" | "channels" | "stories" | "funnels" | "trends" | "retention" | "paths" | "dashboards" | "ads", item?: string) => void;
 
 // The page that resolves each area of blocker GET /status reports.
 const areaTab: Record<WorkspaceStatus["blockers"][number]["area"], Parameters<Go>[0]> = {
@@ -23,6 +23,15 @@ const areaTab: Record<WorkspaceStatus["blockers"][number]["area"], Parameters<Go
   sequences: "allocation", infrastructure: "infrastructure", inbox: "inbox", context: "company", analytics: "analytics", fixes: "fixes",
   // Customer data has no page of its own yet; Outflare's agent resolves it.
   lifecycle: "lifecycle", social: "social", customers: "ai", setup: "setup", brands: "brands",
+  // Paid ads: decisions, alerts, the target and the knowledge sheet.
+  ads: "ads",
+};
+
+// The Paid ads screen a blocker of its area opens: decisions and alerts
+// the inbox, the knowledge sheet the set-up path, the target and the
+// number itself the number ("" is the page's first screen).
+const adsScreen: Partial<Record<WorkspaceStatus["blockers"][number]["code"], string>> = {
+  ads_decisions_waiting: "inbox", ads_alert: "inbox", ads_knowledge_unreviewed: "setup", ads_over_target: "", ads_economics_missing: "",
 };
 
 // One row on the "Needs you" list: a status blocker, a rate that is off,
@@ -67,7 +76,7 @@ export function Overview({ ws, name, isAdmin, go, limited = false, agent }: { ws
   useEffect(() => {
     const load = async () => {
       const [stats, st] = await Promise.all([
-        api.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws }, query: handle ? { brand: handle } : {} } }),
+        brand ? api.GET("/v1/brands/{brand}/stats", { params: { path: { brand: brand.id } } }) : Promise.resolve({ data: undefined }),
         limited ? Promise.resolve({ data: undefined }) : api.GET("/v1/workspaces/{ws}/status", { params: { path: { ws }, query: handle ? { brand: handle } : {} } }),
       ]);
       if (stats.data) setS(stats.data);
@@ -108,7 +117,8 @@ export function Overview({ ws, name, isAdmin, go, limited = false, agent }: { ws
   const todos: Todo[] = [];
   for (const b of status?.blockers ?? []) {
     if (b.code === "no_mailboxes" || b.code === "context_missing") continue;
-    todos.push({ key: b.code, title: b.title, tone: blockerTone[b.severity], tab: areaTab[b.area] });
+    const screen = adsScreen[b.code];
+    todos.push({ key: b.code, title: b.title, tone: blockerTone[b.severity], tab: areaTab[b.area], onOpen: screen !== undefined ? () => go("ads", screen || undefined) : undefined });
   }
   if (!status) {
     if (s.unread_replies > 0) todos.push({ key: "unread", title: `${plural(s.unread_replies, "reply is", "replies are")} unread`, tone: "grey", tab: "inbox" });

@@ -171,6 +171,27 @@ groups:
         annotations:
           summary: "Conversions sent back to traffic sources have been given up on for 30 minutes, so networks aren't told of conversions and can't optimise: check the source postback sends (GET .../traffic-sources/{id}/postbacks) and the job logs. See the Conversions sent back panel on the Redirect links row."
 
+      - alert: OutflareTrackerSuspectClicksHigh
+        expr: sum(rate(outflare_tracker_fraud_flags_total{subject="click"}[30m])) > 0.5 * sum(rate(outflare_redirect_clicks_total{outcome="counted"}[30m])) and sum(rate(outflare_redirect_clicks_total{outcome="counted"}[30m])) > 0.1
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Over half of the tracker clicks in the last 30 minutes were flagged suspect (a hosting network or repeat clicks): a campaign is getting bot traffic, or a fraud detector misfires. See the Suspect tracker clicks panel on the Redirect links row, and the links' suspect_clicks."
+
+      - alert: OutflareTrackerWeightSuggestionsSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_tracker_weight_suggestions_seconds_bucket[30m]))) > 5
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Suggested weights take over 5 seconds for the slowest 5% of links and flows: the click and conversion queries behind GET .../weight-suggestions need optimising (a link with very many clicks, or a missing index). See Time to suggest weights on the Redirect links row."
+
+      - alert: OutflareTrackerWeightSuggestionsFailing
+        expr: sum(increase(outflare_tracker_weight_suggestions_seconds_count{outcome="error"}[15m])) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Suggested weights failed for 15 minutes, so people can't see or apply them: find the error by its request id in the engine log (GET .../weight-suggestions). See Time to suggest weights on the Redirect links row."
+
       - alert: OutflareRedirectClickBacklog
         expr: max(outflare_redirect_click_buffer) > 20000
         for: 5m
@@ -550,6 +571,12 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Postgres detected deadlocks."
+
+      - alert: OutflareTxRetriesGaveUp
+        expr: sum(increase(outflare_db_tx_retries_total{outcome="gave_up"}[1h])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "A request's write lost a deadlock three times in a row and answered 500 (transactions or customer events): two senders keep locking the same people in opposite order. See Contention in the Postgres row and 'transaction retried' in the logs."
 
       - alert: OutflareGoroutineLeak
         expr: max(go_goroutines{job="outflare"}) > 20000
@@ -992,6 +1019,38 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "A conversion has waited over 30 minutes to go to its ad platform; check the jobs queue for ads.conversions_send and the engine log for ad_conversions."
+
+      - alert: OutflareAdsFeedSendsFailing
+        # Google refusing conversions sent through the conversion feed
+        # (Data Manager, or the Ads API fallback): a bad row shape, a
+        # conversion action removed, or an account that cannot use the
+        # feed at all.
+        expr: sum by (transport) (increase(outflare_ads_feed_sends_total{outcome="failed"}[1h])) > 20 and sum by (transport) (increase(outflare_ads_feed_sends_total{outcome="failed"}[1h])) / sum by (transport) (increase(outflare_ads_feed_sends_total[1h])) > 0.25
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over a quarter of conversions sent through the {{ $labels.transport }} feed fail; the send log (GET .../ads/conversion-sends?status=failed) has Google's reason per row, and the Paid media (conversion feed) row the batches by outcome."
+
+      - alert: OutflareAdsFeedFallingBack
+        # Accounts being turned away from the Data Manager API: the
+        # destination is not allowlisted, the sign-in lacks the scope, or
+        # the API is not enabled on the server's Cloud project. Sends fall
+        # back to the Ads API, which Google closes to new integrations.
+        expr: sum(increase(outflare_ads_feed_batches_total{transport="data_manager", outcome="refused"}[6h])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "The Data Manager API refused an account's destination and its sends fell back to the Ads API; GET .../ads/accounts/{id}/feed shows transport_reason, and ad_feed.transport_changed events name the account."
+
+      - alert: OutflarePayersListRefreshFailing
+        # The daily refresh of the paying customers lists keeps failing,
+        # so Google's new customer goal reads a stale list of existing
+        # customers.
+        expr: sum(increase(outflare_ads_feed_batches_total{transport="payers_list", outcome="failed"}[24h])) > 2
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Refreshing the paying customers lists on Google Ads failed more than twice in a day; ad_payers.refreshed failures carry the error code, and GET .../ads/accounts/{id}/feed shows payers_list.error."
 
       - alert: OutflarePartnerRewardsBehind
         # Rewards past their hold aren't being approved: the approver loop
@@ -1524,6 +1583,13 @@ groups:
         annotations:
           summary: "Personal CRM Google capture jobs are over fifteen minutes late; check worker capacity and database access."
 
+      - alert: OutflareWorkspaceCalendarCaptureFailing
+        expr: sum(increase(outflare_jobs_processed_total{kind="crm_calendar.workspace_sync",outcome=~"retried|dead"}[30m])) > 2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Reading Workspace members' calendars into the CRM is failing; check the Google Workspace connection's domain-wide delegation for calendar.readonly and crm_calendar.workspace_sync jobs."
+
       - alert: OutflareMailPrivacyChecksFailing
         expr: sum(increase(outflare_crm_mail_privacy_checks_total{outcome=~"failed|no_ai|budget"}[1h])) > 20
         for: 15m
@@ -1543,3 +1609,78 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Insight queries are failing with errors; the Insights panels say which kind, and the server log has each error by request id."
+
+      # ---- Paid media (sync and alerts): the hourly ad sync, click harvest,
+      # change events and alert job (engine/internal/adsync). ----
+      - alert: OutflareAdSyncLagging
+        expr: (time() - max(timestamp(outflare_ads_sync_runs_total{outcome="success"}))) > 10800 and sum(outflare_ads_sync_runs_total) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "No ad sync has succeeded for over three hours though they run hourly: connections are failing (ads.synced events with an error code in the log) or no worker runs them. Today's spend, the alerts and the suggestions are stale. Check the Paid media (sync and alerts) row."
+      - alert: OutflareAdSyncsFailing
+        expr: sum(increase(outflare_ads_sync_runs_total{outcome!="success"}[3h])) > 5 and sum(increase(outflare_ads_sync_runs_total{outcome!="success"}[3h])) > sum(increase(outflare_ads_sync_runs_total{outcome="success"}[3h]))
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Hourly ad syncs fail more often than they work over three hours. connector_auth means sign-ins need renewing (the connection shows it); connector_quota means a network is rate limiting us; internal is ours (the log has each by request id). Check the Paid media (sync and alerts) row."
+      - alert: OutflareAdClickHarvestFailing
+        expr: sum(increase(outflare_ads_clicks_harvested_total{outcome!="stored"}[6h])) > 3
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Google refused the click harvest (click_view) more than three times in six hours, so ad_clicks stops at its last day and landing pages with only a gclid can't be tied to their ad group, ad and keyword. Google keeps 90 days: a harvest stuck for weeks loses clicks for good. The outcome label says why (connector_quota, connector_auth). Check the Paid media (sync and alerts) row."
+      - alert: OutflareAdChangeEventsFailing
+        expr: sum(increase(outflare_ads_change_event_reads_total{outcome!="success"}[1h])) > 3 and sum(increase(outflare_ads_change_event_reads_total{outcome!="success"}[1h])) > sum(increase(outflare_ads_change_event_reads_total{outcome="success"}[1h]))
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Reads of ad platforms' change histories (Google change_event, every 15 minutes) fail more often than they work: the Changes tab stops showing what people and Google change, and the auto-apply audit goes blind. ad_change_events.read events in the log carry the error code. Check the Paid media (sync and alerts) row."
+      - alert: OutflareAdAlertJobFailing
+        expr: sum(increase(outflare_ads_alert_runs_total{outcome="error"}[3h])) > 3
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "The paid ads alert job (after each hourly sync) failed more than three times in three hours: spend anomalies, overspend pauses, flatlines and tracking problems are not being raised or expired. ad_alerts.failed in the log has each error by request id. Check the Paid media (sync and alerts) row."
+      - alert: OutflareAdAlertFlood
+        expr: sum(increase(outflare_ads_alerts_total[1h])) > 50
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over fifty paid ads alerts were raised in an hour across every workspace. A few a day is normal; a flood means a rule misfires (a baseline broken by a sync that wrote zeros, or a threshold too tight) and people are being paged for nothing. The kind label on the Paid media (sync and alerts) row says which rule."
+      # ---- Brand knowledge (the sheet ads are written from) ----
+      - alert: OutflareBrandKnowledgeReadsFailing
+        expr: sum(increase(outflare_brand_knowledge_reads_total{outcome!="success"}[24h])) > 3 and sum(increase(outflare_brand_knowledge_reads_total{outcome!="success"}[24h])) > sum(increase(outflare_brand_knowledge_reads_total{outcome="success"}[24h]))
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Reads of brands' websites for their knowledge sheet fail more often than they work over a day, so ads can't be written from them; check the Brand knowledge row, then brand.knowledge_read_failed events for the code (connector_needed, ai_model_needed, page codes) and the brand.read_knowledge job's log."
+      # The paid ads ledger (engine/internal/paidads): sign-ups, payments and
+      # refunds tied to the ad click that brought them, read a few minutes
+      # after they arrive.
+      - alert: OutflarePaidAdsLedgerBehind
+        expr: max(outflare_paidads_ledger_lag_seconds) > 1800
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "The paid ads ledger is over 30 minutes behind for some workspace with an ad account, so cost per new paying customer is stale: the loop is stuck, failing (see OutflarePaidAdsLedgerFailing) or not running on any worker. Check the Paid media (cost per new customer) row and paidads.run_failed in the log."
+      - alert: OutflarePaidAdsLedgerFailing
+        expr: sum(increase(outflare_paidads_ledger_events_total{outcome="error"}[1h])) > 3
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "More than three customer events failed in the paid ads ledger in an hour: a workspace's run stops at the failing event and retries it every minute, so its ledger falls behind. The error is in ad_acquisition_runs.last_error and the log (paidads.run_failed). Check the Paid media (cost per new customer) row."
+      # ---- Paid media (findings and verdicts): the rules that write the
+      # findings queue and judge changes (engine/internal/adsuggest). Run
+      # failures are OutflareAdSuggestionsFailing above. ----
+      - alert: OutflareAdFindingsStale
+        expr: (time() - max(timestamp(outflare_ads_suggest_run_seconds_count{outcome="success"}))) > 90000 and sum(increase(outflare_ads_sync_runs_total{outcome="success"}[25h])) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "No run of the paid ads rules has succeeded in 25 hours while ad accounts keep syncing: findings aren't refreshed, savings aren't applied and measured changes aren't judged for any brand. The run follows each hourly sync (ads.suggest job); ad_suggestions.failed in the log has each failure by request id. Check the Paid media (findings and verdicts) row."
+      - alert: OutflareAdFindingVerdictsBad
+        expr: sum by (kind) (increase(outflare_ads_verdicts_total{verdict="did_not_work"}[7d])) > 5 and sum by (kind) (increase(outflare_ads_verdicts_total{verdict="did_not_work"}[7d])) > sum by (kind) (increase(outflare_ads_verdicts_total{verdict="worked"}[7d]))
+        labels: { severity: info }
+        annotations:
+          summary: "Over a week, changes of one kind of paid ads finding did not work more often than they worked (the kind label says which): that rule's thresholds want a look (engine/internal/adsuggest/rules.go) before more brands let it apply on its own. Check the Paid media (findings and verdicts) row."

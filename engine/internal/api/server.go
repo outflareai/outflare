@@ -38,6 +38,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/features"
+	"github.com/outflareai/outflare/engine/internal/fraud"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbound"
 	"github.com/outflareai/outflare/engine/internal/inboundemail"
@@ -125,9 +126,12 @@ type Server struct {
 	webhooks        *webhooks.Service
 	// eventArchive reads events beyond Postgres's retention for rule dry
 	// runs; nil without the ClickHouse event store.
-	eventArchive  rules.EventArchive
-	emails        *emails.Service
-	rateLimit     *rateLimiter
+	eventArchive rules.EventArchive
+	emails       *emails.Service
+	rateLimit    *rateLimiter
+	// sessionLimit caps a signed-in browser session: sessionLimitFactor
+	// times a token's limit.
+	sessionLimit  *rateLimiter
 	logs          *logWriter
 	registerLimit *rateLimiter
 	// Browser events, per visitor address and per site key.
@@ -137,10 +141,13 @@ type Server struct {
 	inboxWake chan struct{}
 	// Redirect links: their destinations in memory, and their clicks
 	// waiting to be written (redirect_clicks.go).
-	redirects        redirectCache
-	clicks           clickBuffer
-	caps             capCounts
-	visitors         visitorMemory
+	redirects redirectCache
+	clicks    clickBuffer
+	caps      capCounts
+	visitors  visitorMemory
+	// repeats counts clicks per link and address for the repeat_click
+	// fraud signal (B7a).
+	repeats          fraud.RepeatCounter
 	siteVisitorLimit *rateLimiter
 	// postbackLimit caps tracker conversion postbacks per source.
 	postbackLimit *rateLimiter
@@ -394,6 +401,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		webhooks:       hooks,
 		eventArchive:   opts.EventArchive,
 		rateLimit:      &rateLimiter{name: "api", limit: opts.RateLimit, window: time.Minute},
+		sessionLimit:   &rateLimiter{name: "session", who: "session", limit: opts.RateLimit * sessionLimitFactor, window: time.Minute},
 		// Apps register themselves once per install; this stops a flood.
 		registerLimit:    &rateLimiter{name: "register", limit: 30, window: time.Hour},
 		siteIPLimit:      &rateLimiter{name: "site_ip", limit: 300, window: time.Minute},
@@ -521,6 +529,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesJobs(mux)
 	s.routesLogs(mux)
 	s.routesBrands(mux)
+	s.routesBrandDelete(mux)
 	s.routesBrandEvents(mux)
 	s.routesPrivacyExports(mux)
 	s.routesRecoveryWindow(mux)
@@ -543,6 +552,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAds(mux)
 	s.routesAdChanges(mux)
 	s.routesAdSuggestions(mux)
+	s.routesAdFindings(mux)
+	s.routesAdPlatformChanges(mux)
 	s.routesAdTests(mux)
 	s.routesAdTargeting(mux)
 	s.routesAdDrafts(mux)
@@ -554,6 +565,9 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesChannels(mux)
 	s.routesAdTracking(mux)
 	s.routesAdConversions(mux)
+	s.routesPaidAds(mux)
+	s.routesAdFeed(mux)
+	s.routesAdRMF(mux)
 	s.routesContext(mux)
 	s.routesOnboarding(mux)
 	s.routesCommunity(mux)
@@ -629,6 +643,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSEOTargets(mux)
 	s.routesSEORanks(mux)
 	s.routesSEOConversions(mux)
+	s.routesSEOOrganicConversions(mux)
 	s.routesSEORegressions(mux)
 	s.routesAIVisibility(mux)
 	s.routesAIVisibilityClaims(mux)
@@ -638,6 +653,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSocialPublish(mux)
 	s.routesRedditCampaigns(mux)
 	s.routesBrandLinks(mux)
+	s.routesBrandLook(mux)
 	s.routesBrandKnowledge(mux)
 	s.routesReviews(mux)
 	s.routesReviewRequests(mux)
@@ -678,6 +694,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesTrackerOffers(mux)
 	s.routesTrackerLanders(mux)
 	s.routesTrackerFlows(mux)
+	s.routesTrackerWeights(mux)
 	s.routesSourcePostbacks(mux)
 	s.routesPartners(mux)
 	s.routesAttribution(mux)

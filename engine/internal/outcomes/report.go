@@ -260,20 +260,20 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 
 	// Meetings booked in the period.
 	rs, err := q.Query(ctx, `
-		SELECT sequence_id::text, attribution, status, COALESCE(qualified, false), count(*)
+		SELECT sequence_id::text, brand_id::text, attribution, status, COALESCE(qualified, false), count(*)
 		FROM meetings
 		WHERE workspace_id = $1 AND booked_at >= $2 AND booked_at < $3 AND status <> 'canceled'
 		  AND ($4 = '' OR sequence_id::text = $4) AND ($5 = '' OR mission_id::text = $5)
-		GROUP BY 1, 2, 3, 4`, ws, f.From, f.To, f.SequenceID, f.MissionID)
+		GROUP BY 1, 2, 3, 4, 5`, ws, f.From, f.To, f.SequenceID, f.MissionID)
 	if err != nil {
 		return rep, err
 	}
 	for rs.Next() {
-		var seq *string
+		var seq, brand *string
 		var attribution, status string
 		var qualified bool
 		var n int
-		if err := rs.Scan(&seq, &attribution, &status, &qualified, &n); err != nil {
+		if err := rs.Scan(&seq, &brand, &attribution, &status, &qualified, &n); err != nil {
 			rs.Close()
 			return rep, err
 		}
@@ -283,10 +283,10 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 			}
 			continue
 		}
-		if !keep(brands.of(seq)) {
+		if !keep(brands.own(seq, brand)) {
 			continue
 		}
-		a := get(key(seq, nil))
+		a := get(key(seq, brand))
 		a.Meetings += n
 		switch status {
 		case MeetingHeld:
@@ -332,27 +332,27 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 
 	// Deals opened in the period.
 	rs, err = q.Query(ctx, `
-		SELECT sequence_id::text, state, currency, count(*), COALESCE(sum(amount_cents), 0)
+		SELECT sequence_id::text, brand_id::text, state, currency, count(*), COALESCE(sum(amount_cents), 0)
 		FROM deals
 		WHERE workspace_id = $1 AND opened_at >= $2 AND opened_at < $3 AND attribution <> 'none'
 		  AND ($4 = '' OR sequence_id::text = $4) AND ($5 = '' OR mission_id::text = $5)
-		GROUP BY 1, 2, 3`, ws, f.From, f.To, f.SequenceID, f.MissionID)
+		GROUP BY 1, 2, 3, 4`, ws, f.From, f.To, f.SequenceID, f.MissionID)
 	if err != nil {
 		return rep, err
 	}
 	for rs.Next() {
-		var seq *string
+		var seq, brand *string
 		var state, currency string
 		var n int
 		var amount int64
-		if err := rs.Scan(&seq, &state, &currency, &n, &amount); err != nil {
+		if err := rs.Scan(&seq, &brand, &state, &currency, &n, &amount); err != nil {
 			rs.Close()
 			return rep, err
 		}
-		if !keep(brands.of(seq)) {
+		if !keep(brands.own(seq, brand)) {
 			continue
 		}
-		a := get(key(seq, nil))
+		a := get(key(seq, brand))
 		a.Deals += n
 		if state == DealWon {
 			a.Won += n
@@ -698,6 +698,14 @@ func (m brandMaps) of(seq *string) string {
 		return m.seq[*seq]
 	}
 	return ""
+}
+
+// own is the brand of a meeting or deal: its sequence's, else its own.
+func (m brandMaps) own(seq, brand *string) string {
+	if b := m.of(seq); b != "" || brand == nil {
+		return b
+	}
+	return *brand
 }
 
 // ofCharge is the brand of spend: its sequence's, else its own, else its

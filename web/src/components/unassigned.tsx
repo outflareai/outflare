@@ -1,5 +1,5 @@
 // Records in no brand. With one brand picked, every page shows only that
-// brand's records, so these show nowhere but under All brands. This card
+// brand's records, so these show only in Settings → Brands. This card
 // lists them by kind and puts the ones ticked into a brand in one go.
 
 import { useCallback, useEffect, useState } from "react";

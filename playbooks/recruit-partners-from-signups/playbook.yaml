@@ -49,7 +49,7 @@ inputs:
     optional: true
 steps:
   - say: Read the brand's context, and check its setup kit is applied so the Partnerships board is there.
-    tools: [getBrandContext, listRecordTypes]
+    tools: [getBrandContext, listBrandRecordTypes]
   - say: List people who signed up in the period, with their companies and websites, and skip anyone already on the board or who opted out of marketing email.
     tools: [listBrandCustomerEvents, listBrandRecords, getBrandRecord]
   - say: Look at the website behind each one and note what it is (review or comparison site, blog, newsletter, channel, agency, or a normal business), its topics and any sign of an audience.

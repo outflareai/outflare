@@ -68,6 +68,8 @@ type leadView struct {
 	Custom      map[string]string `json:"custom"`
 	Source      string            `json:"source"`
 	Suppressed  bool              `json:"suppressed"`
+	// Why it is suppressed: the entry that stops it, nil when none does.
+	Suppression *leadSuppression `json:"suppression"`
 	// Latest verification result, nil until the address has been checked.
 	Verification *string   `json:"verification"`
 	ListIDs      []string  `json:"list_ids"`
@@ -79,10 +81,23 @@ type leadView struct {
 	BrandID *string `json:"brand_id"`
 }
 
+// leadSuppression is the suppression entry that stops a lead's email: the
+// one for its address before one for its domain, newest first.
+type leadSuppression struct {
+	ID        string    `json:"id"`
+	Kind      string    `json:"kind"`
+	Value     string    `json:"value"`
+	Reason    string    `json:"reason"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 var leadSelect = `
 	SELECT l.id, l.email, l.domain, l.first_name, l.last_name, l.company, l.title, l.phone,
 	       l.linkedin_url, l.website, l.custom, l.source,
 	       EXISTS (` + leads.SuppressedInSQL("l.workspace_id", "l.brand_id", "l.email") + `),
+	       (` + strings.Replace(leads.SuppressedInSQL("l.workspace_id", "l.brand_id", "l.email"), "SELECT 1 FROM", `SELECT jsonb_build_object('id', s.id, 'kind', s.kind, 'value', s.value,
+			'reason', s.reason, 'source', s.source, 'created_at', s.created_at) FROM`, 1) + ` ORDER BY s.kind = 'email' DESC, s.created_at DESC LIMIT 1),
 	       (SELECT v.status FROM email_verifications v WHERE v.workspace_id = l.workspace_id AND v.email = lower(l.email)),
 	       ARRAY(SELECT m.list_id::text FROM lead_list_members m WHERE m.lead_id = l.id ORDER BY m.added_at),
 	       l.created_at, l.updated_at, l.record_id::text, l.brand_id::text

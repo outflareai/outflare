@@ -8,6 +8,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MissionClient } from "@outflare/sdk";
 import { z } from "zod";
+import { brandCaller } from "./records.js";
 
 type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Response }>) => Promise<CallToolResult>;
 
@@ -18,6 +19,7 @@ const steps = ["business_model", "site_script", "verify_site", "analytics", "sea
 const installSteps = ["site_script", "verify_site"] as const;
 
 export function registerSetupTools(server: McpServer, gtm: MissionClient, workspace: () => string, readOnly: boolean, call: Call): void {
+  const onBrand = brandCaller(gtm, workspace);
   const path = (brand: string) => ({ ws: workspace(), brand });
 
   server.registerTool(
@@ -66,10 +68,10 @@ export function registerSetupTools(server: McpServer, gtm: MissionClient, worksp
       description:
         "What is out of date or broken, worst first: a site that never sent a visit or stopped, an old copy of the website script, an unverified site, a connection that needs signing in again, " +
         "an SDK, CLI or MCP server below the supported version, or calls to a deprecated API operation. Each check has fix.tool or fix.page and fix.who.",
-      inputSchema: { brand: z.string().optional().describe("Only this brand's checks (handle or id). Required for a token kept to some brands.") },
+      inputSchema: { brand: brandRef.describe("The brand whose installs to check: a handle or id from list_brands.") },
       annotations: read,
     },
-    ({ brand }) => call(() => gtm.GET("/v1/workspaces/{ws}/install-health", { params: { path: { ws: workspace() }, query: brand ? { brand } : {} } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/install-health", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(

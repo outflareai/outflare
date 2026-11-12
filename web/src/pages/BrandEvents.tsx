@@ -10,8 +10,9 @@ import { nameItem } from "@/lib/records";
 // Events: what a brand's product sent to POST /v1/brands/{brand}/events.
 // Every event is saved first and processed in the background; this page
 // shows what happened to each (accepted, duplicate, rejected with what to
-// fix, or held for a name the catalog hasn't approved) and replays the
-// rejected and held ones once they are fixed.
+// fix, or held for a name someone paused in the catalog) and replays the
+// rejected and held ones once they are fixed. New names need no approval:
+// the page asks only when one looks like a typo of another.
 
 type Event = Schemas["BrandEvent"];
 type Detail = Schemas["BrandEventDetail"];
@@ -23,7 +24,7 @@ const statuses: Record<Status, { label: string; tone: "green" | "amber" | "red" 
   accepted: { label: "Accepted", tone: "green", help: "Stored, and matched to its person." },
   duplicate: { label: "Duplicate", tone: "grey", help: "An event with this messageId was already stored, so this one wasn't stored again." },
   rejected: { label: "Rejected", tone: "red", help: "Something to fix: the reason says what. Fix it, then replay." },
-  held: { label: "Held", tone: "amber", help: "A new event name, kept until someone approves it in the catalog. Approve it, then replay." },
+  held: { label: "Held", tone: "amber", help: "A name someone paused in the catalog, kept until it is approved again. Approve it, then replay." },
 };
 
 export function BrandEvents({ ws, canManage, tabs, onOpen }: { ws: string; canManage: boolean; tabs: ReactNode; onOpen: (item: string) => void }) {
@@ -117,6 +118,15 @@ function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage
     refresh();
   }
 
+  async function answer(name: string, looksLike: string, same: boolean) {
+    setBusy(true);
+    const { error } = await api.POST("/v1/brands/{brand}/catalog/events/{event}/name-check", { params: { path: { brand, event: name } }, body: { same } });
+    setBusy(false);
+    if (error) return toast(errorMessage(error), "error");
+    toast(same ? `${name} merged into ${looksLike}.` : `Kept ${name} as its own event.`);
+    refresh();
+  }
+
   async function approve(name: string) {
     if (!(await confirmAction(`Approve ${name} and replay its events?`, <p>Approved names drive journeys, rules and reports. The events held for it are processed now.</p>, "Approve and replay", false))) return;
     setBusy(true);
@@ -141,8 +151,33 @@ function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage
         </Stats>
       )}
 
+      {summary && summary.name_checks.length > 0 && (
+        <Card title="Is this a typo?" description="These new names look like a name you already send. Their events are stored and usable either way. Merge one and its events move to the other name, along with any sent with it later.">
+          <ul className="divide-y">
+            {summary.name_checks.map((n) => (
+              <li key={n.name} className="flex flex-wrap items-center gap-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px]">
+                    Is <span className="font-mono">{n.name}</span> a typo of <span className="font-mono">{n.looks_like}</span>?
+                  </p>
+                  <p className="text-[12px] text-muted-foreground">
+                    {n.reason ? `${n.reason[0].toUpperCase()}${n.reason.slice(1)} · ` : ""}{plural(n.events, "event")} vs {n.looks_like_events.toLocaleString()}
+                  </p>
+                </div>
+                {canManage && (
+                  <span className="flex gap-2">
+                    <Button variant="ghost" disabled={busy} onClick={() => answer(n.name, n.looks_like, false)}>No, keep both</Button>
+                    <Button disabled={busy} onClick={() => answer(n.name, n.looks_like, true)}>Yes, merge</Button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {summary && summary.held_names.length > 0 && (
-        <Card title="Names waiting for approval" description="Events with a name the catalog hasn't seen are held: kept, but changing no one, until someone approves the name. Approving one processes its held events.">
+        <Card title="Paused names" description="Someone paused these names in the catalog, so their events are held: kept, but changing no one. Approving one processes its held events.">
           <ul className="divide-y">
             {summary.held_names.map((n) => (
               <li key={n.name} className="flex flex-wrap items-center gap-3 py-2">

@@ -29,6 +29,7 @@ The server is now at `mcp/dist/index.js`. It needs Node 18 or later.
 | `OUTFLARE_TOKEN` | An API token (`oft_...`) created in the web app under API tokens |
 | `OUTFLARE_WORKSPACE` | Optional: the token already says which workspace it belongs to |
 | `OUTFLARE_MCP_READ_ONLY` | Optional. `1` registers only the tools that change nothing |
+| `OUTFLARE_MCP_TOOLS` | Optional. `all` lists every tool. By default the app sees the core set, and `find_tools` and `call_tool` reach the rest (see [Finding every tool](#finding-every-tool)) |
 | `OUTFLARE_BRAND` | Optional. A brand's handle: `get_context` and the list tools default to that brand. The agent can still pass another brand, or `all` |
 
 Give the token only the scopes the agent needs. A reporting agent needs `workspace.read`, `mailboxes.read`, `leads.read`, `sequences.read` and `inbox.read`. An agent that runs outreach also needs `leads.manage`, `sequences.manage` and `inbox.manage`, and `mailboxes.manage` to pause domains or change their limits. An agent that plans sending infrastructure needs `infrastructure.read` and `infrastructure.manage`; give it `infrastructure.approve` only if it may spend the customer's money on domains and mailboxes without a person approving. A tool whose scope is missing returns a `403` error to the agent. A token with the action layer on (`action_gate`, [docs/actions.md](../docs/actions.md)): each change it makes runs, waits for a person (`202` with an `action`; poll `get_action`) or is refused, by the grants a person set for it.
@@ -63,6 +64,19 @@ Add it to the client's MCP config (for Claude Desktop, `claude_desktop_config.js
 
 Each API call the server makes names the tool it runs for (`Outflare-Tool`) and the app the agent runs in (`Outflare-Agent`, such as `claude-ai` or `cursor`), so the Outflare server's product analytics show which tools agents use and which fail. Only names are sent, never arguments. See [docs/product-analytics.md](../docs/product-analytics.md).
 
+## Finding every tool
+
+Outflare has well over a thousand tools, and apps cap or struggle with long lists: ChatGPT keeps only the first 200. So by default the server lists about 50 core tools (context, leads and records, sequences and the inbox, lifecycle email, reports, connectors and playbooks) and two more that reach everything else:
+
+| Tool | What |
+| --- | --- |
+| `find_tools` | Search every Outflare tool by what you want to do ("create an email template", "check rankings"). Returns each match's name, description and `input_schema` |
+| `call_tool` | Run any tool by name with its arguments. It runs exactly as if called directly: same scopes, send policy, approvals and audit log. A wrong name suggests the closest tools; arguments that don't fit say why |
+
+`get_context`, `find_tools` and the server instructions list every area Outflare covers, so an agent searches before it says something can't be done. Read-only connections reach only the read tools. To list every tool instead (for apps that search tools themselves, such as Claude Code), set `OUTFLARE_MCP_TOOLS=all`, or connect to the hosted server at `/mcp?tools=all`.
+
+The server reports the Outflare server's own version (from `/v1/meta`) to the app, so you can tell which release you're connected to.
+
 ## Start here: context, memory and status
 
 Agents forget everything between chats, and different clients share nothing. Outflare keeps what matters, so the person never repeats themselves:
@@ -73,8 +87,9 @@ Agents forget everything between chats, and different clients share nothing. Out
 | `update_context` | Save a brand's context ("About your company"); pass `brand` and send the `version` you read |
 | `list_brands` | The brands the company markets, each with its website, domains, platforms and what it owns. Empty for a one-brand company |
 | `list_brand_link_suggestions` | Links found on a brand's website waiting for a decision, and the common places it has no link for yet |
-| `get_brand_context`, `update_brand_context` | Read or save what is true for one brand: about, audience, goals, voice, rules (added to the company's) and notes |
+| `get_brand_context`, `update_brand_context` | Read or save what is true for one brand: about, audience, goals, voice, rules (added to the company's), notes, and its legal name, tax number and postal address (reused in email footers, the help centre and the cookie policy) |
 | `read_brand_website`, `update_brand_knowledge` | Read the brand's website through your own Geonode connection and have your own AI model write what it offers (products, services, features, integrations, capabilities, who it serves, use cases, each with its page), then edit it |
+| `get_brand_knowledge`, `review_brand_knowledge` | Read the brand's knowledge sheet with how it stands (`read_error` when the read couldn't run, `reviewed_at`, `changed_since_review`, `refresh_daily`, `trusted`), and, from a person's own session only, mark it reviewed so ads can be written from it |
 | `remember` | Save one lasting fact, preference or decision in a sentence. Never transcripts |
 | `list_memories` | Search memories before asking something the person may have said before |
 | `update_memory`, `forget` | Correct or delete a memory |
@@ -156,6 +171,7 @@ Read (always available):
 | `list_rules`, `get_rule`, `simulate_rule`, `list_rule_firings` | The rules engine: rules that turn what happens to records into business events, a dry run of what one would have done, and when it fired for whom |
 | `list_metrics`, `get_record_metrics` | A brand's live metrics (spend, usage, last seen…) and a company's or person's values, overall and per product |
 | `list_products`, `list_product_names`, `get_lifecycle`, `get_record_lifecycle` | A brand's products, the product names its events and billing use (held ones wait to be mapped), its lifecycle stages and moves, and where a company or person stands with each product, with a company's overall status |
+| `get_record_relationship` | The relationship check on a card: already a customer, deals, other pipelines, last contact and stale threads, and who on the team has emailed them for a warm intro |
 | `list_emails`, `get_email`, `get_email_recipient` | Transactional and lifecycle emails with delivery status, opens, clicks and what triggered each; one email's content and timeline; everything one address was sent |
 | `list_lead_lists`, `get_lead_list` | Lead lists with sizes, search settings and the latest build |
 | `list_lead_list_members` | A list's leads with their ICP fit score and reasons, best first |
@@ -239,6 +255,7 @@ Read (always available):
 | `get_analytics_summary` | Traffic totals from every analytics connection over one range, in one call |
 | `get_analytics_report` | Traffic, top pages, sources, search queries or events from one connection, the same shape for every provider |
 | `list_analytics_sites` | The properties, sites or projects an analytics connection can read |
+| `update_analytics_site` | Switch one site of an analytics connection on or off (off stops syncing it and deletes what was stored for it), or set its domain |
 | `get_analytics_changes` | Start here: per website, headline sentences, this period against the one before per tool, top movers, unusual days, SEO moves, and gaps with the connector that fills each |
 | `get_analytics_catalog` | Per website: the analytics and SEO tools, the metrics each has stored, history stored, budget left and gaps (also the resource `outflare://analytics/catalog`) |
 | `get_analytics_overview` | Every website lined up by domain: each analytics tool side by side, search clicks added up, latest SEO figures. Take `brand`: they belong to one brand |
@@ -277,6 +294,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_ideal_customer_profile`, `update_ideal_customer_profile` | Describe an ideal customer once (words and filters) for list scoring and the lead finder |
 | `create_brand`, `update_brand` | Add a brand (a business with its own website), or change or archive one |
 | `find_brand_links`, `add_brand_link`, `dismiss_brand_link` | Read a brand's website through Geonode for its social profiles and app listings, then add (corrected if need be) or dismiss each one |
+| `find_brand_look` | Read a brand's home page for its logo and theme colour, filling in whichever the brand doesn't have yet |
 | `update_brand_setup`, `prepare_brand_setup`, `check_brand_setup` | Skip or close setup steps, make the website script or DNS record, check a site's DNS record now |
 | `install_brand_setup` | Add the website script through the workspace's own Tag Manager, or the verification record on its own Cloudflare, in one click |
 | `add_brand_dns` | Add every DNS record a brand still needs (site proof, sending domains, tracking domain) in one go through its own Cloudflare |
@@ -311,7 +329,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `link_records`, `end_record_link` | Link two records, such as partner_of, or end a link |
 | `create_record_type`, `update_record_type`, `create_field`, `update_field` | Add, change or archive (delete) a brand's record types and fields; other brands never see them |
 | `create_option_set`, `update_option_set`, `define_event`, `update_event_definition` | Add or change a brand's option lists and product event definitions (`brand` is a handle or id) |
-| `approve_event_name` | Approve a name a brand's events are held for, so `replay_brand_events` processes them; needs `customers.manage` only |
+| `approve_event_name` | Approve a name someone paused, whose events are held, so `replay_brand_events` processes them (new names need no approval); needs `customers.manage` only |
+| `answer_event_name_check` | Answer whether a new event name is a typo of one the brand has (`name_checks` on `get_brand_events_summary`): merge it into that name, or keep both |
 | `request_privacy_export`, `get_privacy_export`, `list_privacy_exports` | Export everything a record's brand holds about a person or company as one file (only that brand, never secrets), follow it until it is ready, and get its download link, valid for 7 days |
 | `send_brand_events`, `list_brand_events`, `get_brand_event`, `get_brand_events_summary`, `replay_brand_events` | Send product events to a brand (saved at once with a receipt each, then processed in the background), see what happened to each (accepted, duplicate, rejected with what to fix, or held for an unapproved name) and replay the rejected or held ones once fixed |
 | `track_customer_events`, `record_consent` | Send product events in Segment's format (matched to people by userId, verified email, then anonymousId) and record consent given or withdrawn |
@@ -400,7 +419,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `add_email_domain`, `check_email_domain`, `add_email_domain_dns`, `get_email_domain_dns_approval`, `delete_email_domain` | Register a sending domain with the provider and get its DNS records; check it now; add its records through the workspace's Cloudflare in one click, or with a link the user approves once at their DNS provider; remove it |
 | `create_email_template`, `update_email_template`, `publish_email_template`, `delete_email_template` | Write, change, publish or delete an email template |
 | `create_email_topic`, `update_email_topic` | Add, rename or archive a topic people can choose on the preference page |
-| `create_email_broadcast`, `update_email_broadcast`, `send_email_broadcast`, `cancel_email_broadcast` | Draft a newsletter or announcement to a topic's subscribers or a list of customer records, send it now or later, or stop it |
+| `create_email_broadcast`, `update_email_broadcast`, `send_email_broadcast`, `cancel_email_broadcast` | Draft a newsletter or announcement to a topic's subscribers, a saved list or segment, or a list of customer records (or a service message that skips marketing consent), send it now or later, or stop it |
+| `import_people` | Import up to 10,000 people by email or your own user id, matched to existing people, optionally into a static list |
 | `create_journey`, `update_journey`, `activate_journey`, `pause_journey`, `archive_journey`, `add_to_journey`, `exit_journey_run` | Build a flow that an event starts (send an email, wait, branch, exit), turn it on or off, and add or take out people |
 | `list_journey_versions`, `edit_journey_draft`, `publish_journey`, `discard_journey_draft` | Change a live journey safely: edit a draft version beside it, then publish it (people in it finish on their version, or move onto the new one); every version that went live is kept |
 | `test_journey` | Test a journey with one person: the path they would take and what each step would do, without sending or writing anything |
@@ -419,7 +439,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_partner_program`, `update_partner_program` | Start a referral, affiliate or influencer program from its preset, or change, pause or archive one |
 | `update_partner_settings` | Choose whether erasing a partner's record also clears their payouts' notes and references (every program) |
 | `set_partner_rules`, `create_partner_group`, `update_partner_group`, `assign_partner_group`, `delete_partner_group` | Replace a program's reward rules (cash, fixed, action, two-sided, tiers), and manage its groups: add, rename, make default, move partners in bulk, remove |
-| `add_partner`, `update_partner`, `add_partner_promo_code` | Add a customer record as a partner, approve, suspend or move them, set their postback URL, and tie promo codes to them |
+| `add_partner`, `update_partner`, `add_partner_promo_code`, `update_partner_promo_code` | Add a customer record as a partner, approve, suspend or move them, set their postback URL, and tie promo codes to them, or switch one off |
 | `log_partner_fee`, `adjust_partner_balance` | Log a fixed fee (an influencer's post) or correct what a partner is owed |
 | `report_partner_conversion` | Report a lead, sale or refund the way the workspace's backend does |
 | `approve_partner_reward`, `reject_partner_reward`, `bulk_partner_rewards`, `fulfil_partner_reward` | Approve or reject a held reward, or many at once (by id, program or partner), or mark an action reward done |
@@ -440,6 +460,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_postback_sources`, `create_postback_source`, `update_postback_source`, `rotate_postback_source` | Where tracker conversions come from: a secret postback URL on the brand's tracking domain per network, with an IP allowlist, click expiry, duplicate policy and the network's template |
 | `list_tracker_conversions` | The click ledger: each conversion a network reported, with the click it credits, its payout and status |
 | `list_flows`, `get_flow`, `create_flow`, `update_flow`, `set_flow_destinations`, `set_flow_paths`, `set_tracking_link_flow` | Reusable paths and destinations that campaign links route by, so one edit changes every link that uses the flow |
+| `get_tracking_link_weight_suggestions`, `set_tracking_link_weights`, `get_flow_weight_suggestions`, `set_flow_weights` | Suggested weights for a link's or flow's landers, offers and pages from how each did, without bots or suspect clicks, and setting only the weights to apply them |
 | `list_landers`, `get_lander`, `create_lander`, `update_lander`, `list_lander_clicks` | The pages the brand sends tracker clicks to before its offers, their click URLs and script, and every click on their calls to action |
 | `list_affiliate_network_templates` | The affiliate networks and platforms Outflare has templates for: where each takes the click id, and its postback macros |
 | `list_offers`, `get_offer`, `create_offer`, `update_offer` | The pages the brand sends tracker clicks to, with payouts by country, daily caps on clicks or conversions and a fallback offer |
@@ -487,7 +508,12 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `sync_ads` | Sync ad platforms now instead of within six hours |
 | `pause_ad_campaign`, `resume_ad_campaign`, `set_ad_campaign_budget` | Pause or resume a campaign, or set its daily budget, on the workspace's own Google Ads, Meta, Microsoft, LinkedIn or TikTok account: the change is queued, made by a job and read back from the platform. On the action layer a raise past a fifth always waits for a person, and so does anything over the grant's spend caps. Needs `ads.manage` |
 | `get_ad_campaign_targeting` | A campaign's bidding, customer list audiences and countries, read live from Google Ads or Meta |
-| `set_ad_campaign_bidding`, `change_ad_campaign_audience`, `change_ad_campaign_country` | Change how a campaign bids (Google), or add or take out a customer list audience or a country (Google and Meta): queued, made by a job, and always approved by a person first. Needs `ads.manage` |
+| `set_ad_campaign_bidding`, `change_ad_campaign_audience`, `change_ad_campaign_country` | Change how a campaign bids (Google: Maximise conversions or value with an optional target, or a portfolio strategy), or add or take out a customer list audience or a country (Google and Meta): queued, made by a job, and always approved by a person first. Needs `ads.manage` |
+| `list_ad_account_conversion_actions`, `create_ad_website_conversion` | A Google Ads account's conversion actions with the website code of website ones, and a new website conversion action (always approved by a person first; needs `ads.manage`) |
+| `list_ad_callouts`, `add_ad_callout`, `remove_ad_callout` | A Google Ads account's own callouts, and adding or removing one (up to 25 characters; always approved by a person first; needs `ads.manage`) |
+| `list_ad_bidding_strategies`, `create_ad_bidding_strategy`, `update_ad_bidding_strategy` | A Google Ads account's portfolio Target CPA and Target ROAS strategies, a new one, or a new target (always approved by a person first; needs `ads.manage`) |
+| `get_ad_bidding_strategy_report` | Each portfolio bidding strategy's type, status, clicks, impressions, cost, average CPC, conversions and cost per conversion over a range, read live from Google Ads |
+| `get_ad_account_change` | How a queued change to an ad account (conversion action, callout, bidding strategy) ended |
 | `list_ad_drafts` | New ads written for a brand, waiting for a person first, then made paused, live, failed or dismissed. Needs `analytics.read` |
 | `write_ad_draft`, `update_ad_draft`, `dismiss_ad_draft` | Write a new ad, ad group or search campaign for a person to check (Google; ads on Meta), rewrite one before it is approved, or leave one unmade. A person approves it in Outflare, which makes it paused, then turns it on. Needs `ads.manage` |
 | `pause_all_ads` | The kill switch: pause every active campaign of a brand at once. Needs `ads.manage` |
@@ -513,6 +539,14 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_ad_conversion_rules`, `create_ad_conversion_rule`, `update_ad_conversion_rule`, `delete_ad_conversion_rule` | Send a customer event to an ad platform as a conversion |
 | `list_ad_conversion_sends` | What each rule sent, skipped (and why) or failed |
 | `get_ad_settings`, `set_ad_settings` | Who conversions are sent for: unless they opted out, or only with a yes |
+| `get_ad_economics`, `set_ad_economics` | What a new paying customer and a sign-up may cost the brand, the acquisition window, payback and margin, and whether rules only record what they would do (shadow mode) |
+| `get_ads_performance` | Per campaign, ad group or ad: spend beside Outflare's own count of sign-ups and new paying customers, cost per each against the target, new, returning and lifetime revenue, payback and trend |
+| `list_ad_acquisitions` | The people the brand's ads acquired: the click, the campaign, ad group, ad and keyword, when they signed up and first paid, and what they have paid since |
+| `get_ads_setup` | The steps to measuring ads in cost per new paying customer, each with whether it is done and what fixes it |
+| `list_ad_findings` | A brand's paid ads findings ranked for a decision: proposed changes, alerts and savings applied on their own, each in cost per new paying customer with its evidence, impact, rule and verdict |
+| `approve_ad_finding`, `dismiss_ad_finding`, `acknowledge_ad_finding` | Make a finding's change and measure it (a person, or an agent for a saving where the server's extension allows it), leave the campaign as it is, or close an alert |
+| `revert_ad_finding` | Undo an applied finding: the inverse change (budget restored, campaign resumed, negative or exclusion removed, keyword or ad enabled, target put back) |
+| `get_ad_feed`, `create_ad_feed`, `update_ad_feed` | Outflare's conversion feed on a Google Ads account: its three conversion actions, the paying customers list and the new customer acquisition goal (`update_ad_feed` always waits for a person) |
 | `get_seo_report` | A live SEO report (overview, keywords, backlinks, links, competitors, audit) for any domain; costs money within the connection's monthly budget |
 | `update_seo_settings`, `sync_seo` | An SEO connection's domains, country, budget and weekly snapshots; take a snapshot now |
 | `list_seo_sites`, `add_seo_site`, `update_seo_site`, `delete_seo_site` | The websites OutflareBot audits: ownership, crawl settings and limits, latest crawl |
@@ -711,12 +745,15 @@ Placements can opt into `monitor_accuracy`. Scheduled reviews run no more often 
 
 ### Link orders
 
-Paid link orders for a brand: the donor catalog, orders, and a summary of committed and spent amounts. Amounts are the donor price only; USD and EUR are never summed. There are no tools to approve or pay an order; those stay with the brand's designated approver.
+Paid link orders for a brand: the donor catalog, orders, and a summary of committed and spent amounts. Amounts are the donor price only; USD and EUR are never summed. There are no tools to approve or pay an order; those stay with the brand's designated approver. The product guide is [docs/link-orders.md](../docs/link-orders.md).
 
 | Tools | Purpose |
 | --- | --- |
-| `list_link_order_catalog`, `import_link_order_catalog` | The donor catalog. Import accepts a CSV string; a repeated domain updates the existing profile, and a bad row does not abort the file. |
+| `list_link_order_catalog`, `import_link_order_catalog` | The donor catalog. Import accepts a CSV string only; a Google Sheet is not imported. A repeated domain updates the existing profile, and a bad row does not abort the file. |
 | `list_link_orders`, `get_link_order`, `create_link_order` | List or request a paid link order against a catalog donor. |
+| `get_link_roi` | Cost per published link against stored Search Console, ranking and referring-domain changes on the target page, 30, 60 and 90 days around publication |
+| `list_link_order_candidates`, `add_link_order_candidate_to_catalog` | Referring domains from the already-saved competitor link gap (no paid provider read; SE Ranking cannot feed this list). Add one to the catalog with source=competitor_gap. |
+| `get_link_order_equivalents` | Catalog donors in the same domain-rating band and niche, with the current donor first when it still qualifies. |
 | `get_link_order_summary` | Counts by status, and donor amounts by currency (committed, spent, lost). |
 
 

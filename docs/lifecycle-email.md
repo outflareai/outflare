@@ -35,8 +35,7 @@ The workspace routes (`/v1/workspaces/{ws}/email-templates` and the rest)
 are deprecated and keep working until the brands contract step: a list is
 the brand `?brand=` picks, else the workspace's first, and something made
 there without `brand_id` goes to the workspace's first brand. In the app
-the Lifecycle pages work inside the brand picked in the brand switcher and
-ask for one when all brands are picked.
+the Lifecycle pages work inside the brand picked in the brand switcher.
 
 ## Providers
 
@@ -109,6 +108,7 @@ sends use. A send can pin `version`, or use `draft: true` for a test.
 | `{{{receipt_html}}}` | Not escaped, for HTML you built |
 | `{{#if coupon}}…{{else}}…{{/if}}` | A part shown only when set |
 | `{{unsubscribe_url}}`, `{{email_id}}` | Filled in by Outflare |
+| `{{brand_address}}`, `{{brand_legal_name}}` | The brand's postal address on one line and its legal name (or name), from About your company |
 
 Variables can be required (a send without one gets `422
 template_variables_missing`), have a default, and have an example for
@@ -117,7 +117,7 @@ previews. `POST .../email-templates/preview` fills content without saving.
 ## Sending
 
 ```sh
-curl -X POST "$URL/v1/workspaces/$WS/emails" \
+curl -X POST "$URL/v1/brands/$BRAND/emails" \
   -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $(uuidgen)" \
   -d '{"to": "ana@customer.example", "from": "Acme <billing@acme.example>",
        "template": "receipt", "data": {"amount": "$49.00", "plan": "Pro"}}'
@@ -130,7 +130,9 @@ addresses are not sent (`suppressed`). Transactional email still reaches
 people who unsubscribed from updates, since they need it; bounces,
 complaints, blocks and do-not-contact entries stop it. Lifecycle email gets
 a one-click unsubscribe link (and `List-Unsubscribe` headers) to a
-preference page, and skips anyone who left its topic or all marketing
+preference page, and the brand's legal name and postal address in its
+footer (CAN-SPAM, the Spam Act, PECR) when the brand has saved one and the
+content doesn't place `{{brand_address}}` itself, and skips anyone who left its topic or all marketing
 email (see [Topics](#topics-and-the-preference-page)).
 
 Statuses: `queued`, `scheduled` (`send_at`), `sending`, `sent`, `delivered`,
@@ -213,8 +215,25 @@ until it is sent, now or at `send_at` (within 30 days).
 - **Audience.** `{"kind": "topic"}` (the default) is every person record
   with a verified email address, of the broadcast's brand when it has one;
   `{"kind": "records", "record_ids": [...]}` is just those records (up to
-  10,000). Kind `list` is reserved for saved lists and segments. A draft's
-  `audience_size` is how many people that is now.
+  10,000); `{"kind": "list", "ref": "<smart list id>"}` is everyone in a
+  saved list or segment of the brand (static, smart or query), or in one
+  of its lead lists, when it
+  sends. Records and list audiences also reach emails that are not
+  verified, such as imported ones: whoever chose them vouches for them. A
+  draft's `audience_size` is how many people that is now.
+- **Importing people.** `POST /v1/brands/{brand}/records/import` (MCP
+  `import_people`, or Lists, New list, Upload a CSV of people in the web app, also offered while making a broadcast) takes up to
+  10,000 rows with an email, the workspace's own `user_id` or both. Each
+  row is matched by user id, then email; only an email nobody in the
+  brand holds makes a new person, with the `origin` you give
+  (`first_party`, `prospect` or `import`). With `list_id`, everyone goes
+  into that static list, ready for a broadcast.
+- **Service messages.** With `"service": true` a broadcast is news about
+  the service people use (a change, an end date), not marketing. It sends
+  a transactional template to a records or list audience, skips marketing
+  consent, topics, frequency caps and quiet hours, has no unsubscribe link
+  and no holdout. Suppressed addresses (bounces, complaints, do not
+  contact) still never get it, through the same send-time policy check.
 - **Who is skipped.** Each person's latest consent decides, as for any
   lifecycle email: leaving the broadcast's topic or all marketing email,
   or never joining an opt-in topic, skips them. Prospects (records from

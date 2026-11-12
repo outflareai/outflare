@@ -4,8 +4,9 @@ import { PickBrand } from "@/components/pick-brand";
 // template and a topic; sending makes one email per person and skips the
 // people who chose not to get it, with why.
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { EmailBroadcast, EmailBroadcastRecipient, EmailTemplate, EmailTopic } from "@outflare/sdk";
+import { UploadPeople } from "@/components/upload-people";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
 import { ExclusionPicker, noExclusion, type Exclusion } from "@/components/exclusion-picker";
@@ -27,8 +28,9 @@ function StatusBadge({ b }: { b: EmailBroadcast }) {
 
 const pct = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : "—");
 
-function audienceText(b: EmailBroadcast) {
+function audienceText(b: EmailBroadcast, listName?: string) {
   if (b.audience.kind === "records") return plural(b.audience.record_ids.length, "chosen person", "chosen people");
+  if (b.audience.kind === "list") return listName ? `Everyone in ${listName}` : "Everyone in a saved list";
   return b.topic ? `Everyone in ${b.topic.name}` : "Everyone who gets marketing email";
 }
 
@@ -76,6 +78,7 @@ function BroadcastsPage({ ws, canManage, open, onOpen, go }: { ws: string; canMa
     if (!open) load();
   }, [load, open]);
 
+  if (creating) return <BroadcastEditor ws={ws} go={go} onClose={() => setCreating(false)} onSaved={(b) => { setCreating(false); onOpen(b.id); }} />;
   if (open) return <BroadcastDetail ws={ws} id={open} canManage={canManage} back={() => onOpen("")} go={go} />;
   if (!list) return <Loading />;
   const add = canManage && <Button onClick={() => setCreating(true)}>New broadcast</Button>;
@@ -89,7 +92,7 @@ function BroadcastsPage({ ws, canManage, open, onOpen, go }: { ws: string; canMa
       <ErrorText>{error}</ErrorText>
       {list.length === 0 ? (
         <Empty title="No broadcasts yet" action={add}>
-          A broadcast sends a published lifecycle template to the people on your customer records: everyone in a topic, such as your newsletter. Write the email as a template first.
+          A broadcast sends one of your email templates to many people: everyone subscribed to a topic, such as your newsletter, or the people in a list. Write the email under Templates first.
         </Empty>
       ) : (
         <DataTable
@@ -109,7 +112,6 @@ function BroadcastsPage({ ws, canManage, open, onOpen, go }: { ws: string; canMa
           )}
         />
       )}
-      {creating && <BroadcastDialog ws={ws} onClose={() => setCreating(false)} onSaved={(b) => { setCreating(false); onOpen(b.id); }} />}
     </div>
   );
 }
@@ -122,6 +124,17 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
   const [scheduling, setScheduling] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [listName, setListName] = useState<string>();
+  const ref = b?.audience.kind === "list" ? b.audience.ref : null;
+  useEffect(() => {
+    if (!ref) return;
+    // A list audience is a saved list or segment, or a lead list.
+    api.GET("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand: brandId, id: ref } } }).then(async ({ data }) => {
+      if (data) return setListName(data.name);
+      const lead = await api.GET("/v1/brands/{brand}/lead-lists/{id}", { params: { path: { brand: brandId, id: ref } } });
+      setListName(lead.data?.name ?? "a deleted list");
+    });
+  }, [ref]);
   const load = useCallback(async () => {
     const { data, error } = await api.GET("/v1/brands/{brand}/email-broadcasts/{id}", { params: { path: { brand: brandId, id } } });
     if (error) return setError(errorMessage(error));
@@ -147,7 +160,7 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
   async function send(at?: string) {
     const n = b!.audience_size ?? 0;
     const ok = await confirmAction(at ? "Schedule this broadcast?" : "Send this broadcast now?",
-      <>It goes to up to {plural(n, "person", "people")}{at ? `, at ${stamp(at)}` : ""}. People who left {b!.topic ? b!.topic.name : "marketing email"} are skipped.</>,
+      <>It goes to up to {plural(n, "person", "people")}{at ? `, at ${stamp(at)}` : ""}. {b!.service ? "It is a service message: only suppressed addresses (bounces, complaints, do not contact) are skipped." : `People who left ${b!.topic ? b!.topic.name : "marketing email"} are skipped.`}</>,
       at ? "Schedule" : "Send now", false);
     if (!ok) return;
     setBusy(true);
@@ -166,6 +179,7 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
     toast("Cancelled.");
   }
 
+  if (editing) return <BroadcastEditor ws={ws} go={go} broadcast={b} onClose={() => setEditing(false)} onSaved={(v) => { setEditing(false); setB(v); }} />;
   const s = b.stats;
   const draft = b.status === "draft";
   return (
@@ -204,7 +218,8 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
             ["Template", <button className="underline" onClick={() => go("templates", b.template.handle)}>{b.template.name}</button>],
             ["Version", b.template_version ? `v${b.template_version}` : "The published one, when it starts"],
             ["Topic", b.topic ? <button className="underline" onClick={() => go("topics")}>{b.topic.name}</button> : "None"],
-            ["Audience", audienceText(b)],
+            ["Kind", b.service ? "Service message (no marketing consent or unsubscribe link)" : "Marketing"],
+            ["Audience", audienceText(b, listName)],
             ["From", b.from || "The template's sender"],
             ...(b.holdout_percent > 0 ? [["Held out", `${b.holdout_percent}% of the audience${b.held_out ? ` (${b.held_out} people)` : ""}, to measure what it adds`] as [string, React.ReactNode]] : []),
             ["Started", b.started_at ? stamp(b.started_at) : "Not yet"],
@@ -212,10 +227,17 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
           ]} />
         </Card>
         <Card title="Who gets it">
+          {b.service ? (
+          <div className="space-y-2 text-[13px] text-muted-foreground">
+            <p>Everyone in the audience with an email address, imported ones included. Each gets their own copy, filled in with their own fields (such as {"{{person.first_name}}"}).</p>
+            <p>It is a service message, so marketing choices don't apply and it has no unsubscribe link. Skipped: suppressed addresses (hard bounces, complaints, do not contact). Use it only for news about the service people use.</p>
+          </div>
+          ) : (
           <div className="space-y-2 text-[13px] text-muted-foreground">
             <p>People on your customer records with a verified email address{b.topic ? `, in ${b.topic.name}` : ""}. Each gets their own copy, filled in with their own fields (such as {"{{person.first_name}}"}).</p>
             <p>Skipped: anyone who left {b.topic ? "this topic" : "marketing email"} or all marketing email, anyone who never joined an opt-in topic, and prospects from lead lists who never agreed to marketing email.</p>
           </div>
+          )}
         </Card>
       </div>
       {b.held_out > 0 && <SendLift brand={brandId} kind="email-broadcasts" id={b.id} />}
@@ -231,7 +253,6 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
           </ul>
         </Card>
       )}
-      {editing && <BroadcastDialog ws={ws} broadcast={b} onClose={() => setEditing(false)} onSaved={(v) => { setEditing(false); setB(v); }} />}
       {scheduling && <ScheduleDialog onClose={() => setScheduling(false)} onPick={(at) => send(at)} />}
     </div>
   );
@@ -258,7 +279,40 @@ function ScheduleDialog({ onClose, onPick }: { onClose: () => void; onPick: (at:
   );
 }
 
-function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broadcast?: EmailBroadcast; onClose: () => void; onSaved: (b: EmailBroadcast) => void }) {
+// A numbered part of the editor: one question, in the order people answer it.
+function Step({ n, title, hint, children }: { n: number; title: string; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="rounded-lg border bg-card p-5 shadow-xs">
+      <header className="mb-4 flex items-start gap-3">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary font-mono text-[12px] text-primary-foreground">{n}</span>
+        <div>
+          <h2 className="text-[15px] font-semibold leading-6">{title}</h2>
+          {hint && <p className="text-[13px] text-muted-foreground">{hint}</p>}
+        </div>
+      </header>
+      <div className="space-y-3 text-[13px] sm:pl-9">{children}</div>
+    </section>
+  );
+}
+
+function Pick({ checked, onChange, title, body, name }: { checked: boolean; onChange: () => void; title: string; body: ReactNode; name: string }) {
+  return (
+    <label className={`flex cursor-pointer items-start gap-2.5 rounded-md border p-3 ${checked ? "border-primary bg-muted/50" : "hover:bg-muted/30"}`}>
+      <input type="radio" name={name} className="mt-0.5" checked={checked} onChange={onChange} />
+      <span className="min-w-0">
+        <span className="block font-medium">{title}</span>
+        <span className="block text-[12px] text-muted-foreground">{body}</span>
+      </span>
+    </label>
+  );
+}
+
+// BroadcastEditor is the whole page for making or changing a draft, in the
+// order people think about it: what kind of email, which email, who gets
+// it, then its name. The email shows beside it as people will see it.
+// Saving sends nothing: it opens the draft, which shows the audience count
+// and has Send and Schedule.
+function BroadcastEditor({ ws, broadcast, onClose, onSaved, go }: { ws: string; broadcast?: EmailBroadcast; onClose: () => void; onSaved: (b: EmailBroadcast) => void; go: Go }) {
   const brandId = useBrand(ws).brand?.id ?? "";
   const [templates, setTemplates] = useState<EmailTemplate[] | null>(null);
   const [topics, setTopics] = useState<EmailTopic[]>([]);
@@ -267,71 +321,257 @@ function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broa
   const [topic, setTopic] = useState<string | undefined>(broadcast ? broadcast.topic?.key ?? "" : undefined);
   const [exclude, setExclude] = useState<Exclusion>(broadcast?.exclude ?? noExclusion);
   const [holdout, setHoldout] = useState(broadcast?.holdout_percent ?? 0);
+  const [service, setService] = useState<boolean | null>(broadcast ? broadcast.service : null);
+  const [audKind, setAudKind] = useState<"topic" | "list" | "records" | "">(broadcast?.audience.kind ?? "");
+  const [listRef, setListRef] = useState(broadcast?.audience.ref ?? "");
+  // Every list of people the brand has: saved lists and segments, then
+  // lead lists.
+  const [lists, setLists] = useState<{ id: string; name: string; members: number; lead: boolean }[] | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const loadLists = useCallback(
+    async () => {
+      const [smart, lead] = await Promise.all([
+        api.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand: brandId } } }),
+        api.GET("/v1/brands/{brand}/lead-lists", { params: { path: { brand: brandId } } }),
+      ]);
+      setLists([
+        ...(smart.data?.data ?? []).filter((l) => l.record_type === "person").map((l) => ({ id: l.id, name: l.name, members: l.members, lead: false })),
+        ...(lead.data?.data ?? []).map((l) => ({ id: l.id, name: l.name, members: l.leads, lead: true })),
+      ]);
+    },
+    [brandId],
+  );
   useEffect(() => {
     api.GET("/v1/brands/{brand}/email-templates", { params: { path: { brand: brandId } } }).then(({ data }) =>
-      setTemplates((data?.data ?? []).filter((t) => t.purpose === "lifecycle" && t.status === "active")),
+      setTemplates((data?.data ?? []).filter((t) => t.status === "active")),
     );
     api.GET("/v1/brands/{brand}/email-topics", { params: { path: { brand: brandId }, query: { status: "active" } } }).then(({ data }) => setTopics(data?.data ?? []));
-  }, [ws]);
-  const chosen = templates?.find((t) => t.id === template);
+    loadLists();
+  }, [brandId, loadLists]);
+
+  const usable = service === null ? [] : (templates ?? []).filter((t) => t.purpose === (service ? "transactional" : "lifecycle"));
+  const chosen = usable.find((t) => t.id === template);
+  const list = lists?.find((l) => l.id === listRef);
+  const topicKey = topic ?? chosen?.topic?.key ?? "";
+  const topicName = topics.find((t) => t.key === topicKey)?.name;
+
+  function setKind(svc: boolean) {
+    if (svc === service) return;
+    setService(svc);
+    setTemplate("");
+    setTopic(undefined);
+    if (svc && audKind === "topic") setAudKind("list");
+  }
+  function pickTemplate(t: EmailTemplate) {
+    // The broadcast takes the email's name until someone types their own.
+    if (!name.trim() || name === chosen?.name) setName(t.name);
+    setTemplate(t.id);
+    setTopic(undefined);
+  }
+
+  const missing = service === null ? "Choose what kind of email it is." : !template ? "Choose the email to send." : !audKind ? "Choose who gets it." : audKind === "list" && !listRef ? "Choose a list." : !name.trim() ? "Give it a name." : "";
+
   async function save(e: FormEvent) {
     e.preventDefault();
+    if (missing || service === null) return;
     setBusy(true);
-    const body = { name, template, exclude, holdout_percent: holdout, ...(topic !== undefined ? { topic: topic || null } : {}) };
+    setError("");
+    const audience =
+      audKind === "list" ? { kind: "list" as const, ref: listRef } : audKind === "records" ? { kind: "records" as const, record_ids: broadcast?.audience.record_ids ?? [] } : { kind: "topic" as const };
+    const body = {
+      name: name.trim(), template, exclude, service, audience,
+      holdout_percent: service ? 0 : holdout,
+      ...(service ? { topic: null } : topic !== undefined ? { topic: topic || null } : {}),
+    };
     const res = broadcast
       ? await api.PATCH("/v1/brands/{brand}/email-broadcasts/{id}", { params: { path: { brand: brandId, id: broadcast.id } }, body })
       : await api.POST("/v1/brands/{brand}/email-broadcasts", { params: { path: { brand: brandId } }, body });
     setBusy(false);
     if (res.error || !res.data) return setError(errorMessage(res.error));
-    toast(broadcast ? "Saved." : "Draft saved. Check the audience, then send it.");
+    toast(broadcast ? "Saved." : "Draft saved. Nothing is sent until you press Send.");
     onSaved(res.data);
   }
+
+  if (!templates || !lists) return <Loading />;
+  const who =
+    audKind === "list" ? (list ? `${plural(list.members, "person", "people")} in ${list.name}` : "A list you choose")
+    : audKind === "records" ? plural(broadcast?.audience.record_ids.length ?? 0, "chosen person", "chosen people")
+    : audKind === "topic" ? (topicName ? `Everyone subscribed to ${topicName}` : "Everyone who gets marketing email")
+    : "Not chosen yet";
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{broadcast ? "Edit the broadcast" : "New broadcast"}</DialogTitle>
-          <DialogDescription>Nothing is sent until you press Send.</DialogDescription>
-        </DialogHeader>
-        {!templates ? <Loading /> : templates.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">You need a lifecycle template first: write the email under Templates, set its kind to lifecycle, and publish it.</p>
-        ) : (
-          <form onSubmit={save} className="space-y-3">
-            <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="October newsletter" maxLength={200} required autoFocus />
-            <label className="block space-y-1 text-[13px]">
-              <span className="font-medium">Template</span>
-              <select aria-label="Template" className={`${field} w-full`} value={template} onChange={(e) => { setTemplate(e.target.value); setTopic(undefined); }} required>
-                <option value="">Choose a template</option>
-                {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.published_version ? "" : " (not published yet)"}</option>)}
-              </select>
-            </label>
-            {chosen && !chosen.published_version && <p className="text-[12px] text-amber-700 dark:text-amber-400">Publish this template before sending.</p>}
-            <label className="block space-y-1 text-[13px]">
-              <span className="font-medium">Topic</span>
-              <select aria-label="Topic" className={`${field} w-full`} value={topic ?? chosen?.topic?.key ?? ""} onChange={(e) => setTopic(e.target.value)}>
-                <option value="">No topic: everyone who gets marketing email</option>
-                {topics.map((t) => <option key={t.id} value={t.key}>{t.name}</option>)}
-              </select>
-              <span className="block text-[12px] text-muted-foreground">Who it goes to, and what the unsubscribe link leaves. The template's topic unless you pick another.</span>
-            </label>
-            <ExclusionPicker ws={ws} value={exclude} onChange={setExclude} what="Skips" />
-            <label className="block space-y-1 text-[13px]">
-              <span className="font-medium">Hold out</span>
-              <select aria-label="Hold out" className={`${field} w-full`} value={holdout} onChange={(e) => setHoldout(Number(e.target.value))}>
-                {[0, 5, 10, 20, 50].map((n) => <option key={n} value={n}>{n === 0 ? "Nobody" : `${n}% of the audience`}</option>)}
-              </select>
-              <span className="block text-[12px] text-muted-foreground">People picked at random who don't get it, so you can see what the email added.</span>
-            </label>
-            <ErrorText>{error}</ErrorText>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-              <Button disabled={busy || !name.trim() || !template}>{broadcast ? "Save" : "Save draft"}</Button>
+    <form onSubmit={save} className="space-y-6">
+      <PageHeader
+        back={{ label: broadcast ? broadcast.name : "Broadcasts", onClick: onClose }}
+        title={broadcast ? "Edit the broadcast" : "New broadcast"}
+        description="Four short steps. Nothing is sent from this page: you save a draft, check who it goes to, then press Send."
+      />
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]">
+        <div className="space-y-4">
+          <Step n={1} title="What kind of email is it?" hint="This decides who may get it and whether it has an unsubscribe link.">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Pick name="kind" checked={service === false} onChange={() => setKind(false)} title="Marketing" body="A newsletter, a launch or an offer. It has an unsubscribe link, and people who opted out of marketing are skipped." />
+              <Pick name="kind" checked={service === true} onChange={() => setKind(true)} title="Service message" body="News people need about the service they use, such as a change or an end date. It goes to everyone in the list, with no unsubscribe link." />
             </div>
-          </form>
-        )}
-      </DialogContent>
-    </Dialog>
+            {service && <p className="text-[12px] text-muted-foreground">Use this only for real service news, never for promotion. Addresses that bounced, complained or asked not to be contacted are still skipped.</p>}
+          </Step>
+
+          <Step n={2} title="Which email do you want to send?" hint={service === null ? "Answer step 1 first." : `Emails are written under Templates. These are your published ${service ? "service (transactional)" : "marketing (lifecycle)"} templates.`}>
+            {service !== null && usable.length === 0 && (
+              <div className="rounded-md border border-dashed p-4 text-muted-foreground">
+                <p>You have no {service ? "service" : "marketing"} email to send yet. Write it under Templates, set its kind to {service ? "transactional" : "lifecycle"}, and publish it. Then come back here.</p>
+                <Button type="button" variant="ghost" className="mt-3" onClick={() => go("templates")}>Go to Templates</Button>
+              </div>
+            )}
+            {usable.length > 0 && (
+              <div className="grid max-h-80 gap-2 overflow-y-auto">
+                {usable.map((t) => (
+                  <Pick key={t.id} name="template" checked={template === t.id} onChange={() => pickTemplate(t)} title={t.name} body={<>Subject: {t.subject || "(no subject)"}{t.published_version ? "" : " · not published yet"}</>} />
+                ))}
+              </div>
+            )}
+            {chosen && !chosen.published_version && <p className="text-[12px] text-amber-700 dark:text-amber-400">This email isn't published yet. You can save the draft, but publish the template before sending.</p>}
+            {usable.length > 0 && <button type="button" className="text-[12px] text-muted-foreground underline hover:text-foreground" onClick={() => go("templates")}>Write or change an email in Templates</button>}
+          </Step>
+
+          <Step n={3} title="Who gets it?" hint={service ? "A service message goes to a list of people." : "Everyone subscribed to a topic, or the people in one of your lists."}>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {!service && <Pick name="aud" checked={audKind === "topic"} onChange={() => setAudKind("topic")} title="Everyone subscribed to a topic" body="Such as everyone who gets your newsletter." />}
+              <Pick name="aud" checked={audKind === "list"} onChange={() => setAudKind("list")} title="The people in a list" body="Any list from Lists (a smart list, a lead list or a segment), or a CSV you upload." />
+              {broadcast?.audience.kind === "records" && <Pick name="aud" checked={audKind === "records"} onChange={() => setAudKind("records")} title="The people chosen before" body={plural(broadcast.audience.record_ids.length, "person", "people")} />}
+            </div>
+            {audKind === "topic" && (
+              <label className="block space-y-1">
+                <span className="font-medium">Topic</span>
+                <select aria-label="Topic" className={`${field} w-full`} value={topicKey} onChange={(e) => setTopic(e.target.value)}>
+                  <option value="">No topic: everyone who gets marketing email</option>
+                  {topics.map((t) => <option key={t.id} value={t.key}>{t.name}</option>)}
+                </select>
+                <span className="block text-[12px] text-muted-foreground">The unsubscribe link in the email takes people out of this topic.</span>
+              </label>
+            )}
+            {audKind === "list" && (
+              <div className="space-y-2">
+                {lists.length === 0 ? (
+                  <p className="rounded-md border border-dashed p-4 text-muted-foreground">You have no lists of people yet. Upload a CSV to make one now, or build one under Lists.</p>
+                ) : (
+                  <label className="block space-y-1">
+                    <span className="font-medium">List</span>
+                    <select aria-label="List" className={`${field} w-full`} value={listRef} onChange={(e) => setListRef(e.target.value)}>
+                      <option value="">Choose a list</option>
+                      {lists.some((l) => !l.lead) && (
+                        <optgroup label="Lists and segments">
+                          {lists.filter((l) => !l.lead).map((l) => <option key={l.id} value={l.id}>{l.name} ({plural(l.members, "person", "people")})</option>)}
+                        </optgroup>
+                      )}
+                      {lists.some((l) => l.lead) && (
+                        <optgroup label="Lead lists">
+                          {lists.filter((l) => l.lead).map((l) => <option key={l.id} value={l.id}>{l.name} ({plural(l.members, "person", "people")})</option>)}
+                        </optgroup>
+                      )}
+                    </select>
+                  </label>
+                )}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <Button type="button" variant="ghost" onClick={() => setUploading(true)}>Upload a CSV of people</Button>
+                  <button type="button" className="text-[12px] text-muted-foreground underline hover:text-foreground" onClick={() => go("lists")}>See or build lists</button>
+                </div>
+              </div>
+            )}
+            {audKind && (
+              <details className="rounded-md border px-3 py-2" open={exclude.lists.length + exclude.tags.length > 0}>
+                <summary className="cursor-pointer font-medium">Leave some people out <span className="font-normal text-muted-foreground">(optional)</span></summary>
+                <div className="pt-3"><ExclusionPicker ws={ws} value={exclude} onChange={setExclude} what="Skips" /></div>
+              </details>
+            )}
+          </Step>
+
+          <Step n={4} title="Name it" hint="Only your team sees the name. It's how you'll find this broadcast later.">
+            <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder={service ? "Change to your plan" : "October newsletter"} maxLength={200} />
+            {service === false && (
+              <details className="rounded-md border px-3 py-2" open={holdout > 0 || (audKind === "list" && topic !== undefined)}>
+                <summary className="cursor-pointer font-medium">More options <span className="font-normal text-muted-foreground">(optional)</span></summary>
+                <div className="space-y-3 pt-3">
+                  {audKind !== "topic" && (
+                    <label className="block space-y-1">
+                      <span className="font-medium">Unsubscribe topic</span>
+                      <select aria-label="Unsubscribe topic" className={`${field} w-full`} value={topicKey} onChange={(e) => setTopic(e.target.value)}>
+                        <option value="">No topic: unsubscribing leaves all marketing email</option>
+                        {topics.map((t) => <option key={t.id} value={t.key}>{t.name}</option>)}
+                      </select>
+                      <span className="block text-[12px] text-muted-foreground">What the unsubscribe link takes people out of. The email's own topic unless you pick another.</span>
+                    </label>
+                  )}
+                  <label className="block space-y-1">
+                    <span className="font-medium">Hold some people back to measure it</span>
+                    <select aria-label="Hold out" className={`${field} w-full`} value={holdout} onChange={(e) => setHoldout(Number(e.target.value))}>
+                      {[0, 5, 10, 20, 50].map((n) => <option key={n} value={n}>{n === 0 ? "Nobody: send to everyone" : `${n}% of the audience`}</option>)}
+                    </select>
+                    <span className="block text-[12px] text-muted-foreground">People picked at random who don't get it, so you can see what the email added.</span>
+                  </label>
+                </div>
+              </details>
+            )}
+          </Step>
+
+          <ErrorText>{error}</ErrorText>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {missing && <span className="text-[12px] text-muted-foreground">{missing}</span>}
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button disabled={busy || !!missing}>{busy ? "Saving…" : broadcast ? "Save" : "Save draft and review"}</Button>
+          </div>
+        </div>
+
+        <aside className="space-y-4 xl:sticky xl:top-4">
+          <section aria-label="Summary" className="rounded-lg border bg-card p-4 shadow-xs">
+            <h2 className="mb-2 text-[13px] font-semibold">Summary</h2>
+            <Facts rows={[
+              ["Kind", service === null ? "Not chosen yet" : service ? "Service message" : "Marketing"],
+              ["Email", chosen?.name ?? "Not chosen yet"],
+              ["Goes to", who],
+              ...(service === false ? [["Unsubscribe", topicName ? `Leaves ${topicName}` : "Leaves all marketing email"] as [string, ReactNode]] : []),
+              ...(service ? [["Unsubscribe", "No link: it is a service message"] as [string, ReactNode]] : []),
+            ]} />
+          </section>
+          <TemplateLook brand={brandId} template={chosen} />
+        </aside>
+      </div>
+      {uploading && <UploadPeople brand={brandId} onClose={() => setUploading(false)} onDone={(l) => { setUploading(false); loadLists(); setListRef(l.id); }} />}
+    </form>
+  );
+}
+
+// TemplateLook shows the chosen email as people will get it, filled with
+// its example values.
+function TemplateLook({ brand, template }: { brand: string; template?: EmailTemplate }) {
+  const [out, setOut] = useState<{ id: string; subject: string; html: string } | null>(null);
+  const id = template?.id;
+  useEffect(() => {
+    if (!template) return;
+    let live = true;
+    api.POST("/v1/brands/{brand}/email-templates/preview", {
+      params: { path: { brand } },
+      body: { subject: template.subject, html: template.html, text: template.text, variables: template.variables },
+    }).then(({ data }) => {
+      if (live && data) setOut({ id: template.id, subject: data.subject, html: data.html });
+    });
+    return () => { live = false; };
+  }, [brand, id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = out && out.id === id ? out : null;
+  return (
+    <section aria-label="Preview" className="rounded-lg border bg-card shadow-xs">
+      <header className="border-b px-4 py-2.5">
+        <h2 className="text-[13px] font-semibold">Preview</h2>
+        <p className="truncate text-[12px] text-muted-foreground">{template ? `Subject: ${shown?.subject ?? template.subject}` : "Choose an email in step 2 to see it here."}</p>
+      </header>
+      {template && (
+        <div className="p-3">
+          <div className="overflow-hidden rounded-md border bg-white">
+            <iframe title="Email preview" sandbox="" srcDoc={shown?.html ?? ""} className="h-[32rem] w-full" />
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

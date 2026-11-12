@@ -129,6 +129,25 @@ A redirect code that doesn't exist on a tracking domain (mistyped, or from a
 deleted link) shows a not found page, or goes to the domain's fallback page:
 `PUT /v1/brands/{brand}/tracking-domains/{id}/fallback`.
 
+### Direct mode
+
+Some networks and placements take only a direct link to the page, with no
+redirect. A campaign with a traffic source still gets its clicks: give the
+ad the page's URL with the campaign's `ofc` code and the source's parameters
+(`https://northpeak.example/winter?ofc=7k2m9qxa&clickid={clickid}&zone_id={zone}`).
+When the site's script sees `ofc` and no `ofclk`, it names a click id for the
+visit (kept in the tab's session storage, so a reload keeps it), and the new
+visit records the tracker click with that id, on the campaign's link for the
+page (or its first), with the source's click id, cost and custom fields from
+the page's URL. A reload isn't a second click.
+
+The page can pass the click id on, as a redirect click's: `outflare.clickId()`
+returns it, and the script fills `{ofclk}` in the page's links, such as an
+offer's sub id (`https://network.example/offer?sub1={ofclk}`). Postbacks,
+landers' `/click` and the click's conversions then work as for a redirect
+click. A campaign without a traffic source (the plain UTM tool) records no
+direct clicks. Direct clicks count against the workspace's tracker clicks.
+
 ### Conversions by click id
 
 A conversion on an offer the brand doesn't own (an affiliate network's, a
@@ -246,6 +265,27 @@ action and where it went, and gives the click the offer it went to, so its
 conversions get that offer's payout. Lander clicks count against the
 destinations' and offers' daily caps.
 
+### Suspect clicks and conversions
+
+Outflare flags tracker clicks and conversions that look automated, from what
+it already keeps (the click's network, the keyed hash of its address and its
+times), and never refuses them:
+
+- `datacenter_network`: the click came from a cloud or hosting provider's
+  network (a short list checked by hand, in `engine/internal/fraud/data`),
+  where people rarely browse from. Networks that carry people through
+  privacy relays (Cloudflare, Akamai, Fastly) are never on it. Direct clicks
+  (from the site script) get this check too;
+- `repeat_click`: the same address and browser clicked the same link more
+  than ten times in an hour (the browser too, since many people can share an
+  address; counted by each server apart, so a few more can slip through);
+- `fast_conversion`: a conversion less than 10 seconds after its click.
+
+A flagged click still goes where a person's would, but counts against no
+destination or offer cap, as a likely bot doesn't. Links show their
+`suspect_clicks`; a conversion inherits its click's reasons and shows them in
+`fraud_reasons`, and `?suspect=true` (or `false`) filters the ledger.
+
 ### Destinations and daily caps
 
 A redirect link can send its clicks to several pages instead of one: two
@@ -306,6 +346,29 @@ flow's paths (`PUT .../flows/{id}/paths`) or destinations
 (`PUT .../flows/{id}/destinations`) changes every link that uses it; the flow
 says how many do (`links`). A cap on a flow's destination counts the clicks
 of all of them. A flow that links use can't be archived.
+
+### Suggested weights
+
+Outflare suggests weights from how each lander, offer and page did
+(`GET .../links/{link}/weight-suggestions`, or `.../flows/{id}/weight-suggestions`;
+a link that routes by a flow gets the flow's). Each list of a path (its
+landers, and the offers and pages after the click or after a lander) shows
+each entry's clicks, conversions, revenue and its chance to be the best on
+the metric: `revenue` per click (the default) or the conversion rate
+(`metric=conversions`), over the last 14 days (`days`, up to 90). The
+suggested weights give each entry clicks in proportion to that chance,
+keeping at least 5% for each so the others go on being tested.
+
+- Likely bots, suspect clicks and conversions, and declined conversions are
+  left out, so the suggestion never learns from bots.
+- A list is ready once each entry that takes clicks has 50 clicks and the
+  list has 5 conversions; until then it says what's missing and suggests the
+  weights it has. An entry at weight 0 stays stopped.
+- Revenue in other currencies counts at the latest exchange rate, in the
+  brand's currency.
+- Nothing changes on its own. Apply a suggestion with
+  `PATCH .../links/{link}/weights` (or `.../flows/{id}/weights`), which sets
+  only the weights it names.
 
 ## Traffic sources and custom fields
 
@@ -444,6 +507,7 @@ traffic their code didn't bring, or lose imported partner links.
 | `GET`, `POST /v1/brands/{brand}/landers`; `GET`, `PATCH .../{id}` | `analytics.read`, `analytics.manage` |
 | `GET`, `POST /v1/brands/{brand}/flows`; `GET`, `PATCH .../{id}`; `PUT .../{id}/destinations`, `PUT .../{id}/paths` | `analytics.read`, `analytics.manage` |
 | `GET`, `PUT /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow` | `analytics.read`, `analytics.manage` |
+| `GET .../links/{link}/weight-suggestions`, `PATCH .../links/{link}/weights`; `GET /v1/brands/{brand}/flows/{id}/weight-suggestions`, `PATCH .../flows/{id}/weights` | `analytics.read`, `analytics.manage` |
 | `GET /v1/brands/{brand}/lander-clicks` (filter by `lander`, `click_id`) | `analytics.read` |
 | `GET /click`, `GET /click/{n}`, `GET /click.js` (a lander's calls to action, on the brand's tracking domain) | Public |
 | `POST /v1/brands/{brand}/tracker-conversions`, `POST .../tracker-conversions/csv` | `analytics.manage` |
@@ -461,7 +525,7 @@ Owners, admins and operators have `analytics.manage`; viewers can read.
 ```sh
 curl -X POST -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"Spring launch, US","channel":"paid_ads","source":"Google Ads","landing_url":"https://northpeak.example/pricing"}' \
-  "$URL/v1/workspaces/$WS/tracking-campaigns"
+  "$URL/v1/brands/$BRAND/tracking-campaigns"
 ```
 
 The MCP tools are `get_tracking_taxonomy`, `list_tracking_campaigns`,
@@ -474,6 +538,7 @@ The MCP tools are `get_tracking_taxonomy`, `list_tracking_campaigns`,
 `list_affiliate_network_templates`, `list_offers`, `get_offer`, `create_offer`, `update_offer`,
 `list_landers`, `get_lander`, `create_lander`, `update_lander`, `list_lander_clicks`,
 `list_flows`, `get_flow`, `create_flow`, `update_flow`, `set_flow_destinations`, `set_flow_paths`, `set_tracking_link_flow`,
+`get_tracking_link_weight_suggestions`, `set_tracking_link_weights`, `get_flow_weight_suggestions`, `set_flow_weights`,
 `list_traffic_source_templates`, `list_traffic_sources`, `list_traffic_source_postbacks`,
 `create_traffic_source` and `update_traffic_source`.
 
@@ -486,6 +551,6 @@ Each change is an audit action (and a product event): `tracking_campaign.created
 `tracker_offer.created`, `tracker_offer.updated`, `tracker_offer.archived`, `tracker_offer.restored`,
 `tracker_lander.created`, `tracker_lander.updated`, `tracker_lander.archived`, `tracker_lander.restored`,
 `tracker_flow.created`, `tracker_flow.updated`, `tracker_flow.archived`, `tracker_flow.restored`, `tracker_flow.paths_updated`,
-`tracker_flow.destinations_updated`, `tracking_link.flow_set`,
+`tracker_flow.destinations_updated`, `tracking_link.flow_set`, `tracking_link.weights_updated`, `tracker_flow.weights_updated`,
 `traffic_source.created`, `traffic_source.updated`, `traffic_source.archived`
 and `traffic_source.restored`.

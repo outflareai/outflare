@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/http"
@@ -110,6 +111,155 @@ type unassignedConnection struct {
 	// connection nobody assigned), else the account or property that has
 	// none.
 	Account *connectionAccount `json:"account"`
+	// What says whose the connection is: the outside account it signed
+	// in to, what the provider reported about it (Tag Manager accounts,
+	// containers and the sites they tag, a Cloudflare account's zones),
+	// who connected it and when, and the connection it was signed in
+	// together with, if any.
+	SignedInAs    string            `json:"signed_in_as"`
+	Details       map[string]string `json:"details"`
+	ConnectedAt   time.Time         `json:"connected_at"`
+	ConnectedBy   *string           `json:"connected_by"`
+	ConnectedWith *string           `json:"connected_with"`
+	// SuggestedBrandID is a brand the whole connection probably belongs
+	// to, for a connection with no brand, and SuggestedBecause why: site
+	// (a site or DNS zone it reports is on the brand's domains), name (an account
+	// or container it reports is named after the brand), same_sign_in
+	// (the same outside account is the brand's in another connection) or
+	// email_domain (it signed in with an address at the brand's domain).
+	// Only a suggestion.
+	SuggestedBrandID *string `json:"suggested_brand_id"`
+	SuggestedBecause *string `json:"suggested_because"`
+}
+
+// brandHint is what a brand is recognised by.
+type brandHint struct {
+	ID, Name string
+	Domains  []string
+}
+
+func onDomain(host string, domains []string) bool {
+	host = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(host)), "www.")
+	if host == "" {
+		return false
+	}
+	for _, d := range domains {
+		d = strings.ToLower(d)
+		if d != "" && (host == d || strings.HasSuffix(host, "."+d)) {
+			return true
+		}
+	}
+	return false
+}
+
+// namedAfter says whether text has the brand's name as a whole word.
+func namedAfter(text, name string) bool {
+	text, name = strings.ToLower(text), strings.ToLower(strings.TrimSpace(name))
+	if len(name) < 3 {
+		return false
+	}
+	letter := func(r byte) bool { return r >= 'a' && r <= 'z' || r >= '0' && r <= '9' }
+	for from := 0; ; {
+		at := strings.Index(text[from:], name)
+		if at < 0 {
+			return false
+		}
+		at += from
+		end := at + len(name)
+		if (at == 0 || !letter(text[at-1])) && (end == len(text) || !letter(text[end])) {
+			return true
+		}
+		from = at + 1
+	}
+}
+
+// suggestBrand guesses the brand of a connection with none, from what it
+// reports and the workspace's other connections. It suggests only when
+// exactly one brand fits the strongest clue.
+func suggestBrand(i connectors.Integration, list []connectors.Integration, brands []brandHint) (*string, *string) {
+	one := func(fits func(b brandHint) bool) *string {
+		var found *string
+		for _, b := range brands {
+			if fits(b) {
+				if found != nil {
+					return nil
+				}
+				id := b.ID
+				found = &id
+			}
+		}
+		return found
+	}
+	because := func(id *string, why string) (*string, *string) {
+		if id == nil {
+			return nil, nil
+		}
+		return id, &why
+	}
+	// Sites a tag manager tags, or a DNS host's zones.
+	if sites := i.Account.Details["sites"] + "," + i.Account.Details["zones"]; sites != "," {
+		if id := one(func(b brandHint) bool {
+			for _, s := range strings.Split(sites, ",") {
+				if onDomain(s, b.Domains) {
+					return true
+				}
+			}
+			return false
+		}); id != nil {
+			return because(id, "site")
+		}
+	}
+	names := i.Account.Details["accounts"] + ", " + i.Account.Details["containers"]
+	if id := one(func(b brandHint) bool { return namedAfter(names, b.Name) }); id != nil {
+		return because(id, "name")
+	}
+	if signIn(i) {
+		owners := map[string]bool{}
+		for _, o := range list {
+			if o.ID != i.ID && o.BrandID != nil && signIn(o) && o.Account.ID == i.Account.ID {
+				owners[*o.BrandID] = true
+			}
+		}
+		if len(owners) == 1 {
+			for id := range owners {
+				if one(func(b brandHint) bool { return b.ID == id }) != nil {
+					return because(&id, "same_sign_in")
+				}
+			}
+		}
+	}
+	if _, domain, ok := strings.Cut(i.Account.Email, "@"); ok {
+		if id := one(func(b brandHint) bool { return onDomain(domain, b.Domains) }); id != nil {
+			return because(id, "email_domain")
+		}
+	}
+	return nil, nil
+}
+
+// signIn says whether a connection signed in to an outside account (an
+// OAuth sign-in), whose id then names that account: an API key's account
+// id can be anything, such as a site.
+func signIn(i connectors.Integration) bool {
+	return i.AuthMethod == connectors.AuthOAuth2 && i.Account.ID != ""
+}
+
+// connectedWith is the connection signed in together with i: another one
+// to the same outside account, made by the same person (makers) up to
+// five minutes before.
+func connectedWith(i connectors.Integration, list []connectors.Integration, makers map[string]string) *string {
+	if !signIn(i) {
+		return nil
+	}
+	for _, o := range list {
+		if o.ID == i.ID || o.Connector == i.Connector || !signIn(o) || o.Account.ID != i.Account.ID || makers[o.ID] != makers[i.ID] {
+			continue
+		}
+		if d := i.CreatedAt.Sub(o.CreatedAt); d >= 0 && d < 5*time.Minute {
+			name := o.Name
+			return &name
+		}
+	}
+	return nil
 }
 
 // unassigned lists what in a workspace has no brand: brand connections
@@ -129,11 +279,39 @@ func (s *Server) unassigned(ctx context.Context, ws string) ([]unassignedConnect
 	if err != nil {
 		return nil, err
 	}
+	// Who made each connection: the actor (to tell sign-ins made
+	// together) and their name.
+	rows, err := s.pool.Query(ctx, `SELECT i.id::text, COALESCE(i.created_by::text, ''), a.display_name
+		FROM integrations i LEFT JOIN actors a ON a.id = i.created_by WHERE i.workspace_id = $1`, ws)
+	if err != nil {
+		return nil, err
+	}
+	makers, makerNames := map[string]string{}, map[string]*string{}
+	var id, maker string
+	var name *string
+	if _, err := pgx.ForEachRow(rows, []any{&id, &maker, &name}, func() error {
+		makers[id], makerNames[id] = maker, name
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	var brands []brandHint
 	out := []unassignedConnection{}
 	for _, i := range list {
 		v := s.view(i)
-		base := unassignedConnection{IntegrationID: i.ID, Connector: i.Connector, ConnectorName: v.ConnectorName, Name: i.Name, BrandKind: i.BrandKind}
+		base := unassignedConnection{IntegrationID: i.ID, Connector: i.Connector, ConnectorName: v.ConnectorName, Name: i.Name, BrandKind: i.BrandKind,
+			SignedInAs: cmp.Or(i.Account.Email, i.Account.Name), Details: i.Account.Details, ConnectedAt: i.CreatedAt,
+			ConnectedBy: makerNames[i.ID], ConnectedWith: connectedWith(i, list, makers)}
+		if base.Details == nil {
+			base.Details = map[string]string{}
+		}
 		if i.BrandKind == connectors.KindBrand && i.BrandID == nil && only == nil {
+			if brands == nil {
+				if brands, err = s.brandHints(ctx, ws); err != nil {
+					return nil, err
+				}
+			}
+			base.SuggestedBrandID, base.SuggestedBecause = suggestBrand(i, list, brands)
 			out = append(out, base)
 			continue
 		}
@@ -149,6 +327,23 @@ func (s *Server) unassigned(ctx context.Context, ws string) ([]unassignedConnect
 		}
 	}
 	return out, nil
+}
+
+// brandHints lists the workspace's active brands with their domains.
+func (s *Server) brandHints(ctx context.Context, ws string) ([]brandHint, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id::text, name, domains FROM brands WHERE workspace_id = $1 AND status = 'active' ORDER BY created_at`, ws)
+	if err != nil {
+		return nil, err
+	}
+	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (brandHint, error) {
+		var b brandHint
+		err := row.Scan(&b.ID, &b.Name, &b.Domains)
+		return b, err
+	})
+	if list == nil {
+		list = []brandHint{}
+	}
+	return list, err
 }
 
 func (s *Server) listUnassignedConnections(w http.ResponseWriter, r *http.Request) {
@@ -290,7 +485,7 @@ func (s *Server) assignConnectionAccount(w http.ResponseWriter, r *http.Request)
 // brand outflare_site_brand gives the site when the row is written.
 // Assigning the site moves its rows with it.
 var siteBrandTables = []string{"search_segments", "search_ga4_outcomes", "search_completeness",
-	"analytics_daily", "analytics_syncs", "search_daily", "search_syncs", "search_sitemaps", "url_inspections", "page_conversions", "page_conversion_syncs"}
+	"analytics_daily", "analytics_syncs", "search_daily", "search_syncs", "search_sitemaps", "url_inspections", "page_conversions", "page_conversion_syncs", "organic_conversions", "organic_conversion_syncs"}
 
 // rebrandSite sets the brand of everything stored for one site to the
 // brand it belongs to now (none when it is unassigned).

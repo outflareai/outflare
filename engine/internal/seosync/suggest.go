@@ -16,7 +16,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
-// The daily look for new competitors. Each day every SEO connection is
+// The weekly look for new competitors. Each week every SEO connection is
 // asked which domains share the most keywords with each SEO site (one read
 // a site, on the workspace's own account and within its budget), and the
 // domains that keep ranking beside the site in its tracked keywords' top
@@ -77,7 +77,29 @@ func notPlatform(param string) string {
 	return `(c.source = 'manual' OR NOT EXISTS (SELECT 1 FROM unnest(` + param + `::text[]) pd WHERE c.host = pd OR c.host LIKE '%.' || pd))`
 }
 
-// queueSuggest queues today's competitor suggestions for each connected
+// suggestSlot is the weekly idempotency key for competitor suggestions,
+// aligned with the snapshot interval, so each connection is asked once a
+// week rather than every day.
+func suggestSlot(now time.Time) string {
+	return fmt.Sprintf("%d", now.UTC().Truncate(interval).Unix())
+}
+
+// snapshotSuggestsCompetitors reports whether the weekly snapshot itself
+// already asks the provider for new competitor suggestions. The weekly
+// path (refresh=false) does; a Refresh-all does not.
+func snapshotSuggestsCompetitors(refresh bool) bool {
+	return !refresh
+}
+
+// queueSuggestAlongsideWeeklySnapshot reports whether QueueDue should also
+// enqueue a separate suggest job in the same weekly cycle. It is false:
+// the snapshot already fetches suggestions, and a second job would call
+// the provider twice.
+func queueSuggestAlongsideWeeklySnapshot() bool {
+	return false
+}
+
+// queueSuggest queues this week's competitor suggestions for each connected
 // SEO connection whose snapshots are on.
 func (s *Syncer) queueSuggest(ctx context.Context, ids []string) error {
 	rows, err := s.Pool.Query(ctx, `SELECT i.id::text, i.workspace_id::text FROM integrations i
@@ -94,17 +116,17 @@ func (s *Syncer) queueSuggest(ctx context.Context, ids []string) error {
 	if err != nil {
 		return err
 	}
-	day := time.Now().UTC().Format(time.DateOnly)
+	slot := suggestSlot(time.Now())
 	for _, c := range list {
-		if _, err := enqueue(ctx, s.Pool, c.ws, payload{Integration: c.id, Suggest: true}, fmt.Sprintf("%s:suggest:%s", c.id, day)); err != nil {
+		if _, err := enqueue(ctx, s.Pool, c.ws, payload{Integration: c.id, Suggest: true}, fmt.Sprintf("%s:suggest:%s", c.id, slot)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// suggestDaily asks one connection for each SEO site's competitors.
-func (s *Syncer) suggestDaily(ctx context.Context, ws, integrationID string) error {
+// suggestWeekly asks one connection for each SEO site's competitors.
+func (s *Syncer) suggestWeekly(ctx context.Context, ws, integrationID string) error {
 	o, err := s.Store.Open(ctx, s.Pool, ws, integrationID)
 	if err != nil {
 		return nil

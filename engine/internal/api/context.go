@@ -192,6 +192,18 @@ func brandMarkdown(b *brandContextView) string {
 			fmt.Fprintf(&sb, "- %s: %s\n", name, l.URL)
 		}
 	}
+	if b.LegalName != "" || b.TaxID != "" || b.AddressText != "" {
+		sb.WriteString("\n## Business details\n\nUse these exactly where a legal name, company number or postal address is needed (an email footer, a press release, a form).\n\n")
+		if b.LegalName != "" {
+			fmt.Fprintf(&sb, "- Legal name: %s\n", b.LegalName)
+		}
+		if b.TaxID != "" {
+			fmt.Fprintf(&sb, "- Tax or company number: %s\n", b.TaxID)
+		}
+		if b.AddressText != "" {
+			fmt.Fprintf(&sb, "- Postal address: %s\n", b.AddressText)
+		}
+	}
 	empty := true
 	for _, f := range brandContextFields {
 		if body := *b.field(f.key); body != "" {

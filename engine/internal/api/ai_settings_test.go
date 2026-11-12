@@ -65,6 +65,17 @@ func (f fakeOpenAI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(args)
 		return map[string]any{"id": id, "type": "function", "function": map[string]any{"name": name, "arguments": string(b)}}
 	}
+	if strings.Contains(string(body), "event_name_check") {
+		// The event name check: checkout_finished is order_completed,
+		// whatever the spelling says; nothing else is a typo.
+		names := []map[string]string{}
+		if strings.Contains(string(body), "checkout_finished") {
+			names = append(names, map[string]string{"name": "checkout_finished", "same_as": "order_completed", "reason": "same event, other words"})
+		}
+		out, _ := json.Marshal(map[string]any{"names": names})
+		answer(map[string]any{"role": "assistant", "content": string(out)}, "stop")
+		return
+	}
 	if strings.Contains(string(body), `"finish_turn"`) {
 		if !strings.Contains(string(body), `"role":"tool"`) {
 			answer(map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{
@@ -192,7 +203,7 @@ func TestAISettings(t *testing.T) {
 	for _, v := range s["tasks"].([]any) {
 		byTask[v.(map[string]any)["task"].(string)] = v.(map[string]any)
 	}
-	if byTask["plan"]["model"] != "gpt-test" || byTask["check_in"]["model"] != "gpt-other" || byTask["check_in"]["custom"] != true || byTask["reply_labelling"]["model"] != "gpt-test" || len(byTask) != 23 || byTask["coverage_review"]["model"] != "gpt-test" {
+	if byTask["plan"]["model"] != "gpt-test" || byTask["check_in"]["model"] != "gpt-other" || byTask["check_in"]["custom"] != true || byTask["reply_labelling"]["model"] != "gpt-test" || len(byTask) != 24 || byTask["coverage_review"]["model"] != "gpt-test" {
 		t.Errorf("tasks = %v", s["tasks"])
 	}
 	// Saving without task_models keeps them.

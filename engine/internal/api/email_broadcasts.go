@@ -19,13 +19,19 @@ import (
 
 // Broadcasts: one lifecycle email to many people on customer records at
 // once, such as a newsletter or a launch. The audience is a topic's
-// subscribers or a list of records; a saved list or segment comes later
-// (audience kind list). Sending is a job (emails.StartBroadcast).
+// subscribers, a list of records, or a saved list or segment (audience
+// kind list, a smart list). A service broadcast sends a transactional
+// template to a list or records whatever people chose about marketing. Sending is a job (emails.StartBroadcast).
 
 type broadcastAudience struct {
 	Kind      string   `json:"kind"`
 	RecordIDs []string `json:"record_ids"`
-	Ref       *string  `json:"ref"`
+	// The saved list (smart list id) of audience kind list.
+	Ref *string `json:"ref"`
+}
+
+func (a broadcastAudience) of() emails.Audience {
+	return emails.Audience{Kind: a.Kind, RecordIDs: a.RecordIDs, Ref: deref(a.Ref)}
 }
 
 type broadcastStats struct {
@@ -52,6 +58,10 @@ type emailBroadcastView struct {
 	ProviderID      *string           `json:"provider_id"`
 	BrandID         *string           `json:"brand_id"`
 	Audience        broadcastAudience `json:"audience"`
+	// A service message: a transactional template sent to everyone in the
+	// audience whatever they chose about marketing email (suppressions
+	// still apply), such as a notice about their account.
+	Service bool `json:"service"`
 	// Who it leaves out: people on these lists or with these tags, or at
 	// a company with one. They are skipped with the reason.
 	Exclude customers.Exclusion `json:"exclude"`
@@ -91,7 +101,7 @@ type templateRef struct {
 
 const emailBroadcastSelect = `
 	SELECT b.id, b.name, b.status, b.status_reason, t.id, t.handle, t.name, b.template_version, tp.id, tp.key, tp.name,
-	       b.from_address, b.provider_id, b.brand_id, b.audience_kind, b.record_ids::text[], b.audience_ref, b.data, b.exclude,
+	       b.from_address, b.provider_id, b.brand_id, b.audience_kind, b.record_ids::text[], b.audience_ref, b.data, b.exclude, b.service,
 	       b.track_opens, b.track_clicks, b.send_at, b.started_at, b.finished_at, b.recipients, b.skipped, b.holdout_percent, b.held_out,
 	       COALESCE(st.emails, 0), COALESCE(st.sent, 0), COALESCE(st.delivered, 0), COALESCE(st.opened, 0), COALESCE(st.clicked, 0),
 	       COALESCE(st.bounced, 0), COALESCE(st.complained, 0), COALESCE(st.not_sent, 0),
@@ -118,7 +128,7 @@ func scanEmailBroadcast(row pgx.Row) (emailBroadcastView, error) {
 	var topic nullTopic
 	var data, exclude []byte
 	err := row.Scan(&v.ID, &v.Name, &v.Status, &v.StatusReason, &v.Template.ID, &v.Template.Handle, &v.Template.Name, &v.TemplateVersion,
-		&topic.ID, &topic.Key, &topic.Name, &v.From, &v.ProviderID, &v.BrandID, &v.Audience.Kind, &v.Audience.RecordIDs, &v.Audience.Ref, &data, &exclude,
+		&topic.ID, &topic.Key, &topic.Name, &v.From, &v.ProviderID, &v.BrandID, &v.Audience.Kind, &v.Audience.RecordIDs, &v.Audience.Ref, &data, &exclude, &v.Service,
 		&v.Track.Opens, &v.Track.Clicks, &v.SendAt, &v.StartedAt, &v.FinishedAt, &v.Recipients, &v.Skipped, &v.HoldoutPercent, &v.HeldOut,
 		&v.Stats.Emails, &v.Stats.Sent, &v.Stats.Delivered, &v.Stats.Opened, &v.Stats.Clicked, &v.Stats.Bounced, &v.Stats.Complained,
 		&v.Stats.NotSent, &v.Stats.Unsubscribed, &v.CreatedAt, &v.UpdatedAt)
@@ -179,30 +189,35 @@ func (s *Server) findEmailBroadcast(w http.ResponseWriter, r *http.Request, ws, 
 		return nil, false
 	}
 	if v.Status == "draft" || v.Status == "scheduled" {
-		n, err := emails.AudienceSize(r.Context(), s.pool, ws, v.BrandID, v.Audience.Kind, v.Audience.RecordIDs)
+		aud := v.Audience.of()
+		n, err := emails.AudienceSize(r.Context(), s.pool, ws, v.BrandID, aud)
 		if err != nil {
 			s.internal(w, r, err)
 			return nil, false
 		}
 		v.AudienceSize = &n
 		if !v.Exclude.Empty() {
-			x, err := emails.AudienceExcluded(r.Context(), s.pool, ws, v.BrandID, v.Audience.Kind, v.Audience.RecordIDs, v.Exclude)
+			x, err := emails.AudienceExcluded(r.Context(), s.pool, ws, v.BrandID, aud, v.Exclude)
 			if err != nil {
 				s.internal(w, r, err)
 				return nil, false
 			}
 			v.AudienceExcluded = &x
 		}
-		if v.AudienceBases, err = emails.AudienceBases(r.Context(), s.pool, ws, v.BrandID, v.Audience.Kind, v.Audience.RecordIDs); err != nil {
+		if v.AudienceBases, err = emails.AudienceBases(r.Context(), s.pool, ws, v.BrandID, aud); err != nil {
 			s.internal(w, r, err)
 			return nil, false
 		}
-		rule, err := customers.MarketingRule(r.Context(), s.pool, ws)
-		if err != nil {
-			s.internal(w, r, err)
-			return nil, false
+		// What people chose about marketing doesn't stop a service
+		// message, so there's nothing to warn about.
+		if !v.Service {
+			rule, err := customers.MarketingRule(r.Context(), s.pool, ws)
+			if err != nil {
+				s.internal(w, r, err)
+				return nil, false
+			}
+			v.Warnings = audienceWarnings(v.AudienceBases, rule)
 		}
-		v.Warnings = audienceWarnings(v.AudienceBases, rule)
 	}
 	return &v, true
 }
@@ -222,6 +237,7 @@ type broadcastFields struct {
 	ProviderID optional[string]     `json:"provider_id"`
 	BrandID    optional[string]     `json:"brand_id"`
 	Audience   *broadcastAudience   `json:"audience"`
+	Service    *bool                `json:"service"`
 	Data       map[string]any       `json:"data"`
 	Exclude    *customers.Exclusion `json:"exclude"`
 	Track      *struct {
@@ -236,6 +252,8 @@ type broadcastFields struct {
 type broadcastRow struct {
 	name, templateID, from, audience string
 	topicID, providerID, brandID     *string
+	ref                              *string
+	service                          bool
 	recordIDs                        []string
 	data                             map[string]any
 	exclude                          customers.Exclusion
@@ -279,8 +297,6 @@ func (s *Server) applyBroadcast(r *http.Request, ws string, f broadcastFields, b
 			return errInvalid("template not found: " + truncate(*f.Template, 63))
 		case err != nil:
 			return err
-		case purpose != "lifecycle":
-			return errInvalid("a broadcast sends a lifecycle template; " + truncate(*f.Template, 63) + " is transactional")
 		case status != "active":
 			return errInvalid("the template is archived; restore it first")
 		}
@@ -314,7 +330,7 @@ func (s *Server) applyBroadcast(r *http.Request, ws string, f broadcastFields, b
 			if len(f.Audience.RecordIDs) > 0 {
 				return errInvalid("record_ids only go with audience kind records")
 			}
-			b.recordIDs = []string{}
+			b.recordIDs, b.ref = []string{}, nil
 		case "records":
 			if len(f.Audience.RecordIDs) == 0 || len(f.Audience.RecordIDs) > 10000 {
 				return errInvalid("audience kind records needs 1 to 10,000 record_ids")
@@ -324,13 +340,51 @@ func (s *Server) applyBroadcast(r *http.Request, ws string, f broadcastFields, b
 					return errInvalid("record_ids must be record ids")
 				}
 			}
-			b.recordIDs = f.Audience.RecordIDs
+			b.recordIDs, b.ref = f.Audience.RecordIDs, nil
 		case "list":
-			return errInvalid("audiences from saved lists are not available yet; use topic or records")
+			if len(f.Audience.RecordIDs) > 0 {
+				return errInvalid("record_ids only go with audience kind records")
+			}
+			if f.Audience.Ref == nil || !validUUID(*f.Audience.Ref) {
+				return errInvalid("audience kind list needs ref: a list's id, from GET .../smart-lists or GET .../lead-lists")
+			}
+			// The list must be this workspace's, and of the broadcast's
+			// brand or shared by every brand.
+			var ok bool
+			if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM smart_lists WHERE workspace_id = $1 AND id = $2
+				AND (brand_id IS NULL OR $3::uuid IS NULL OR brand_id = $3::uuid))
+				OR EXISTS (SELECT 1 FROM lead_lists WHERE workspace_id = $1 AND id = $2
+				AND (brand_id IS NULL OR $3::uuid IS NULL OR brand_id = $3::uuid))`, ws, *f.Audience.Ref, b.brandID).Scan(&ok); err != nil {
+				return err
+			}
+			if !ok {
+				return errInvalid("list not found: ref must be a list of this brand, from GET .../smart-lists or GET .../lead-lists")
+			}
+			b.recordIDs, b.ref = []string{}, f.Audience.Ref
 		default:
-			return errInvalid("audience kind is topic or records")
+			return errInvalid("audience kind is topic, records or list")
 		}
 		b.audience = f.Audience.Kind
+	}
+	if f.Service != nil {
+		b.service = *f.Service
+	}
+	// A marketing broadcast sends a lifecycle template, a service message
+	// a transactional one; a topic's audience is for marketing only.
+	if b.templateID != "" {
+		var purpose string
+		if err := s.pool.QueryRow(ctx, `SELECT purpose FROM email_templates WHERE id = $1`, b.templateID).Scan(&purpose); err != nil {
+			return err
+		}
+		switch {
+		case b.service && purpose != "transactional":
+			return errInvalid("a service broadcast sends a transactional template; this one is " + purpose + " (or leave service off)")
+		case !b.service && purpose != "lifecycle":
+			return errInvalid("this template is transactional: set service to true to send it as a service message, or pick a lifecycle template")
+		}
+	}
+	if b.service && b.audience == "topic" {
+		return errInvalid("a service broadcast goes to a list or to records, not a topic's subscribers")
 	}
 	if f.Data != nil {
 		if raw, _ := json.Marshal(f.Data); len(raw) > 32<<10 {
@@ -350,6 +404,9 @@ func (s *Server) applyBroadcast(r *http.Request, ws string, f broadcastFields, b
 			return errInvalid("holdout_percent must be 0 to 50")
 		}
 		b.holdout = *f.HoldoutPercent
+	}
+	if b.service && b.holdout > 0 {
+		return errInvalid("a service message holds nobody out: set holdout_percent to 0")
 	}
 	if f.Track != nil {
 		if f.Track.Opens.Set {
@@ -393,14 +450,15 @@ func (s *Server) createEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 			createdBy = &a.ActorID
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO email_broadcasts (workspace_id, name, template_id, topic_id, from_address, provider_id, brand_id,
-			audience_kind, record_ids, data, track_opens, track_clicks, created_by, request_id, exclude, mission_id, holdout_percent)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, NULLIF($14, ''), $15, NULLIF($16, '')::uuid, $17) RETURNING id`,
+			audience_kind, record_ids, data, track_opens, track_clicks, created_by, request_id, exclude, mission_id, holdout_percent,
+			audience_ref, service)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, NULLIF($14, ''), $15, NULLIF($16, '')::uuid, $17, $18, $19) RETURNING id`,
 			a.WorkspaceID, b.name, b.templateID, b.topicID, b.from, b.providerID, b.brandID, b.audience, b.recordIDs, data,
-			b.trackOpens, b.trackClicks, createdBy, RequestID(ctx), b.exclude, missions.ID(ctx), b.holdout).Scan(&id); err != nil {
+			b.trackOpens, b.trackClicks, createdBy, RequestID(ctx), b.exclude, missions.ID(ctx), b.holdout, b.ref, b.service).Scan(&id); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "email_broadcast.created", "email_broadcast", id,
-			map[string]any{"audience": b.audience, "has_topic": b.topicID != nil, "holdout_percent": b.holdout})
+			map[string]any{"audience": b.audience, "has_topic": b.topicID != nil, "holdout_percent": b.holdout, "service": b.service})
 	})
 	if err != nil {
 		s.internal(w, r, err)
@@ -423,14 +481,14 @@ func (s *Server) updateEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &f) {
 		return
 	}
-	onlyName := f.Template == nil && !f.Topic.Set && f.From == nil && !f.ProviderID.Set && !f.BrandID.Set && f.Audience == nil && f.Data == nil && f.Track == nil && f.Exclude == nil && f.HoldoutPercent == nil
+	onlyName := f.Template == nil && !f.Topic.Set && f.From == nil && !f.ProviderID.Set && !f.BrandID.Set && f.Audience == nil && f.Data == nil && f.Track == nil && f.Exclude == nil && f.HoldoutPercent == nil && f.Service == nil
 	if cur.Status != "draft" && !onlyName {
 		writeError(w, r, http.StatusConflict, "conflict", "the broadcast is "+cur.Status+"; only its name can change")
 		return
 	}
 	b := broadcastRow{name: cur.Name, templateID: cur.Template.ID, from: cur.From, audience: cur.Audience.Kind, providerID: cur.ProviderID,
 		brandID: cur.BrandID, recordIDs: cur.Audience.RecordIDs, data: cur.Data, exclude: cur.Exclude, trackOpens: cur.Track.Opens, trackClicks: cur.Track.Clicks,
-		holdout: cur.HoldoutPercent}
+		holdout: cur.HoldoutPercent, ref: cur.Audience.Ref, service: cur.Service}
 	if cur.Topic != nil {
 		b.topicID = &cur.Topic.ID
 	}
@@ -449,9 +507,9 @@ func (s *Server) updateEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 		data, _ := json.Marshal(b.data)
 		if _, err := tx.Exec(ctx, `UPDATE email_broadcasts SET name = $3, template_id = $4, topic_id = $5, from_address = $6, provider_id = $7,
 			brand_id = $8, audience_kind = $9, record_ids = $10::uuid[], data = $11, track_opens = $12, track_clicks = $13, exclude = $14,
-			holdout_percent = $15, updated_at = now()
+			holdout_percent = $15, audience_ref = $16, service = $17, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID, b.name, b.templateID, b.topicID, b.from, b.providerID, b.brandID,
-			b.audience, b.recordIDs, data, b.trackOpens, b.trackClicks, b.exclude, b.holdout); err != nil {
+			b.audience, b.recordIDs, data, b.trackOpens, b.trackClicks, b.exclude, b.holdout, b.ref, b.service); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "email_broadcast.updated", "email_broadcast", cur.ID, nil)
@@ -489,10 +547,14 @@ func (s *Server) sendEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	purpose := "lifecycle"
+	if cur.Service {
+		purpose = "transactional"
+	}
 	// A dry run with an example person: problems only one person's data
 	// could cause are left to the send, which skips that person.
 	_, err := s.emails.Compose(ctx, s.pool, emails.Draft{NewEmail: emails.NewEmail{WorkspaceID: a.WorkspaceID, BrandID: cur.BrandID,
-		From: cur.From, To: []string{"person@example.com"}, Purpose: "lifecycle", ProviderID: deref(cur.ProviderID)},
+		From: cur.From, To: []string{"person@example.com"}, Purpose: purpose, ProviderID: deref(cur.ProviderID)},
 		TemplateID: cur.Template.ID, Data: cur.Data, TopicSet: true})
 	var ce *emails.ComposeError
 	if errors.As(err, &ce) && ce.Code == "template_variables_missing" {

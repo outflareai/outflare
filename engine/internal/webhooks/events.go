@@ -293,6 +293,14 @@ var Catalog = []Event{
 	{"coverage_record.discovered", "coverage", "A Coverage record was discovered. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
 	{"coverage_record.confirmed", "coverage", "A Coverage record was confirmed. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
 	{"coverage_record.deleted", "coverage", "A Coverage record was removed, such as a party taken off a placement. data names the placement, the CRM record and its role."},
+	// Paid link orders
+	{"link_order.approved", "link_orders", "A paid link order was approved. data has brand_id and the frozen donor amount (minor units and currency)."},
+	{"link_order.published", "link_orders", "A paid link order was published. data has brand_id, published_url and placement_id."},
+	{"link_order.checked", "link_orders", "A live-link check finished for a paid link order. data has brand_id, last_check_live, last_check_target_match and placement_id."},
+	{"link_order.paid", "link_orders", "A paid link order was marked paid (a Coverage payment was recorded; no money was sent). data has brand_id, amount in minor units and currency."},
+	{"link_order.verified", "link_orders", "A paid link order was marked verified after a passing live-link check. data has brand_id."},
+	{"link_order.lost", "link_orders", "A paid link order was marked lost, by a person or after two consecutive failing live-link checks. data has brand_id and the reason when one was given."},
+	{"link_order.replacement_opened", "link_orders", "A replacement paid link order was opened for a lost one. data has brand_id and the new order id."},
 	// Workspace
 	{"workspace.updated", "workspace", "The workspace was renamed or its slug (its name in URLs) changed. data has the new and previous values."},
 	// Webhooks

@@ -112,7 +112,10 @@ var errorCodes = []errorCode{
 	{"records_locked", []int{403}, "This workspace lets only owners and admins change customer records (Settings, Workspace). Ask one of them, or ask them to turn the setting off.", false},
 	{"owner_only", []int{403}, "Only the workspace's owners, signed in, can do this (bulk edits and their undo). Preview it and ask an owner.", false},
 	{"admin_only", []int{403}, "Only the workspace's owners and admins, signed in, can do this (publishing and changing query endpoints).", false},
+	{"person_only", []int{403}, "Only a person, signed in, can do this: letting paid ads rules' findings go live (turning shadow_mode off), or removing a campaign, an ad or a keyword, which can't be undone. Ask them to do it in Outflare.", false},
 	{"token_required", []int{403}, "This is called with an API token, not from a signed-in session (published query endpoints).", false},
+	{"last_brand", []int{409}, "This is the workspace's only brand. Add another brand before deleting it.", false},
+	{"brand_only_access", []int{409}, "Some members, invites or API tokens can see only this brand. Give them another brand or remove them before deleting it, so nobody gains access to every brand.", false},
 	{"brand_token_required", []int{403}, "The API token must be made for this brand only: a published query endpoint answers only tokens limited to its brand.", false},
 	{"endpoint_broken", []int{409}, "The saved query behind this query endpoint was archived. Ask an admin to publish it again.", false},
 	{"undo_expired", []int{409}, "A bulk edit can be undone for 7 days; this one is older. Make a new bulk edit to change the records back.", false},
@@ -125,6 +128,7 @@ var errorCodes = []errorCode{
 	// Sequences, mailboxes and infrastructure.
 	{"blocked", []int{409}, "The policy blocks this, for example the mailbox or domain is paused. The message says why.", false},
 	{"not_active", []int{409}, "The item is not in a state that allows this.", false},
+	{"payers_list_too_small", []int{422}, "Serving new customers only needs at least 1,000 people on the account's paying customers list (Google's requirement). Use bid_higher until it grows.", false},
 	{"no_referral", []int{422}, "The reply doesn't name an email address to add. Add the person as a lead by hand.", false},
 	{"mailbox_in_use", []int{409}, "The mailbox can't answer support: it sends for a sequence or campaign, or Outflare can't read it. The message says which.", false},
 	{"nothing_to_answer", []int{409}, "The customer hasn't written anything to answer yet.", false},
@@ -204,6 +208,9 @@ var errorCodes = []errorCode{
 	// Shared dashboards (POST /v1/shared/dashboards/{token}).
 	{"password_required", []int{401}, "This shared dashboard has a password. Send it as password, then reuse the key the answer gives.", false},
 	{"wrong_password", []int{401}, "The password for this shared dashboard is wrong. Repeated tries are rate limited per link.", false},
+
+	// Paid ads: the knowledge sheet.
+	{"knowledge_unreviewed", []int{422}, "Ads are written from the brand's knowledge sheet (what its website says it offers), and nobody has reviewed it, its last read failed, or the website changed what it sells since the review. A person checks the sheet (GET /v1/brands/{brand}/knowledge) and marks it reviewed (POST .../knowledge/review); a person may also send override_knowledge true to write one draft anyway.", false},
 }
 
 func (s *Server) listErrorCodes(w http.ResponseWriter, r *http.Request) {

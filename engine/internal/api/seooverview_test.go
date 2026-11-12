@@ -83,15 +83,24 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	}
 	weeks := rp["weeks"].([]any)
 	last := weeks[len(weeks)-1].(map[string]any)
-	if last["branded_clicks"] != 140.0 || last["search_clicks"] != 490.0 || last["visitors"] != 700.0 || last["sessions"] != 840.0 {
+	if last["branded_clicks"] != 140.0 || last["search_clicks"] != 490.0 || last["non_branded_clicks"] != 350.0 || last["visitors"] != 700.0 || last["sessions"] != 840.0 {
 		t.Fatalf("last week: %v", last)
 	}
-	if first := weeks[0].(map[string]any); first["branded_clicks"] != nil || first["visitors"] != nil {
+	if last["search_ctr"] != 0.1 {
+		t.Fatalf("non-branded CTR: %v", last["search_ctr"])
+	}
+	if first := weeks[0].(map[string]any); first["branded_clicks"] != nil || first["visitors"] != nil || first["non_branded_clicks"] != nil {
 		t.Fatalf("a week with no data is unknown: %v", first)
 	}
 	trend := func(name string) map[string]any { return rp["trends"].(map[string]any)[name].(map[string]any) }
 	if b := trend("branded_search"); b["direction"] != "up" || b["current"] != 560.0 || b["previous"] != 280.0 || b["change"] != 1.0 {
 		t.Fatalf("branded: %v", b)
+	}
+	if n := trend("non_branded_search"); n["direction"] != "flat" || n["current"] != 1400.0 || n["previous"] != 1400.0 {
+		t.Fatalf("non-branded: %v", n)
+	}
+	if c := trend("search_ctr"); c["direction"] != "flat" || c["current"] != 0.1 {
+		t.Fatalf("ctr: %v", c)
 	}
 	if v := trend("visitors"); v["direction"] != "flat" {
 		t.Fatalf("visitors: %v", v)
@@ -107,6 +116,35 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	}
 	if seo := rp["seo"].([]any); len(seo) != 2 || seo[1].(map[string]any)["connector"] != "ahrefs" {
 		t.Fatalf("seo: %v", seo)
+	}
+	// A period of its own: the weeks picked against as many before them.
+	for _, q := range []string{"weeks=4", "from=" + day(27) + "&to=" + day(3), "from=" + day(25) + "&to=" + today.AddDate(1, 0, 0).Format(time.DateOnly)} {
+		res := owner.must(200, "GET", base+"/seo/overview?brand=repocket&"+q, nil)
+		if res["from"] != day(27) || res["to"] != day(0) || res["previous_from"] != day(55) || res["previous_to"] != day(28) {
+			t.Fatalf("%s: period %v to %v, before %v to %v", q, res["from"], res["to"], res["previous_from"], res["previous_to"])
+		}
+		b := res["data"].([]any)[0].(map[string]any)
+		if len(b["weeks"].([]any)) != 4 || len(b["previous_weeks"].([]any)) != 4 || b["previous_weeks"].([]any)[0].(map[string]any)["week"] != day(55) {
+			t.Fatalf("%s: weeks %v before %v", q, b["weeks"], b["previous_weeks"])
+		}
+		period := b["period"].(map[string]any)
+		if p := period["branded_search"].(map[string]any); p["direction"] != "up" || p["current"] != 560.0 || p["previous"] != 280.0 {
+			t.Fatalf("%s: branded over the period: %v", q, p)
+		}
+		if p := period["domain_rating"].(map[string]any); p["current"] != 44.0 || p["previous"] != 40.0 {
+			t.Fatalf("%s: rating over the period: %v", q, p)
+		}
+		// Trends still set the last 4 weeks against the 4 before.
+		if tr := b["trends"].(map[string]any)["branded_search"].(map[string]any); tr["previous"] != 280.0 {
+			t.Fatalf("%s: trend: %v", q, tr)
+		}
+	}
+	// An earlier period ends where it was asked to.
+	if res := owner.must(200, "GET", base+"/seo/overview?brand=repocket&from="+day(55)+"&to="+day(29), nil); res["to"] != day(28) || len(res["data"].([]any)[0].(map[string]any)["weeks"].([]any)) != 4 {
+		t.Fatalf("earlier period: %v to %v", res["from"], res["to"])
+	}
+	for _, q := range []string{"weeks=105", "from=" + day(0) + "&to=" + day(7), "from=2020-01-01", "from=yesterday"} {
+		owner.must(400, "GET", base+"/seo/overview?brand=repocket&"+q, nil)
 	}
 	if sites := rp["sites"].([]any); len(sites) != 1 || rp["open_fixes"] != 0.0 {
 		t.Fatalf("sites: %v fixes %v", sites, rp["open_fixes"])
@@ -156,7 +194,18 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	if tr["domain_rating"].(map[string]any)["current"] != 45.0 || tr["organic_traffic"].(map[string]any)["current"] != 3000.0 || tr["organic_keywords"].(map[string]any)["current"] != 120.0 {
 		t.Fatalf("latest numbers: %v", tr)
 	}
-
+	// A later snapshot from another tool must not replace the Ahrefs series.
+	dfs2 := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "dataforseo", "credentials": map[string]string{"login": "jo", "password": "pw"}})["id"].(string)
+	exec(snap, ws, dfs2, "dataforseo", today.AddDate(0, 0, 1).Format(time.DateOnly), `{"domain_rating": 20, "organic_traffic": 1, "top3": 9}`)
+	exec(`UPDATE seo_snapshots SET metrics = metrics || '{"top3": 80}' WHERE connector = 'ahrefs' AND day = $1`, today.Format(time.DateOnly))
+	rp = owner.must(200, "GET", base+"/seo/overview?brand=repocket", nil)["data"].([]any)[0].(map[string]any)
+	tr = rp["trends"].(map[string]any)
+	if tr["domain_rating"].(map[string]any)["current"] != 45.0 || tr["keywords_top3"].(map[string]any)["current"] != 80.0 {
+		t.Fatalf("one connector: %v", tr)
+	}
+	if seo := rp["seo"].([]any); seo[len(seo)-1].(map[string]any)["connector"] != "ahrefs" {
+		t.Fatalf("mixed connector: %v", seo[len(seo)-1])
+	}
 	// Each brand's own overview: never another brand's, nor a shared entry.
 	one := func(brand string) any {
 		t.Helper()
@@ -186,10 +235,12 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	// An SEO tool shared with other brands only is "not shared", not
 	// "not connected".
 	owner.must(200, "PATCH", base+"/integrations/"+dfs, map[string]any{"brand_ids": []string{"repocket"}})
-	if st := status(owner, "geonode"); st["state"] != "not_shared" || st["integration_id"] != dfs {
+	owner.must(200, "PATCH", base+"/integrations/"+dfs2, map[string]any{"brand_ids": []string{"repocket"}})
+	if st := status(owner, "geonode"); st["state"] != "not_shared" || st["integration_id"] != dfs && st["integration_id"] != dfs2 {
 		t.Fatalf("not shared: %v", st)
 	}
 	owner.must(200, "PATCH", base+"/integrations/"+dfs, map[string]any{"brand_ids": []string{}})
+	owner.must(200, "PATCH", base+"/integrations/"+dfs2, map[string]any{"brand_ids": []string{}})
 
 	// A token that may read analytics but not SEO sites gets no audits.
 	secret := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Reports", "scopes": []string{"analytics.read"}})["token"].(string)
@@ -198,6 +249,15 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	if len(got["sites"].([]any)) != 0 || got["open_fixes"] != nil {
 		t.Fatalf("no seo.read: %v %v", got["sites"], got["open_fixes"])
 	}
+	// Search totals without query rows are not zero branded clicks.
+	exec(`INSERT INTO analytics_daily (workspace_id, integration_id, connector, site, host, report, day, key, clicks, impressions)
+		VALUES ($1, $2, 'google_search_console', 'geonode.com', 'geonode.com', 'traffic', $3, '', 100, 1000)`, ws, sc, day(0))
+	gn := owner.must(200, "GET", base+"/seo/overview?brand=geonode", nil)["data"].([]any)[0].(map[string]any)
+	lastGN := gn["weeks"].([]any)[len(gn["weeks"].([]any))-1].(map[string]any)
+	if lastGN["search_clicks"] != 100.0 || lastGN["branded_clicks"] != nil || lastGN["non_branded_clicks"] != nil {
+		t.Fatalf("missing queries are unknown: %v", lastGN)
+	}
+
 	// Nor why a read failed: that is in the SEO settings.
 	if st := status(bot, "repocket"); st["state"] != "failed" || strings.Contains(st["message"].(string), "budget") {
 		t.Fatalf("failure reason without seo.read: %v", st)

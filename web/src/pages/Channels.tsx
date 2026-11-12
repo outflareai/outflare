@@ -300,6 +300,13 @@ function Drilldown({ ws, row, query, onClose }: { ws: string; row: Row | null; q
 type CustomerRow = { channel: string; label: string; warm_conversions: number; cold_conversions: number; new_revenue: Money[]; repeat_revenue: Money[] };
 type CohortRow = { channel: string; label: string; people: number; customers: number; revenue: Money[]; revenue_per_person: Money[] };
 
+// withoutBrand drops the sidebar's brand from a query sent to a brand
+// route, where the path already names the brand.
+function withoutBrand<T extends { brand?: string }>(q: T): Omit<T, "brand"> {
+  const { brand: _brand, ...rest } = q; // eslint-disable-line @typescript-eslint/no-unused-vars
+  return rest;
+}
+
 // PeopleAndCohorts answers who each channel brings: people already known
 // or new to you, first or repeat revenue, and what the people a channel
 // first brought are worth over time.
@@ -311,8 +318,8 @@ function PeopleAndCohorts({ ws, query }: { ws: string; query: { from: string; to
   useEffect(() => {
     const q = JSON.parse(key) as typeof query;
     Promise.all([
-      api.GET("/v1/workspaces/{ws}/attribution/customers", { params: { path: { ws }, query: q } }),
-      api.GET("/v1/workspaces/{ws}/attribution/cohorts", { params: { path: { ws }, query: { from: q.from, to: q.to, ...(q.brand ? { brand: q.brand } : {}) } } }),
+      api.GET("/v1/brands/{brand}/attribution/customers", { params: { path: { brand: pickedBrandId() }, query: withoutBrand(q) } }),
+      api.GET("/v1/brands/{brand}/attribution/cohorts", { params: { path: { brand: pickedBrandId() }, query: { from: q.from, to: q.to } } }),
     ]).then(([c, h]) => {
       setError(c.error || h.error ? errorMessage(c.error ?? h.error) : "");
       setCustomers(c.data?.data ?? []);
@@ -379,8 +386,8 @@ function AccountsAndDeals({ ws, query }: { ws: string; query: { from: string; to
   useEffect(() => {
     const q = JSON.parse(key) as typeof query;
     Promise.all([
-      api.GET("/v1/workspaces/{ws}/attribution/deals", { params: { path: { ws }, query: q } }),
-      api.GET("/v1/workspaces/{ws}/attribution/accounts", { params: { path: { ws }, query: q } }),
+      api.GET("/v1/brands/{brand}/attribution/deals", { params: { path: { brand: pickedBrandId() }, query: withoutBrand(q) } }),
+      api.GET("/v1/brands/{brand}/attribution/accounts", { params: { path: { brand: pickedBrandId() }, query: withoutBrand(q) } }),
     ]).then(([d, a]) => {
       setError(d.error || a.error ? errorMessage(d.error ?? a.error) : "");
       setDeals(d.data?.data ?? []);

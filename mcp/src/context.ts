@@ -4,6 +4,7 @@
 // repeats themselves and the agent knows where things stand. Memories are
 // short lasting facts, never transcripts; the client keeps the chat.
 
+import { TOOLS_HINT } from "./toolbox.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MissionClient } from "@outflare/sdk";
@@ -81,6 +82,8 @@ export function registerContextTools(
         status: status.isError ? { error: (status.content[0] as { text: string }).text } : status.structuredContent,
         // Tokens without the scope can't read it; then it is simply left out.
         ...(onboarding.isError ? {} : { onboarding: onboarding.structuredContent }),
+        // Apps list only the core tools: say what else there is and how to reach it.
+        tools: TOOLS_HINT,
       };
       return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
     },

@@ -218,13 +218,16 @@ function TestsList({ ws, tests, error, canManage, go, onOpen }: { ws: string; te
 }
 
 function useEvents(ws: string) {
+  const { brand: picked, brands } = useBrand(ws);
+  const brand = picked?.id ?? brands[0]?.id ?? "";
   const [events, setEvents] = useState<string[]>([]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/catalog/events", { params: { path: { ws }, query: { status: "approved" } } }).then(({ data }) =>
+    if (!brand) return;
+    api.GET("/v1/brands/{brand}/catalog/events", { params: { path: { brand }, query: { status: "approved" } } }).then(({ data }) =>
       // Page views are a page goal, and seeing a version is the test itself.
       setEvents((data?.data ?? []).map((e) => e.name).filter((n) => n !== "experiment_viewed" && n !== "page.viewed")),
     );
-  }, [ws]);
+  }, [brand]);
   return events;
 }
 

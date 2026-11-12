@@ -60,6 +60,14 @@ func (g GoogleAds) CheckDraft(d c.AdDraft) error {
 	if err := draftTexts("descriptions", d.Descriptions, 2, 4, 90); err != nil {
 		return err
 	}
+	if len(d.HeadlinePins) > 0 && len(d.HeadlinePins) != len(d.Headlines) {
+		return c.Errf(c.ErrInvalid, "headline_pins has one entry per headline (0 for unpinned, 1 to 3 for the position)")
+	}
+	for _, p := range d.HeadlinePins {
+		if p < 0 || p > 3 {
+			return c.Errf(c.ErrInvalid, "a headline pin is 0 (unpinned) or a position from 1 to 3")
+		}
+	}
 	for _, p := range []string{d.Path1, d.Path2} {
 		if utf8.RuneCountInString(p) > 15 || strings.ContainsAny(p, "/ ") {
 			return c.Errf(c.ErrInvalid, "a display path part is at most 15 characters, without spaces or slashes")
@@ -154,8 +162,12 @@ func googleBiddingFields(b c.AdBidding) (map[string]any, error) {
 // googleRSA is a draft's responsive search ad.
 func googleRSA(d c.AdDraft) map[string]any {
 	var hs, ds []any
-	for _, h := range d.Headlines {
-		hs = append(hs, map[string]any{"text": strings.TrimSpace(h)})
+	for i, h := range d.Headlines {
+		asset := map[string]any{"text": strings.TrimSpace(h)}
+		if i < len(d.HeadlinePins) && d.HeadlinePins[i] > 0 {
+			asset["pinnedField"] = "HEADLINE_" + strconv.Itoa(d.HeadlinePins[i])
+		}
+		hs = append(hs, asset)
 	}
 	for _, t := range d.Descriptions {
 		ds = append(ds, map[string]any{"text": strings.TrimSpace(t)})

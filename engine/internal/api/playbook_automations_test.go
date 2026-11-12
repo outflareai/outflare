@@ -123,8 +123,9 @@ func TestPlaybookAutomations(t *testing.T) {
 	eid := ev["id"].(string)
 	lost := func() {
 		t.Helper()
-		if _, err := e.pool.Exec(ctx, `INSERT INTO audit_events (workspace_id, actor_type, action, target_type, target_id, data)
-			VALUES ($1, 'system', 'backlink.lost', 'backlink', gen_random_uuid()::text, '{}')`, ws); err != nil {
+		// The automation's brand's event: an automation takes only its own brand's.
+		if _, err := e.pool.Exec(ctx, `INSERT INTO audit_events (workspace_id, brand_id, actor_type, action, target_type, target_id, data)
+			VALUES ($1, $2, 'system', 'backlink.lost', 'backlink', gen_random_uuid()::text, '{}')`, ws, ev["brand_id"]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -212,7 +213,7 @@ func TestPlaybookAutomations(t *testing.T) {
 	}
 	agent.must(204, "DELETE", auto+"/"+sid, nil)
 	agent.must(404, "GET", auto+"/"+sid, nil)
-	owner.must(200, "GET", base+"/agent-runs/"+m["id"].(string), nil)
+	owner.must(200, "GET", "/v1/brands/"+m["brand_id"].(string)+"/agent-runs/"+m["id"].(string), nil)
 
 	// An automation of an outside agent's token from before missions
 	// retired is held when it next comes due, with the reason.

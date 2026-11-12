@@ -96,7 +96,9 @@ func (s *Server) adAccountOpen(w http.ResponseWriter, r *http.Request, ws, accou
 }
 
 // setupNeededFor lists the optional setup fields a conversion sender still
-// lacks, such as Reddit's Conversions API token.
+// lacks, such as Reddit's Conversions API token, and whether its sign-in
+// has to be made again for a permission added since (Google's Data
+// Manager scope), as a field named reconnect.
 func setupNeededFor(o *connectors.Opened) []connectors.Field {
 	out := []connectors.Field{}
 	if n, ok := o.Connector.(connectors.SetupNeeder); ok {
@@ -104,6 +106,11 @@ func setupNeededFor(o *connectors.Opened) []connectors.Field {
 			if o.Creds[f.Name] == "" {
 				out = append(out, f)
 			}
+		}
+	}
+	if n, ok := o.Connector.(connectors.ReconnectNeeder); ok {
+		if why := n.ReconnectNeeded(o.Creds); why != "" {
+			out = append(out, connectors.ReconnectField(why))
 		}
 	}
 	return out
@@ -196,12 +203,17 @@ type adConversionRule struct {
 	LastSentAt       *time.Time `json:"last_sent_at"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+	// FeedRole is the rule's part in the conversion feed (custom for a
+	// rule made by hand); CustomerType what it tells Google about the
+	// person ('' for nothing, new, returning or auto).
+	FeedRole     string `json:"feed_role"`
+	CustomerType string `json:"customer_type"`
 }
 
 const adRuleSelect = `SELECT r.id, r.ad_account_id, a.connector, COALESCE(d.event_name, r.event_name), d.key, d.name, r.target_id, r.target_name, r.event_type,
 		r.value_property, r.value_unit, r.fixed_value_micros, r.currency, r.enabled,
 		COALESCE(st.sent, 0), COALESCE(st.skipped, 0), COALESCE(st.failed, 0), COALESCE(st.queued, 0), st.last_sent_at,
-		r.created_at, r.updated_at
+		r.created_at, r.updated_at, r.feed_role, r.customer_type
 	FROM ad_conversion_rules r JOIN ad_accounts a ON a.id = r.ad_account_id
 	LEFT JOIN conversion_definitions d ON d.id = r.conversion_id
 	LEFT JOIN LATERAL (
@@ -217,7 +229,7 @@ func scanAdRule(row pgx.Row) (adConversionRule, error) {
 	var x adConversionRule
 	err := row.Scan(&x.ID, &x.AdAccountID, &x.Connector, &x.EventName, &x.Conversion, &x.ConversionName, &x.TargetID, &x.TargetName, &x.EventType,
 		&x.ValueProperty, &x.ValueUnit, &x.FixedValueMicros, &x.Currency, &x.Enabled,
-		&x.Sent30d, &x.Skipped30d, &x.Failed30d, &x.Queued, &x.LastSentAt, &x.CreatedAt, &x.UpdatedAt)
+		&x.Sent30d, &x.Skipped30d, &x.Failed30d, &x.Queued, &x.LastSentAt, &x.CreatedAt, &x.UpdatedAt, &x.FeedRole, &x.CustomerType)
 	return x, err
 }
 
@@ -588,6 +600,10 @@ type adConversionSend struct {
 	Attempts    int        `json:"attempts"`
 	SentAt      *time.Time `json:"sent_at"`
 	CreatedAt   time.Time  `json:"created_at"`
+	// Transport is the path the send took (data_manager or ads_api) and
+	// RequestID the Data Manager request it went in, when it did.
+	Transport string `json:"transport"`
+	RequestID string `json:"request_id"`
 }
 
 var adSendStatuses = []string{"queued", "sent", "skipped", "failed"}
@@ -623,7 +639,7 @@ func (s *Server) listAdConversionSends(w http.ResponseWriter, r *http.Request) {
 	where := brand.sql(`a.brand_id`, &args)
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT q.id, q.rule_id, a.connector, x.event_name, q.record_id, q.event_id, q.occurred_at, q.status, q.reason, q.match_keys,
-			q.value_micros, q.currency, q.attempts, q.sent_at, q.created_at
+			q.value_micros, q.currency, q.attempts, q.sent_at, q.created_at, q.transport, q.request_id
 		FROM ad_conversion_sends q JOIN ad_conversion_rules x ON x.id = q.rule_id JOIN ad_accounts a ON a.id = x.ad_account_id
 		WHERE q.workspace_id = $1 AND ($2 = '' OR q.rule_id::text = $2) AND ($3 = '' OR q.status = $3)
 		  AND ($4 = '' OR q.record_id::text = $4) AND ($5::timestamptz IS NULL OR q.created_at < $5)`+where+`
@@ -637,7 +653,7 @@ func (s *Server) listAdConversionSends(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var x adConversionSend
 		if err := rows.Scan(&x.ID, &x.RuleID, &x.Connector, &x.EventName, &x.RecordID, &x.EventID, &x.OccurredAt, &x.Status, &x.Reason, &x.MatchKeys,
-			&x.ValueMicros, &x.Currency, &x.Attempts, &x.SentAt, &x.CreatedAt); err != nil {
+			&x.ValueMicros, &x.Currency, &x.Attempts, &x.SentAt, &x.CreatedAt, &x.Transport, &x.RequestID); err != nil {
 			s.internal(w, r, err)
 			return
 		}

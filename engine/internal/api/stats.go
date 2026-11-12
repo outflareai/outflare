@@ -8,6 +8,7 @@ import (
 
 func (s *Server) routesStats(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/stats", s.inBrand(auth.ScopeWorkspaceRead, s.stats))
+	mux.HandleFunc("GET /v1/brands/{brand}/stats", s.onBrand(auth.ScopeWorkspaceRead, s.stats))
 }
 
 type statsView struct {

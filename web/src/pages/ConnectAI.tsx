@@ -255,7 +255,7 @@ function AppSettings({ ws, app: a, onClose }: { ws: string; app: AgentApp; onClo
       setMission(!on);
       return toast(errorMessage(error), "error");
     }
-    toast(on ? `${a.name} makes changes only inside missions you approve.` : `${a.name} may make changes outside missions.`);
+    toast(on ? `Every change ${a.name} makes now waits for you on the Agents page.` : `${a.name} may now change things directly.`);
     reloadAgentApps(ws);
   }
   const flip = (g: (typeof switches)[number], on: boolean) =>

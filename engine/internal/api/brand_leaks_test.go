@@ -53,6 +53,7 @@ var brandWide = map[string]string{
 var sweepQuery = map[string]string{
 	"/v1/workspaces/{ws}/search":            "q=bravo",
 	"/v1/workspaces/{ws}/outcomes/export":   "dataset=report",
+	"/v1/brands/{brand}/outcomes/export":    "dataset=report",
 	"/v1/workspaces/{ws}/seo/history":       "report=keywords&host=bravo.example",
 	"/v1/workspaces/{ws}/analytics/compare": "host=bravo.example",
 	"/v1/workspaces/{ws}/records/lookup":    "namespace=email&value=leak@bravo.example",

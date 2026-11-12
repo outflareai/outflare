@@ -76,9 +76,15 @@ func TestAdDrafts(t *testing.T) {
 	owner.must(400, "POST", drafts, with(ad, "kind", "banner", "ad_group_id", ggroup))
 	owner.must(404, "POST", drafts, with(ad, "kind", "ad", "ad_group_id", gcamp))
 
-	// An agent writes a draft under its grant.
+	// An agent writes a draft under its grant, once a person has reviewed
+	// the brand's knowledge sheet the ads are written from
+	// (TestBrandKnowledgeGate has the rest of the gate).
 	agent, agentID := gatedAgent(t, owner, base, "Ads writer", "analytics.read", "ads.manage")
 	owner.must(201, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "path": "brands/*/ads/**", "mode": "run"})
+	if st, res := agent.do("POST", drafts, with(ad, "kind", "ad", "ad_group_id", ggroup, "reason", "The group's only ad is two years old.")); st != 422 || res["error"].(map[string]any)["code"] != "knowledge_unreviewed" {
+		t.Fatalf("draft from an unreviewed sheet: %d %v", st, res)
+	}
+	owner.must(200, "POST", "/v1/brands/"+brand+"/knowledge/review", nil)
 	st, d := agent.do("POST", drafts, with(ad, "kind", "ad", "ad_group_id", ggroup, "reason", "The group's only ad is two years old."))
 	if st != 201 || d["status"] != "draft" || d["kind"] != "ad" || d["campaign_id"] != gcamp || d["action_id"] == nil {
 		t.Fatalf("agent draft: %d %v", st, d)

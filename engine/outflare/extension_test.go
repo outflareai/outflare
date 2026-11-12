@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/outflareai/outflare/engine/internal/adsuggest"
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/metrics"
@@ -56,6 +57,40 @@ func TestHostWiresRoutesMiddlewareAndCapabilities(t *testing.T) {
 	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/cloud/nope", nil))
 	if rec.Code != 404 {
 		t.Fatalf("unknown /v1 path: %d", rec.Code)
+	}
+}
+
+// /v1/meta lists ad_suggestions_auto only when an extension set the hook
+// that lets paid ads savings apply without a person.
+func TestAdAutoApproveCapability(t *testing.T) {
+	meta := func(h *Host) []string {
+		t.Helper()
+		srv := api.NewServer(nil, slog.New(slog.DiscardHandler), api.Options{Capabilities: h.capabilities, AdAutoApprove: h.adAutoApprove}).Handler()
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/meta", nil))
+		var m struct{ Capabilities []string }
+		if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+			t.Fatal(err)
+		}
+		return m.Capabilities
+	}
+	if c := meta(&Host{}); slices.Contains(c, "ad_suggestions_auto") {
+		t.Fatalf("without the hook: %v", c)
+	}
+	h := &Host{}
+	h.SetAdAutoApprove(func(context.Context, string, string, string) bool { return true })
+	if c := meta(h); !slices.Contains(c, "ad_suggestions_auto") {
+		t.Fatalf("with the hook: %v", c)
+	}
+	if !slices.Contains(AdSavingKinds(), "budget_down") || slices.Contains(AdSavingKinds(), "budget_up") {
+		t.Fatalf("saving kinds: %v", AdSavingKinds())
+	}
+	// Every kind an extension may offer is one the engine counts as a
+	// saving, so the hook is asked about it.
+	for _, k := range AdSavingKinds() {
+		if !slices.Contains(adsuggest.SavingKinds(), k) {
+			t.Fatalf("%s is offered but isn't a saving: %v", k, adsuggest.SavingKinds())
+		}
 	}
 }
 

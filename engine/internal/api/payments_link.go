@@ -90,7 +90,8 @@ type knownPayment struct {
 // samePayment finds the brand's payment transaction that is the payment
 // described: the one with the same source id from any source, or else, from
 // another source, the same person's of the same amount and currency within
-// paymentWindow. ok is false when there is none.
+// paymentWindow that has no copy from source yet (copies), or has this one.
+// ok is false when there is none.
 func samePayment(ctx context.Context, tx pgx.Tx, brand, source, sourceID, recordID string, amountMinor int64, currency string, at time.Time) (knownPayment, bool, error) {
 	var k knownPayment
 	err := tx.QueryRow(ctx, `
@@ -98,8 +99,9 @@ func samePayment(ctx context.Context, tx pgx.Tx, brand, source, sourceID, record
 		WHERE brand_id = $1 AND kind = 'payment' AND (
 			($2 <> '' AND source_id = $2 AND source <> $3)
 			OR ($4 <> '' AND record_id = NULLIF($4, '')::uuid AND source <> $3 AND amount_minor = $5 AND currency = $6
-				AND occurred_at BETWEEN $7::timestamptz - $8::interval AND $7::timestamptz + $8::interval))
-		ORDER BY source_id = $2 DESC, abs(extract(epoch FROM occurred_at - $7::timestamptz)), id LIMIT 1`,
+				AND occurred_at BETWEEN $7::timestamptz - $8::interval AND $7::timestamptz + $8::interval
+				AND ($3 || ':' || $2 = ANY(copies) OR NOT EXISTS (SELECT 1 FROM unnest(copies) c WHERE starts_with(c, $3 || ':')))))
+		ORDER BY source_id = $2 DESC, $3 || ':' || $2 = ANY(copies) DESC, abs(extract(epoch FROM occurred_at - $7::timestamptz)), id LIMIT 1`,
 		brand, sourceID, source, recordID, amountMinor, currency, at, paymentWindow.String()).Scan(&k.id, &k.source, &k.sourceID, &k.recordID, &k.amountMinor, &k.currency, &k.occurredAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return k, false, nil
@@ -114,6 +116,9 @@ func samePayment(ctx context.Context, tx pgx.Tx, brand, source, sourceID, record
 // The same id a day or more after the payment it names is recorded as
 // transaction.resent instead (paymentResent).
 func paymentMerged(ctx context.Context, tx pgx.Tx, p *principal, ws, brand, source, sourceID string, amountMinor int64, currency string, at time.Time, known knownPayment) error {
+	if err := addCopy(ctx, tx, known.id, source, sourceID); err != nil {
+		return err
+	}
 	matched := "id"
 	if sourceID == "" || sourceID != known.sourceID {
 		matched = "guess"
@@ -125,6 +130,14 @@ func paymentMerged(ctx context.Context, tx pgx.Tx, p *principal, ws, brand, sour
 		"matched_by": matched, "source": source, "source_id": sourceID, "amount_minor": amountMinor, "currency": currency,
 		"kept_source": known.source, "kept_source_id": known.sourceID, "kept_amount_minor": known.amountMinor, "kept_currency": known.currency,
 		"amounts_differ": amountMinor != known.amountMinor || currency != known.currency})
+}
+
+// addCopy records that the payment sent as source and sourceID is kept as
+// transaction id.
+func addCopy(ctx context.Context, tx pgx.Tx, id, source, sourceID string) error {
+	_, err := tx.Exec(ctx, `UPDATE transactions SET copies = array_append(copies, $2 || ':' || $3)
+		WHERE id = $1 AND NOT $2 || ':' || $3 = ANY(copies)`, id, source, sourceID)
+	return err
 }
 
 // paymentResent records a payment id sent again from the same source at

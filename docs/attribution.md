@@ -126,21 +126,21 @@ archived.
   campaign, ad set or ad, by the network's ids the tracking template
   recorded, beside the platform's spend and conversion count
   ([paid-media.md](paid-media.md#what-each-campaign-brought)).
-- `GET /v1/workspaces/{ws}/attribution/customers`: for every channel, the
+- `GET /v1/brands/{brand}/attribution/customers`: for every channel, the
   conversions credited to people who weren't a record yet when the credited
   visit happened (cold) and to people who already were (warm), and revenue
   from each person's first payment (new) and from later ones (repeat), net
   of refunds. A refund counts as repeat when the person paid before it.
-- `GET /v1/workspaces/{ws}/attribution/cohorts`: lifetime value by first
+- `GET /v1/brands/{brand}/attribution/cohorts`: lifetime value by first
   channel. People whose first conversion fell in the period, grouped by its
   first-touch credit, with how many have paid and everything they have paid
   since, in total and per person. Always first touch, whatever `model`.
-- `GET /v1/workspaces/{ws}/attribution/accounts`: credit rolled up from
+- `GET /v1/brands/{brand}/attribution/accounts`: credit rolled up from
   people to their company (a person's first company on their record). For
   every company: how many of its people converted, the conversions and
   revenue credited to them, the channel with the most credit, and the deals
   it won in the period. People with no company are left out.
-- `GET /v1/workspaces/{ws}/attribution/deals`: won deal value per channel.
+- `GET /v1/brands/{brand}/attribution/deals`: won deal value per channel.
   Each deal won in the period is spread across channels in proportion to
   the credit, under the model, of the conversions its people had before it
   closed. A deal's people are its people, its contact and everyone at its

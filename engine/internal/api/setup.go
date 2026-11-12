@@ -55,6 +55,7 @@ func (s *Server) routesSetup(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/brands/{brand}/setup/check", s.inBrand(manage, s.checkBrandSetup))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/brands/{brand}/setup/tag-containers", s.inBrand(read, s.listTagContainers))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/install-health", s.inBrand(read, s.getInstallHealth))
+	mux.HandleFunc("GET /v1/brands/{brand}/install-health", s.onBrand(read, s.getInstallHealth))
 }
 
 type setupStepDef struct {

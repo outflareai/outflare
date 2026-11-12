@@ -97,7 +97,7 @@ var (
 	}, []string{"outcome"})
 	redirectLandings = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "redirect", Name: "landings_total",
-		Help: "Page views on a site that carried a redirect click's key (ofclk), by outcome (claimed when the visit took the click, pending when its click wasn't written yet and the landing waits for it, unmatched when the click was already claimed, as on a reload, isn't the site's workspace's, or no click took a waiting landing within an hour).",
+		Help: "Page views on a site that carried a redirect click's key (ofclk), by outcome (claimed when the visit took the click, pending when its click wasn't written yet and the landing waits for it, direct when a direct-mode visit recorded its own click, unmatched when the click was already claimed, as on a reload, isn't the site's workspace's, or no click took a waiting landing within an hour).",
 	}, []string{"outcome"})
 	inboxEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "inbox", Name: "events_total",
@@ -111,6 +111,15 @@ var (
 	redirectClickWrites = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "redirect", Name: "click_writes_total",
 		Help: "Redirect clicks by what happened when their batch was written: written, refused_quota (the workspace's click quota), link_gone, failed (the batch waits for the next flush) or dropped_full (too many waiting).",
+	}, []string{"outcome"})
+	trackerFraudFlags = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "fraud_flags_total",
+		Help: "Tracker clicks and conversions a first-party fraud signal flagged, by subject (click or conversion) and reason: datacenter_network (a hosting network), repeat_click (one address and browser clicking a link more than ten times an hour) or fast_conversion (within 10 seconds of its click). A flagged click still goes on but counts against no cap.",
+	}, []string{"subject", "reason"})
+	trackerWeightSuggestions = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "weight_suggestions_seconds",
+		Help:    "Time to work out the suggested weights of a link or flow (its clicks and conversions over up to 90 days, then the chance each lander, offer or page is the best), by outcome: success or error.",
+		Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 	}, []string{"outcome"})
 	trackerSourcePostbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "source_postbacks_total",
@@ -404,6 +413,10 @@ var (
 		Namespace: namespace, Subsystem: "transactions", Name: "saved_total",
 		Help: "Transactions sent to Outflare, by where from (api, connector) and outcome (created; duplicate: the same source id again; deleted: the same source id as one in Recently deleted, not added back; invalid; error).",
 	}, []string{"from", "outcome"})
+	txRetries = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "db", Name: "tx_retries_total",
+		Help: "Database transactions a request ran again because Postgres chose it as a deadlock victim or couldn't serialize it, by operation and outcome (retried: tried again; gave_up: failed on its last try, so the request answered an error).",
+	}, []string{"operation", "outcome"})
 	transactionSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "transactions", Name: "save_seconds",
 		Help: "How long saving one transaction took, its conversion to the brand's currency included.", Buckets: requestBuckets,
@@ -623,6 +636,38 @@ var (
 		Namespace: namespace, Subsystem: "ad_conversions", Name: "oldest_queued_seconds",
 		Help: "How long the oldest conversion waiting to be sent has waited, as of this process's last round.",
 	})
+	// The conversion feed (engine/internal/adconv, feed.go): conversions
+	// sent to Google by transport (data_manager, the Data Manager API;
+	// ads_api, the older upload call), the batches each took, and the
+	// payers lists' size. transport also takes payers_list for the list's
+	// refresh batches.
+	adsFeedSends = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads_feed", Name: "sends_total",
+		Help: "Conversions sent through the conversion feed, by transport (data_manager, ads_api) and outcome (sent, failed).",
+	}, []string{"transport", "outcome"})
+	adsFeedBatches = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads_feed", Name: "batches_total",
+		Help: "Batches the conversion feed sent, by transport (data_manager, ads_api, payers_list) and outcome (sent, failed, refused: the destination cannot be used, so sends fall back to ads_api).",
+	}, []string{"transport", "outcome"})
+	adsPayersListMembers = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "payers_list_members",
+		Help: "People in every account's Outflare paying customers list, added together, as of this process's last round.",
+	})
+
+	// The paid ads ledger (engine/internal/paidads): sign-ups, payments and
+	// refunds tied to the ad click that brought them.
+	paidAdsLedgerEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "paidads", Name: "ledger_events_total",
+		Help: "Customer events the paid ads ledger looked at, by kind (signup, payment, refund) and outcome (acquired, recorded, known, no_click, not_ads, no_payment, error).",
+	}, []string{"kind", "outcome"})
+	paidAdsLedgerLag = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "paidads", Name: "ledger_lag_seconds",
+		Help: "How far behind the paid ads ledger is for the furthest-behind workspace with an ad account: seconds since the last event it read arrived, as of this process's last round. Normal is under ten minutes (events wait five to settle).",
+	})
+	paidAdsAcquisitions = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "paidads", Name: "acquisitions_total",
+		Help: "People a brand's ads acquired, by connector and kind (signup, first_payment).",
+	}, []string{"connector", "kind"})
 
 	// Meetings on people's timelines (outcomes.MeetingEvents).
 	meetingEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -650,7 +695,7 @@ var (
 	// conversions, ads, SEO snapshots).
 	syncRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "sync", Name: "runs_total",
-		Help: "Scheduled sync runs of connections, by module (analytics, search_console, page_conversions, ads, seo) and outcome (success, internal, connector_auth, connector_quota, connector_unavailable, connector_invalid).",
+		Help: "Scheduled sync runs of connections, by module (analytics, search_console, page_conversions, organic_conversions, ads, seo) and outcome (success, internal, connector_auth, connector_quota, connector_unavailable, connector_invalid).",
 	}, []string{"module", "outcome"})
 	// Ad groups' and ads' days stored by the ad sync (Meta and Google).
 	adItemRows = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -726,6 +771,7 @@ var (
 	// web search connection.
 	coverageReviews   = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "reviews_total", Help: "Coverage AI reviews by bounded result status."}, []string{"status"})
 	mailPrivacyChecks = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "crm_mail", Name: "privacy_checks_total", Help: "Emails the workspace's AI model checked before team email sharing shows them, by outcome: work (shown to colleagues), private (kept to its owner), failed (the model call or its answer failed; the email stays private), no_ai (no AI connection) and budget (the AI limit was reached)."}, []string{"outcome"})
+	eventNameChecks   = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "customer_events", Name: "name_checks_total", Help: "New event names checked for typos of names the brand already has, by how (ai: the workspace's own AI model; spelling: compared letter by letter, with no AI connected or when the AI call failed) and outcome (ok: nothing to ask; asked: a person is asked whether it is a typo)."}, []string{"method", "outcome"})
 	coverageChecks    = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "checks_total", Help: "Coverage page checks by observed condition."}, []string{"health"})
 	coverageFound     = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "found_total", Help: "Pages Presence discovery added to a brand's review list for the first time, by source (news, backlinks, link_prospects, social, ai_citations, web_search)."}, []string{"source"})
 	coverageSearches  = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "search_runs_total", Help: "Presence web search runs by outcome (done, connector_needed, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable)."}, []string{"outcome"})
@@ -1022,6 +1068,48 @@ var (
 		Namespace: namespace, Name: "build_info",
 		Help: "Always 1; the labels are the running engine version and its role (OUTFLARE_ROLE).",
 	}, []string{"version", "role"})
+
+	// ---- Paid ads intelligence layer: hourly sync, click harvest, change
+	// events and alerts (plans/paid-ads/plan.md; engine/internal/adsync). ----
+	adSyncRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "sync_runs_total",
+		Help: "Runs of the hourly ad sync per connection, by the window each read (first: 90 days on an account's first sync; hourly: 2 days; daily: 7; weekly: 35; monthly: 95) and outcome (success, internal, connector_auth, connector_quota, connector_unavailable, connector_invalid).",
+	}, []string{"window", "outcome"})
+	adClicksHarvested = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "clicks_harvested_total",
+		Help: "Paid clicks read from a network's click report (Google click_view) into ad_clicks, by connector and outcome: stored (one per click), or failed (one per read a network refused, with the error kind as connector_<kind>).",
+	}, []string{"connector", "outcome"})
+	adChangeEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "change_events_total",
+		Help: "Changes made on ad platforms read into ad_change_events (Google change_event, every 15 minutes), by connector. Normal is a trickle; zero for days on an account people work in means the read is failing (see the job).",
+	}, []string{"connector"})
+	adChangeEventReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "change_event_reads_total",
+		Help: "Reads of ad platforms' change histories per connection, by connector and outcome (success, internal, connector_auth, connector_quota, connector_unavailable, connector_invalid).",
+	}, []string{"connector", "outcome"})
+	adAlerts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "alerts_total",
+		Help: "Alerts the paid ads alert job raised as new findings, by kind (alert.spend_anomaly, alert.pacing, alert.flatline, alert.zero_conversions, alert.disapproved, alert.auto_apply_on, alert.sends_failing, alert.tracking_broken, overspend_pause). A few a day across all workspaces is normal; dozens an hour is a flood.",
+	}, []string{"kind"})
+	adAlertRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "alert_runs_total",
+		Help: "Runs of the paid ads alert job (once per workspace after each hourly sync), by outcome (success, error).",
+	}, []string{"outcome"})
+
+	// ---- Paid ads intelligence layer: findings and verdicts
+	// (plans/paid-ads/plan.md; engine/internal/adsuggest). ----
+	adFindings = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "findings_total",
+		Help: "Findings the paid ads rules wrote, by kind (budget_down, pause, negative_add, target_tighten, exclusion_add, ..., alert.target_stale), autonomy (auto, approve, alert, shadow) and outcome (created: a new row for a person; applied: a saving made on its own; recorded: what a rule would have done in shadow mode).",
+	}, []string{"kind", "autonomy", "outcome"})
+	adFindingVerdicts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "verdicts_total",
+		Help: "Verdicts on findings whose change was made, by kind and verdict (worked, did_not_work, not_sure). Mostly worked and not_sure is normal; did_not_work outnumbering worked for a kind means that rule's thresholds want a look.",
+	}, []string{"kind", "verdict"})
+	adFindingsOpen = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "findings_open",
+		Help: "Findings waiting for a person across every workspace (status open, autonomy approve), as of the last run of the rules. A number that only grows means nobody is deciding them.",
+	})
 )
 
 // own are the metrics this package keeps itself; Postgres is registered
@@ -1029,7 +1117,7 @@ var (
 var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerSourcePostbacks, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
+	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerSourcePostbacks, trackerFraudFlags, trackerWeightSuggestions, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -1038,7 +1126,7 @@ var own = []prometheus.Collector{
 	connectionLimitAlerts, connectionLimitStops,
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
-	queryEndpointCalls, queryEndpointSeconds, queryEndpointRows, handEditsExpired, transactionsSaved, transactionSeconds, insightRuns, insightSeconds,
+	queryEndpointCalls, queryEndpointSeconds, queryEndpointRows, handEditsExpired, transactionsSaved, transactionSeconds, txRetries, insightRuns, insightSeconds,
 	queryRuns, queryDuration, queryRows, queryTypeTablesFailed, querySavedRuns, queryExports, queryExportRows,
 	mcpClientCalls, mcpClientDuration, ruleEvaluations, recordMetricUpdates, recordMetricBackfills, recordMetricSweeps, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, adChanges, adSuggestRuns, adSuggestions, adVerdicts, adTestSteps, adDraftSteps, contentPublishes, accountAttempts, accountTakeovers, browserTasks, browserSteps, browserSessions, mailSignInsMoved,
 	actionsDecided, actionsFinished, agentRunTurns,
@@ -1048,13 +1136,15 @@ var own = []prometheus.Collector{
 	knowledgeSuggestions,
 	supportMessages, supportReplies, supportReplyDuration, supportAssistantRuns, supportAssistantDuration, knowledgeAnswerSearches, knowledgeAnswerSearchDuration, knowledgeWebsiteImports, knowledgeWebsiteImportDuration, knowledgeWebsitePages, knowledgeWebsiteRechecks, knowledgeReplyLearning, knowledgeReplyLearningDuration, supportAssistantHeld, supportSLABreaches, supportOverdue, supportChatRequests, supportSLAChecks, supportSLACheckDuration,
 	adConversions, adConversionsOldest, adConversionAdjustments,
+	paidAdsLedgerEvents, paidAdsLedgerLag, paidAdsAcquisitions,
+	adsFeedSends, adsFeedBatches, adsPayersListMembers,
 	meetingEvents, meetingEventsPending,
 	reviewReads, reviewsFound, pricingReads, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkAutoSends, linkReplies, linkLiveChecks, webSearches, aiAnswers, aiDemandReads, aiStanceReads, aiPromptDrafts,
 	socialPublishes,
 	redditSends,
 	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
-	mailPrivacyChecks,
+	mailPrivacyChecks, eventNameChecks,
 	coverageChecks, coverageReviews, coverageFound, coverageSearches, competitorScans, competitorFound, competitorSuggest, opportunities, newsRuns, newsFound, newsReads, storyAIRuns,
 	quoteApprovalEmails, quoteApprovalPages, quoteApprovalDecisions,
 	automationRuns, automationLag,
@@ -1071,6 +1161,11 @@ var own = []prometheus.Collector{
 	desktopLinks, desktopReports, desktopReadings, desktopReadFailures, desktopDevices, desktopPurged,
 	telegramSteps, telegramAccounts, telegramSynced, telegramSyncRuns, telegramSyncLag, telegramMatches, telegramSummaries, telegramWaiting,
 	buildInfo,
+	adSyncRuns, adClicksHarvested, adChangeEvents, adChangeEventReads, adAlerts, adAlertRuns,
+	// Paid ads: the brand knowledge sheet.
+	brandKnowledgeReads,
+	// Paid ads: findings and verdicts.
+	adFindings, adFindingVerdicts, adFindingsOpen,
 }
 
 func init() {
@@ -1184,6 +1279,12 @@ func TrackerConversionRow(via, outcome string) {
 	trackerConversionRows.WithLabelValues(via, outcome).Inc()
 }
 
+// TrackerFraudFlag counts a tracker click or conversion a fraud signal
+// flagged, by reason.
+func TrackerFraudFlag(subject, reason string) {
+	trackerFraudFlags.WithLabelValues(subject, reason).Inc()
+}
+
 // TrackerSourcePostback counts a conversion sent back to a traffic source
 // by outcome.
 func TrackerSourcePostback(outcome string) { trackerSourcePostbacks.WithLabelValues(outcome).Inc() }
@@ -1202,11 +1303,18 @@ func RedirectRoute(outcome string) { redirectRoutes.WithLabelValues(outcome).Inc
 // RedirectClickBuffer reports how many clicks wait to be written.
 func RedirectClickBuffer(n int) { redirectClickBuffer.Set(float64(n)) }
 
+// TrackerWeightSuggestions times working out one link's or flow's
+// suggested weights, by outcome (success or error).
+func TrackerWeightSuggestions(outcome string, d time.Duration) {
+	trackerWeightSuggestions.WithLabelValues(outcome).Observe(d.Seconds())
+}
+
 // RedirectClickFlush times writing one batch of clicks.
 func RedirectClickFlush(d time.Duration) { redirectClickFlush.Observe(d.Seconds()) }
 
 // RedirectLanding counts one page view carrying a redirect click's key, by
-// outcome: claimed, pending (its click not written yet) or unmatched.
+// outcome: claimed, pending (its click not written yet), direct (a
+// direct-mode visit recorded its own click) or unmatched.
 func RedirectLanding(outcome string) { redirectLandings.WithLabelValues(outcome).Inc() }
 
 // PageVitals counts page speed readings by outcome: stored, rejected or
@@ -1451,6 +1559,13 @@ func ABResults(outcome string, d time.Duration) {
 func TransactionSaved(from, outcome string, d time.Duration) {
 	transactionsSaved.WithLabelValues(from, outcome).Inc()
 	transactionSeconds.Observe(d.Seconds())
+}
+
+// TxRetry counts one deadlock or serialization failure a request's
+// transaction hit: retried when it runs again, gave_up when it was the
+// last try.
+func TxRetry(operation, outcome string) {
+	txRetries.WithLabelValues(operation, outcome).Inc()
 }
 
 // InsightRun counts one insight query, by kind (funnel, funnel_people,
@@ -1833,9 +1948,44 @@ func AdConversionAdjustments(connector string, sent, skipped, failed int) {
 	adConversionAdjustments.WithLabelValues(connector, "failed").Add(float64(failed))
 }
 
+// AdsFeedSends counts the conversions one feed batch sent and the ones
+// the platform refused, by the transport it took.
+func AdsFeedSends(transport string, sent, failed int) {
+	adsFeedSends.WithLabelValues(transport, "sent").Add(float64(sent))
+	adsFeedSends.WithLabelValues(transport, "failed").Add(float64(failed))
+}
+
+// AdsFeedBatch counts one feed batch: sent, failed, or refused (the
+// destination cannot be used, so the account falls back to ads_api).
+func AdsFeedBatch(transport, outcome string) {
+	adsFeedBatches.WithLabelValues(transport, outcome).Inc()
+}
+
+// AdsPayersListMembers records how many people every payers list holds,
+// added together.
+func AdsPayersListMembers(n int64) {
+	adsPayersListMembers.Set(float64(n))
+}
+
 // AdConversionsOldest records how long the oldest waiting conversion has
 // waited.
 func AdConversionsOldest(d time.Duration) { adConversionsOldest.Set(d.Seconds()) }
+
+// PaidAdsLedgerEvent records one customer event the paid ads ledger looked
+// at: its kind (signup, payment, refund) and what came of it.
+func PaidAdsLedgerEvent(kind, outcome string) {
+	paidAdsLedgerEvents.WithLabelValues(kind, outcome).Inc()
+}
+
+// PaidAdsLedgerLag records how far behind the ledger is for the
+// furthest-behind workspace, as of this round.
+func PaidAdsLedgerLag(d time.Duration) { paidAdsLedgerLag.Set(d.Seconds()) }
+
+// PaidAdsAcquisition records one person a brand's ads acquired, by the
+// network's connector and whether a sign-up or a first payment made them.
+func PaidAdsAcquisition(connector, kind string) {
+	paidAdsAcquisitions.WithLabelValues(connector, kind).Inc()
+}
 
 // MeetingEventsRecorded counts meeting events recorded with one status.
 func MeetingEventsRecorded(status string, n int) {
@@ -2067,6 +2217,10 @@ func DesktopPurged(n int64) { desktopPurged.Add(float64(n)) }
 // work, private, failed, no_ai or budget.
 func MailPrivacyCheck(outcome string) { mailPrivacyChecks.WithLabelValues(outcome).Inc() }
 
+// EventNameCheck counts one new event name's check: method ai or
+// spelling, outcome ok or asked.
+func EventNameCheck(method, outcome string) { eventNameChecks.WithLabelValues(method, outcome).Inc() }
+
 func CoverageCheck(health string) { coverageChecks.WithLabelValues(health).Inc() }
 
 func CoverageReview(status string) { coverageReviews.WithLabelValues(status).Inc() }
@@ -2143,4 +2297,78 @@ func TelegramAccounts(counts map[string]int) {
 	for _, st := range telegramStatuses {
 		telegramAccounts.WithLabelValues(st).Set(float64(counts[st]))
 	}
+}
+
+// ---- Paid ads intelligence layer (engine/internal/adsync) ----
+
+// AdSyncRun records one run of the hourly ad sync for a connection: the
+// window it read (first, hourly, daily, weekly, monthly) and its outcome.
+func AdSyncRun(window, outcome string) {
+	adSyncRuns.WithLabelValues(window, outcome).Inc()
+}
+
+// AdClicksHarvested records n paid clicks stored from a network's click
+// report.
+func AdClicksHarvested(connector string, n int) {
+	if n > 0 {
+		adClicksHarvested.WithLabelValues(connector, "stored").Add(float64(n))
+	}
+}
+
+// AdClickHarvestFailed records one click report read a network refused.
+func AdClickHarvestFailed(connector, code string) {
+	adClicksHarvested.WithLabelValues(connector, code).Inc()
+}
+
+// AdChangeEventsRead records one read of a platform's change history and
+// the n changes it stored.
+func AdChangeEventsRead(connector, outcome string, n int) {
+	adChangeEventReads.WithLabelValues(connector, outcome).Inc()
+	if n > 0 {
+		adChangeEvents.WithLabelValues(connector).Add(float64(n))
+	}
+}
+
+// AdAlertRaised records one new alert finding of a kind.
+func AdAlertRaised(kind string) {
+	adAlerts.WithLabelValues(kind).Inc()
+}
+
+// AdAlertRun records one run of the alert job and its outcome.
+func AdAlertRun(outcome string) {
+	adAlertRuns.WithLabelValues(outcome).Inc()
+}
+
+// ---- Brand knowledge (paid ads: the sheet ads are written from) ----
+
+// brandKnowledgeReads counts reads of a brand's website for its knowledge
+// sheet (the brand.read_knowledge job: on creation, on request and daily
+// once an ad account is connected), by how each ended.
+var brandKnowledgeReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: namespace, Subsystem: "brand", Name: "knowledge_reads_total",
+	Help: "Reads of brands' websites for their knowledge sheet, by outcome: success, failed (the workspace lacks a page reader or an AI model, or the site refused), error (the read broke).",
+}, []string{"outcome"})
+
+// BrandKnowledgeRead records one read of a brand's website for its
+// knowledge sheet and how it ended (success, failed, error).
+func BrandKnowledgeRead(outcome string) {
+	brandKnowledgeReads.WithLabelValues(outcome).Inc()
+}
+
+// ---- Paid ads: findings and verdicts (engine/internal/adsuggest) ----
+
+// AdFinding records one finding the rules wrote: created for a person,
+// applied on its own, or recorded in shadow mode.
+func AdFinding(kind, autonomy, outcome string) {
+	adFindings.WithLabelValues(kind, autonomy, outcome).Inc()
+}
+
+// AdVerdict records one verdict on a finding whose change was made.
+func AdVerdict(kind, verdict string) {
+	adFindingVerdicts.WithLabelValues(kind, verdict).Inc()
+}
+
+// AdFindingsOpen sets how many findings wait for a person.
+func AdFindingsOpen(n int) {
+	adFindingsOpen.Set(float64(n))
 }

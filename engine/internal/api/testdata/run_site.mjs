@@ -24,7 +24,9 @@
 // or a string as written) of a <script id="outflare-flags"> the site's
 // server put in the page. flagsAttr sets data-flags to that value (such
 // as "off"); hidden lists the of-hide styles added to <head>, with whether
-// they were taken off again.
+// they were taken off again. links lists the hrefs of the page's links
+// that ask for the click key ({ofclk}); it prints them after the script ran,
+// with the script's clickId().
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
@@ -42,7 +44,9 @@ const attrs = { "data-key": "ofk_test_not_a_real_key", "data-consent": opt.conse
 if (opt.flags && !opt.noTag) attrs["data-flags"] = "";
 if (opt.flagsAttr !== undefined) attrs["data-flags"] = opt.flagsAttr;
 if (opt.bannerOff) attrs["data-banner"] = "off";
+if (opt.reopenOff) attrs["data-reopen"] = "off";
 if (opt.cookiesOff) attrs["data-cookies"] = "off";
+let shown = null;
 const classes = new Set(opt.htmlClass ? [opt.htmlClass] : []);
 const storage = new Map(Object.entries(opt.stored || {}));
 const sessionStorage = {
@@ -80,6 +84,10 @@ const elements = Object.fromEntries(Object.entries(opt.elements || {}).map(([sel
   const e = { textContent: "old", attrs: {}, display: "", setAttribute(k, v) { e.attrs[k] = v; }, style: { setProperty(k, v) { e.display = v; } } };
   return e;
 })]));
+const links = (opt.links || []).map((href) => {
+  const a = { href, getAttribute: (k) => (k === "href" ? a.href : null), setAttribute(k, v) { if (k === "href") a.href = v; } };
+  return a;
+});
 const appended = [];
 const spots = Array.from({ length: opt.policySpots || 0 }, () => ({ innerHTML: "", querySelector: () => null }));
 const document = {
@@ -103,12 +111,15 @@ const document = {
     q.includes("data-category") ? held.filter((h) => h.getAttribute("type") === "text/plain" && h.getAttribute("data-of-loaded") === null)
     : q.includes("cookie-policy") ? spots
     : q.startsWith("script[src]") ? tags
+    : q.includes("ofclk") ? links
     : elements[q] ? elements[q]
     : [],
   createElement: () => {
-    const n = { attrs: {}, setAttribute(k, v) { n.attrs[k] = v; } };
+    const n = { attrs: {}, innerHTML: "", setAttribute(k, v) { n.attrs[k] = v; }, addEventListener() {}, querySelector: () => null };
     return n;
   },
+  // With opt.body, the page has a body, so the consent banner mounts.
+  body: opt.body ? { appendChild(n) { shown = n; n.parentNode = { removeChild() { shown = null; } }; } } : undefined,
   head: { appendChild(n) { appended.push(n); n.parentNode = { removeChild() { n.removed = true; } }; } },
   documentElement: { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } },
 };
@@ -178,6 +189,6 @@ for (let i = 0; i < 10; i++) {
 }
 console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage),
   choices, bannerAsks, cookieReports, policy: spots.map((s) => s.innerHTML), local: Object.fromEntries(local), state, consent: window.outflare.consent(), dataLayer: (window.dataLayer || []).map((a) => [...a]), uetq: window.uetq || null, fbq, ran,
-  cookies: Object.fromEntries(jar), bodies,
+  cookies: Object.fromEntries(jar), bodies, shown: shown ? shown.innerHTML : null, links: links.map((a) => a.href), clickId: window.outflare.clickId(),
   hidden: appended.filter((n) => n.id === "of-hide").map((n) => ({ css: n.textContent, removed: !!n.removed })),
   elements: Object.fromEntries(Object.entries(elements).map(([k, els]) => [k, els.map((e) => ({ text: e.textContent, attrs: e.attrs, display: e.display }))])) }));

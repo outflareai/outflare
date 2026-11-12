@@ -89,6 +89,41 @@ export function registerLinkOrderTools(
       ),
   );
 
+  server.registerTool(
+    "list_link_order_candidates",
+    {
+      title: "List link-order candidates",
+      description:
+        "Referring domains from the brand's already-saved competitor link gap (stored snapshots and live backlinks only). This does not call a paid SEO provider. Traffic is always null. Status is not_in_catalog, in_catalog, or ordered. Page with cursor=next_cursor.",
+      inputSchema: {
+        brand,
+        site_id: z.string().uuid().optional().describe("Limit the gap to one SEO site."),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+        limit: z.number().int().min(1).max(500).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/link-orders/candidates", { params: { path: { brand }, query } }),
+      ),
+  );
+
+  server.registerTool(
+    "get_link_order_equivalents",
+    {
+      title: "List equivalent donors for a link order",
+      description:
+        "Catalog donors in the same domain-rating band and niche as the order's donor, not archived, preferring non-PBN when the source is not PBN. The current donor is first when it still qualifies. Amounts are the donor price only.",
+      inputSchema: { brand, id: z.string().uuid().describe("The order id.") },
+      annotations: read,
+    },
+    ({ brand, id }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/link-orders/{id}/equivalents", { params: { path: { brand, id } } }),
+      ),
+  );
+
   if (readOnly) {
     return;
   }
@@ -121,7 +156,7 @@ export function registerLinkOrderTools(
     "import_link_order_catalog",
     {
       title: "Import the link-order catalog from CSV",
-      description: "The first row is the header and must include domain. A repeated domain updates the existing profile. A bad row is listed in errors and does not abort the rest of the file. Amounts are the donor price only, in minor units.",
+      description: "Import a CSV string only; a Google Sheet is not imported. The first row is the header and must include domain. A repeated domain updates the existing profile. A bad row is listed in errors and does not abort the rest of the file. Amounts are the donor price only, in minor units.",
       inputSchema: {
         brand,
         csv: z.string().min(1).describe("The CSV file contents, including the header row."),
@@ -133,4 +168,39 @@ export function registerLinkOrderTools(
         gtm.POST("/v1/brands/{brand}/link-orders/catalog/import", { params: { path: { brand } }, body: { csv } }),
       ),
   );
+
+  server.registerTool(
+    "add_link_order_candidate_to_catalog",
+    {
+      title: "Add a saved-gap candidate to the catalog",
+      description:
+        "Find-or-create a donor profile for a domain that is already in the saved link gap, with source=competitor_gap. A domain that is not in the saved gap fails. This does not call a paid SEO provider.",
+      inputSchema: {
+        brand,
+        domain: z.string().min(1).describe("The referring domain from the saved link gap."),
+        site_id: z.string().uuid().optional().describe("Limit the gap check to one SEO site."),
+      },
+      annotations: write,
+    },
+    ({ brand, domain, site_id }) =>
+      call(() =>
+        gtm.POST("/v1/brands/{brand}/link-orders/candidates/{domain}/add-to-catalog", {
+          params: { path: { brand, domain }, query: site_id ? { site_id } : undefined },
+        }),
+      ),
+  );
+  server.registerTool(
+    "get_link_roi",
+    {
+      title: "Read cost per published link against stored page changes",
+      description:
+        "For each published, paid or verified link order: the donor price, the referring domain and its stored rating, and already-saved Search Console, ranking and referring-domain figures on the target page 30, 60 and 90 days around publication. " +
+        "This does not call a paid SEO provider or claim that the link caused a change. Amounts stay per currency. " +
+        "Pages rolls the same orders up by target URL. Orders without a publication date are counted in totals only.",
+      inputSchema: { brand },
+      annotations: read,
+    },
+    ({ brand }) => call(() => gtm.GET("/v1/brands/{brand}/link-roi", { params: { path: { brand } } })),
+  );
+
 }

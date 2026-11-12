@@ -1,9 +1,11 @@
 // The brand the app is narrowed to, for companies that market several
 // brands in one workspace. Like a project in PostHog, one brand is shown at
 // a time: a workspace with brands opens on the one picked last, or its
-// first. "" is all brands, which someone picks on purpose. The choice is
-// kept per person and workspace, and in the URL (/acme/repocket/seo, or
-// /acme/all/seo) so a shared link opens on the same brand.
+// first. There is no "all brands": brands share nothing but the team,
+// billing and connections. "" is only a workspace with no brand yet. The
+// choice is kept per person and workspace, and in the URL
+// (/acme/repocket/seo) so a shared link opens on the same brand; an old
+// /acme/all/... link opens the first brand.
 //
 // Every workspace read the app sends carries the brand picked (api.ts), so
 // a page can't show another brand's records by forgetting it; a call that
@@ -82,7 +84,7 @@ export async function loadBrands(ws: string) {
   if (state.ws !== ws) return;
   const active = brands.filter((b) => b.status === "active");
   let brand = active.some((b) => b.handle === state.brand) ? state.brand : "";
-  if (!brand && picked !== allBrands && active.length > 0) brand = active[0].handle;
+  if (!brand && active.length > 0) brand = active[0].handle;
   set({ brands, brand, loaded: true });
   syncURL();
 }
@@ -91,6 +93,8 @@ export async function loadBrands(ws: string) {
 // or a link (Back and Forward) that names another brand.
 export function setBrand(handle: string, from: "switcher" | "link" = "switcher") {
   if (handle === allBrands) handle = "";
+  // A workspace with brands always shows one of them.
+  if (!handle && state.brands.some((b) => b.status === "active")) return;
   if (handle === state.brand) return;
   if (from === "link" && handle && !state.brands.some((b) => b.handle === handle && b.status === "active")) return;
   set({ brand: handle });

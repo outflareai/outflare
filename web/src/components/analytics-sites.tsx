@@ -245,7 +245,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
           </tbody>
         </table>
       </div>
-      {others > 0 && focus && <p className="text-[12px] text-muted-foreground">{others === 1 ? "1 other site belongs" : `${others} other sites belong`} to other brands or every brand. Pick All brands in the sidebar to see them.</p>}
+      {others > 0 && focus && <p className="text-[12px] text-muted-foreground">{others === 1 ? "1 other site belongs" : `${others} other sites belong`} to other brands or to every brand. Switch brand in the sidebar to see them.</p>}
       <div className={`flex flex-wrap items-center gap-3 ${compact ? "justify-end" : "justify-between"}`}>
         {!compact && (
           <p className="text-[12px] text-muted-foreground">

@@ -576,7 +576,7 @@ function WorkspaceBody({
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="mb-1 text-xs text-muted-foreground">
-            {brand?.name ?? "All brands"} / CRM
+            {brand?.name ? `${brand.name} / CRM` : "CRM"}
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">
             {section === "tasks"

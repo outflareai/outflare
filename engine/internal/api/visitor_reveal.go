@@ -270,7 +270,11 @@ func (s *Server) applyReveal(ctx context.Context, tx pgx.Tx, ws string, set visi
 	if visitors.Matches(domain, set.ExcludeDomains) || visitors.Matches(domain, set.NotCompanies) {
 		return nil
 	}
-	acct, err := crmCompany(ctx, tx, ws, domain)
+	var brand string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(brand_id::text), '') FROM site_visitors WHERE workspace_id = $1 AND anonymous_id = $2`, ws, anon).Scan(&brand); err != nil {
+		return err
+	}
+	acct, err := crmCompany(ctx, tx, ws, brand, domain)
 	if err != nil {
 		return err
 	}
@@ -293,12 +297,14 @@ func (s *Server) applyReveal(ctx context.Context, tx pgx.Tx, ws string, set visi
 }
 
 // crmCompany is the CRM company with a domain, if any.
-func crmCompany(ctx context.Context, tx pgx.Tx, ws, domain string) (*string, error) {
+func crmCompany(ctx context.Context, tx pgx.Tx, ws, brand, domain string) (*string, error) {
 	var id string
+	// A brand's visitor goes only to that brand's company ("" for any).
 	err := tx.QueryRow(ctx, `SELECT r.id::text FROM record_identities i JOIN records r ON r.id = i.record_id
 		WHERE i.workspace_id = $1 AND i.namespace = 'domain' AND i.value = $2 AND i.valid_to IS NULL
 		  AND r.record_type = 'account' AND r.merged_into IS NULL AND r.archived_at IS NULL
-		ORDER BY i.verified DESC, i.created_at LIMIT 1`, ws, domain).Scan(&id)
+		  AND ($3 = '' OR r.brand_id::text = $3)
+		ORDER BY i.verified DESC, i.created_at LIMIT 1`, ws, domain, brand).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -334,8 +340,9 @@ func (s *Server) addVisitorCompany(w http.ResponseWriter, r *http.Request) {
 		var name string
 		var brand *string
 		var n int
+		// On a brand route, only that brand's visitors and companies.
 		if err := tx.QueryRow(ctx, `SELECT count(*), COALESCE(max(company_name), ''), (array_agg(brand_id::text))[1] FROM site_visitors
-			WHERE workspace_id = $1 AND company_domain = $2`, a.WorkspaceID, domain).Scan(&n, &name, &brand); err != nil {
+			WHERE workspace_id = $1 AND company_domain = $2 AND ($3 = '' OR brand_id::text = $3)`, a.WorkspaceID, domain, a.Brand).Scan(&n, &name, &brand); err != nil {
 			return err
 		}
 		if n == 0 {
@@ -344,7 +351,7 @@ func (s *Server) addVisitorCompany(w http.ResponseWriter, r *http.Request) {
 		if !a.writes(brand) {
 			brand = nil
 		}
-		acct, err := crmCompany(ctx, tx, a.WorkspaceID, domain)
+		acct, err := crmCompany(ctx, tx, a.WorkspaceID, a.Brand, domain)
 		if err != nil {
 			return err
 		}
@@ -370,8 +377,9 @@ func (s *Server) addVisitorCompany(w http.ResponseWriter, r *http.Request) {
 			}
 			created = true
 		}
-		if _, err := tx.Exec(ctx, `UPDATE site_visitors SET account_id = $3 WHERE workspace_id = $1 AND company_domain = $2 AND record_id IS NULL AND account_id IS NULL`,
-			a.WorkspaceID, domain, id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE site_visitors SET account_id = $3 WHERE workspace_id = $1 AND company_domain = $2 AND record_id IS NULL AND account_id IS NULL
+			AND ($4 = '' OR brand_id::text = $4)`,
+			a.WorkspaceID, domain, id, a.Brand); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "visitor.company_added", "record", id, map[string]any{"record_id": id, "created": created, "browsers": n})

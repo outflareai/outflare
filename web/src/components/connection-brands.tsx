@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { Brand, ConnectionAccount, ConnectionKind, Integration, UnassignedConnection } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
+import { ago, stamp } from "../format";
 import { Badge, Button, ErrorText, field, toast } from "../ui";
 import { BrandsPicker, brandsLabel } from "./brand-picker";
 import { ConnectorLogo } from "./connector-logo";
@@ -77,6 +78,7 @@ export function ConnectionBrandsDialog({ ws, integration: i, brands, onClose, on
             <DialogTitle className="flex items-center gap-2.5 text-[15px]"><ConnectorLogo id={i.connector} />Whose is "{i.name}"</DialogTitle>
             <DialogDescription className="text-[13px]">Data from a connection, or one of its accounts, that belongs to no brand shows in no brand.</DialogDescription>
           </DialogHeader>
+          <ConnectionFacts signedInAs={i.account?.email || i.account?.name || ""} details={i.account?.details ?? {}} connectedAt={i.created_at} />
           {option("brand", "The whole connection belongs to one brand, such as Stripe for Acme.")}
           {option("split", "One sign-in whose sites, properties or ad accounts belong to different brands. Assign each below.")}
           {option("shared", "A tool every brand uses, such as DataForSEO or the AI key. What it produces belongs to the brand that used it.")}
@@ -137,10 +139,69 @@ function AssignAccount({ ws, account: a, brands, onDone }: { ws: string; account
   );
 }
 
+// Labels for what providers report about an account (connectors'
+// Account.Details); anything else is shown with its key tidied up.
+const detailLabels: Record<string, string> = { accounts: "Accounts", containers: "Containers", sites: "Sites it tags", zones: "Zones", workspace_slug: "Workspace", team_id: "Team" };
+const detailLabel = (k: string) => detailLabels[k] ?? k.charAt(0).toUpperCase() + k.slice(1).replaceAll("_", " ");
+
+// Why a brand is suggested for a connection with none.
+const because: Record<string, string> = {
+  site: "a site or zone it reports is on that brand's domain",
+  name: "its account or container is named after that brand",
+  same_sign_in: "the same sign-in is that brand's in another connection",
+  email_domain: "it signed in with an address at that brand's domain",
+};
+
+// ConnectionFacts is what tells whose a connection is: the account it
+// signed in to, what the provider reports (accounts, containers, sites),
+// and who connected it when.
+function ConnectionFacts({ signedInAs, details, connectedAt, connectedBy, connectedWith, extra }: { signedInAs: string; details: Record<string, string>; connectedAt: string; connectedBy?: string | null; connectedWith?: string | null; extra?: [string, string][] }) {
+  const rows: [string, string][] = [...(extra ?? [])];
+  if (signedInAs) rows.push([signedInAs.includes("@") ? "Signed in as" : "Account", signedInAs]);
+  for (const [k, v] of Object.entries(details)) if (v) rows.push([detailLabel(k), v]);
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[12px]">
+      {rows.map(([k, v]) => (
+        <div key={k} className="contents">
+          <dt className="text-muted-foreground">{k}</dt>
+          <dd className="min-w-0 break-words">{v}</dd>
+        </div>
+      ))}
+      <dt className="text-muted-foreground">Connected</dt>
+      <dd title={stamp(connectedAt)}>{ago(connectedAt)}{connectedBy ? ` by ${connectedBy}` : ""}{connectedWith ? `, with the ${connectedWith} sign-in` : ""}</dd>
+    </dl>
+  );
+}
+
+// AssignConnection gives a whole connection with no brand its brand, the
+// suggested one first.
+function AssignConnection({ ws, u, brands, onDone }: { ws: string; u: UnassignedConnection; brands: Brand[]; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const suggested = brands.find((b) => b.id === u.suggested_brand_id);
+  async function assign(brand: string) {
+    if (!brand) return;
+    setBusy(true);
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/integrations/{id}", { params: { path: { ws, id: u.integration_id } }, body: { brand_kind: "brand", brand_id: brand } });
+    setBusy(false);
+    if (error) return toast(errorMessage(error), "error");
+    toast(`${u.name} now belongs to ${brands.find((b) => b.id === brand)?.name ?? "that brand"}.`);
+    onDone();
+  }
+  return (
+    <select aria-label={`Brand for ${u.name}`} className={`${field} w-44 shrink-0`} disabled={busy} value="" onChange={(e) => assign(e.target.value)}>
+      <option value="">No brand</option>
+      {suggested && <option value={suggested.id}>{suggested.name} (suggested)</option>}
+      {brands.filter((b) => b.id !== suggested?.id).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+    </select>
+  );
+}
+
 // UnassignedConnections is the workspace's alert: connections and
-// accounts whose data belongs to no brand, each with a way to assign it.
-export function UnassignedConnections({ ws, brands, canManage, onOpen }: { ws: string; brands: Brand[]; canManage: boolean; onOpen?: (integrationId: string) => void }) {
+// accounts whose data belongs to no brand, each with what tells whose it
+// is and a way to assign it.
+export function UnassignedConnections({ ws, brands, canManage, onOpen, onChanged }: { ws: string; brands: Brand[]; canManage: boolean; onOpen?: (integrationId: string) => void; onChanged?: () => void }) {
   const [list, setList] = useState<UnassignedConnection[] | null>(null);
+  const [reading, setReading] = useState("");
   const load = useCallback(async () => {
     const { data } = await api.GET("/v1/workspaces/{ws}/connections/unassigned", { params: { path: { ws } } });
     setList(data?.data ?? []);
@@ -150,16 +211,44 @@ export function UnassignedConnections({ ws, brands, canManage, onOpen }: { ws: s
   }, [load]);
   if (!list || list.length === 0) return null;
   const active = brands.filter((b) => b.status === "active");
+  const done = () => {
+    load();
+    onChanged?.();
+  };
+  // Connections made before their provider reported these details read
+  // them again (a sign-in check; nothing changes at the provider).
+  async function readDetails(id: string) {
+    setReading(id);
+    const { error } = await api.POST("/v1/workspaces/{ws}/integrations/{id}/test", { params: { path: { ws, id } } });
+    setReading("");
+    if (error) return toast(errorMessage(error), "error");
+    load();
+  }
   return (
     <section role="status" className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[13px]">
       <div className="font-medium">{list.length === 1 ? "A connection has" : `${list.length} connections and accounts have`} no brand, so {list.length === 1 ? "its" : "their"} data shows in no brand.</div>
-      <ul className="space-y-1.5">
-        {list.map((u) => (
-          <li key={`${u.integration_id}:${u.account?.kind ?? ""}:${u.account?.account ?? ""}`} className="flex flex-wrap items-center justify-between gap-2">
-            <span className="flex min-w-0 items-center gap-2"><ConnectorLogo id={u.connector} /><span className="truncate">{u.name}{u.account ? ` · ${u.account.name || u.account.host || u.account.account}` : ""}</span></span>
-            {canManage && (u.account ? <AssignAccount ws={ws} account={u.account} brands={active} onDone={load} /> : onOpen && <Button variant="ghost" onClick={() => onOpen(u.integration_id)}>Assign</Button>)}
-          </li>
-        ))}
+      <ul className="divide-y divide-amber-500/20">
+        {list.map((u) => {
+          const suggested = active.find((b) => b.id === (u.account ? u.account.suggested_brand_id : u.suggested_brand_id));
+          const extra: [string, string][] = u.account ? [[u.account.kind === "ad_account" ? "Ad account" : "Site", [u.account.name, u.account.host, u.account.account].filter((x, n, all) => x && all.indexOf(x) === n).join(" · ")]] : [];
+          const sparse = !u.account && (Object.keys(u.details).length === 0 || (u.connector === "google_tag_manager" && !u.details.containers));
+          return (
+            <li key={`${u.integration_id}:${u.account?.kind ?? ""}:${u.account?.account ?? ""}`} className="space-y-1.5 py-2 first:pt-1 last:pb-0">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-2 font-medium"><ConnectorLogo id={u.connector} /><span className="truncate">{u.name}</span></span>
+                {canManage && (
+                  <span className="flex items-center gap-1">
+                    {u.account ? <AssignAccount ws={ws} account={u.account} brands={active} onDone={done} /> : <AssignConnection ws={ws} u={u} brands={active} onDone={done} />}
+                    {!u.account && onOpen && <Button variant="ghost" onClick={() => onOpen(u.integration_id)}>More</Button>}
+                  </span>
+                )}
+              </div>
+              <ConnectionFacts signedInAs={u.signed_in_as} details={u.details} connectedAt={u.connected_at} connectedBy={u.connected_by} connectedWith={u.connected_with} extra={extra} />
+              {suggested && <p className="text-[12px]">Probably {suggested.name}'s: {u.account ? "its domain is one of that brand's" : because[u.suggested_because ?? ""] ?? "it matches that brand"}.</p>}
+              {canManage && sparse && <button className="text-[12px] font-medium underline-offset-2 hover:underline disabled:opacity-60" disabled={reading === u.integration_id} onClick={() => readDetails(u.integration_id)}>{reading === u.integration_id ? "Reading…" : "Read its accounts and sites from the provider"}</button>}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

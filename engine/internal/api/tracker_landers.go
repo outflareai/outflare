@@ -69,6 +69,8 @@ type landerSource struct {
 	country, region, city, isp       string
 	asn                              int64
 	device, os, browser, language    string
+	// fraud are the click's fraud reasons.
+	fraud []string
 }
 
 // findLanderSource finds the click a lander click names, writing this
@@ -80,10 +82,10 @@ func (s *Server) findLanderSource(ctx context.Context, key string) (landerSource
 		var fields []byte
 		err := s.pool.QueryRow(ctx, `SELECT k.id, k.workspace_id::text, COALESCE(k.brand_id::text, ''), k.click_key, k.link_id::text,
 				COALESCE(k.path_id::text, ''), COALESCE(l.redirect_code, ''), COALESCE(k.lander_id::text, ''), k.source_click_id, k.fields, k.cost_micros,
-				k.clicked_at, k.likely_bot, k.country, k.region, k.city, k.isp, k.asn, k.device, k.os, k.browser, k.language
+				k.clicked_at, k.likely_bot, k.country, k.region, k.city, k.isp, k.asn, k.device, k.os, k.browser, k.language, k.fraud_reasons
 			FROM tracking_link_clicks k JOIN tracking_links l ON l.id = k.link_id
 			WHERE k.click_key = $1`, key).Scan(&c.id, &c.ws, &c.brand, &c.key, &c.link, &c.path, &c.code, &c.lander, &c.sourceClickID, &fields, &c.cost,
-			&c.at, &c.bot, &c.country, &c.region, &c.city, &c.isp, &c.asn, &c.device, &c.os, &c.browser, &c.language)
+			&c.at, &c.bot, &c.country, &c.region, &c.city, &c.isp, &c.asn, &c.device, &c.os, &c.browser, &c.language, &c.fraud)
 		if err == nil {
 			err = json.Unmarshal(fields, &c.fields)
 		}
@@ -164,14 +166,17 @@ func (s *Server) landerClick(w http.ResponseWriter, r *http.Request) {
 			list = p.dests
 		}
 	}
+	// A likely bot's or a suspect click's lander click goes on like any
+	// other, but counts against no cap.
 	bot := c.bot || tracking.LikelyBot(r.UserAgent(), time.Time{}, now)
+	uncounted := bot || len(c.fraud) > 0
 	var d *linkDestination
 	next := onward(list)
 	if n > 0 && n <= len(next) && s.caps.open(next[n-1], capDay(now)) {
-		d = s.take(next[n-1], capDay(now), bot)
+		d = s.take(next[n-1], capDay(now), uncounted)
 	}
 	if d == nil {
-		d = s.route(next, now, bot)
+		d = s.route(next, now, uncounted)
 	}
 	link := t.link
 	outcome := "fallback"
@@ -182,7 +187,7 @@ func (s *Server) landerClick(w http.ResponseWriter, r *http.Request) {
 		link.URL = tokens.ExpandKnown(link.URL, destinationValues(t, c.buffered(), formatMicros(c.cost)), trafficsources.DestinationTokens)
 	}
 	target := withParam(tagLink(t.campaign, link), clickKeyParam, c.key)
-	if err := s.saveLanderClick(ctx, c, n, d, bot, now); err != nil {
+	if err := s.saveLanderClick(ctx, c, n, d, bot, uncounted, now); err != nil {
 		// The person still goes on; the lander click is lost.
 		track.Fail(ctx, s.log, track.Event{Name: "tracker_lander.click_failed", Surface: "system"}, "internal", err)
 		outcome = "error"
@@ -208,7 +213,7 @@ func (c landerSource) buffered() bufferedClick {
 // saveLanderClick keeps a lander click, gives the click the offer it went
 // on to (so its conversions get the offer's terms), and counts it against
 // the destination's and the offer's daily caps.
-func (s *Server) saveLanderClick(ctx context.Context, c landerSource, cta int, d *linkDestination, bot bool, now time.Time) error {
+func (s *Server) saveLanderClick(ctx context.Context, c landerSource, cta int, d *linkDestination, bot, uncounted bool, now time.Time) error {
 	var dest, offer string
 	if d != nil {
 		dest, offer = d.id, d.offerID
@@ -227,7 +232,7 @@ func (s *Server) saveLanderClick(ctx context.Context, c landerSource, cta int, d
 				return err
 			}
 		}
-		if bot || dest == "" {
+		if uncounted || dest == "" {
 			return nil
 		}
 		var total int64
@@ -252,7 +257,7 @@ func (s *Server) saveLanderClick(ctx context.Context, c landerSource, cta int, d
 	})
 	if err != nil {
 		// What this server held against the caps for the click is let go.
-		if !bot {
+		if !uncounted {
 			for _, id := range []string{dest, offer} {
 				if id != "" {
 					s.caps.settle(id, day, 1, 0)

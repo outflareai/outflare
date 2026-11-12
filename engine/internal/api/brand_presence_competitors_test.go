@@ -9,9 +9,10 @@ import (
 )
 
 // Where competitors appear: tracked competitors are scanned on the
-// brand's cadence (monthly by default for every competitor, overridable), on the
-// workspace's own connections, and each page is kept with its type, the
-// site's numbers and "likely paid" only with evidence.
+// brand's cadence (top ones monthly and the rest every 90 days by
+// default, overridable), on the workspace's own connections, and each
+// page is kept with its type, the site's numbers and "likely paid" only
+// with evidence.
 func TestPresenceCompetitors(t *testing.T) {
 	events := track.Capture(t)
 	e := freshEnv(t)
@@ -34,21 +35,22 @@ func TestPresenceCompetitors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Every competitor is monthly by default. With one top competitor
-	// made weekly, the first is weekly and the second monthly.
+	// Top competitors are monthly by default and the rest every 90 days.
+	// With one top competitor made weekly, the first is weekly and the
+	// second still every 90 days.
 	owner.must(400, "PATCH", root+"/competitors/settings", map[string]any{"top_every_days": 0})
 	set := owner.must(200, "PATCH", root+"/competitors/settings", map[string]any{"top_competitors": 1})
-	if set["top_every_days"] != 30.0 || set["rest_every_days"] != 30.0 {
+	if set["top_every_days"] != 30.0 || set["rest_every_days"] != 90.0 {
 		t.Fatalf("default settings: %v", set)
 	}
 	set = owner.must(200, "PATCH", root+"/competitors/settings", map[string]any{"top_every_days": 7})
-	if set["top_competitors"] != 1.0 || set["top_every_days"] != 7.0 || set["rest_every_days"] != 30.0 {
+	if set["top_competitors"] != 1.0 || set["top_every_days"] != 7.0 || set["rest_every_days"] != 90.0 {
 		t.Fatalf("settings: %v", set)
 	}
 	list := owner.must(200, "GET", root+"/competitors", nil)
 	rows := list["data"].([]any)
 	if len(rows) != 2 || rows[0].(map[string]any)["id"] != rival || rows[0].(map[string]any)["every_days"] != 7.0 || rows[0].(map[string]any)["top"] != true ||
-		rows[1].(map[string]any)["every_days"] != 30.0 || rows[1].(map[string]any)["top"] != false {
+		rows[1].(map[string]any)["every_days"] != 90.0 || rows[1].(map[string]any)["top"] != false {
 		t.Fatalf("competitors: %v", list)
 	}
 	// One competitor can have its own cadence, and go back to the brand's.
@@ -56,7 +58,7 @@ func TestPresenceCompetitors(t *testing.T) {
 		t.Fatalf("own cadence: %v", got)
 	}
 	owner.must(400, "PATCH", root+"/competitors/"+small, map[string]any{"every_days": 0})
-	if got := owner.must(200, "PATCH", root+"/competitors/"+small, map[string]any{"every_days": nil}); got["every_days"] != 30.0 || got["own_every_days"] != nil {
+	if got := owner.must(200, "PATCH", root+"/competitors/"+small, map[string]any{"every_days": nil}); got["every_days"] != 90.0 || got["own_every_days"] != nil {
 		t.Fatalf("brand cadence: %v", got)
 	}
 	owner.must(404, "PATCH", "/v1/brands/"+other+"/coverage/competitors/"+small, map[string]any{"every_days": 7})

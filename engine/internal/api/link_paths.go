@@ -283,14 +283,14 @@ func (s *Server) choose(r *http.Request, t redirectTarget, c bufferedClick, now 
 		}
 		for _, p := range t.paths {
 			if f.matches(p.conds) {
-				if d := s.route(entry(p.dests), now, c.bot); d != nil {
+				if d := s.route(entry(p.dests), now, c.uncounted()); d != nil {
 					routeMetric("path")
 					return d, p.id
 				}
 			}
 		}
 	}
-	if d := s.route(entry(t.dests), now, c.bot); d != nil {
+	if d := s.route(entry(t.dests), now, c.uncounted()); d != nil {
 		routeMetric("destination")
 		return d, ""
 	}

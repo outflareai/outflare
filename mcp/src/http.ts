@@ -15,6 +15,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createClient } from "@outflare/sdk";
 import { createServer, VERSION } from "./server.js";
+import { toolMode, type ToolMode } from "./toolbox.js";
 
 type Session = {
   transport: StreamableHTTPServerTransport;
@@ -91,7 +92,24 @@ export function serveHttp(opts: HttpOptions) {
     return { tokenId: t.id, workspace: t.workspace_id, scopes: t.scopes ?? [] };
   }
 
-  async function open(token: string, res: ServerResponse): Promise<Session | null> {
+  // The version apps see is the Outflare server's own (from /v1/meta), so
+  // anyone can tell which release they're connected to.
+  // It is asked for at the first session, and again until it answers, since
+  // the engine may still be starting when this server does.
+  let known: string | undefined;
+  const version = async (): Promise<string> => {
+    if (known) return known;
+    try {
+      const r = await fetch(new URL("/v1/meta", opts.baseUrl), { signal: AbortSignal.timeout(3000) });
+      const m = r.ok ? ((await r.json()) as { version?: string }) : undefined;
+      if (m?.version) known = m.version;
+    } catch {
+      // Fall back to the package's own version for this session.
+    }
+    return known ?? VERSION;
+  };
+
+  async function open(token: string, res: ServerResponse, tools: ToolMode): Promise<Session | null> {
     const who = await whoami(token);
     if (!who) {
       fail(res, 401, -32001, "The token is not valid. Connect the app again.", { code: "unauthenticated" });
@@ -100,7 +118,7 @@ export function serveHttp(opts: HttpOptions) {
     const auth = { token };
     // A token that may change nothing gets only the tools that change nothing.
     const readOnly = !who.scopes.some((s) => !s.endsWith(".read"));
-    const server = createServer({ client: client(auth), workspace: who.workspace, readOnly });
+    const server = createServer({ client: client(auth), workspace: who.workspace, readOnly, tools, version: await version() });
     let session: Session;
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
@@ -122,7 +140,8 @@ export function serveHttp(opts: HttpOptions) {
   const http = createHttpServer(async (req, res) => {
     try {
       if (!same(String(req.headers["x-outflare-proxy-secret"] ?? ""), opts.secret)) return fail(res, 403, -32000, "Only the Outflare server may call this.");
-      if (new URL(req.url ?? "/", "http://x").pathname !== "/mcp") return fail(res, 404, -32000, "Not found.");
+      const url = new URL(req.url ?? "/", "http://x");
+      if (url.pathname !== "/mcp") return fail(res, 404, -32000, "Not found.");
       const token = bearer(req);
       if (!token) return fail(res, 401, -32001, "Send the access token as Authorization: Bearer.", { code: "unauthenticated" });
       const id = req.headers["mcp-session-id"];
@@ -143,7 +162,9 @@ export function serveHttp(opts: HttpOptions) {
       if (req.method !== "POST") return fail(res, 400, -32000, "Start a session with an initialize request.", { code: "invalid_request", param: req.method });
       const body = await readJSON(req);
       if (!isInitializeRequest(body)) return fail(res, 400, -32000, "Start a session with an initialize request.", { code: "invalid_request", param: methodOf(body) || "method" });
-      const s = await open(token, res);
+      // /mcp?tools=all lists every tool; by default apps get the core set
+      // and find_tools (toolbox.ts).
+      const s = await open(token, res, toolMode(url.searchParams.get("tools")));
       if (!s) return;
       const name = (body as { params?: { clientInfo?: { name?: string } } }).params?.clientInfo?.name;
       // The engine records which app connected; only the name, never more.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -81,7 +82,7 @@ func TestBrandEvents(t *testing.T) {
 	}
 	got6 := settled(events, id(0), id(1), id(2), id(3), id(4), id(5))
 	status := func(ev map[string]any) string { s, _ := ev["code"].(string); return ev["status"].(string) + ":" + s }
-	want := []string{"accepted:", "held:name_not_approved", "rejected:missing_id", "accepted:", "rejected:invalid_type", "duplicate:"}
+	want := []string{"accepted:", "accepted:", "rejected:missing_id", "accepted:", "rejected:invalid_type", "duplicate:"}
 	for i, w := range want {
 		if status(got6[i]) != w {
 			t.Fatalf("event %d is %s, want %s: %v", i, status(got6[i]), w, got6[i])
@@ -89,41 +90,61 @@ func TestBrandEvents(t *testing.T) {
 	}
 	ada := got6[0]["record_id"].(string)
 	if got6[0]["customer_event_id"] == nil || got6[0]["name"] != "profile.identified" || got6[1]["name"] != "order_completed" {
-		t.Fatalf("accepted: %v / held: %v", got6[0], got6[1])
+		t.Fatalf("accepted: %v / new name: %v", got6[0], got6[1])
 	}
 	if r, _ := got6[2]["reason"].(string); !strings.Contains(r, "userId or anonymousId") {
 		t.Fatalf("a rejection says what to fix: %v", got6[2])
 	}
-	// Accepted rows go after 30 days, rejected and held after 90.
+	// Accepted rows go after 30 days, rejected after 90.
 	days := func(ev map[string]any) int {
 		rec, _ := time.Parse(time.RFC3339Nano, ev["received_at"].(string))
 		exp, _ := time.Parse(time.RFC3339Nano, ev["expires_at"].(string))
 		return int(exp.Sub(rec).Hours() / 24)
 	}
-	if days(got6[0]) != 30 || days(got6[1]) != 90 || days(got6[2]) != 90 || days(got6[5]) != 30 {
+	if days(got6[0]) != 30 || days(got6[1]) != 30 || days(got6[2]) != 90 || days(got6[5]) != 30 {
 		t.Fatalf("retention: %d %d %d %d", days(got6[0]), days(got6[1]), days(got6[2]), days(got6[5]))
 	}
 	// The person belongs to the route's brand.
 	if rec := owner.must(200, "GET", base+"/records/"+ada, nil); rec["brand_id"] != acme || rec["attributes"].(map[string]any)["first_name"] != "Ada" {
 		t.Fatalf("person: %v", rec)
 	}
-	// A held event changed nothing: it isn't a product event yet.
-	if l := owner.must(200, "GET", base+"/customer-events?name=order_completed", nil)["data"].([]any); len(l) != 0 {
-		t.Fatalf("a held event drives nothing: %v", l)
+	// A new name needs nobody's approval: its event is a product event at
+	// once, and the name is in the catalog, approved, waiting for its check.
+	if l := owner.must(200, "GET", base+"/customer-events?name=order_completed", nil)["data"].([]any); len(l) != 1 {
+		t.Fatalf("a new name's event is stored: %v", l)
+	}
+	if d := owner.must(200, "GET", "/v1/brands/"+acme+"/catalog/events?status=approved", nil)["data"].([]any); !slices.ContainsFunc(d, func(v any) bool {
+		m := v.(map[string]any)
+		return m["name"] == "order_completed" && m["name_check"] == "pending"
+	}) {
+		t.Fatalf("catalog: %v", d)
 	}
 
-	// Approving the name and replaying the held events processes them.
-	owner.must(200, "PATCH", base+"/catalog/events/order_completed", map[string]any{"status": "approved",
+	// A name someone paused holds its events, until it is approved again
+	// and they are replayed.
+	owner.must(200, "PATCH", base+"/catalog/events/order_completed", map[string]any{"status": "quarantined",
 		"properties": []map[string]any{{"key": "total", "value_type": "number"}}})
+	paused := owner.must(202, "POST", events, map[string]any{"type": "track", "userId": "u1", "event": "Order Completed", "messageId": "m7",
+		"properties": map[string]any{"total": 30}})["events"].([]any)[0].(map[string]any)["id"].(string)
+	if ev := settled(events, paused)[0]; ev["status"] != "held" || ev["code"] != "name_not_approved" {
+		t.Fatalf("paused name: %v", ev)
+	}
+	if l := owner.must(200, "GET", base+"/customer-events?name=order_completed", nil)["data"].([]any); len(l) != 1 {
+		t.Fatalf("a held event drives nothing: %v", l)
+	}
+	if h := owner.must(200, "GET", events+"/summary", nil)["held_names"].([]any); len(h) != 1 || h[0].(map[string]any)["name"] != "order_completed" {
+		t.Fatalf("held names: %v", h)
+	}
+	owner.must(200, "PATCH", base+"/catalog/events/order_completed", map[string]any{"status": "approved"})
 	owner.must(400, "POST", events+"/replay", map[string]any{})
 	owner.must(400, "POST", events+"/replay", map[string]any{"status": "accepted"})
 	if r := owner.must(202, "POST", events+"/replay", map[string]any{"status": "held"}); r["replayed"] != 1.0 {
 		t.Fatalf("replay held: %v", r)
 	}
-	if ev := settled(events, id(1))[0]; ev["status"] != "accepted" || ev["record_id"] != ada || ev["code"] != nil {
+	if ev := settled(events, paused)[0]; ev["status"] != "accepted" || ev["record_id"] != ada || ev["code"] != nil {
 		t.Fatalf("replayed held event: %v", ev)
 	}
-	if l := owner.must(200, "GET", base+"/customer-events?name=order_completed", nil)["data"].([]any); len(l) != 1 {
+	if l := owner.must(200, "GET", base+"/customer-events?name=order_completed", nil)["data"].([]any); len(l) != 2 {
 		t.Fatalf("the replayed event is stored: %v", l)
 	}
 
@@ -165,11 +186,11 @@ func TestBrandEvents(t *testing.T) {
 		t.Helper()
 		return len(owner.must(200, "GET", events+"?"+query, nil)["data"].([]any))
 	}
-	if n := count(""); n != 7 {
+	if n := count(""); n != 8 {
 		t.Fatalf("all: %d", n)
 	}
-	if count("status=rejected") != 2 || count("code=missing_id") != 1 || count("status=accepted") != 4 || count("source=segment") != 6 ||
-		count("batch_id="+batch) != 6 || count("status=held") != 0 || count("source=api&status=accepted") != 1 {
+	if count("status=rejected") != 2 || count("code=missing_id") != 1 || count("status=accepted") != 5 || count("source=segment") != 6 ||
+		count("batch_id="+batch) != 6 || count("status=held") != 0 || count("source=api&status=accepted") != 2 {
 		t.Fatalf("filters: rejected %d, missing_id %d, accepted %d, segment %d", count("status=rejected"), count("code=missing_id"), count("status=accepted"), count("source=segment"))
 	}
 	owner.must(400, "GET", events+"?status=lost", nil)
@@ -177,14 +198,14 @@ func TestBrandEvents(t *testing.T) {
 	if len(page["data"].([]any)) != 4 || page["next_cursor"] == nil {
 		t.Fatalf("page: %v", page)
 	}
-	if rest := owner.must(200, "GET", events+"?limit=4&cursor="+page["next_cursor"].(string), nil)["data"].([]any); len(rest) != 3 {
+	if rest := owner.must(200, "GET", events+"?limit=4&cursor="+page["next_cursor"].(string), nil)["data"].([]any); len(rest) != 4 {
 		t.Fatalf("second page: %d", len(rest))
 	}
 
 	// The summary counts them and lists the rejections still kept.
 	sum := owner.must(200, "GET", events+"/summary", nil)
 	day := sum["last_24h"].(map[string]any)
-	if day["accepted"] != 4.0 || day["rejected"] != 2.0 || day["duplicate"] != 1.0 || day["held"] != 0.0 || sum["pending"] != 0.0 {
+	if day["accepted"] != 5.0 || day["rejected"] != 2.0 || day["duplicate"] != 1.0 || day["held"] != 0.0 || sum["pending"] != 0.0 {
 		t.Fatalf("summary: %v", sum)
 	}
 	codes := sum["rejection_codes"].([]any)
@@ -200,7 +221,7 @@ func TestBrandEvents(t *testing.T) {
 		t.Fatalf("purged %d: %v", n, err)
 	}
 	owner.must(404, "GET", events+"/"+id(2), nil)
-	if n := count(""); n != 6 {
+	if n := count(""); n != 7 {
 		t.Fatalf("after the purge: %d", n)
 	}
 

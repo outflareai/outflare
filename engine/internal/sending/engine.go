@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/outflareai/outflare/engine/internal/audit"
+	"github.com/outflareai/outflare/engine/internal/brands"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/holdout"
@@ -519,6 +520,9 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 		}
 	}
 	if err := customers.PersonVars(ctx, tx, en.LeadID, vars); err != nil {
+		return nil, en, err
+	}
+	if err := brands.Vars(ctx, tx, en.WorkspaceID, en.BrandID, vars); err != nil {
 		return nil, en, err
 	}
 	subject := stepSubject

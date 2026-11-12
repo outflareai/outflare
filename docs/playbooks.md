@@ -56,9 +56,9 @@ Deciding which playbooks to run toward a target, and changing course from the re
 
 | Call | What it does |
 | --- | --- |
-| `GET /v1/workspaces/{ws}/playbook-automations` | Automations, with status, next run and this month's spend (`missions.read`) |
-| `POST /v1/workspaces/{ws}/playbook-automations` | Set one up as a draft (`missions.run`) |
-| `PATCH`, `DELETE /v1/workspaces/{ws}/playbook-automations/{id}` | Change (back to draft) or delete it (`missions.run`) |
+| `GET /v1/brands/{brand}/playbook-automations` | Automations, with status, next run and this month's spend (`missions.read`) |
+| `POST /v1/brands/{brand}/playbook-automations` | Set one up as a draft (`missions.run`) |
+| `PATCH`, `DELETE /v1/brands/{brand}/playbook-automations/{id}` | Change (back to draft) or delete it (`missions.run`) |
 | `POST .../playbook-automations/{id}/approve` | Turn it on, or back on (`missions.approve`, a person only) |
 | `POST .../playbook-automations/{id}/pause` | Pause it (`missions.run`) |
 | `POST .../playbook-automations/{id}/run` | Start a run now, inside its limits (`missions.run`) |
@@ -88,7 +88,7 @@ The first kit, **Creator partnerships**, adds a Partnerships record type with a 
 | `GET /v1/kits`, `GET /v1/kits/{id}` | Setup kits, public, with the playbooks that use each |
 | `GET /v1/workspaces/{ws}/kits/{id}/preview` | What the kit would add, extend, reuse or conflict with (`customers.read`) |
 | `POST /v1/workspaces/{ws}/kits/{id}/apply` | Set it up (`catalog.manage`, and `emails.manage` for email drafts); 409 `conflict` names what's in the way |
-| `GET /v1/brands/{brand}/kits/{id}/preview`, `POST /v1/brands/{brand}/kits/{id}/apply` | The same for one brand's catalog, so each brand gets its own pipeline. A kit with smart lists, rules or journeys is 400 here: those are set up for the workspace's first brand |
+| `GET /v1/brands/{brand}/kits/{id}/preview`, `POST /v1/brands/{brand}/kits/{id}/apply` | The same for one brand, so each brand gets its own pipeline, smart lists, rules and journeys; the workspace routes set up the workspace's first brand |
 
 ## Events
 

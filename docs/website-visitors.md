@@ -45,7 +45,7 @@ Visitors nobody knows yet can be matched to a company from their IP address, wit
 - Only visitors who accepted your site's cookies are looked up, each browser at most once a day and each address at most once a week, up to **Lookups a day at most** (`reveal_daily_limit`, 500 by default). Lookups spend your provider's credits.
 - The address goes to the provider in a background job and is never stored. Lookups are kept by a keyed hash of the address, with the company's domain and name.
 - A home, phone, VPN or data-centre connection names nobody. Those visitors are counted as on such a network (`no_company` in the totals).
-- Lookups are often wrong, so they never add anything to your CRM. A company the CRM already has at that domain is linked straight away and can turn hot. Any other company is listed as **Not in CRM** until someone clicks **Add to CRM** (`POST /v1/workspaces/{ws}/visitors/companies`, MCP `add_visitor_company`). It is then added as a prospect from the provider (`acquired_via` `snitcher` or `peopledatalabs`), with its domain marked as from a lookup (`source` `visitor_reveal`, unverified), so it is never treated as opted in.
+- Lookups are often wrong, so they never add anything to your CRM. A company the CRM already has at that domain is linked straight away and can turn hot. Any other company is listed as **Not in CRM** until someone clicks **Add to CRM** (`POST /v1/brands/{brand}/visitors/companies`, MCP `add_visitor_company`). It is then added as a prospect from the provider (`acquired_via` `snitcher` or `peopledatalabs`), with its domain marked as from a lookup (`source` `visitor_reveal`, unverified), so it is never treated as opted in.
 - **Not a company (ISP)** (`not_companies`) is for an internet provider or carrier mistaken for its customers. Its visitors lose it, it is never named again, and a company record that only lookups put in the CRM is archived.
 - A company found for visitors who don't come back within 90 days, and that nobody added, is dropped.
 - When a site sends its events through its own domain, Outflare sees that server's address rather than the visitor's, so lookups name nobody for it unless the proxy passes the visitor's address on with the key's proxy secret ([website tracking](website-tracking.md)).
@@ -84,7 +84,7 @@ Set **Leave out these domains** to your own company's domains so your team doesn
 
 - `GET /v1/brands/{brand}/visitors` (`customers.read`): `view` (`companies` or `people`), `days`, `hot`, `limit`, `brand`.
 - `GET` and `PUT /v1/brands/{brand}/visitors/settings` (`customers.read`, `customers.manage`): each brand has its own; the workspace route is deprecated and acts on the first brand. A change is in the audit log as `visitor_settings.updated`.
-- `POST /v1/workspaces/{ws}/visitors/companies` (`customers.manage`): add a looked-up company to the CRM.
+- `POST /v1/brands/{brand}/visitors/companies` (`customers.manage`): add a looked-up company to the CRM.
 - `POST /v1/visitor-hooks/{id}/{token}` (public, the address is the authority): where RB2B, Vector or Warmly send people. One person or up to 100 per call; field names as the tool sends them.
 - `POST /v1/brands/{brand}/records/{record}/review` (`customers.manage`): approve or reject a record held for review.
 - `GET /v1/brands/{brand}/visitors/browsers` (`customers.read`): every browser, `known` `true` or `false` to keep known or anonymous ones, `days`, `limit`, `cursor`.

@@ -75,15 +75,18 @@ var (
 		{"cursor", regexp.MustCompile(`(?i)\bcursor\s+(pro\+?|ultra|business|teams?)\b`)},
 		{"copilot", regexp.MustCompile(`(?i)\bcopilot\s+(pro\+?|business|enterprise|individual)\b`)},
 	}
-	apiMarks  = regexp.MustCompile(`(?i)\b(api|credit grant|credits|usage)\b`)
-	amountRe  = regexp.MustCompile(`(?im)^.{0,40}?\b(amount paid|total paid|amount charged|total due|total)\b[^\n\d]{0,30}?(?:([A-Z]{3})\s*)?(S\$|A\$|CA\$|NZ\$|HK\$|US\$|R\$|\$|€|£|¥|₹)?\s?([\d.,' ]*\d)\s*([A-Z]{3})?\s*$`)
-	seatsRe   = regexp.MustCompile(`(?i)\b(?:qty|quantity|seats?)\s*[:x×]?\s*(\d{1,5})\b|\b(\d{1,5})\s+seats?\b`)
-	periodRe  = regexp.MustCompile(`(?i)\b([A-Z][a-z]{2,8}\.? \d{1,2})(?:,? (\d{4}))?\s*(?:–|—|-|to)\s*([A-Z][a-z]{2,8}\.? \d{1,2}),? (\d{4})\b`)
-	paidOnRe  = regexp.MustCompile(`(?i)\b(?:date paid|paid on|date of issue|invoice date|date)\s*:?\s*([A-Z][a-z]{2,8}\.? \d{1,2},? \d{4})\b`)
-	billToRe  = regexp.MustCompile(`(?is)\b(?:bill(?:ed)? to|account|receipt for|sent to)\b.{0,120}?([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})`)
-	invoiceRe = regexp.MustCompile(`(?i)\b(?:invoice|receipt)\s*(?:number|no\.?|#)\s*:?\s*#?([A-Z0-9]{4,12})-(\d{3,8})\b`)
-	cardRe    = regexp.MustCompile(`(?i)\b(?:ending in|ends in|\*{2,4}|•{2,4}|x{4})\s*(\d{4})\b`)
-	symbols   = map[string]string{"$": "USD", "US$": "USD", "€": "EUR", "£": "GBP", "S$": "SGD", "A$": "AUD", "CA$": "CAD", "NZ$": "NZD", "HK$": "HKD", "R$": "BRL", "¥": "JPY", "₹": "INR"}
+	// A receipt says so in its subject, or has a total. Everything else an
+	// AI company sends (sign-in alerts, newsletters, product news) isn't one.
+	receiptSubject = regexp.MustCompile(`(?i)\b(receipts?|invoices?|payments?|paid|charged|billing|billed|renew(?:al|ed|s)?|order confirmation|subscription (?:is )?(?:confirmed|renewed|started|activated|updated))\b`)
+	apiMarks       = regexp.MustCompile(`(?i)\b(api|credit grant|credits|usage)\b`)
+	amountRe       = regexp.MustCompile(`(?im)^.{0,40}?\b(amount paid|total paid|amount charged|total due|total)\b[^\n\d]{0,30}?(?:([A-Z]{3})\s*)?(S\$|A\$|CA\$|NZ\$|HK\$|US\$|R\$|\$|€|£|¥|₹)?\s?([\d.,' ]*\d)\s*([A-Z]{3})?\s*$`)
+	seatsRe        = regexp.MustCompile(`(?i)\b(?:qty|quantity|seats?)\s*[:x×]?\s*(\d{1,5})\b|\b(\d{1,5})\s+seats?\b`)
+	periodRe       = regexp.MustCompile(`(?i)\b([A-Z][a-z]{2,8}\.? \d{1,2})(?:,? (\d{4}))?\s*(?:–|—|-|to)\s*([A-Z][a-z]{2,8}\.? \d{1,2}),? (\d{4})\b`)
+	paidOnRe       = regexp.MustCompile(`(?i)\b(?:date paid|paid on|date of issue|invoice date|date)\s*:?\s*([A-Z][a-z]{2,8}\.? \d{1,2},? \d{4})\b`)
+	billToRe       = regexp.MustCompile(`(?is)\b(?:bill(?:ed)? to|account|receipt for|sent to)\b.{0,120}?([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})`)
+	invoiceRe      = regexp.MustCompile(`(?i)\b(?:invoice|receipt)\s*(?:number|no\.?|#)\s*:?\s*#?([A-Z0-9]{4,12})-(\d{3,8})\b`)
+	cardRe         = regexp.MustCompile(`(?i)\b(?:ending in|ends in|\*{2,4}|•{2,4}|x{4})\s*(\d{4})\b`)
+	symbols        = map[string]string{"$": "USD", "US$": "USD", "€": "EUR", "£": "GBP", "S$": "SGD", "A$": "AUD", "CA$": "CAD", "NZ$": "NZD", "HK$": "HKD", "R$": "BRL", "¥": "JPY", "₹": "INR"}
 )
 
 // ReadReceipt reads a receipt from a message. ok is false when it isn't
@@ -195,6 +198,9 @@ func ReadReceipt(m Message) (Receipt, bool) {
 	}
 	if c := cardRe.FindStringSubmatch(text); c != nil {
 		r.Identifiers["card_last4"] = r.Vendor + ":" + c[1]
+	}
+	if r.AmountMinor == nil && !receiptSubject.MatchString(m.Subject) {
+		return Receipt{}, false
 	}
 	return r, true
 }

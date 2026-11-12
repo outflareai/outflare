@@ -32,6 +32,7 @@ import {
 import { FieldInput, RecordDialog, editable } from "../RecordEdit";
 import { Activities } from "./Activities";
 import { RecordMail } from "./Mail";
+import { RelationshipCheck } from "./Relationship";
 import { pickedBrandId } from "@/lib/brand";
 
 type Rec = Schemas["Record"];
@@ -198,6 +199,15 @@ export function RecordPreview({
           {!record && !error && <Loading />}
           {record && section === "overview" && (
             <div className="space-y-6">
+              <RelationshipCheck
+                id={record.id}
+                brand={record.brand_id}
+                myId={myId}
+                typeName={(key) =>
+                  cat.catalog?.types.find((t) => t.key === key)?.name ?? key
+                }
+                onOpen={onOpen}
+              />
               <div>
                 <h3 className="mb-3 text-xs font-semibold text-muted-foreground">
                   PROPERTIES

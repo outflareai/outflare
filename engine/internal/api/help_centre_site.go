@@ -26,6 +26,7 @@ import (
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 
+	"github.com/outflareai/outflare/engine/internal/brands"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 )
 
@@ -346,6 +347,10 @@ type helpPageData struct {
 	Thanks                                                        bool
 	Social                                                        []string
 	Contact                                                       bool
+	// The brand's legal name and postal address (About your company), for
+	// the footer and the Organization markup; empty when it has none.
+	LegalName, Address string
+	Website            string
 }
 
 type helpHeading struct {
@@ -372,6 +377,16 @@ func (s *Server) renderHelpPage(ctx context.Context, site *helpSite, page, ref, 
 		if set.Social[k] != "" {
 			d.Social = append(d.Social, k)
 		}
+	}
+	if site.centre.BrandID != nil {
+		b, brandName, err := brands.Load(ctx, s.pool, site.ws, *site.centre.BrandID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, 0, err
+		}
+		if d.Address = b.Address.String(); d.Address != "" {
+			d.LegalName = b.Name(brandName)
+		}
+		d.Website = set.WebsiteURL
 	}
 	if !site.preview {
 		d.Canonical = strings.TrimSuffix(site.centre.URL, "/")

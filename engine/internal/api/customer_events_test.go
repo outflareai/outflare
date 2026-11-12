@@ -124,12 +124,14 @@ func TestCustomerEvents(t *testing.T) {
 		t.Fatalf("company domain: %v", l)
 	}
 
-	// Names land in the catalog: track names quarantined, the rest approved.
+	// Names land in the catalog approved, usable at once; new track names
+	// wait for the name check, the rest are Outflare's own.
 	defs := map[string]string{}
 	for _, d := range owner.must(200, "GET", base+"/catalog/events", nil)["data"].([]any) {
-		defs[d.(map[string]any)["name"].(string)] = d.(map[string]any)["status"].(string)
+		d := d.(map[string]any)
+		defs[d["name"].(string)] = d["status"].(string) + ":" + d["name_check"].(string)
 	}
-	if defs["viewed_demo"] != "quarantined" || defs["order_completed"] != "quarantined" || defs["page.viewed"] != "approved" || defs["profile.identified"] != "approved" {
+	if defs["viewed_demo"] != "approved:pending" || defs["order_completed"] != "approved:pending" || defs["page.viewed"] != "approved:ok" || defs["profile.identified"] != "approved:ok" {
 		t.Fatalf("event definitions: %v", defs)
 	}
 

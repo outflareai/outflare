@@ -138,6 +138,17 @@ func (s *Server) RunAffiliateSync(ctx context.Context, ws, partner string) error
 }
 
 // RunMailPrivacyCheck runs one email privacy check for a brand.
+// CheckEventNames runs the event name check for a brand now, and says
+// whether more names wait.
+func (s *Server) CheckEventNames(ctx context.Context, ws, brand string) (bool, error) {
+	return s.checkEventNames(ctx, ws, brand)
+}
+
 func (s *Server) RunMailPrivacyCheck(ctx context.Context, ws, brand string) error {
 	return s.crmMailPrivacyJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"brand_id":"` + brand + `"}`)})
+}
+
+// RunWorkspaceCalendar reads one Workspace-read member's calendar once.
+func (s *Server) RunWorkspaceCalendar(ctx context.Context, ws, connection string) error {
+	return s.crmCalendarWorkspaceJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"connection_id":"` + connection + `"}`)})
 }

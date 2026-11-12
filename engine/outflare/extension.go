@@ -190,22 +190,36 @@ func (h *Host) SetSupportAutoReplies(fn func(ctx context.Context, workspaceID st
 	h.AddCapability("support_auto_replies")
 }
 
-// SetAdAutoApprove decides when an agent may approve a paid ads
-// suggestion without a person: fn gets the workspace, the suggestion's
-// brand and its kind, and says yes or no. The engine asks it only for
-// kinds that save money (AdSavingKinds: a lower budget, a pause, a
-// negative keyword) on a brand's own campaigns; anything that can spend
-// more always waits for a person. The agent's grants still apply, and the
-// change is measured and judged like one a person approved. Without it
-// only a person approves suggestions.
+// SetAdAutoApprove decides when a paid ads change may be made without a
+// person: fn gets the workspace, the finding's brand and its kind, and
+// says yes or no. The engine asks it before the rules apply a saving on
+// their own, before the protective overspend pause (kind
+// overspend_pause), and when an agent approves a suggestion. It asks only
+// for kinds that save money (a lower budget, a pause, a negative keyword,
+// a keyword or ad paused, a tighter target, an exclusion, and
+// overspend_pause) on a brand's own campaigns;
+// anything that can spend more always waits for a person, and a campaign
+// on an account every brand shares is never changed on its own. A change
+// fn allows is recorded with an undo and measured and judged like one a
+// person approved; an agent's grants still apply to its approvals; a
+// brand in shadow mode only records what would have happened. Without
+// it, every change waits for a person and the overspend is only an
+// alert. fn runs on every rules run, so keep it quick.
 func (h *Host) SetAdAutoApprove(fn func(ctx context.Context, workspaceID, brandID, kind string) bool) {
 	h.adAutoApprove = fn
 	h.AddCapability("ad_suggestions_auto")
 }
 
-// AdSavingKinds are the kinds of paid ads suggestion an agent may approve
-// on its own when SetAdAutoApprove allows it.
-func AdSavingKinds() []string { return adsuggest.SavingKinds() }
+// AdSavingKinds are the paid ads savings an extension may offer to let
+// apply on their own: a lower budget, a pause and a negative keyword. The
+// engine counts more kinds as savings (adsuggest.SavingKinds) and asks
+// SetAdAutoApprove's fn about each of them; an fn that allows only what
+// this lists keeps every other saving waiting for a person. The list
+// grows only together with the extensions that offer it, so their
+// settings never show a kind they haven't handled.
+func AdSavingKinds() []string {
+	return []string{adsuggest.BudgetDown, adsuggest.Pause, adsuggest.NegativeAdd}
+}
 
 // Metrics is the registry the engine's private metrics port serves
 // (OUTFLARE_METRICS_ADDR). An extension registers its own collectors here so

@@ -141,12 +141,12 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       title: "Find records by identity",
       description:
         "The records an email, phone, user id or other identity points at. owner is the one record holding it verified; the others hold it " +
-        "unverified, such as a sign-up that never confirmed its email. Each brand has its own people: pass brand to look in one (the same email " +
+        "unverified, such as a sign-up that never confirmed its email. Each brand has its own people: it looks in one brand (the same email " +
         "in another brand is another person). Use before create_record to avoid duplicates.",
-      inputSchema: { namespace: z.string().min(1), value: z.string().min(1), brand: z.string().optional() },
+      inputSchema: { namespace: z.string().min(1), value: z.string().min(1), brand: brandRef },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/records/lookup", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/lookup", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -341,7 +341,8 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       title: "Summarise a brand's received events",
       description:
         "How many events a brand received in the last 24 hours and 7 days by status, how many wait, the rejection codes still kept with " +
-        "the latest reason, and the held names waiting for approval (approve with approve_event_name, then replay_brand_events).",
+        "the latest reason, new names that look like a typo of another (name_checks: answer with answer_event_name_check), and names someone " +
+        "paused whose events are held (approve with approve_event_name, then replay_brand_events).",
       inputSchema: { brand: brandRef },
       annotations: read,
     },
@@ -956,15 +957,36 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
   server.registerTool(
     "approve_event_name",
     {
-      title: "Approve a held event name",
+      title: "Approve a paused event name",
       description:
-        "Approves a track name a brand's events are held for (get_brand_events_summary lists them), so replay_brand_events can process them. " +
-        "Needs customers.manage only; it changes nothing else about the event.",
+        "New names are approved as they arrive; this approves a track name someone paused, whose events are held (get_brand_events_summary " +
+        "lists them), so replay_brand_events can process them. Needs customers.manage only; it changes nothing else about the event.",
       inputSchema: { brand: brandRef, name: z.string().min(1).max(100).describe("The catalog name, such as order_completed.") },
       annotations: write,
     },
     ({ brand, name }) =>
       call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/catalog/events/{event}/approve", { params: { path: { brand: b, event: name } } }))),
+  );
+
+  server.registerTool(
+    "answer_event_name_check",
+    {
+      title: "Answer whether a new event name is a typo",
+      description:
+        "Answers \"Is sign_up a typo of signed_up?\" for a new name the name check flagged (name_checks on get_brand_events_summary). " +
+        "same: true moves its events to the name it looks like and stores new ones there; same: false keeps both. Ask the person when " +
+        "unsure: the events are usable either way. Needs customers.manage.",
+      inputSchema: {
+        brand: brandRef,
+        name: z.string().min(1).max(100).describe("The new name, such as sign_up."),
+        same: z.boolean().describe("true: it is a typo of the name it looks like; false: it is its own event."),
+      },
+      annotations: write,
+    },
+    ({ brand, name, same }) =>
+      call(() =>
+        onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/catalog/events/{event}/name-check", { params: { path: { brand: b, event: name } }, body: { same } })),
+      ),
   );
 
   server.registerTool(
@@ -1057,7 +1079,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "Replay rejected or held events",
       description:
-        "Process rejected or held events again once what they needed is fixed (the name approved with approve_event_name, a property's " +
+        "Process rejected or held events again once what they needed is fixed (a paused name approved with approve_event_name, a property's " +
         "type changed, an identity freed): either ids, or a filter (status, code, source, batch_id, name), up to 10,000 a call. Accepted and " +
         "duplicate events are skipped. Check the result with list_brand_events.",
       inputSchema: {

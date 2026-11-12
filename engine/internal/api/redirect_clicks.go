@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,12 +146,19 @@ type bufferedClick struct {
 	// destinationID is the destination the click went to, "" for the
 	// link's own page, and pathID the rule-based path it took.
 	destinationID, pathID string
+	// fraud are why it is suspect (engine/internal/fraud), none when it
+	// isn't.
+	fraud []string
 	// offerID is the offer it went to, and landerID the lander.
 	offerID, landerID string
 	bot               bool
 	at                time.Time
 	detail            clickDetail
 }
+
+// uncounted says a click goes where a person's would but counts against
+// no cap: a likely bot, or a click a fraud signal flagged.
+func (c bufferedClick) uncounted() bool { return c.bot || len(c.fraud) > 0 }
 
 type clickBuffer struct {
 	mu      sync.Mutex
@@ -292,7 +300,7 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 	for _, c := range batch {
 		if !refused[c.ws] {
 			kept = append(kept, c)
-		} else if !c.bot {
+		} else if !c.uncounted() {
 			for _, id := range []string{c.destinationID, c.offerID} {
 				if id != "" {
 					s.caps.settle(id, capDay(c.at), 1, 0)
@@ -301,7 +309,7 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 		}
 	}
 	var (
-		membership, subID, referrer, fields, sourceClickID, destination, path, offer, lander       []string
+		membership, subID, referrer, fields, sourceClickID, destination, path, offer, lander, fr   []string
 		cost                                                                                       []int64
 		ws, brand, link, key, ipHash, country, region, city, isp, device, deviceBrand, deviceModel []string
 		os, osVersion, browser, browserVersion, language                                           []string
@@ -329,7 +337,7 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 		}
 		fields, sourceClickID, cost = append(fields, string(f)), append(sourceClickID, c.sourceClickID), append(cost, c.costMicros)
 		destination, path, offer = append(destination, c.destinationID), append(path, c.pathID), append(offer, c.offerID)
-		lander = append(lander, c.landerID)
+		lander, fr = append(lander, c.landerID), append(fr, strings.Join(c.fraud, ","))
 	}
 	if n := len(batch) - len(key); n > 0 {
 		metrics.RedirectClickWrites("refused_quota", n)
@@ -346,22 +354,23 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 		tag, err := tx.Exec(ctx, `INSERT INTO tracking_link_clicks (workspace_id, brand_id, link_id, membership_id, sub_id, referrer_host,
 				click_key, likely_bot, clicked_at, ip_hash,
 				country, region, city, asn, isp, device, device_brand, device_model, os, os_version, browser, browser_version, language,
-				fields, source_click_id, cost_micros, destination_id, path_id, offer_id, lander_id)
+				fields, source_click_id, cost_micros, destination_id, path_id, offer_id, lander_id, fraud_reasons)
 			SELECT t.ws::uuid, COALESCE(NULLIF(t.brand, '')::uuid, l.brand_id, m.brand_id), l.id, m.id, t.sub_id, t.referrer,
 				t.key, t.bot, t.at, t.ip_hash,
 				t.country, t.region, t.city, t.asn, t.isp, t.device, t.device_brand, t.device_model, t.os, t.os_version, t.browser, t.browser_version, t.language,
-				t.fields::jsonb, t.source_click_id, t.cost, NULLIF(t.destination, '')::uuid, NULLIF(t.path, '')::uuid, NULLIF(t.offer, '')::uuid, NULLIF(t.lander, '')::uuid
+				t.fields::jsonb, t.source_click_id, t.cost, NULLIF(t.destination, '')::uuid, NULLIF(t.path, '')::uuid, NULLIF(t.offer, '')::uuid, NULLIF(t.lander, '')::uuid,
+				COALESCE(string_to_array(NULLIF(t.fraud, ''), ','), '{}')
 			FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::bool[], $6::timestamptz[], $7::text[],
 				$8::text[], $9::text[], $10::text[], $11::bigint[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[],
-				$18::text[], $19::text[], $20::text[], $21::text[], $22::text[], $23::text[], $24::text[], $25::text[], $26::bigint[], $27::text[], $28::text[], $29::text[], $30::text[])
+				$18::text[], $19::text[], $20::text[], $21::text[], $22::text[], $23::text[], $24::text[], $25::text[], $26::bigint[], $27::text[], $28::text[], $29::text[], $30::text[], $31::text[])
 				AS t(ws, brand, link, key, bot, at, ip_hash, country, region, city, asn, isp, device, device_brand, device_model, os, os_version,
-					browser, browser_version, language, membership, sub_id, referrer, fields, source_click_id, cost, destination, path, offer, lander)
+					browser, browser_version, language, membership, sub_id, referrer, fields, source_click_id, cost, destination, path, offer, lander, fraud)
 			LEFT JOIN tracking_links l ON t.link <> '' AND l.id = NULLIF(t.link, '')::uuid AND l.workspace_id = t.ws::uuid
 			LEFT JOIN partner_memberships m ON t.membership <> '' AND m.id = NULLIF(t.membership, '')::uuid AND m.workspace_id = t.ws::uuid
 			WHERE l.id IS NOT NULL OR m.id IS NOT NULL
 			ON CONFLICT (click_key) DO NOTHING`,
 			ws, brand, link, key, bot, at, ipHash, country, region, city, asn, isp, device, deviceBrand, deviceModel, os, osVersion,
-			browser, browserVersion, language, membership, subID, referrer, fields, sourceClickID, cost, destination, path, offer, lander)
+			browser, browserVersion, language, membership, subID, referrer, fields, sourceClickID, cost, destination, path, offer, lander, fr)
 		if err != nil {
 			return err
 		}

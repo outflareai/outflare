@@ -26,10 +26,8 @@ import (
 
 func (s *Server) routesCatalog(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCatalogManage
-	// The workspace routes act on one brand's catalog: ?brand= picks it
-	// for reads, and otherwise (and for every change) it is the
-	// workspace's first brand. They stay until the contract step of
-	// plans/brands/README.md; the brand routes below are the ones to use.
+	// Retired: the workspace routes answer 410 route_moved
+	// (retired_routes.go); the brand routes below are the ones to use.
 	mux.HandleFunc("GET /v1/workspaces/{ws}/catalog", s.inBrand(read, s.getCatalog))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/catalog/types", s.inBrand(read, s.listRecordTypes))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/catalog/types", s.inWorkspace(manage, s.createRecordType))
@@ -59,10 +57,12 @@ func (s *Server) routesCatalog(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+b+"/events", s.onBrand(read, s.listEventDefinitions))
 	mux.HandleFunc("POST "+b+"/events", s.onBrand(manage, s.createEventDefinition))
 	mux.HandleFunc("PATCH "+b+"/events/{event}", s.onBrand(manage, s.updateEventDefinition))
-	// Approving a held event name is part of fixing a brand's data (the
-	// Events page's "Approve and replay"), so customers.manage may do it;
-	// changing what an event means stays with catalog.manage.
+	// Approving a paused event name, and answering the name check's "Is
+	// this a typo?", are part of fixing a brand's data (the Events page),
+	// so customers.manage may do them; changing what an event means stays
+	// with catalog.manage.
 	mux.HandleFunc("POST "+b+"/events/{event}/approve", s.onBrand(auth.ScopeCustomersManage, s.approveEventName))
+	mux.HandleFunc("POST "+b+"/events/{event}/name-check", s.onBrand(auth.ScopeCustomersManage, s.answerEventNameCheck))
 }
 
 var (
@@ -142,8 +142,15 @@ type eventDefinitionView struct {
 	FirstSeenAt   *time.Time `json:"first_seen_at"`
 	LastSeenAt    *time.Time `json:"last_seen_at"`
 	SeenCount     int64      `json:"seen_count"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	// The name check: pending, ok, or asked when the name looks like a
+	// typo of LooksLike and a person is asked (CheckReason says why).
+	// SameAs is the name a person said it is: its events moved there.
+	NameCheck   string    `json:"name_check"`
+	LooksLike   *string   `json:"looks_like"`
+	CheckReason string    `json:"check_reason"`
+	SameAs      *string   `json:"same_as"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type eventProperty struct {
@@ -303,6 +310,9 @@ type catalog struct {
 	// brand. Identity matching for writes that use the catalog happens in
 	// it too.
 	Brand string `json:"-"`
+	// sameAs maps a track name a person said is a typo to the name it
+	// stands for: events sent with it are stored under that name.
+	sameAs map[string]string
 }
 
 // catalogBrand resolves the brand whose catalog to use: brand when it is
@@ -439,6 +449,19 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws, brand string, withEvents boo
 			return nil, err
 		}
 	}
+	rows, err = q.Query(ctx, `SELECT name, same_as FROM event_definitions WHERE workspace_id = $1
+		AND brand_id IS NOT DISTINCT FROM NULLIF($2, '')::uuid AND same_as IS NOT NULL`, ws, c.Brand)
+	if err != nil {
+		return nil, err
+	}
+	c.sameAs = map[string]string{}
+	var from, to string
+	if _, err := pgx.ForEachRow(rows, []any{&from, &to}, func() error {
+		c.sameAs[from] = to
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -447,7 +470,7 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws, brand string, withEvents boo
 func loadEventDefinitions(ctx context.Context, q pgx.Tx, ws, brand string, name *string, status string) ([]eventDefinitionView, error) {
 	rows, err := q.Query(ctx, `
 		SELECT name, label, description, properties, status, sensitivity, owner_id::text, retention_days, destinations,
-		       first_seen_at, last_seen_at, seen_count, created_at, updated_at
+		       first_seen_at, last_seen_at, seen_count, name_check, looks_like, check_reason, same_as, created_at, updated_at
 		FROM event_definitions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($4, '')::uuid
 		  AND ($2::text IS NULL OR name = $2) AND ($3 = '' OR status = $3)
 		ORDER BY name`, ws, name, status, brand)
@@ -457,7 +480,7 @@ func loadEventDefinitions(ctx context.Context, q pgx.Tx, ws, brand string, name 
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (eventDefinitionView, error) {
 		var e eventDefinitionView
 		err := row.Scan(&e.Name, &e.Label, &e.Description, &e.Properties, &e.Status, &e.Sensitivity, &e.OwnerID, &e.RetentionDays, &e.Destinations,
-			&e.FirstSeenAt, &e.LastSeenAt, &e.SeenCount, &e.CreatedAt, &e.UpdatedAt)
+			&e.FirstSeenAt, &e.LastSeenAt, &e.SeenCount, &e.NameCheck, &e.LooksLike, &e.CheckReason, &e.SameAs, &e.CreatedAt, &e.UpdatedAt)
 		e.Destinations = orEvery(e.Destinations)
 		return e, err
 	})
@@ -1298,8 +1321,8 @@ func (s *Server) createEventDefinition(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO event_definitions (workspace_id, brand_id, name, label, description, properties, status, sensitivity, created_by,
-				owner_id, retention_days, destinations)
-			VALUES ($1, $9, $2, $3, $4, $5, $6, $7, $8, $10, $11, $12)`, a.WorkspaceID, *req.Name, label, description, props, status, sensitivity, a.ActorID, b,
+				owner_id, retention_days, destinations, name_check)
+			VALUES ($1, $9, $2, $3, $4, $5, $6, $7, $8, $10, $11, $12, 'ok')`, a.WorkspaceID, *req.Name, label, description, props, status, sensitivity, a.ActorID, b,
 			req.OwnerID.Value, req.RetentionDays.Value, req.Destinations.Value); err != nil {
 			if isUnique(err) {
 				return errInvalid("event " + *req.Name + " is already defined; change it with PATCH")
@@ -1424,7 +1447,7 @@ func (s *Server) approveEventName(w http.ResponseWriter, r *http.Request) {
 		}
 		switch {
 		case before == nil:
-			if _, err := tx.Exec(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, created_by) VALUES ($1, $2, $3, 'approved', $4)`,
+			if _, err := tx.Exec(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, created_by, name_check) VALUES ($1, $2, $3, 'approved', $4, 'ok')`,
 				a.WorkspaceID, a.Brand, name, nullIfEmpty(a.ActorID)); err != nil {
 				return err
 			}

@@ -246,8 +246,42 @@ type Options struct {
 	ActorID *string
 }
 
+// chargeableCost is what to book in the Outcomes ledger for one provider
+// call: the report's cost when the call succeeded, or nothing when it
+// failed (a 403, a timeout, a refused report).
+func chargeableCost(callErr error, cost connectors.SEOCost) connectors.SEOCost {
+	if callErr != nil {
+		return connectors.SEOCost{}
+	}
+	return cost
+}
+
+// permanentError is a refusal that will not fix itself on an hourly retry:
+// a report the plan doesn't include, a bad key, or a reached budget.
+func permanentError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var be *BudgetError
+	if errors.As(err, &be) {
+		return true
+	}
+	switch connectors.KindOf(err) {
+	case connectors.ErrInvalid, connectors.ErrAuth:
+		return true
+	default:
+		return false
+	}
+}
+
+// permanentErrorCodeSQL is last_error_code / error_code values for
+// permanentError, as an IN list. Those failed reads wait for the next
+// weekly snapshot instead of being retried every hour.
+const permanentErrorCodeSQL = `('connector_invalid', 'connector_auth', 'budget_reached', 'invalid_request')`
+
 // Fetch answers one checked query: from a copy under a day old unless
-// Fresh, otherwise from the provider within the budget, recording the cost.
+// Fresh, otherwise from the provider within the budget, recording the cost
+// only when the provider answers successfully.
 func Fetch(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, r connectors.SEOReader, q connectors.SEOQuery, opt Options) (Answer, error) {
 	out := Answer{Integration: o.ID, Connector: o.Connector.Definition().ID}
 	if !connectors.SupportsSEO(r, q.Report) {
@@ -287,8 +321,13 @@ func Fetch(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, r conn
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	rep, callErr := r.SEOReport(cctx, o.Client, o.Creds, q)
-	if spent := amountOf(b.Unit, rep.Cost); spent > 0 {
-		if err := record(ctx, pool, o, b.Unit, q, rep.Cost, opt.ActorID); err != nil {
+	// A failed provider call must not count against the budget: Ahrefs
+	// (and the others) still put an estimate on the report when they
+	// return 403 or another error, and booking that cost was how a
+	// refused report was billed again on every retry.
+	cost := chargeableCost(callErr, rep.Cost)
+	if spent := amountOf(b.Unit, cost); spent > 0 {
+		if err := record(ctx, pool, o, b.Unit, q, cost, opt.ActorID); err != nil {
 			return out, err
 		}
 		out.Budget.Spent += spent
@@ -376,7 +415,7 @@ type payload struct {
 	// whose weekly read failed, and nothing else.
 	SiteReads bool `json:"site_reads,omitempty"`
 	// Suggest only asks which domains compete with each SEO site, the
-	// daily look for new competitors (suggest.go).
+	// weekly look for new competitors (suggest.go).
 	Suggest bool `json:"suggest,omitempty"`
 	// RefreshBrand only reads now the numbers of one brand's tracked
 	// competitors that weren't read today (Competition → Refresh).
@@ -452,8 +491,13 @@ func (s *Syncer) QueueDue(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := s.queueSuggest(ctx, ids); err != nil {
-		return err
+	// The weekly snapshot already fetches competitor suggestions
+	// (SyncSiteCompetitors → SuggestSiteCompetitors). Do not also
+	// queueSuggest in the same cycle: that would call the provider twice.
+	if queueSuggestAlongsideWeeklySnapshot() {
+		if err := s.queueSuggest(ctx, ids); err != nil {
+			return err
+		}
 	}
 	if err := SuggestFromRankings(ctx, s.Pool, s.Log); err != nil {
 		return err
@@ -507,11 +551,14 @@ func (s *Syncer) tickNew(ctx context.Context, ids []string) error {
 				return err
 			}
 		}
-		// A domain whose snapshot failed is read again soon (retry.After),
-		// not at next week's snapshot; each retry is a job of its own.
+		// A domain whose snapshot failed for a transient reason is read
+		// again soon (retry.After). A refused report, a bad key or a
+		// reached budget will not fix itself, so those wait for next
+		// week's snapshot instead of being retried every hour.
 		var failedAt int64
 		if err := s.Pool.QueryRow(ctx, `SELECT COALESCE(max(extract(epoch FROM y.last_run_at))::bigint, 0) FROM seo_syncs y
 			WHERE y.integration_id = $1 AND y.host = ANY($2) AND y.failures > 0
+			  AND COALESCE(y.last_error_code, '') NOT IN `+permanentErrorCodeSQL+`
 			  AND y.last_run_at < now() - `+retry.SQL("y.failures"), id, domains).Scan(&failedAt); err != nil {
 			return err
 		}
@@ -527,6 +574,7 @@ func (s *Syncer) tickNew(ctx context.Context, ids []string) error {
 		if err := s.Pool.QueryRow(ctx, `SELECT COALESCE(max(extract(epoch FROM t.at))::bigint, 0) FROM (
 				SELECT x.target, count(*) AS n, max(x.created_at) AS at FROM link_reads x
 				WHERE x.integration_id = $1 AND x.reason = 'dead_page' AND x.status = 'failed' AND x.created_at > now() - interval '8 days'
+				  AND COALESCE(x.error_code, '') NOT IN `+permanentErrorCodeSQL+`
 				  AND NOT EXISTS (SELECT 1 FROM link_reads d WHERE d.workspace_id = x.workspace_id AND d.target = x.target AND d.scope = 'page' AND d.status = 'done')
 				GROUP BY x.target) t
 			WHERE t.at < now() - `+retry.SQL("t.n"), id).Scan(&deadFailedAt); err != nil {
@@ -542,6 +590,7 @@ func (s *Syncer) tickNew(ctx context.Context, ids []string) error {
 		var siteFailedAt int64
 		if err := s.Pool.QueryRow(ctx, `SELECT COALESCE(max(extract(epoch FROM f.last_failed_at))::bigint, 0) FROM seo_site_read_failures f
 			WHERE f.integration_id = $1 AND f.last_failed_at > now() - interval '7 days'
+			  AND COALESCE(f.last_error_code, '') NOT IN `+permanentErrorCodeSQL+`
 			  AND f.last_failed_at < now() - `+retry.SQL("f.failures"), id).Scan(&siteFailedAt); err != nil {
 			return err
 		}
@@ -653,7 +702,7 @@ func (s *Syncer) job(ctx context.Context, job jobs.Job) error {
 		return s.retrySiteReads(ctx, *job.WorkspaceID, p.Integration)
 	}
 	if p.Suggest {
-		return s.suggestDaily(ctx, *job.WorkspaceID, p.Integration)
+		return s.suggestWeekly(ctx, *job.WorkspaceID, p.Integration)
 	}
 	if p.ReadCompetitor != "" {
 		return s.readCompetitor(ctx, *job.WorkspaceID, p.Integration, p.ReadCompetitor)

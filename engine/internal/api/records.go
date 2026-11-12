@@ -65,6 +65,8 @@ func (s *Server) routesRecords(mux *http.ServeMux) {
 	}
 	// Who an email or id belongs to in one brand.
 	mux.HandleFunc("GET /v1/brands/{brand}/records/lookup", s.onBrand(read, s.lookupRecords))
+	// People from a list in hand (a CSV), matched by user id or email.
+	mux.HandleFunc("POST /v1/brands/{brand}/records/import", s.onBrand(manage, s.editsRecords(s.importRecords)))
 	// Every source's value of a field, and pinning a hand edit (field
 	// sources): new since the brands expand step, on a brand's path only.
 	mux.HandleFunc("GET /v1/brands/{brand}/records/{record}/field-values", s.onBrand(read, s.listFieldValues))
@@ -486,7 +488,7 @@ func writeAttributes(ctx context.Context, tx pgx.Tx, c *catalog, t *recordTypeVi
 	for _, key := range keys {
 		f := t.field(key)
 		if f == nil {
-			return false, errInvalid(fmt.Sprintf("%s has no field %s: add it with POST /v1/workspaces/{ws}/catalog/types/%s/fields, or use an existing one (GET .../catalog/types/%s)", t.Name, key, t.Key, t.Key))
+			return false, errInvalid(fmt.Sprintf("%s has no field %s: add it with POST /v1/brands/{brand}/catalog/types/%s/fields, or use an existing one (GET .../catalog/types/%s)", t.Name, key, t.Key, t.Key))
 		}
 		if f.Archived {
 			return false, errInvalid(fmt.Sprintf("field %s is archived; restore it in the catalog to write it", key))

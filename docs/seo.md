@@ -79,6 +79,9 @@ the top 100, within a monthly budget you set on the Geonode connection.
   too.
 - Answers are kept for 24 hours, so asking again the same day is free.
   Pass `fresh=true` to ask again.
+- Listing Link orders candidates, and reading a saved link gap, do not spend
+  the connection budget. A live `backlinks` or `links` report, or
+  `POST /seo-competitors/gaps/links`, does. See [link-orders.md](link-orders.md).
 
 ## Weekly snapshots
 
@@ -118,16 +121,33 @@ again, so the domains that worked cost nothing more.
 `GET /seo/overview` (the SEO overview page, MCP `get_seo_overview`) answers that
 for each brand from what is already stored, so it is free:
 
+- **Non-branded search:** search clicks minus branded clicks, with CTR and
+  the impression-weighted average position of non-branded queries. A week
+  with search totals but no query rows leaves branded and non-branded
+  unknown: missing query history is not read as zero.
 - **Branded search:** search console queries that contain one of the brand's
   `terms` (its name, handle and the names of its domains, such as `repocket`
   for repocket.com), added up by week. Consoles hide rare queries, so this is
   a floor, not a total.
+- **Search conversions:** conversions on visits that landed from a search
+  engine, from stored product analytics (PostHog page conversions).
+- **Keywords in the top 3 and top 10:** top 3 from the same SEO snapshots as
+  the other snapshot tiles; top 10 is the share of active tracked keywords
+  that were in the top 10 that week.
+- **AI mention and recommend rates:** the share of stored AI answers that
+  week that name or recommend the brand.
+- **Share of voice:** the brand's share of estimated search visits, and of
+  keywords in the top 3, among itself and its tracked competitors, from
+  stored snapshots of the same connector. Opening the page does not refresh
+  them.
 - **Search clicks and visitors:** the brand's websites from every analytics
   tool, each website's day counted once (the tool that measured most).
+  Visitors are all channels, not organic only.
 - **Domain rating, backlinks, referring domains, organic traffic and
-  keywords:** from the SEO snapshots, up to and including today's. Ahrefs wins
-  when it is connected; the rating is the brand's main website's, the rest are
-  added up across its websites.
+  keywords:** from the SEO snapshots, up to and including today's. The
+  series uses one connector (Ahrefs when it has a snapshot in the period)
+  so the arrows compare like with like; the rating is the brand's main
+  website's, the rest are added up across its websites.
 - **SEO status:** `seo_status` says why those numbers are there or not: no SEO
   tool connected (`not_connected`), one connected but shared with other brands
   only (`not_shared`), no website for the brand (`no_website`),
@@ -143,14 +163,28 @@ for each brand from what is already stored, so it is free:
   (`not_connected`). So a brand whose website isn't in the connected tool, or
   whose site is set to another brand, is told that instead of being asked to
   connect a tool again.
-- **Trends:** the last 4 whole weeks against the 4 before (for snapshots, the
-  latest against the last one at least 4 weeks older). Within 3% is flat.
+- **Trends:** the last 4 whole weeks against the 4 before (for snapshots and share of voice, the
+  latest against the last one at least 4 weeks older). Within 3% is flat. For average position, a drop is up.
+- **Period:** `period` sets the whole period picked against as many weeks
+  just before it (`previous_from` to `previous_to`, listed in
+  `previous_weeks`): totals for counts, the mean for rates and positions, and
+  for snapshots and share of voice the latest against the last one before the
+  period.
 - **Site health and fixes:** the brand's audited sites and its open fixes, for
   callers with `seo.read`.
 
 A brand's websites are its domains plus any analytics site set to report for
 it. Websites no brand claims are a shared entry (`brand: null`). `?brand=`
-narrows to one brand; `?weeks=` returns 8 to 52 weeks (default 12).
+narrows to one brand; `?weeks=` returns 4 to 104 weeks back from the last
+week that is over (default 12), and `?from=` and `?to=` pick the whole weeks
+those days fall in instead (at most 104).
+
+The page shows each number on its own row: its value for the period, the
+change against the period before, and a chart with values on the y-axis and
+each week's number on hover. Counts per week also name the week they rose and
+the week they fell most, and draw the weeks before as a dashed line. Pick the
+weeks at the top (4 weeks to 2 years, or custom dates); the choice stays in
+the page's address, so a shared link shows the same weeks.
 
 ## Backlinks
 
@@ -342,9 +376,19 @@ read is priced like the keywords and links reports and counts against the
 connection's budget. Gaps are ideas for content and links: Outflare never
 contacts a site for you.
 
+**Link orders** (the Link orders page in the SEO module, [link-orders.md](link-orders.md))
+uses the already-saved link gap as its Candidates list
+(`GET /v1/brands/{brand}/link-orders/candidates`). That read is free: it does
+not call Ahrefs or DataForSEO, and it does not `POST /seo-competitors/gaps/links`
+(that route is a paid referring-domain pull and is never started from Link
+orders). A connection that cannot produce a backlinks snapshot cannot fill this
+list. **SE Ranking** has no `backlinks` or `links` report, so it does not feed
+referring domains, the link gap, or Link orders candidates.
+
 Click a keyword gap to see **who ranks for it**: the top 20 results, competitor
 or not, marked as you, tracked, suggested or not a competitor, with Yes and No
-for suggestions and Track for the rest (`GET /seo-competitors/results`, MCP
+for suggestions and Track for the rest, including a site you said no to
+before, so one click makes it a competitor (`GET /seo-competitors/results`, MCP
 `get_seo_keyword_results`). Once a day, Outflare reads the results pages of up
 to 25 of a site's keyword gaps (the ones most competitors rank for first, each
 at most once a week) on the workspace's own SERP connection (DataForSEO or

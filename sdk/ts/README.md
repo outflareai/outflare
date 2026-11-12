@@ -30,7 +30,7 @@ const ws = process.env.OUTFLARE_WORKSPACE!;
 const brand = process.env.OUTFLARE_BRAND!;
 
 // How is outreach going?
-const stats = ok(await gtm.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws } } }));
+const stats = ok(await gtm.GET("/v1/brands/{brand}/stats", { params: { path: { brand } } }));
 console.log(`${stats.mailboxes.active} mailboxes, ${stats.sent_24h} sent today, ${stats.unread_replies} unread replies`);
 
 // Import leads from a CSV into a list.

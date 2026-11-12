@@ -122,9 +122,12 @@ type seoSite struct {
 }
 
 type issueCounts struct {
-	Errors   int `json:"errors"`
-	Warnings int `json:"warnings"`
-	Notices  int `json:"notices"`
+	Errors       int `json:"errors"`
+	Warnings     int `json:"warnings"`
+	Notices      int `json:"notices"`
+	ErrorPages   int `json:"error_pages"`
+	WarningPages int `json:"warning_pages"`
+	NoticePages  int `json:"notice_pages"`
 }
 
 type crawlRunView struct {
@@ -231,6 +234,15 @@ func (s *Server) loadSEOSites(ctx context.Context, ws string, id *string, sel br
 			v.LastCrawl = &run
 		}
 		out = append(out, v.seoSite)
+	}
+	runs := make([]*crawlRunView, 0, len(out))
+	for i := range out {
+		if out[i].LastCrawl != nil {
+			runs = append(runs, out[i].LastCrawl)
+		}
+	}
+	if err := s.fillIssuePageCounts(ctx, ws, runs...); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -752,7 +764,10 @@ func (s *Server) startCrawl(w http.ResponseWriter, r *http.Request) {
 func (s *Server) loadCrawl(ctx context.Context, ws, id string) (crawlRunView, error) {
 	var v crawlRunView
 	err := scanCrawlRun(s.pool.QueryRow(ctx, `SELECT `+crawlRunCols+` FROM crawl_runs r WHERE r.id = $1 AND r.workspace_id = $2`, id, ws), &v)
-	return v, err
+	if err != nil {
+		return v, err
+	}
+	return v, s.fillIssuePageCounts(ctx, ws, &v)
 }
 
 // crawlFor loads the {crawl} path value's run, or writes a 404. It also
@@ -765,6 +780,10 @@ func (s *Server) crawlFor(w http.ResponseWriter, r *http.Request, a *access) (*c
 		err := scanCrawlRun(s.pool.QueryRow(r.Context(), `SELECT `+crawlRunCols+`, s.brand_id::text
 			FROM crawl_runs r JOIN seo_sites s ON s.id = r.site_id WHERE r.id = $1 AND r.workspace_id = $2`, id, a.WorkspaceID), &v, &brand)
 		if err == nil && a.sees(brand) {
+			if err := s.fillIssuePageCounts(r.Context(), a.WorkspaceID, &v); err != nil {
+				s.internal(w, r, err)
+				return nil, nil, false
+			}
 			return &v, brand, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -824,6 +843,10 @@ func (s *Server) listCrawls(w http.ResponseWriter, r *http.Request) {
 	}
 	if list == nil {
 		list = []crawlRunView{}
+	}
+	if err := fillIssuePageCountsList(r.Context(), s, a.WorkspaceID, list); err != nil {
+		s.internal(w, r, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }

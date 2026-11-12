@@ -46,6 +46,7 @@ func (s *Server) routesVisitors(mux *http.ServeMux) {
 		mux.HandleFunc("PUT "+t.path+"/settings", t.on(s.inWorkspace)(manage, s.updateVisitorSettings))
 	}
 	mux.HandleFunc("POST /v1/workspaces/{ws}/visitors/companies", s.inWorkspace(manage, s.addVisitorCompany))
+	mux.HandleFunc("POST /v1/brands/{brand}/visitors/companies", s.onBrand(manage, s.addVisitorCompany))
 	mux.HandleFunc("POST /v1/visitor-hooks/{id}/{token}", s.visitorHook)
 }
 

@@ -302,7 +302,7 @@ func (s *Server) negotiateLinkOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) approveLinkOrder(w http.ResponseWriter, r *http.Request) {
-	s.mutateLinkOrder(w, r, "link_orders.approved", true, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
+	s.mutateLinkOrder(w, r, "link_order.approved", true, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
 		return linkorders.Approve(r.Context(), tx, ws, brand, id, actor)
 	})
 }
@@ -315,8 +315,20 @@ func (s *Server) publishLinkOrder(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	s.mutateLinkOrder(w, r, "link_orders.published", false, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
-		return linkorders.Publish(r.Context(), tx, ws, brand, id, actor, strings.TrimSpace(in.PublishedURL), strings.TrimSpace(in.ProofURL))
+	s.mutateLinkOrder(w, r, "link_order.published", false, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
+		o, err := linkorders.Publish(r.Context(), tx, ws, brand, id, actor, strings.TrimSpace(in.PublishedURL), strings.TrimSpace(in.ProofURL))
+		if err != nil || o == nil || o.PlacementID == nil {
+			return o, err
+		}
+		a := accessFrom(r.Context())
+		_, err = jobs.Enqueue(r.Context(), tx, jobs.NewJob{
+			Kind:           jobCoverageCheck,
+			WorkspaceID:    &a.WorkspaceID,
+			Payload:        map[string]string{"placement_id": o.PlacementID.String(), "brand_id": a.Brand, "source": "link_orders"},
+			IdempotencyKey: "coverage.check:" + o.PlacementID.String() + ":link_orders:publish",
+			MaxAttempts:    3,
+		})
+		return o, err
 	})
 }
 
@@ -345,7 +357,7 @@ func (s *Server) checkLinkOrder(w http.ResponseWriter, r *http.Request) {
 			Kind:           jobCoverageCheck,
 			WorkspaceID:    &a.WorkspaceID,
 			Payload:        map[string]string{"placement_id": o.PlacementID.String(), "brand_id": a.Brand, "source": "link_orders"},
-			IdempotencyKey: "coverage.check:" + o.PlacementID.String() + ":link_orders:" + time.Now().UTC().Format("200601021504"),
+			IdempotencyKey: "coverage.check:" + o.PlacementID.String() + ":link_orders:" + time.Now().UTC().Format(time.RFC3339Nano),
 			MaxAttempts:    3,
 		})
 		return err
@@ -358,13 +370,13 @@ func (s *Server) checkLinkOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) payLinkOrder(w http.ResponseWriter, r *http.Request) {
-	s.mutateLinkOrder(w, r, "link_orders.paid", true, true, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
+	s.mutateLinkOrder(w, r, "link_order.paid", true, true, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
 		return linkorders.Pay(r.Context(), tx, ws, brand, id, actor)
 	})
 }
 
 func (s *Server) verifyLinkOrder(w http.ResponseWriter, r *http.Request) {
-	s.mutateLinkOrder(w, r, "link_orders.verified", false, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
+	s.mutateLinkOrder(w, r, "link_order.verified", false, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
 		return linkorders.Verify(r.Context(), tx, ws, brand, id, actor)
 	})
 }
@@ -378,7 +390,7 @@ func (s *Server) loseLinkOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.mutateLinkOrder(w, r, "link_orders.lost", false, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
+	s.mutateLinkOrder(w, r, "link_order.lost", false, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
 		return linkorders.MarkLost(r.Context(), tx, ws, brand, id, actor, in.Notes)
 	})
 }
@@ -396,7 +408,7 @@ func (s *Server) replaceLinkOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "donor_profile_id is required")
 		return
 	}
-	s.mutateLinkOrder(w, r, "link_orders.replacement_opened", false, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
+	s.mutateLinkOrder(w, r, "link_order.replacement_opened", false, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
 		return linkorders.Replace(r.Context(), tx, ws, brand, id, actor, donorID, in.Notes)
 	})
 }

@@ -54,6 +54,17 @@ func (s *Server) routesPlaybookAutomations(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+automationsBase+"/{id}/pause", s.inWorkspace(run, s.pausePlaybookAutomation))
 	mux.HandleFunc("POST "+automationsBase+"/{id}/run", s.inWorkspace(run, s.runPlaybookAutomation))
 	mux.HandleFunc("GET "+automationsBase+"/{id}/runs", s.inWorkspace(read, s.listPlaybookAutomationRuns))
+	// The same, under the brand (brands own their automations).
+	const brandBase = "/v1/brands/{brand}/playbook-automations"
+	mux.HandleFunc("GET "+brandBase, s.onBrand(read, s.listPlaybookAutomations))
+	mux.HandleFunc("POST "+brandBase, s.onBrand(run, s.createPlaybookAutomation))
+	mux.HandleFunc("GET "+brandBase+"/{id}", s.onBrand(read, s.getPlaybookAutomation))
+	mux.HandleFunc("PATCH "+brandBase+"/{id}", s.onBrand(run, s.updatePlaybookAutomation))
+	mux.HandleFunc("DELETE "+brandBase+"/{id}", s.onBrand(run, s.deletePlaybookAutomation))
+	mux.HandleFunc("POST "+brandBase+"/{id}/approve", s.onBrand(approve, s.approvePlaybookAutomation))
+	mux.HandleFunc("POST "+brandBase+"/{id}/pause", s.onBrand(run, s.pausePlaybookAutomation))
+	mux.HandleFunc("POST "+brandBase+"/{id}/run", s.onBrand(run, s.runPlaybookAutomation))
+	mux.HandleFunc("GET "+brandBase+"/{id}/runs", s.onBrand(read, s.listPlaybookAutomationRuns))
 }
 
 type automationView struct {
@@ -130,6 +141,16 @@ func (s *Server) loadAutomation(ctx context.Context, q pgx.Tx, ws, id string, lo
 		row = s.pool.QueryRow(ctx, sql, id, ws)
 	}
 	return scanAutomation(row)
+}
+
+// loadOwnAutomation is loadAutomation for a request: on a brand route,
+// another brand's automation (or one about no brand) is not found.
+func (s *Server) loadOwnAutomation(ctx context.Context, q pgx.Tx, a *access, id string, lock bool) (automationView, error) {
+	v, err := s.loadAutomation(ctx, q, a.WorkspaceID, id, lock)
+	if err == nil && a.Brand != "" && (v.BrandID == nil || *v.BrandID != a.Brand) {
+		return automationView{}, errNotFound
+	}
+	return v, err
 }
 
 // automationSpend is what the automation's runs have spent since from,
@@ -246,7 +267,7 @@ func (s *Server) listPlaybookAutomations(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) getPlaybookAutomation(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	v, err := s.loadAutomation(r.Context(), nil, a.WorkspaceID, r.PathValue("id"), false)
+	v, err := s.loadOwnAutomation(r.Context(), nil, a, r.PathValue("id"), false)
 	if s.automationError(w, r, err) {
 		return
 	}
@@ -299,6 +320,13 @@ func (in *automationInput) apply(ctx context.Context, tx pgx.Tx, a *access, v *a
 	if in.BrandID.Set {
 		v.BrandID = in.BrandID.Value
 		set()
+	}
+	// On a brand route the automation is that brand's.
+	if a.Brand != "" {
+		if v.BrandID != nil && *v.BrandID != a.Brand {
+			return false, errInvalid("brand_id must be this route's brand, or left out")
+		}
+		v.BrandID = &a.Brand
 	}
 	if v.BrandID != nil {
 		var ok bool
@@ -487,7 +515,7 @@ func (s *Server) createPlaybookAutomation(w http.ResponseWriter, r *http.Request
 	if s.automationError(w, r, err) {
 		return
 	}
-	out, err := s.loadAutomation(ctx, nil, a.WorkspaceID, id, false)
+	out, err := s.loadOwnAutomation(ctx, nil, a, id, false)
 	if s.automationError(w, r, err) {
 		return
 	}
@@ -518,7 +546,7 @@ func (s *Server) changeAutomation(w http.ResponseWriter, r *http.Request, change
 	ctx := r.Context()
 	id := r.PathValue("id")
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		v, err := s.loadAutomation(ctx, tx, a.WorkspaceID, id, true)
+		v, err := s.loadOwnAutomation(ctx, tx, a, id, true)
 		if err != nil {
 			return err
 		}
@@ -527,7 +555,7 @@ func (s *Server) changeAutomation(w http.ResponseWriter, r *http.Request, change
 	if s.automationError(w, r, err) {
 		return
 	}
-	v, err := s.loadAutomation(ctx, nil, a.WorkspaceID, id, false)
+	v, err := s.loadOwnAutomation(ctx, nil, a, id, false)
 	if s.automationError(w, r, err) {
 		return
 	}
@@ -582,7 +610,7 @@ func (s *Server) deletePlaybookAutomation(w http.ResponseWriter, r *http.Request
 	a := accessFrom(r.Context())
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		v, err := s.loadAutomation(ctx, tx, a.WorkspaceID, r.PathValue("id"), true)
+		v, err := s.loadOwnAutomation(ctx, tx, a, r.PathValue("id"), true)
 		if err != nil {
 			return err
 		}
@@ -658,7 +686,7 @@ func (s *Server) runPlaybookAutomation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var missionID string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		v, err := s.loadAutomation(ctx, tx, a.WorkspaceID, r.PathValue("id"), true)
+		v, err := s.loadOwnAutomation(ctx, tx, a, r.PathValue("id"), true)
 		if err != nil {
 			return err
 		}
@@ -690,7 +718,7 @@ func (s *Server) runPlaybookAutomation(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listPlaybookAutomationRuns(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
-	v, err := s.loadAutomation(ctx, nil, a.WorkspaceID, r.PathValue("id"), false)
+	v, err := s.loadOwnAutomation(ctx, nil, a, r.PathValue("id"), false)
 	if s.automationError(w, r, err) {
 		return
 	}

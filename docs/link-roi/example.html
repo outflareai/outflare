@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Link ROI — example data</title>
+<style>
+  :root {
+    --bg: #0c0c0e; --card: #161618; --border: #2a2a2e; --text: #f4f4f5;
+    --muted: #a1a1aa; --accent: #e4e4e7; --banner: #7c2d12; --banner-text: #ffedd5;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+    --up: #86efac; --down: #fda4af;
+  }
+  html.light {
+    --bg: #fafafa; --card: #ffffff; --border: #e4e4e7; --text: #18181b;
+    --muted: #71717a; --accent: #27272a; --banner: #9a3412; --banner-text: #fff7ed;
+    --up: #166534; --down: #9f1239;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); padding: 28px 36px 48px; max-width: 1180px; }
+  .banner { background: var(--banner); color: var(--banner-text); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 12px; padding: 8px 12px; border-radius: 8px; margin-bottom: 20px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .lede { color: var(--muted); font-size: 13px; max-width: 46rem; margin: 0 0 16px; }
+  .note { border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 10px 14px; color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+  .tabs { display: flex; gap: 8px; margin: 0 0 16px; }
+  .tab { border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
+  .tab.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .stat { border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 14px 16px; }
+  .stat .k { font-size: 11px; color: var(--muted); }
+  .stat .v { font-size: 22px; font-weight: 600; margin-top: 4px; letter-spacing: -0.03em; }
+  .stat .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  h2 { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 28px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; }
+  td.n, th.n { text-align: right; font-family: var(--mono); font-size: 12px; }
+  td.path { font-family: var(--mono); font-size: 12px; }
+  .sub { color: var(--muted); font-size: 11px; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  tr:last-child td { border-bottom: 0; }
+</style>
+</head>
+<body>
+  <div class="banner">Example data — fictional Northpeak workspace on northpeak.example, not a customer’s numbers</div>
+  <h1>Link ROI</h1>
+  <p class="lede">Donor price of each published link against already-stored Search Console, ranking and referring-domain changes on the target page, 30, 60 and 90 days around publication. These figures do not show that the link caused a change.</p>
+  <p class="note">Cost is the donor price on each published link. Traffic, rank and referring-domain figures are already-stored Search Console, ranking and backlink rows around publication. They do not show that the link caused a change, and no SEO provider is called.</p>
+  <div class="tabs"><span class="tab on">30 days</span><span class="tab">60 days</span><span class="tab">90 days</span></div>
+  <div class="stats">
+    <div class="stat"><div class="k">Published links</div><div class="v">1</div><div class="s">1 still open · 0 lost</div></div>
+    <div class="stat"><div class="k">Spend</div><div class="v">$10.00</div><div class="s">$10.00 per link</div></div>
+    <div class="stat"><div class="k">Click change, 30d</div><div class="v up">+15</div><div class="s">1 of 1 have Search Console rows</div></div>
+    <div class="stat"><div class="k">Referring domains, 30d</div><div class="v up">+1</div><div class="s">1 of 1 have stored backlinks</div></div>
+  </div>
+  <h2>By published link</h2>
+  <p class="hint">Published 8 August 2026. Cost per click gained is $0.67; cost per referring domain gained is $10.00.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Donor</th>
+        <th>Target page</th>
+        <th class="n">Cost</th>
+        <th class="n">Clicks</th>
+        <th class="n">Rank</th>
+        <th class="n">Referring domains</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>donor.example<div class="sub">DR 45 · 12,000 visits · published</div></td>
+        <td class="path">https://northpeak.example/page</td>
+        <td class="n">$10.00</td>
+        <td class="n">10 → 25 <span class="up">+15</span><div class="sub">$0.67 / click</div></td>
+        <td class="n">8.00 → 4.00 <span class="down">−4.00</span></td>
+        <td class="n">1 → 2 <span class="up">+1</span><div class="sub">$10.00 / domain</div></td>
+      </tr>
+    </tbody>
+  </table>
+  <h2>By target page</h2>
+  <p class="hint">Several links to the same page share one Search Console series, so the change is measured around the first publication rather than added together.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Target page</th>
+        <th class="n">Links</th>
+        <th class="n">Spend</th>
+        <th class="n">Clicks, 30d</th>
+        <th class="n">Referring domains, 30d</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="path">https://northpeak.example/page<div class="sub">donor.example</div></td>
+        <td class="n">1</td>
+        <td class="n">$10.00</td>
+        <td class="n"><span class="up">+15</span></td>
+        <td class="n"><span class="up">+1</span></td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

@@ -182,8 +182,9 @@ export function CRMSettings({
                     </span>
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {ev.status === "quarantined"
-                      ? "Waiting for approval · "
+                    {ev.status === "quarantined" ? "Paused · " : ""}
+                    {ev.name_check === "asked" && ev.looks_like
+                      ? `Looks like ${ev.looks_like} · `
                       : ""}
                     {ev.sensitivity}
                     {ev.retention_days !== null

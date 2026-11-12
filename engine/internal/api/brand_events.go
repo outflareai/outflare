@@ -31,8 +31,8 @@ import (
 //   - accepted: stored, with its person and customer event
 //   - duplicate: a messageId the brand already has
 //   - rejected: a code and what to fix; fixable and replayable
-//   - held: a track name the catalog hasn't approved; stored here but
-//     driving nothing until someone approves it and replays it
+//   - held: a track name a person paused in the catalog; stored here but
+//     driving nothing until they approve it again and replay it
 //
 // Accepted and duplicate rows are kept 30 days, rejected and held 90.
 
@@ -308,7 +308,7 @@ func (s *Server) processInboxChunk(ctx context.Context, ws, brand string) (int, 
 		}
 		for _, id := range order {
 			b := batches[id]
-			if err := saveEventNames(ctx, tx, ws, c.Brand, b.totals.names); err != nil {
+			if err := saveEventNames(ctx, tx, ws, c.Brand, b.totals.names, false); err != nil {
 				return err
 			}
 			if len(b.counts) == 0 {
@@ -414,12 +414,13 @@ func (s *Server) processInboxRow(ctx context.Context, tx pgx.Tx, ws, brand strin
 	if json.Unmarshal(row.raw, &m) != nil {
 		return reject("invalid_event", `each event is a JSON object, such as {"type": "track", "userId": "u_123", "event": "Order Completed"}`)
 	}
-	// A track name the catalog hasn't approved is held, before it changes
-	// anyone: it waits here until someone approves it and replays it.
+	// A new track name is stored straight away (the name check looks at it
+	// afterwards). Only a name a person paused in the catalog is held: it
+	// waits here until they resume it and replay it.
 	if strings.ToLower(m.text("type")) == "track" && (m.get("userId", "user_id") != nil || m.get("anonymousId", "anonymous_id") != nil) {
 		if name, ok := eventNameFor(m.text("event")); ok {
 			def, known := defs[name]
-			if !known || def.status == "quarantined" {
+			if known && def.status == "quarantined" {
 				n := totals.names[name]
 				if n == nil {
 					n = &seenName{kind: "track", first: now, last: now}
@@ -427,9 +428,9 @@ func (s *Server) processInboxRow(ctx context.Context, tx pgx.Tx, ws, brand strin
 				}
 				n.count++
 				return inboxOutcome{status: "held", code: "name_not_approved", name: name, took: time.Since(start),
-					reason: name + " is a new event name, held until someone approves it in the catalog; approve it, then replay this event"}, nil
+					reason: name + " is paused in the catalog, so its events are held; approve it again, then replay this event"}, nil
 			}
-			if props, err := m.object(maxEventProperties, "properties"); err == nil {
+			if props, err := m.object(maxEventProperties, "properties"); known && err == nil {
 				if key, want := propertyMismatch(def.props, props); key != "" {
 					return reject("property_type", fmt.Sprintf("property %s must be %s, as the catalog defines it for %s; send %s, or change the property's type in the catalog, then replay this event",
 						key, want, name, want))
@@ -699,6 +700,7 @@ func (s *Server) brandEventsSummary(w http.ResponseWriter, r *http.Request) {
 		OldestPendingAt *time.Time       `json:"oldest_pending_at"`
 		Codes           []inboxCodeCount `json:"rejection_codes"`
 		HeldNames       []inboxNameCount `json:"held_names"`
+		NameChecks      []eventNameCheck `json:"name_checks"`
 		RetentionDays   map[string]int   `json:"retention_days"`
 	}
 	out.RetentionDays = inboxRetention
@@ -753,6 +755,10 @@ func (s *Server) brandEventsSummary(w http.ResponseWriter, r *http.Request) {
 			var n inboxNameCount
 			return n, r.Scan(&n.Name, &n.Count, &n.ExpiresAt)
 		})
+		if err != nil {
+			return err
+		}
+		out.NameChecks, err = askedEventNames(ctx, tx, a.WorkspaceID, a.Brand)
 		return err
 	})
 	if s.allocError(w, r, err) {

@@ -177,6 +177,33 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
     ({ brand, ...body }) => call(() => gtm.PUT("/v1/workspaces/{ws}/brands/{brand}/knowledge", { params: { path: brandPath(brand) }, body: { ...body, pages: body.pages ?? [] } })),
   );
 
+  // ---- Knowledge sheet review (paid ads) ----
+  server.registerTool(
+    "get_brand_knowledge",
+    {
+      title: "Read a brand's knowledge sheet and whether it is trusted",
+      description:
+        "The brand's knowledge (what its website says it offers) with how it stands: read_at and read_error (connector_needed without a page reader, ai_model_needed without an AI model, '' when the read worked), " +
+        "reviewed_at and reviewed_by, changed_since_review (a read changed what it sells since), refresh_daily (on once an ad account is connected) and trusted. Ads are written only from a trusted sheet.",
+      inputSchema: { brand: id.describe("The brand's id from list_brands.") },
+      annotations: read,
+    },
+    ({ brand }) => call(() => gtm.GET("/v1/brands/{brand}/knowledge", { params: { path: { brand } } })),
+  );
+
+  server.registerTool(
+    "review_brand_knowledge",
+    {
+      title: "Say the brand's knowledge sheet looks right",
+      description:
+        "A person's session only (an API token or agent gets 403): marks the brand's knowledge sheet reviewed, which lets ads be written from it (write_ad_draft). " +
+        "Ask the person to check the sheet (get_brand_knowledge) first; never call it on their behalf. A later read that changes the brand's products, services, prices or summary clears the review.",
+      inputSchema: { brand: id.describe("The brand's id from list_brands.") },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand }) => call(() => gtm.POST("/v1/brands/{brand}/knowledge/review", { params: { path: { brand } } })),
+  );
+
   server.registerTool(
     "find_brand_links",
     {
@@ -188,6 +215,19 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
       annotations: write,
     },
     ({ brand }) => call(() => gtm.POST("/v1/workspaces/{ws}/brands/{brand}/links/discover", { params: { path: brandPath(brand) } })),
+  );
+
+  server.registerTool(
+    "find_brand_look",
+    {
+      title: "Find a brand's logo and colour on its website",
+      description:
+        "Reads the brand's home page as OutflareBot (obeying robots.txt) for its logo and theme colour, and fills in the brand's logo_url and main colour only where they are empty. " +
+        "Runs in the background; then list_brands. Never replaces a logo or colour someone set. Needs a website; no connection or key.",
+      inputSchema: { brand: brandRef },
+      annotations: write,
+    },
+    ({ brand }) => call(() => gtm.POST("/v1/workspaces/{ws}/brands/{brand}/look/find", { params: { path: brandPath(brand) } })),
   );
 
   server.registerTool(
@@ -228,6 +268,7 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
       title: "Save what you learned about a brand",
       description:
         "Saves what is true for one brand, in the person's words where possible. Each brand's context is its own: nothing is shared between brands. " +
+        "legal_name, tax_id and address are the business behind the brand: lifecycle email footers ({{brand_address}}), its help centre and cookie policy reuse them. " +
         "Pass the version you read (409 context_changed means read again).",
       inputSchema: {
         brand: brandRef,
@@ -237,6 +278,19 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
         voice: z.string().max(4000).optional().describe("How its emails and posts sound."),
         rules: z.string().max(10000).optional().describe("Things never to do for this brand."),
         notes: z.string().max(210000).optional().describe("Everything else, in Markdown."),
+        legal_name: z.string().max(200).optional().describe("The registered business name, such as Northpeak Pty Ltd."),
+        tax_id: z.string().max(60).optional().describe("Its tax or company number: ABN, VAT, EIN."),
+        address: z
+          .object({
+            line1: z.string().max(200).describe("The street or PO box."),
+            line2: z.string().max(200).default(""),
+            city: z.string().max(200),
+            region: z.string().max(200).default("").describe("State, province or county."),
+            postal_code: z.string().max(200).default(""),
+            country: z.string().max(200).describe("Two-letter ISO 3166 code, such as AU."),
+          })
+          .optional()
+          .describe("The postal address. Replaces the whole address; all parts empty clears it."),
         onboarding_dismissed: z.boolean().optional().describe("True when the person does not want to be asked for the missing fields."),
         version: z.number().int().optional().describe("version from get_brand_context, or brand.version from get_context."),
       },

@@ -169,7 +169,7 @@ func (s *Syncer) syncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 		run.Error = &msg
 		return run, err
 	}
-	if !refresh {
+	if snapshotSuggestsCompetitors(refresh) {
 		n, cost, err := s.SuggestSiteCompetitors(ctx, o, r, site, country)
 		run.Suggested += n
 		run.Cost += cost

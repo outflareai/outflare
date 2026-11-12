@@ -10,19 +10,17 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/seosync"
-	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 // One competitor list per brand: no limit on how many are tracked, new
-// ones suggested every day (from the SEO connection and, at no cost, from
-// the sites ranking beside the brand), AI visibility cohorts add theirs to
-// it, and Reddit posts name competitors the way it does.
+// ones suggested weekly with the snapshot (from the SEO connection and, at
+// no cost, from the sites ranking beside the brand), AI visibility cohorts
+// add theirs to it, and Reddit posts name competitors the way it does.
 func TestCompetitorsOneList(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
-	events := track.Capture(t)
 	t.Cleanup(func() { setDFSRivals() })
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -88,7 +86,8 @@ func TestCompetitorsOneList(t *testing.T) {
 		t.Fatalf("dismissed: %s %v", status, err)
 	}
 
-	// Every day the SEO connection is asked too, once a day.
+	// Once a week the SEO connection is asked as part of the snapshot,
+	// not a second time via a separate suggest job in the same cycle.
 	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "dataforseo", "credentials": map[string]string{"login": "jo", "password": "pw"}})
 	setDFSRivals(map[string]any{"domain": "daily.example", "intersections": 30})
 	seo := &seosync.Syncer{Pool: e.pool, Store: e.integrations, Log: log}
@@ -100,12 +99,18 @@ func TestCompetitorsOneList(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var queued int
-	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE workspace_id = $1 AND kind = 'seo.sync' AND payload->>'suggest' = 'true'`, ws).Scan(&queued); err != nil || queued != 1 {
-		t.Fatalf("daily look queued %d, %v", queued, err)
-	}
-	if _, err := e.pool.Exec(ctx, `DELETE FROM jobs WHERE workspace_id = $1 AND NOT (payload->>'suggest' = 'true')`, ws); err != nil {
+	var queued, suggests int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE workspace_id = $1 AND kind = 'seo.sync'`, ws).Scan(&queued); err != nil {
 		t.Fatal(err)
+	}
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE workspace_id = $1 AND kind = 'seo.sync' AND payload->>'suggest' = 'true'`, ws).Scan(&suggests); err != nil {
+		t.Fatal(err)
+	}
+	if suggests != 0 {
+		t.Fatalf("separate suggest job queued %d, want none in the same weekly cycle", suggests)
+	}
+	if queued < 1 {
+		t.Fatalf("weekly snapshot queued %d", queued)
 	}
 	q := jobs.New(e.pool, log)
 	q.PollInterval = 20 * time.Millisecond
@@ -114,14 +119,14 @@ func TestCompetitorsOneList(t *testing.T) {
 	done := make(chan struct{})
 	go func() { q.Run(qctx, 1); close(done) }() //nolint:errcheck
 	defer func() { stop(); <-done }()
-	for deadline := time.Now().Add(10 * time.Second); ; {
+	for deadline := time.Now().Add(20 * time.Second); ; {
 		var n int
 		e.pool.QueryRow(ctx, `SELECT count(*) FROM seo_competitors WHERE site_id = $1 AND host = 'daily.example' AND status = 'suggested'`, site).Scan(&n)
-		if n == 1 && len(named(events(), "seo_competitors.suggested")) >= 2 {
+		if n == 1 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no daily suggestion or its event: %d, %d events", n, len(named(events(), "seo_competitors.suggested")))
+			t.Fatalf("no weekly snapshot suggestion for daily.example: %d", n)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

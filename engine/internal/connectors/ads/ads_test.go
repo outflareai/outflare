@@ -50,7 +50,7 @@ func fake(t *testing.T, routes map[string]any) (*c.Client, *[]seen, string) {
 	}))
 	t.Cleanup(srv.Close)
 	cl := &c.Client{BaseURLs: map[string]string{}}
-	for _, id := range []string{"google_ads", "meta_ads", "microsoft_ads.customer", "microsoft_ads.campaign", "microsoft_ads.reporting",
+	for _, id := range []string{"google_ads", "google_ads.datamanager", "meta_ads", "microsoft_ads.customer", "microsoft_ads.campaign", "microsoft_ads.reporting",
 		"reddit_ads", "reddit_ads.conversions", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "snapchat_ads.conversions",
 		"taboola_ads", "taboola_ads.conversions", "outbrain_ads", "apple_ads", "apple_ads.token", "amazon_ads.na", "amazon_ads.token", "pinterest_ads"} {
 		cl.BaseURLs[id] = srv.URL
@@ -82,12 +82,10 @@ func TestDefinitions(t *testing.T) {
 }
 
 func TestMissingSetup(t *testing.T) {
-	// Google retired developer tokens: the field is optional.
-	if got := c.MissingSetup(GoogleAds{}, c.Creds{"access_token": "t"}); len(got) != 0 {
-		t.Fatalf("google ads without a developer token: %+v", got)
-	}
-	if got := c.MissingSetup(GoogleAds{}, c.Creds{"developer_token": "d"}); len(got) != 0 {
-		t.Fatalf("with the token: %+v", got)
+	// Google retired developer tokens: nothing is asked for beyond the
+	// sign-in.
+	if got := c.MissingSetup(GoogleAds{}, c.Creds{"access_token": "t"}); got != nil {
+		t.Fatalf("google ads needs no setup: %+v", got)
 	}
 	if got := c.MissingSetup(MetaAds{}, c.Creds{}); got != nil {
 		t.Fatalf("meta needs no setup: %+v", got)
@@ -132,9 +130,11 @@ func TestGoogleAds(t *testing.T) {
 	if len(accts) != 2 || accts[0].ID != "111" || accts[1].ID != "222" || accts[1].Meta["login_customer_id"] != "900" || accts[1].Currency != "EUR" {
 		t.Fatalf("accounts: %+v", accts)
 	}
+	// Google retired developer tokens: one a workspace stored is never
+	// sent.
 	for _, r := range *reqs {
-		if r.header.Get("developer-token") != "dev" {
-			t.Fatalf("%s %s without the developer token", r.method, r.path)
+		if r.header.Get("developer-token") != "" {
+			t.Fatalf("%s %s sent a developer token", r.method, r.path)
 		}
 	}
 	camps, err := g.AdCampaigns(ctx, cl, creds, accts[0])
@@ -986,14 +986,12 @@ func TestGoogleAdItems(t *testing.T) {
 }
 
 func TestGoogleAdsAudiences(t *testing.T) {
-	job := "customers/111/offlineUserDataJobs/9"
 	cl, reqs, _ := fake(t, map[string]any{
-		"POST /v23/customers/111/googleAds:search":           map[string]any{"results": []any{map[string]any{"userList": map[string]any{"id": "5", "name": "Trial users"}}}},
-		"POST /v23/customers/111/offlineUserDataJobs:create": map[string]any{"resourceName": job},
-		"POST /v23/" + job + ":addOperations":                map[string]any{},
-		"POST /v23/" + job + ":run":                          map[string]any{},
+		"POST /v23/customers/111/googleAds:search": map[string]any{"results": []any{map[string]any{"userList": map[string]any{"id": "5", "name": "Trial users"}}}},
+		"POST /v1/audienceMembers:ingest":          map[string]any{"requestId": "req-1"},
+		"POST /v1/audienceMembers:remove":          map[string]any{"requestId": "req-2"},
 	})
-	g, creds, acct := GoogleAds{}, c.Creds{"access_token": "tok", "developer_token": "dev"}, c.AdAccount{ID: "111"}
+	g, creds, acct := GoogleAds{}, c.Creds{"access_token": "tok"}, c.AdAccount{ID: "111"}
 	if !g.Definition().Has(c.CapAdsAudiences) {
 		t.Fatal("Google Ads should sync audiences")
 	}
@@ -1010,8 +1008,9 @@ func TestGoogleAdsAudiences(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := *reqs
-	if len(got) != 4 || !strings.Contains(got[1].body, `"userList":"customers/111/userLists/5"`) || !strings.Contains(got[1].body, `"adPersonalization":"GRANTED"`) ||
-		!strings.Contains(got[2].body, `"create":{"userIdentifiers":[{"hashedEmail":"`+em+`"},{"hashedPhoneNumber":"`) || got[3].path != "/v23/"+job+":run" {
+	if len(got) != 2 || got[1].path != "/v1/audienceMembers:ingest" || !strings.Contains(got[1].body, `"productDestinationId":"5"`) ||
+		!strings.Contains(got[1].body, `"adPersonalization":"CONSENT_GRANTED"`) || !strings.Contains(got[1].body, `"emailAddress":"`+em+`"`) ||
+		got[1].header.Get("Developer-Token") != "" {
 		t.Fatalf("add calls %+v", got)
 	}
 	m.ConsentGranted = false
@@ -1019,11 +1018,11 @@ func TestGoogleAdsAudiences(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = *reqs
-	if strings.Contains(got[4].body, "consent") || !strings.Contains(got[5].body, `"remove":{"userIdentifiers"`) {
-		t.Fatalf("remove calls %+v", got[4:])
+	if got[2].path != "/v1/audienceMembers:remove" || strings.Contains(got[2].body, "consent") {
+		t.Fatalf("remove calls %+v", got[2:])
 	}
 	// No identifiers: nothing to do, nothing called.
-	if err := g.SyncAudience(ctx, cl, creds, acct, "5", c.AudienceAdd, c.AudienceMember{}); err != nil || len(*reqs) != 7 {
+	if err := g.SyncAudience(ctx, cl, creds, acct, "5", c.AudienceAdd, c.AudienceMember{}); err != nil || len(*reqs) != 3 {
 		t.Fatalf("empty: %v, %d calls", err, len(*reqs))
 	}
 }

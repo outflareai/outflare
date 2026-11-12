@@ -193,7 +193,7 @@ export function registerCoverageTools(
     {
       title: "List competitors whose presence is scanned",
       description:
-        "The brand's tracked competitors with how often each is scanned (top ones weekly, the rest monthly unless changed), when it was last scanned, what each source said (connector_needed means the workspace has to connect a search results or SEO connection) and how many pages it appears on. Also the brand's scan settings.",
+        "The brand's tracked competitors with how often each is scanned (the top 10 every 30 days and the rest every 90 days unless changed), when it was last scanned, what each source said (connector_needed means the workspace has to connect a search results or SEO connection) and how many pages it appears on. Also the brand's scan settings.",
       inputSchema: { brand },
       annotations: read,
     },
@@ -360,7 +360,7 @@ export function registerCoverageTools(
       {
         title: "Change how often competitors are scanned",
         description:
-          "How many competitors count as top (by shared keywords) and the days between scans for the top ones and the rest. rest_every_days 7 scans every competitor weekly.",
+          "How many competitors count as top (by shared keywords) and the days between scans for the top ones and the rest. By default the top 10 are scanned every 30 days and the rest every 90 days. rest_every_days 7 scans every competitor weekly.",
         inputSchema: {
           brand,
           top_competitors: z.number().int().min(0).max(1000).optional(),

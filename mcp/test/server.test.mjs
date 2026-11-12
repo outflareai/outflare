@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createClient } from "@outflare/sdk";
 import { createServer } from "../dist/server.js";
+import { CORE, MAX_CORE } from "../dist/toolbox.js";
 
 const WS = "11111111-1111-4111-8111-111111111111";
 const SEQ = "22222222-2222-4222-8222-222222222222";
@@ -19,7 +20,7 @@ async function connect(api, opts = {}) {
     const [status, json] = api(req, body);
     return new Response(json === undefined ? null : JSON.stringify(json), { status, headers: { "Content-Type": "application/json", "X-Request-Id": "req_1" } });
   };
-  const server = createServer({ client: createClient({ baseUrl: "http://gtm.test", token: "oft_x", fetch }), workspace: WS, ...opts });
+  const server = createServer({ client: createClient({ baseUrl: "http://gtm.test", token: "oft_x", fetch }), workspace: WS, tools: "all", ...opts });
   const client = new Client({ name: "test", version: "0" });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(a), client.connect(b)]);
@@ -27,7 +28,7 @@ async function connect(api, opts = {}) {
 }
 
 test("lists read and write tools, and only read tools when read-only", async () => {
-  const { client } = await connect(() => [200, {}]);
+  const { client } = await connect(() => [200, {}], { tools: "all" });
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name);
   assert.ok(names.includes("get_overview") && names.includes("enroll_leads") && names.includes("reply_to_inbox_message"));
@@ -35,7 +36,7 @@ test("lists read and write tools, and only read tools when read-only", async () 
   assert.equal(tools.find((t) => t.name === "list_inbox").annotations.readOnlyHint, true);
   assert.equal(tools.find((t) => t.name === "reply_to_inbox_message").annotations.openWorldHint, true);
 
-  const ro = await connect(() => [200, {}], { readOnly: true });
+  const ro = await connect(() => [200, {}], { readOnly: true, tools: "all" });
   const roTools = (await ro.client.listTools()).tools;
   assert.ok(roTools.length > 0);
   assert.ok(roTools.every((t) => t.annotations.readOnlyHint), roTools.map((t) => t.name).join());
@@ -554,4 +555,128 @@ test("partner proof tools: the proof, its json export, and the new list and bulk
   assert.equal(calls[3].url.search, "?q=ch_1");
   await client.callTool({ name: "bulk_partner_rewards", arguments: { brand: BRAND, action: "approve", program: "affiliates", dry_run: true } });
   assert.deepEqual(JSON.parse(calls[4].body), { action: "approve", program: "affiliates", dry_run: true });
+});
+
+// The toolbox: apps see a short core list, and find_tools and call_tool reach
+// every other tool, so no app's cap (ChatGPT keeps 200) ever hides one.
+test("lists the core set by default, under the cap, and every tool with tools=all", async () => {
+  const all = (await (await connect(() => [200, {}], { tools: "all" })).client.listTools()).tools.map((t) => t.name);
+  const core = (await (await connect(() => [200, {}], { tools: "core" })).client.listTools()).tools.map((t) => t.name);
+  assert.ok(CORE.size <= MAX_CORE, `the core set has ${CORE.size} tools; keep it at ${MAX_CORE} or fewer`);
+  assert.ok(core.length <= MAX_CORE && core.length < 100, `${core.length} tools listed by default`);
+  for (const name of CORE) assert.ok(all.includes(name), `core tool ${name} doesn't exist`);
+  assert.deepEqual([...core].sort(), [...CORE].sort());
+  assert.ok(all.length > 500 && all.includes("find_tools") && all.includes("call_tool"));
+});
+
+test("find_tools finds every tool and what people ask for", async () => {
+  const { client } = await connect(() => [200, {}], { tools: "all" });
+  const all = (await client.listTools()).tools;
+  const find = async (query, limit = 5) => (await client.callTool({ name: "find_tools", arguments: { query, limit } })).structuredContent.tools.map((t) => t.name);
+  const asks = {
+    "create an email template": "create_email_template",
+    "send an email": "send_email",
+    "send a newsletter broadcast": "send_email_broadcast",
+    "set up an email provider": "update_email_provider",
+    "add an email sending domain": "add_email_domain",
+    "create a journey": "create_journey",
+    "email timeline for a person": "get_record_timeline",
+    "check keyword rankings": "check_rankings",
+    "pause an ad campaign": "pause_ad_campaign",
+    "add leads to a list": "add_leads_to_list",
+    "create a dashboard": "create_dashboard",
+    "list partner payouts": "list_partner_payouts",
+  };
+  for (const [q, want] of Object.entries(asks)) assert.ok((await find(q)).includes(want), `"${q}" should find ${want}, got ${await find(q)}`);
+  // Every tool can be found by the words of its own name.
+  const lost = [];
+  for (const t of all) if (!(await find(t.name.replace(/_/g, " "), 3)).includes(t.name)) lost.push(t.name);
+  assert.deepEqual(lost, []);
+  // And nearly every one by its title, as a person would put it.
+  let byTitle = 0;
+  for (const t of all) if ((await find(t.title ?? t.name, 10)).includes(t.name)) byTitle++;
+  assert.ok(byTitle / all.length >= 0.99, `${all.length - byTitle} tools can't be found by their title`);
+  const hit = (await client.callTool({ name: "find_tools", arguments: { query: "create email template", limit: 1 } })).structuredContent.tools[0];
+  assert.equal(hit.name, "create_email_template");
+  assert.equal(hit.input_schema.type, "object");
+  assert.ok(hit.input_schema.properties);
+});
+
+test("call_tool runs any tool through the API, and explains mistakes", async () => {
+  const { client, calls } = await connect(() => [200, { data: [] }], { tools: "core" });
+  const listed = (await client.listTools()).tools.map((t) => t.name);
+  assert.ok(!listed.includes("get_journey"));
+  const res = await client.callTool({ name: "call_tool", arguments: { name: "get_journey", arguments: { brand: BRAND, journey: SEQ } } });
+  assert.equal(res.isError, undefined, res.content?.[0]?.text);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url.pathname, new RegExp(SEQ));
+  assert.equal(calls[0].headers.get("outflare-tool"), "get_journey");
+
+  const bad = await client.callTool({ name: "call_tool", arguments: { name: "get_journey", arguments: {} } });
+  assert.equal(bad.isError, true);
+  assert.match(bad.content[0].text, /don't fit.*journey/s);
+
+  const typo = await client.callTool({ name: "call_tool", arguments: { name: "create_email_templates" } });
+  assert.equal(typo.isError, true);
+  assert.match(typo.content[0].text, /Did you mean: .*create_email_template/);
+});
+
+test("read-only connections can't reach write tools through call_tool", async () => {
+  const { client, calls } = await connect(() => [200, {}], { readOnly: true, tools: "core" });
+  const tools = (await client.listTools()).tools;
+  assert.ok(tools.every((t) => t.annotations.readOnlyHint), tools.map((t) => t.name).join());
+  const res = await client.callTool({ name: "call_tool", arguments: { name: "send_email", arguments: {} } });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /can only read/);
+  assert.equal(calls.length, 0);
+});
+
+test("get_context and the instructions say how to find every tool", async () => {
+  const { client } = await connect(() => [200, {}], { tools: "core" });
+  assert.match(client.getInstructions(), /find_tools/);
+  const res = await client.callTool({ name: "get_context", arguments: {} });
+  assert.match(res.structuredContent.tools, /find_tools.*call_tool/s);
+});
+
+test("the hosted server lists the core set, every tool with ?tools=all, and reports the server's version", async () => {
+  const { createServer: createHttp } = await import("node:http");
+  const { serveHttp } = await import("../dist/http.js");
+  const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+  const api = createHttp((req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    if (req.url === "/v1/meta") return res.end(JSON.stringify({ version: "1.2.3+abc" }));
+    if (req.url === "/v1/whoami") return res.end(JSON.stringify({ token: { id: "tok", workspace_id: WS, scopes: ["leads.manage"] } }));
+    res.statusCode = 404;
+    res.end("{}");
+  });
+  await new Promise((r) => api.listen(0, "127.0.0.1", r));
+  const port = await new Promise((r) => {
+    const probe = createHttp();
+    probe.listen(0, "127.0.0.1", () => {
+      const p = probe.address().port;
+      probe.close(() => r(p));
+    });
+  });
+  const mcp = serveHttp({ listen: `127.0.0.1:${port}`, baseUrl: `http://127.0.0.1:${api.address().port}`, secret: "s" });
+  await new Promise((r) => (mcp.http.listening ? r() : mcp.http.once("listening", r)));
+  const open = async (query) => {
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp${query}`), {
+      requestInit: { headers: { Authorization: "Bearer oft_test_not_a_real_token", "X-Outflare-Proxy-Secret": "s" } },
+    }));
+    return client;
+  };
+  try {
+    const core = await open("");
+    assert.equal(core.getServerVersion().version, "1.2.3+abc");
+    const n = (await core.listTools()).tools.length;
+    assert.ok(n <= MAX_CORE, `${n} tools`);
+    const all = await open("?tools=all");
+    assert.ok((await all.listTools()).tools.length > 500);
+    await core.close();
+    await all.close();
+  } finally {
+    mcp.close();
+    api.close();
+  }
 });

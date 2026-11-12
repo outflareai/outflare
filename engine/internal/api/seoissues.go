@@ -14,9 +14,16 @@ import (
 // The audit's results: the issues a finished crawl found, grouped by rule
 // and by URL template, and the pages behind each.
 
-type crawlIssueTemplate struct {
+type crawlIssueLocale struct {
+	Locale   string `json:"locale"`
 	Template string `json:"template"`
 	Pages    int    `json:"pages"`
+}
+
+type crawlIssueTemplate struct {
+	Template string             `json:"template"`
+	Pages    int                `json:"pages"`
+	Locales  []crawlIssueLocale `json:"locales,omitempty"`
 }
 
 type crawlIssueView struct {
@@ -77,6 +84,18 @@ func (s *Server) listCrawlIssues(w http.ResponseWriter, r *http.Request) {
 		})
 		list = append(list, *v)
 	}
+	fold := r.URL.Query().Get("fold_locales") == "true" || r.URL.Query().Get("fold_locales") == "1"
+	if fold {
+		list = foldIssueTemplates(list)
+		for i := range list {
+			sort.Slice(list[i].Templates, func(a, b int) bool {
+				if list[i].Templates[a].Pages != list[i].Templates[b].Pages {
+					return list[i].Templates[a].Pages > list[i].Templates[b].Pages
+				}
+				return list[i].Templates[a].Template < list[i].Templates[b].Template
+			})
+		}
+	}
 	sort.Slice(list, func(i, j int) bool {
 		if a, b := issueSeverityRank[list[i].Severity], issueSeverityRank[list[j].Severity]; a != b {
 			return a < b
@@ -86,6 +105,10 @@ func (s *Server) listCrawlIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		return list[i].ID < list[j].ID
 	})
+	if err := s.fillIssuePageCounts(r.Context(), a.WorkspaceID, run); err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "crawl": run})
 }
 
@@ -124,11 +147,17 @@ func (s *Server) getCrawlIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	templates, err := s.templatesForIssue(r.Context(), run.ID, a.WorkspaceID, def.ID, q.Get("template"), q.Get("locale"))
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT i.id::text, i.page_id::text, p.url, i.template, i.detail, p.http_status
 		FROM crawl_issues i JOIN crawl_pages p ON p.id = i.page_id
-		WHERE i.run_id = $1 AND i.workspace_id = $2 AND i.rule = $3 AND ($4 = '' OR i.template = $4) AND i.id > $5
-		ORDER BY i.id LIMIT $6`, run.ID, a.WorkspaceID, def.ID, q.Get("template"), after, limit)
+		WHERE i.run_id = $1 AND i.workspace_id = $2 AND i.rule = $3
+		  AND (cardinality($4::text[]) = 0 OR i.template = ANY($4)) AND i.id > $5
+		ORDER BY i.id LIMIT $6`, run.ID, a.WorkspaceID, def.ID, templates, after, limit)
 	if err != nil {
 		s.internal(w, r, err)
 		return

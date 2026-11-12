@@ -26,6 +26,7 @@ type siteBannerOut struct {
 	Reports  []map[string]any  `json:"cookieReports"`
 	Policy   []string          `json:"policy"`
 	Local    map[string]string `json:"local"`
+	Shown    string            `json:"shown"`
 }
 
 // runSiteBanner runs site.js in the stand-in browser, in a time zone.
@@ -187,6 +188,18 @@ func TestSiteConsentBanner(t *testing.T) {
 	if out := runSiteBanner(t, "Europe/Berlin", map[string]any{"banner": testBanner(nil), "bannerOff": true, "consent": "auto"}); out.Asks != 0 || len(out.Data) != 0 ||
 		out.Consent["rule"] != "opt_in" {
 		t.Fatalf("data-banner off: %+v", out)
+	}
+	// After a choice the corner button reopens the banner; data-reopen="off"
+	// leaves it out, and outflare.showConsent() still opens the banner.
+	decided := "of_consent=2.111." + strconv.FormatInt(time.Now().Unix(), 10)
+	if out := runSiteBanner(t, "Europe/Berlin", map[string]any{"banner": testBanner(nil), "body": true, "cookie": decided}); !strings.Contains(out.Shown, "of-cb-reopen") {
+		t.Fatalf("corner button: %q", out.Shown)
+	}
+	if out := runSiteBanner(t, "Europe/Berlin", map[string]any{"banner": testBanner(nil), "body": true, "cookie": decided, "reopenOff": true}); out.Shown != "" {
+		t.Fatalf("data-reopen off: %q", out.Shown)
+	}
+	if out := runSiteBanner(t, "Europe/Berlin", map[string]any{"banner": testBanner(nil), "body": true, "cookie": decided, "reopenOff": true, "calls": [][]any{{"showConsent"}}}); !strings.Contains(out.Shown, "of-cb-prefs") {
+		t.Fatalf("showConsent with data-reopen off: %q", out.Shown)
 	}
 }
 

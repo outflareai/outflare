@@ -37,9 +37,13 @@ func (s *Server) routesAttribution(mux *http.ServeMux) {
 	// Rolled-up reports (customers, cohorts, accounts, deals) stay workspace
 	// routes for now; they move under the brand in a later change.
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/customers", s.inWorkspace(read, s.attributionCustomers))
+	mux.HandleFunc("GET /v1/brands/{brand}/attribution/customers", s.onBrand(read, s.attributionCustomers))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/cohorts", s.inWorkspace(read, s.attributionCohorts))
+	mux.HandleFunc("GET /v1/brands/{brand}/attribution/cohorts", s.onBrand(read, s.attributionCohorts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/accounts", s.inWorkspace(read, s.attributionAccounts))
+	mux.HandleFunc("GET /v1/brands/{brand}/attribution/accounts", s.onBrand(read, s.attributionAccounts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/deals", s.inWorkspace(read, s.attributionDeals))
+	mux.HandleFunc("GET /v1/brands/{brand}/attribution/deals", s.onBrand(read, s.attributionDeals))
 }
 
 type attributionSettings struct {

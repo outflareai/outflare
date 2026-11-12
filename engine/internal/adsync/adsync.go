@@ -5,9 +5,13 @@
 // (spend_entries, category ads, channel paid_ads), so costs and outcomes
 // include ads without anyone typing them in.
 //
-// An account's first run stores the last 90 days. Later runs re-read the
-// last 7 days every few hours and the last 30 once a day, because the
-// platforms keep revising recent days (late conversions, invalid clicks).
+// An account's first run stores the last 90 days. Later runs are hourly
+// and re-read the last 2 days; once a day they re-read the last 7, once a
+// week the last 35 and once a month the last 95, because the platforms keep
+// revising recent days (late conversions, invalid clicks) for up to 90
+// days. The same package harvests Google's clicks (harvest.go), reads what
+// changed on the platform and who did it (changeevents.go), and raises
+// alerts as findings after each sync (alerts.go).
 package adsync
 
 import (
@@ -32,18 +36,65 @@ import (
 )
 
 const (
-	JobSync      = "ads.sync"
-	interval     = 6 * time.Hour
-	fullInterval = 24 * time.Hour
+	JobSync = "ads.sync"
+	// interval is how often each connection syncs: every hour, reading the
+	// last recentDays (today and yesterday, the days the platforms are
+	// still filling in).
+	interval   = time.Hour
+	recentDays = 2
+	// Once a day (dailyInterval, watermark ad_syncs.last_full_at) a run
+	// re-reads the last dailyDays; once a week (last_week_at) weekDays;
+	// once a month (last_month_at) monthDays, which covers the 90 days a
+	// platform may still restate conversions for.
+	dailyInterval = 24 * time.Hour
+	dailyDays     = 7
+	weekInterval  = 7 * 24 * time.Hour
+	weekDays      = 35
+	monthInterval = 30 * 24 * time.Hour
+	monthDays     = 95
+	// backfillDays is what an account's first sync reads.
 	backfillDays = 90
-	fullDays     = 30
-	recentDays   = 7
 	// MaxAccounts is how many of a sign-in's ad accounts sync without being
 	// switched on one by one; the rest are listed but off.
 	MaxAccounts = 20
 	// Channel is the spend ledger's channel for ad spend.
 	Channel = "paid_ads"
 )
+
+// The windows a run reads, as the sync metric labels them
+// (outflare_ads_sync_runs_total{window}).
+const (
+	WindowFirst   = "first"
+	WindowHourly  = "hourly"
+	WindowDaily   = "daily"
+	WindowWeekly  = "weekly"
+	WindowMonthly = "monthly"
+)
+
+// windowDays is how many days each window reads, ending today.
+var windowDays = map[string]int{WindowFirst: backfillDays, WindowHourly: recentDays, WindowDaily: dailyDays, WindowWeekly: weekDays, WindowMonthly: monthDays}
+
+// watermarks is when a connection last read each of the longer windows
+// (ad_syncs), and the click harvest's last day.
+type watermarks struct {
+	daily, weekly, monthly *time.Time
+	clicksDay              *time.Time
+}
+
+// pick is the window a run reads now: the longest one that is due. A
+// longer window includes the shorter ones, so reading it marks them too.
+func (w watermarks) pick(now time.Time) string {
+	due := func(last *time.Time, every time.Duration) bool { return last == nil || now.Sub(*last) >= every }
+	switch {
+	case due(w.monthly, monthInterval):
+		return WindowMonthly
+	case due(w.weekly, weekInterval):
+		return WindowWeekly
+	case due(w.daily, dailyInterval):
+		return WindowDaily
+	}
+	return WindowHourly
+}
 
 // Syncer runs ad syncs as jobs.
 type Syncer struct {
@@ -65,6 +116,8 @@ func (s *Syncer) Register(q *jobs.Queue) {
 	q.Handle(JobDraft, s.draftJob)
 	q.Handle(JobTracking, s.trackingJob)
 	q.Handle(JobTest, s.testJob)
+	q.Handle(JobChangeEvents, s.changeEventsJob)
+	q.Handle(JobAlerts, s.alertsJob)
 }
 
 func (s *Syncer) now() time.Time {
@@ -94,6 +147,9 @@ func (s *Syncer) Run(ctx context.Context) {
 	for {
 		if err := s.QueueDue(ctx); err != nil && ctx.Err() == nil {
 			s.Log.Error("ads: schedule syncs", "err", err)
+		}
+		if err := s.QueueChangeEvents(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "ad_change_events.schedule_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -210,6 +266,10 @@ type Result struct {
 	SearchTerms int `json:"search_terms"`
 	// Rows are campaign-days stored.
 	Rows int `json:"rows"`
+	// Window is the days the run read (first, hourly, daily, weekly,
+	// monthly), and Clicks how many paid clicks it harvested (Google).
+	Window string `json:"window"`
+	Clicks int    `json:"clicks"`
 }
 
 // dbError marks a database failure, which is retried, from a platform's.
@@ -223,7 +283,7 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 	o, err := s.Store.Open(ctx, s.Pool, ws, integrationID)
 	if err != nil {
 		if connectors.KindOf(err) == connectors.ErrAuth {
-			s.finish(ctx, ws, integrationID, false, res, err)
+			s.finish(ctx, ws, integrationID, "", watermarks{}, res, err)
 		}
 		return res, err
 	}
@@ -235,12 +295,12 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 	if missing := connectors.MissingSetup(o.Connector, o.Creds); len(missing) > 0 {
 		err := connectors.Errf(connectors.ErrAuth, "%s needs your %s before it can sync: add it on the connection",
 			o.Connector.Definition().Name, strings.ToLower(missing[0].Label))
-		s.finish(ctx, ws, integrationID, false, res, err)
+		s.finish(ctx, ws, integrationID, "", watermarks{}, res, err)
 		return res, err
 	}
 	found, err := reader.AdAccounts(ctx, o.Client, o.Creds)
 	if err != nil {
-		s.finish(ctx, ws, integrationID, false, res, err)
+		s.finish(ctx, ws, integrationID, "", watermarks{}, res, err)
 		return res, err
 	}
 	if err := s.saveAccounts(ctx, ws, integrationID, res.Connector, found); err != nil {
@@ -250,16 +310,18 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 	if err != nil {
 		return res, dbError{err}
 	}
-	var last struct{ full *time.Time }
-	_ = s.Pool.QueryRow(ctx, `SELECT last_full_at FROM ad_syncs WHERE integration_id = $1`, integrationID).Scan(&last.full)
-	full := last.full == nil || s.now().Sub(*last.full) >= fullInterval
+	var marks watermarks
+	_ = s.Pool.QueryRow(ctx, `SELECT last_full_at, last_week_at, last_month_at, last_clicks_day FROM ad_syncs WHERE integration_id = $1`, integrationID).
+		Scan(&marks.daily, &marks.weekly, &marks.monthly, &marks.clicksDay)
+	window := marks.pick(s.now())
+	res.Window = window
 	var firstErr error
 	for _, a := range accounts {
 		if !a.syncOn {
 			continue
 		}
 		res.Accounts++
-		err := s.syncAccount(ctx, o, reader, a, full, &res)
+		err := s.syncAccount(ctx, o, reader, a, window, &res)
 		if err == nil {
 			continue
 		}
@@ -275,11 +337,34 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 			break
 		}
 	}
-	s.finish(ctx, ws, integrationID, full && firstErr == nil, res, firstErr)
+	if firstErr == nil {
+		// Yesterday's clicks, and the backfill on a first sync. A refused
+		// read stops the harvest for this run, not the sync: the next run
+		// carries on from the last day stored.
+		if cr, ok := o.Connector.(connectors.AdClickReader); ok {
+			day, n, err := s.harvestClicks(ctx, o, cr, accounts, marks.clicksDay)
+			res.Clicks = n
+			if day != nil {
+				marks.clicksDay = day
+			}
+			if err != nil {
+				var db dbError
+				if errors.As(err, &db) {
+					return res, err
+				}
+				track.Fail(ctx, s.Log, track.Event{Name: "ad_clicks.harvested", WorkspaceID: ws, ActorType: "system", Surface: "job",
+					Props: map[string]any{"connector": res.Connector, "clicks": n}}, "connector_"+connectors.KindOf(err), err)
+			} else if n > 0 {
+				track.Emit(ctx, track.Event{Name: "ad_clicks.harvested", WorkspaceID: ws, ActorType: "system", Surface: "job",
+					Props: map[string]any{"connector": res.Connector, "clicks": n}})
+			}
+		}
+	}
+	s.finish(ctx, ws, integrationID, window, marks, res, firstErr)
 	return res, firstErr
 }
 
-func (s *Syncer) finish(ctx context.Context, ws, integrationID string, full bool, res Result, runErr error) {
+func (s *Syncer) finish(ctx context.Context, ws, integrationID, window string, marks watermarks, res Result, runErr error) {
 	var msg, code *string
 	outcome := "success"
 	if runErr != nil {
@@ -291,8 +376,12 @@ func (s *Syncer) finish(ctx context.Context, ws, integrationID string, full bool
 		msg, code, outcome = &m, &c, c
 	}
 	metrics.SyncRun("ads", outcome)
-	// Fresh numbers: judge measured changes, suggest new ones and read
-	// running tests.
+	if window == "" {
+		window = WindowHourly
+	}
+	metrics.AdSyncRun(window, outcome)
+	// Fresh numbers: judge measured changes, suggest new ones, read
+	// running tests and look for anything to alert on.
 	if runErr == nil {
 		if err := adsuggest.Enqueue(ctx, s.Pool, ws, s.now()); err != nil {
 			track.Fail(ctx, s.Log, track.Event{Name: "ad_suggestions.failed", WorkspaceID: ws, ActorType: "system", Surface: "job", Outcome: track.Error}, "internal", err)
@@ -301,17 +390,38 @@ func (s *Syncer) finish(ctx context.Context, ws, integrationID string, full bool
 			track.Fail(ctx, s.Log, track.Event{Name: "ad_test.failed", WorkspaceID: ws, ActorType: "system", Surface: "job", Outcome: track.Error,
 				Props: map[string]any{"step": TestCheck}}, "internal", err)
 		}
+		if err := EnqueueAlerts(ctx, s.Pool, ws, s.now()); err != nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "ad_alerts.failed", WorkspaceID: ws, ActorType: "system", Surface: "job", Outcome: track.Error}, "internal", err)
+		}
+	}
+	// A successful read of a longer window marks every shorter one read too.
+	rank := map[string]int{WindowHourly: 0, WindowDaily: 1, WindowWeekly: 2, WindowMonthly: 3, WindowFirst: 3}
+	now := s.now()
+	var daily, weekly, monthly *time.Time
+	if runErr == nil {
+		if rank[window] >= 1 {
+			daily = &now
+		}
+		if rank[window] >= 2 {
+			weekly = &now
+		}
+		if rank[window] >= 3 {
+			monthly = &now
+		}
 	}
 	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO ad_syncs (integration_id, workspace_id, last_run_at, last_ok_at, last_full_at, last_error, last_rows, failures, last_error_code)
-		VALUES ($1, $2, $3::timestamptz, CASE WHEN $4::text IS NULL THEN $3::timestamptz END, CASE WHEN $5::boolean THEN $3::timestamptz END, $4::text, $6::integer,
-			CASE WHEN $4::text IS NULL THEN 0 ELSE 1 END, $7::text)
+		INSERT INTO ad_syncs (integration_id, workspace_id, last_run_at, last_ok_at, last_full_at, last_week_at, last_month_at, last_clicks_day, last_error, last_rows, failures, last_error_code)
+		VALUES ($1, $2, $3::timestamptz, CASE WHEN $4::text IS NULL THEN $3::timestamptz END, $5::timestamptz, $6::timestamptz, $7::timestamptz, $8::date, $4::text, $9::integer,
+			CASE WHEN $4::text IS NULL THEN 0 ELSE 1 END, $10::text)
 		ON CONFLICT (integration_id) DO UPDATE SET last_run_at = EXCLUDED.last_run_at,
 			last_ok_at = COALESCE(EXCLUDED.last_ok_at, ad_syncs.last_ok_at),
 			last_full_at = COALESCE(EXCLUDED.last_full_at, ad_syncs.last_full_at),
+			last_week_at = COALESCE(EXCLUDED.last_week_at, ad_syncs.last_week_at),
+			last_month_at = COALESCE(EXCLUDED.last_month_at, ad_syncs.last_month_at),
+			last_clicks_day = COALESCE(EXCLUDED.last_clicks_day, ad_syncs.last_clicks_day),
 			last_error = EXCLUDED.last_error, last_rows = EXCLUDED.last_rows, last_error_code = EXCLUDED.last_error_code,
 			failures = CASE WHEN EXCLUDED.last_error IS NULL THEN 0 ELSE ad_syncs.failures + 1 END`,
-		integrationID, ws, s.now(), msg, full, res.Rows, code)
+		integrationID, ws, now, msg, daily, weekly, monthly, marks.clicksDay, res.Rows, code)
 	if err != nil && s.Log != nil {
 		s.Log.Error("ads: record sync", "integration", integrationID, "err", err)
 	}
@@ -403,21 +513,25 @@ func today(now time.Time, tz string) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
-// Window is the dates a run reads for an account.
-func Window(now time.Time, tz string, first, full bool) (from, to string) {
+// Window is the dates a run reads for an account: the window's days
+// (windowDays) ending today in the account's time zone. An unknown window
+// reads the hourly one.
+func Window(now time.Time, tz string, window string) (from, to string) {
 	end := today(now, tz)
-	n := recentDays
-	switch {
-	case first:
-		n = backfillDays
-	case full:
-		n = fullDays
+	n, ok := windowDays[window]
+	if !ok {
+		n = recentDays
 	}
 	return end.AddDate(0, 0, -(n - 1)).Format(time.DateOnly), end.Format(time.DateOnly)
 }
 
-func (s *Syncer) syncAccount(ctx context.Context, o *connectors.Opened, r connectors.AdsReader, a account, full bool, res *Result) error {
-	from, to := Window(s.now(), a.timeZone, a.firstDay == nil, full)
+func (s *Syncer) syncAccount(ctx context.Context, o *connectors.Opened, r connectors.AdsReader, a account, window string, res *Result) error {
+	if a.firstDay == nil {
+		// An account's first sync reads its history whatever the run's
+		// window; it can't be shorter than any of them.
+		window = WindowFirst
+	}
+	from, to := Window(s.now(), a.timeZone, window)
 	camps, err := r.AdCampaigns(ctx, o.Client, o.Creds, a.ad())
 	if err != nil {
 		s.accountError(ctx, a.id, err)
@@ -586,11 +700,17 @@ func (s *Syncer) syncKeywords(ctx context.Context, o *connectors.Opened, r conne
 			id, ok := keyword[k]
 			if !ok {
 				if err := tx.QueryRow(ctx, `
-					INSERT INTO ad_keywords (workspace_id, ad_account_id, ad_group_id, external_id, text, match_type, status, brand_id)
-					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+					INSERT INTO ad_keywords (workspace_id, ad_account_id, ad_group_id, external_id, text, match_type, status, brand_id,
+						first_page_cpc_micros, top_of_page_cpc_micros, first_position_cpc_micros, quality_score)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 					ON CONFLICT (ad_group_id, external_id) DO UPDATE SET text = EXCLUDED.text, match_type = EXCLUDED.match_type,
-						status = EXCLUDED.status, brand_id = EXCLUDED.brand_id, updated_at = now()
-					RETURNING id`, o.WorkspaceID, a.id, group, d.ID, trim(d.Text, 300), trim(d.MatchType, 30), statusOr(d.Status), brands[group]).Scan(&id); err != nil {
+						status = EXCLUDED.status, brand_id = EXCLUDED.brand_id,
+						first_page_cpc_micros = COALESCE(EXCLUDED.first_page_cpc_micros, ad_keywords.first_page_cpc_micros),
+						top_of_page_cpc_micros = COALESCE(EXCLUDED.top_of_page_cpc_micros, ad_keywords.top_of_page_cpc_micros),
+						first_position_cpc_micros = COALESCE(EXCLUDED.first_position_cpc_micros, ad_keywords.first_position_cpc_micros),
+						quality_score = COALESCE(EXCLUDED.quality_score, ad_keywords.quality_score), updated_at = now()
+					RETURNING id`, o.WorkspaceID, a.id, group, d.ID, trim(d.Text, 300), trim(d.MatchType, 30), statusOr(d.Status), brands[group],
+					d.FirstPageCPCMicros, d.TopOfPageCPCMicros, d.FirstPositionCPCMicros, d.QualityScore).Scan(&id); err != nil {
 					return err
 				}
 				keyword[k] = id
@@ -616,6 +736,10 @@ func (s *Syncer) syncKeywords(ctx context.Context, o *connectors.Opened, r conne
 			spend, impressions, clicks int64
 			conv                       *float64
 			value                      *int64
+			// How the search matched, the way with the most impressions
+			// when the platform splits it.
+			match     string
+			matchImpr int64
 		}
 		agg := map[key]*sums{}
 		var order []key
@@ -635,6 +759,9 @@ func (s *Syncer) syncKeywords(ctx context.Context, o *connectors.Opened, r conne
 				agg[k] = x
 				order = append(order, k)
 			}
+			if m := trim(d.MatchType, 30); m != "" && (x.match == "" || max(d.Impressions, 0) > x.matchImpr) {
+				x.match, x.matchImpr = m, max(d.Impressions, 0)
+			}
 			x.spend += max(d.SpendMicros, 0)
 			x.impressions += max(d.Impressions, 0)
 			x.clicks += max(d.Clicks, 0)
@@ -649,10 +776,10 @@ func (s *Syncer) syncKeywords(ctx context.Context, o *connectors.Opened, r conne
 		for _, k := range order {
 			x := agg[k]
 			day, _ := time.Parse(time.DateOnly, k.day)
-			copyRows = append(copyRows, []any{o.WorkspaceID, brands[k.group], a.id, k.group, day, k.term, k.kw, k.match, a.currency, x.spend, x.impressions, x.clicks, x.conv, x.value})
+			copyRows = append(copyRows, []any{o.WorkspaceID, brands[k.group], a.id, k.group, day, k.term, k.kw, k.match, x.match, a.currency, x.spend, x.impressions, x.clicks, x.conv, x.value})
 		}
 		n, err := tx.CopyFrom(ctx, pgx.Identifier{"ad_search_terms_daily"},
-			[]string{"workspace_id", "brand_id", "ad_account_id", "ad_group_id", "day", "term", "keyword_text", "keyword_match_type", "currency",
+			[]string{"workspace_id", "brand_id", "ad_account_id", "ad_group_id", "day", "term", "keyword_text", "keyword_match_type", "search_term_match_type", "currency",
 				"spend_micros", "impressions", "clicks", "conversions", "conversion_value_micros"}, pgx.CopyFromRows(copyRows))
 		termDays = int(n)
 		return err
@@ -795,14 +922,15 @@ func saveDay(ctx context.Context, tx pgx.Tx, entityID, ws, currency, day string,
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros, impressions, clicks, conversions, conversion_value_micros,
-			reach, link_clicks, landing_page_views, video_views)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			reach, link_clicks, landing_page_views, video_views, all_conversions, all_conversion_value_micros)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (ad_entity_id, day) DO UPDATE SET currency = EXCLUDED.currency, spend_micros = EXCLUDED.spend_micros,
 			impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks, conversions = EXCLUDED.conversions,
 			conversion_value_micros = EXCLUDED.conversion_value_micros, reach = EXCLUDED.reach, link_clicks = EXCLUDED.link_clicks,
-			landing_page_views = EXCLUDED.landing_page_views, video_views = EXCLUDED.video_views, updated_at = now()`,
+			landing_page_views = EXCLUDED.landing_page_views, video_views = EXCLUDED.video_views,
+			all_conversions = EXCLUDED.all_conversions, all_conversion_value_micros = EXCLUDED.all_conversion_value_micros, updated_at = now()`,
 		entityID, day, ws, currency, max(spend, 0), max(impressions, 0), max(clicks, 0), conv, value,
-		nonNeg(x.Reach), nonNeg(x.LinkClicks), nonNeg(x.LandingPageViews), nonNeg(x.VideoViews)); err != nil {
+		nonNeg(x.Reach), nonNeg(x.LinkClicks), nonNeg(x.LandingPageViews), nonNeg(x.VideoViews), x.AllConversions, x.AllConversionValueMicros); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM ad_conversion_actions_daily WHERE ad_entity_id = $1 AND day = $2`, entityID, day); err != nil {

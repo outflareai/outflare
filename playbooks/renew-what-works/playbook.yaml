@@ -33,7 +33,7 @@ steps:
   - say: Read the brand's context, and list partnerships at Live or Measured.
     tools: [getBrandContext, listBrandRecords]
   - say: For each one, add up its recorded spend and its visits, sign-ups and paying customers from its link and code.
-    tools: [listSpend, getAnalyticsReport, outcomesReport]
+    tools: [listSpend, getAnalyticsReport, getBrandOutcomesReport]
   - say: Rank them by cost per paying customer, mark each as renew, renegotiate or stop against the target, and move them to Measured.
     tools: [updateBrandRecord]
   - say: Draft a renewal for each one to renew, a new rate for each to renegotiate, and a short thank-you for the rest, held until a person approves them.

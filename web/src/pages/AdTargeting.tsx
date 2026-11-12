@@ -3,17 +3,18 @@
 // change is queued, made on the platform by a job and listed under Changes.
 
 import { useCallback, useEffect, useState } from "react";
-import type { AdCampaign, AdTargeting as Targeting } from "@outflare/sdk";
+import type { AdBiddingStrategy, AdCampaign, AdTargeting as Targeting } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { ask, Badge, Button, Card, ErrorText, Loading, toast } from "../ui";
 import { money, platformName } from "./Ads";
 import { pickedBrandId } from "@/lib/brand";
 
-const methodWord: Record<string, string> = { maximize_conversions: "Maximise conversions", maximize_conversion_value: "Maximise conversion value" };
+const methodWord: Record<string, string> = { maximize_conversions: "Maximise conversions", maximize_conversion_value: "Maximise conversion value", portfolio: "Portfolio strategy" };
 
 function biddingWord(t: Targeting["bidding"], currency: string) {
   const name = methodWord[t.strategy] ?? t.strategy.replace(/_/g, " ");
   if (t.strategy === "set_per_ad_set") return "Set on each ad set, in Ads Manager";
+  if (t.bidding_strategy_id) return `${name}, on portfolio strategy ${t.bidding_strategy_id}`;
   if (t.target_cpa_micros != null) return `${name}, target ${money(t.target_cpa_micros, currency)} a conversion`;
   if (t.target_roas != null) return `${name}, target ${t.target_roas}× return`;
   return `${name}, no target`;
@@ -40,6 +41,24 @@ export function CampaignTargeting({ ws, campaign }: { ws: string; campaign: AdCa
     toast("Change queued. It shows under Changes once the platform takes it.");
     setTimeout(load, 4000);
   }
+  // portfolio puts the campaign on one of its account's portfolio
+  // strategies, picked from the account's list.
+  async function portfolio() {
+    const { data: list, error } = await api.GET("/v1/brands/{brand}/ads/accounts/{id}/bidding-strategies", { params: { path: { brand: pickedBrandId(), id: campaign.ad_account_id } } });
+    if (error) return toast(errorMessage(error), "error");
+    const usable = (list?.data ?? []).filter((s: AdBiddingStrategy) => s.status !== "removed" && s.id !== data?.targeting?.bidding.bidding_strategy_id).slice(0, 8);
+    if (usable.length === 0) return toast("This account has no other portfolio strategy. Create one under Accounts, Portfolio bidding strategies.");
+    const target = (s: AdBiddingStrategy) => (s.target_cpa_micros != null ? `, ${money(s.target_cpa_micros, s.currency || campaign.currency)} a conversion` : s.target_roas != null ? `, ${s.target_roas}× return` : "");
+    const r = await ask({
+      title: `Put ${campaign.name} on a portfolio strategy`,
+      body: "The campaign bids to the strategy's target, shared with its other campaigns. To move the target, change it on the strategy.",
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, ...usable.map((s) => ({ label: `${s.name}${target(s)}`, value: s.id, variant: "primary" as const }))],
+    });
+    if (!r || r.choice === "cancel") return;
+    setBusy(true);
+    const res = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/bidding", { params: { path }, body: { strategy: "portfolio", bidding_strategy_id: r.choice } });
+    done(res.error);
+  }
   async function bidding() {
     const r = await ask({
       title: `Change how ${campaign.name} bids`,
@@ -48,6 +67,7 @@ export function CampaignTargeting({ ws, campaign }: { ws: string; campaign: AdCa
       choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, ...data!.bidding_methods.map((m) => ({ label: methodWord[m] ?? m, value: m, variant: "primary" as const }))],
     });
     if (!r) return;
+    if (r.choice === "portfolio") return portfolio();
     const v = Number(r.value);
     const strategy = r.choice as "maximize_conversions" | "maximize_conversion_value";
     const target = r.value.trim() === "" || !(v > 0) ? {} : strategy === "maximize_conversions" ? { target_cpa_micros: Math.round(v * 1e6) } : { target_roas: v };

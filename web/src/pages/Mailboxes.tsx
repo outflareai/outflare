@@ -105,7 +105,7 @@ export function Mailboxes({ ws, canManage, go }: { ws: string; canManage: boolea
 
   async function setSender(m: Mailbox, senderId: string) {
     // A mailbox sends as one of its own brand's senders.
-    const { error } = await api.POST("/v1/workspaces/{ws}/mailboxes/sender", { params: { path: { ws }, query: m.brand_id ? { brand: m.brand_id } : {} }, body: { mailbox_ids: [m.id], sender_id: senderId || null } });
+    const { error } = await api.POST("/v1/brands/{brand}/mailboxes/sender", { params: { path: { brand: m.brand_id ?? brandId ?? "" } }, body: { mailbox_ids: [m.id], sender_id: senderId || null } });
     if (error) return toast(errorMessage(error), "error");
     toast(senderId ? `${m.email} sends as ${senders.find((x) => x.id === senderId)?.name}.` : `Cleared the sender for ${m.email}.`);
     load();

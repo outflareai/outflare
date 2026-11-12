@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -135,15 +136,34 @@ func (s *Server) queueAdTargeting(w http.ResponseWriter, r *http.Request, kind s
 
 func (s *Server) setAdBidding(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Strategy        string   `json:"strategy"`
-		TargetCPAMicros *int64   `json:"target_cpa_micros"`
-		TargetROAS      *float64 `json:"target_roas"`
+		Strategy          string   `json:"strategy"`
+		TargetCPAMicros   *int64   `json:"target_cpa_micros"`
+		TargetROAS        *float64 `json:"target_roas"`
+		BiddingStrategyID string   `json:"bidding_strategy_id"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	b := connectors.AdBidding{Strategy: strings.TrimSpace(in.Strategy)}
+	b := connectors.AdBidding{Strategy: strings.TrimSpace(in.Strategy), BiddingStrategyID: strings.TrimSpace(in.BiddingStrategyID)}
+	if b.Strategy == "" && b.BiddingStrategyID != "" {
+		b.Strategy = connectors.BidPortfolio
+	}
+	if b.BiddingStrategyID != "" && b.Strategy != connectors.BidPortfolio {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "bidding_strategy_id goes with strategy portfolio")
+		return
+	}
 	switch b.Strategy {
+	case connectors.BidPortfolio:
+		// The strategy's own target applies; it is moved on the strategy
+		// (PATCH .../ads/accounts/{id}/bidding-strategies/{strategy}).
+		if in.TargetCPAMicros != nil || in.TargetROAS != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "a portfolio strategy keeps its own target: change it on the strategy")
+			return
+		}
+		if _, err := strconv.ParseInt(b.BiddingStrategyID, 10, 64); err != nil || len(b.BiddingStrategyID) > 30 {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "bidding_strategy_id is a portfolio strategy's id, from GET .../ads/accounts/{id}/bidding-strategies")
+			return
+		}
 	case connectors.BidMaxConversions:
 		if in.TargetROAS != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "maximize_conversions takes target_cpa_micros, not target_roas")
@@ -165,7 +185,7 @@ func (s *Server) setAdBidding(w http.ResponseWriter, r *http.Request) {
 		}
 		b.TargetROAS = in.TargetROAS
 	default:
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "strategy is maximize_conversions or maximize_conversion_value")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "strategy is maximize_conversions, maximize_conversion_value or portfolio (with bidding_strategy_id)")
 		return
 	}
 	s.queueAdTargeting(w, r, adsync.ChangeBidding, adsync.ChangeState{Bidding: &b}, func(t connectors.AdTargetingManager) bool {

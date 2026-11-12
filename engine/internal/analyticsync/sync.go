@@ -335,6 +335,8 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 		`DELETE FROM search_sitemaps WHERE integration_id = $1 AND site = ANY($2)`,
 		`DELETE FROM page_conversions WHERE integration_id = $1 AND site = ANY($2)`,
 		`DELETE FROM page_conversion_syncs WHERE integration_id = $1 AND site = ANY($2)`,
+		`DELETE FROM organic_conversions WHERE integration_id = $1 AND site = ANY($2)`,
+		`DELETE FROM organic_conversion_syncs WHERE integration_id = $1 AND site = ANY($2)`,
 	} {
 		if _, err := s.Pool.Exec(ctx, q, integrationID, off); err != nil {
 			return res, err
@@ -353,6 +355,9 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 		}
 		if ga, ok := reader.(connectors.LandingOutcomeReader); ok && err == nil {
 			_, err = s.syncConversions(ctx, o, outcomeAdapter{AnalyticsReader: reader, reader: ga}, p, &res)
+		}
+		if oc, ok := reader.(connectors.OrganicConversionReader); ok && err == nil {
+			_, err = s.syncOrganicConversions(ctx, o, oc, p, &res)
 		}
 		if err == nil {
 			continue

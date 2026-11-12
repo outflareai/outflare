@@ -389,7 +389,7 @@ func countDestinationClicks(ctx context.Context, tx pgx.Tx, batch []bufferedClic
 	type key struct{ id, day string }
 	counts := map[key]int64{}
 	for _, c := range batch {
-		if c.destinationID != "" && !c.bot {
+		if c.destinationID != "" && !c.uncounted() {
 			counts[key{c.destinationID, capDay(c.at)}]++
 		}
 	}
@@ -429,7 +429,7 @@ func countOfferClicks(ctx context.Context, tx pgx.Tx, batch []bufferedClick) ([]
 	type key struct{ id, day string }
 	counts := map[key]int64{}
 	for _, c := range batch {
-		if c.offerID != "" && !c.bot {
+		if c.offerID != "" && !c.uncounted() {
 			counts[key{c.offerID, capDay(c.at)}]++
 		}
 	}

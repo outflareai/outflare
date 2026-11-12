@@ -54,9 +54,12 @@ export type FlowCatalog = { events: EventDefinition[]; personFields: { key: stri
 // fields, for suggestions. Someone who can't read the catalog gets none,
 // and can still type names.
 export function useFlowCatalog(ws: string): FlowCatalog {
+  const { brand: picked, brands } = useBrand(ws);
+  const brand = picked?.id ?? brands[0]?.id ?? "";
   const [catalog, setCatalog] = useState<FlowCatalog>({ events: [], personFields: [], types: [] });
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws } } }).then(({ data }) => {
+    if (!brand) return;
+    api.GET("/v1/brands/{brand}/catalog", { params: { path: { brand } } }).then(({ data }) => {
       if (!data) return;
       const person = data.types.find((t) => t.key === "person");
       setCatalog({
@@ -65,7 +68,7 @@ export function useFlowCatalog(ws: string): FlowCatalog {
         types: data.types.filter((t) => !t.archived).map((t) => ({ key: t.key, name: t.name })),
       });
     });
-  }, [ws]);
+  }, [brand]);
   return catalog;
 }
 

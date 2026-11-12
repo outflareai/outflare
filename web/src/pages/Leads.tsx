@@ -1,3 +1,4 @@
+import { WontBeEmailed } from "@/components/wont-be-emailed";
 import {
   useCallback,
   useEffect,
@@ -211,7 +212,14 @@ function LeadsPage({ ws, canManage, go }: { ws: string; canManage: boolean; go: 
           }}
         />
       )}
-      {showImport && <Import ws={ws} onDone={() => load()} go={go} />}
+      {showImport && (
+        <Card
+          title="Import leads from a CSV"
+          description="Exports from Apollo, Clay, your CRM or a spreadsheet all work."
+        >
+          <ImportLeads ws={ws} lists={lists} preselect={listId} onDone={() => load()} go={go} />
+        </Card>
+      )}
       {!loaded && <Loading />}
       {empty && !canManage && <Empty title="No leads yet" />}
       {loaded && !empty && (
@@ -298,12 +306,7 @@ function LeadsPage({ ws, canManage, go }: { ws: string; canManage: boolean; go: 
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {l.verification && <Verdict v={l.verification} />}
                     {l.suppressed && (
-                      <Badge
-                        tone="red"
-                        title="On the suppression list: never emailed"
-                      >
-                        Won't be emailed
-                      </Badge>
+                      <WontBeEmailed why={l.suppression} />
                     )}
                   </div>
                 </div>
@@ -319,12 +322,7 @@ function LeadsPage({ ws, canManage, go }: { ws: string; canManage: boolean; go: 
                   <span className="inline-flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-[12px]">{l.email}</span>
                     {l.suppressed && (
-                      <Badge
-                        tone="red"
-                        title="On the suppression list: never emailed"
-                      >
-                        Won't be emailed
-                      </Badge>
+                      <WontBeEmailed why={l.suppression} />
                     )}
                   </span>
                 ),
@@ -417,20 +415,56 @@ function LeadsPage({ ws, canManage, go }: { ws: string; canManage: boolean; go: 
   );
 }
 
-function Import({ ws, onDone, go }: { ws: string; onDone: () => void; go: (t: Tab) => void }) {
+// The CSV import: a card on Leads, or the body of the dialog a list opens.
+// `list` fixes the list the leads go into; without it, people pick one of the
+// brand's lists, make a new one, or add the leads to no list.
+export function ImportLeads({
+  ws,
+  lists,
+  list,
+  preselect,
+  onDone,
+  go,
+}: {
+  ws: string;
+  lists: LeadList[];
+  list?: LeadList;
+  preselect?: string;
+  onDone: () => void;
+  go: (t: Tab) => void;
+}) {
   const brandId = useBrand(ws).brand?.id ?? "";
+  // Lists built from a search fill themselves, so a CSV goes into manual ones.
+  const choices = lists.filter((l) => l.kind !== "search");
   const [file, setFile] = useState<File | null>(null);
-  const [list, setList] = useState("");
+  const [pick, setPick] = useState(preselect ?? "");
+  const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<LeadImportResult | null>(null);
+  const [importedInto, setImportedInto] = useState("");
   const [error, setError] = useState("");
+
+  // A list removed or switched elsewhere falls back to no list.
+  useEffect(() => {
+    if (lists.length && pick && pick !== NEW_LIST && !choices.some((l) => l.id === pick)) setPick("");
+  }, [lists]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (preselect !== undefined) setPick(preselect);
+  }, [preselect]);
+
+  const name = list
+    ? list.name
+    : pick === NEW_LIST
+      ? newName.trim()
+      : (choices.find((l) => l.id === pick)?.name ?? "");
+  const missingName = !list && pick === NEW_LIST && !name;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!file) return;
+    if (!file || missingName) return;
     setBusy(true);
     const { data, error } = await api.POST("/v1/brands/{brand}/leads/import", {
-      params: { path: { brand: brandId }, query: list ? { list } : {} },
+      params: { path: { brand: brandId }, query: name ? { list: name } : {} },
       body: await file.text(),
       bodySerializer: (b: string) => b,
       headers: { "Content-Type": "text/csv" },
@@ -439,93 +473,147 @@ function Import({ ws, onDone, go }: { ws: string; onDone: () => void; go: (t: Ta
     if (error) return setError(errorMessage(error));
     setError("");
     setResult(data ?? null);
+    setImportedInto(name);
     setFile(null);
+    // The new list is now one of the brand's: pick it once the lists reload.
+    if (pick === NEW_LIST && data?.list_id) {
+      setPick(data.list_id);
+      setNewName("");
+    }
     onDone();
   }
 
   return (
-    <Card
-      title="Import leads from a CSV"
-      description="Exports from Apollo, Clay, your CRM or a spreadsheet all work."
-    >
-      <form onSubmit={submit} className="space-y-4 text-sm">
-        <p className="text-muted-foreground">
-          Only an <code>email</code> column is required. Name, company, title,
-          phone, LinkedIn and website columns are recognised by their usual
-          names. Every other column is kept as a custom field, so a{" "}
-          <code>pain_point</code> column becomes <code>{"{{pain_point}}"}</code>{" "}
-          in your emails. Leads already here are updated, not duplicated.
-        </p>
-        <FilePicker
-          file={file}
-          onChange={setFile}
-          accept=".csv,text/csv"
-          example={{
-            name: "leads-example.csv",
-            content:
-              "email,first_name,last_name,company,title,pain_point\nana@acme-com.example,Ana,Diaz,Acme,Founder,slow outbound\n",
-          }}
-        />
-        <div className="flex flex-wrap items-end gap-3">
+    <form onSubmit={submit} className="space-y-4 text-sm">
+      <p className="text-muted-foreground">
+        Only an <code>email</code> column is required. Name, company, title,
+        phone, LinkedIn and website columns are recognised by their usual
+        names. Every other column is kept as a custom field, so a{" "}
+        <code>pain_point</code> column becomes <code>{"{{pain_point}}"}</code>{" "}
+        in your emails. Leads already here are updated, not duplicated.
+      </p>
+      <FilePicker
+        file={file}
+        onChange={setFile}
+        accept=".csv,text/csv"
+        example={{
+          name: "leads-example.csv",
+          content:
+            "email,first_name,last_name,company,title,pain_point\nana@acme-com.example,Ana,Diaz,Acme,Founder,slow outbound\n",
+        }}
+      />
+      <div className="flex flex-wrap items-end gap-3">
+        {!list && (
           <label className="block">
-            <span className="mb-1 block font-medium">
-              Add them to a list{" "}
-              <span className="font-normal text-muted-foreground">
-                (optional)
-              </span>
-            </span>
+            <span className="mb-1 block font-medium">Add them to a list</span>
+            <select
+              className={field}
+              value={pick}
+              onChange={(e) => setPick(e.target.value)}
+            >
+              <option value="">No list</option>
+              {choices.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name} ({l.leads.toLocaleString()})
+                </option>
+              ))}
+              <option value={NEW_LIST}>New list…</option>
+            </select>
+          </label>
+        )}
+        {!list && pick === NEW_LIST && (
+          <label className="block">
+            <span className="mb-1 block font-medium">New list name</span>
             <input
               className={field}
               placeholder="e.g. Q4 founders"
-              value={list}
-              onChange={(e) => setList(e.target.value)}
+              maxLength={100}
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
             />
-            <span className="mt-1 block text-xs text-muted-foreground">
-              A new name creates the list. You add lists to sequences.
-            </span>
           </label>
-          <Button
-            disabled={!file || busy}
-            title={!file ? "Choose a CSV file first" : undefined}
-          >
-            {busy ? "Importing…" : "Import leads"}
-          </Button>
-        </div>
-        <ErrorText>{error}</ErrorText>
-        {result && (
-          <div className="rounded bg-muted p-3">
-            <p>
-              {result.created.toLocaleString()} added,{" "}
-              {result.updated.toLocaleString()} updated
-              {result.duplicates > 0 &&
-                `, ${result.duplicates} duplicate rows merged`}
-              {result.errors.length > 0 && `, ${result.errors.length} skipped`}.
-              {result.suppressed > 0 &&
-                ` ${result.suppressed} are on the suppression list and won't be emailed.`}
-            </p>
-            {result.list_id && (
-              <button
-                type="button"
-                className="mt-2 underline"
-                onClick={() => go("sequences")}
-              >
-                Add this list to a sequence →
-              </button>
-            )}
-            {result.errors.length > 0 && (
-              <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-red-600 dark:text-red-400">
-                {result.errors.slice(0, 200).map((e) => (
-                  <li key={`${e.line}-${e.email}`}>
-                    Line {e.line}
-                    {e.email ? ` (${e.email})` : ""}: {e.error}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
         )}
-      </form>
-    </Card>
+        <Button
+          disabled={!file || busy || missingName}
+          title={
+            !file
+              ? "Choose a CSV file first"
+              : missingName
+                ? "Name the new list first"
+                : undefined
+          }
+        >
+          {busy ? "Importing…" : "Import leads"}
+        </Button>
+      </div>
+      <ErrorText>{error}</ErrorText>
+      {result && (
+        <div className="rounded bg-muted p-3">
+          <p>
+            {result.created.toLocaleString()} added,{" "}
+            {result.updated.toLocaleString()} updated
+            {result.duplicates > 0 &&
+              `, ${result.duplicates} duplicate rows merged`}
+            {result.errors.length > 0 && `, ${result.errors.length} skipped`}
+            {result.list_id && importedInto ? ` in ${importedInto}` : ""}.
+            {result.suppressed > 0 &&
+              ` ${result.suppressed} are on the suppression list and won't be emailed.`}
+          </p>
+          {result.list_id && (
+            <button
+              type="button"
+              className="mt-2 underline"
+              onClick={() => go("sequences")}
+            >
+              Add this list to a sequence →
+            </button>
+          )}
+          {result.errors.length > 0 && (
+            <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-red-600 dark:text-red-400">
+              {result.errors.slice(0, 200).map((e) => (
+                <li key={`${e.line}-${e.email}`}>
+                  Line {e.line}
+                  {e.email ? ` (${e.email})` : ""}: {e.error}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </form>
+  );
+}
+
+const NEW_LIST = "__new";
+
+// The import on a list's own page: leads go straight into that list.
+export function ImportLeadsDialog({
+  ws,
+  list,
+  onClose,
+  onDone,
+  go,
+}: {
+  ws: string;
+  list: LeadList;
+  onClose: () => void;
+  onDone: () => void;
+  go: (t: Tab) => void;
+}) {
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Import leads into {list.name}</DialogTitle>
+          <DialogDescription>
+            Upload a CSV from Apollo, Clay, your CRM or a spreadsheet. Every
+            lead in it is added to this list.
+          </DialogDescription>
+        </DialogHeader>
+        <ImportLeads ws={ws} lists={[list]} list={list} onDone={onDone} go={go} />
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -790,12 +878,7 @@ function LeadDialog({
             <div className="flex flex-wrap items-center gap-1.5">
               <Verdict v={lead.verification} />
               {lead.suppressed && (
-                <Badge
-                  tone="red"
-                  title="On the suppression list: never emailed"
-                >
-                  Won't be emailed
-                </Badge>
+                <WontBeEmailed why={lead.suppression} />
               )}
               {lead.list_ids
                 .map((id) => listName(id))

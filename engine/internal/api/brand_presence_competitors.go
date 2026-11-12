@@ -25,8 +25,9 @@ import (
 )
 
 // Where competitors appear: each competitor the brand tracks (its SEO
-// competitors) is scanned on a schedule, once a month unless the brand
-// (for its top competitors or the rest) or the competitor says otherwise. A scan reads search results for the competitor's name and
+// competitors) is scanned on a schedule, the top ones once a month and
+// the rest every 90 days unless the brand (for its top competitors or
+// the rest) or the competitor says otherwise. A scan reads search results for the competitor's name and
 // who links to its site, on the workspace's own connections and within
 // their budgets, and the pages AI answers cite when they name it. Each
 // page is kept with its type, whether it looks paid for (only with
@@ -42,10 +43,12 @@ const (
 	// competitorSearchDepth is how many search results one scan reads.
 	competitorSearchDepth = 50
 	// presenceDefaultEveryDays is how often a new brand scans its top
-	// competitors (the rest already default to monthly): once a month.
-	// It is written on insert rather than as the column's default, so
-	// the previous version's own default still holds after a rollback.
-	presenceDefaultEveryDays = 30
+	// competitors: once a month. The rest default to every 90 days
+	// (presenceDefaultRestEveryDays). Both are written on insert rather
+	// than as the column's default, so the previous version's own
+	// default still holds after a rollback.
+	presenceDefaultEveryDays     = 30
+	presenceDefaultRestEveryDays = 90
 )
 
 func (s *Server) routesPresenceCompetitors(mux *http.ServeMux) {

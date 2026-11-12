@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -30,12 +31,17 @@ func (s *Server) routesAdSuggestions(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/suggestions", s.inBrand(auth.ScopeAnalyticsRead, s.listAdSuggestions))
 	mux.HandleFunc("POST /v1/brands/{brand}/ads/suggestions/refresh", s.onBrand(manage, s.refreshAdSuggestions))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/suggestions/refresh", s.inBrand(manage, s.refreshAdSuggestions))
-	mux.HandleFunc("POST /v1/brands/{brand}/ads/suggestions/{id}/approve", s.onBrand(manage, s.approveAdSuggestion))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/suggestions/{id}/approve", s.inBrand(manage, s.approveAdSuggestion))
-	mux.HandleFunc("POST /v1/brands/{brand}/ads/suggestions/{id}/dismiss", s.onBrand(manage, s.dismissAdSuggestion))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/suggestions/{id}/dismiss", s.inBrand(manage, s.dismissAdSuggestion))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/suggestions/{id}/approve", s.onBrand(manage, s.approveAdFinding))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/suggestions/{id}/approve", s.inBrand(manage, s.approveAdFinding))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/suggestions/{id}/dismiss", s.onBrand(manage, s.dismissAdFinding))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/suggestions/{id}/dismiss", s.inBrand(manage, s.dismissAdFinding))
 	mux.HandleFunc("GET /v1/brands/{brand}/ads/recommendations", s.onBrand(auth.ScopeAnalyticsRead, s.listAdRecommendations))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/recommendations", s.inBrand(auth.ScopeAnalyticsRead, s.listAdRecommendations))
+	// Alerts (adsync/alerts.go) are findings with autonomy alert; a person
+	// acknowledges one instead of approving or dismissing it. The same
+	// rows are the findings queue (ad_findings.go), served by the same
+	// handlers.
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/suggestions/{id}/acknowledge", s.onBrand(manage, s.acknowledgeAdFinding))
 }
 
 type adSuggestionOut struct {
@@ -65,11 +71,26 @@ type adSuggestionOut struct {
 	JudgedAt     *time.Time     `json:"judged_at"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
+	// The findings queue (plans/paid-ads/plan.md): the autonomy class
+	// (auto, approve, alert), the unit the evidence is in, the expected
+	// change in cost per new paying customer, whether the rule only
+	// recorded it (shadow) or applied it on its own, when a person
+	// reverted it and with which change, and the rule that made it.
+	Autonomy       string     `json:"autonomy"`
+	Unit           string     `json:"unit"`
+	ImpactMicros   *int64     `json:"impact_micros"`
+	Shadow         bool       `json:"shadow"`
+	AppliedAuto    bool       `json:"applied_auto"`
+	RevertedAt     *time.Time `json:"reverted_at"`
+	RevertChangeID *string    `json:"revert_change_id"`
+	Rule           string     `json:"rule"`
+	RuleVersion    int        `json:"rule_version"`
 }
 
 const adSuggestionCols = `x.id, e.id, e.name, a.id, a.name, a.connector, a.currency, x.brand_id, x.kind, x.status, x.reason, x.evidence, x.proposed, x.change_id, x.test_id,
 	x.decided_by, x.decided_at, to_char(x.measure_from, 'YYYY-MM-DD'), to_char(x.measure_until, 'YYYY-MM-DD'), x.window_note, x.verdict, x.verdict_note, x.result,
-	x.judged_at, x.created_at, x.updated_at`
+	x.judged_at, x.created_at, x.updated_at,
+	x.autonomy, x.unit, x.impact_micros, x.shadow, x.applied_auto, x.reverted_at, x.revert_change_id, x.rule, x.rule_version`
 
 const adSuggestionFrom = `FROM ad_suggestions x JOIN ad_entities e ON e.id = x.ad_entity_id JOIN ad_accounts a ON a.id = e.ad_account_id`
 
@@ -78,7 +99,8 @@ func scanAdSuggestion(row pgx.Row) (adSuggestionOut, error) {
 	var ev, pr, res []byte
 	err := row.Scan(&v.ID, &v.CampaignID, &v.CampaignName, &v.AccountID, &v.AccountName, &v.Connector, &v.Currency, &v.BrandID, &v.Kind, &v.Status,
 		&v.Reason, &ev, &pr, &v.ChangeID, &v.TestID, &v.DecidedBy, &v.DecidedAt, &v.MeasureFrom, &v.MeasureUntil, &v.WindowNote, &v.Verdict, &v.VerdictNote, &res,
-		&v.JudgedAt, &v.CreatedAt, &v.UpdatedAt)
+		&v.JudgedAt, &v.CreatedAt, &v.UpdatedAt,
+		&v.Autonomy, &v.Unit, &v.ImpactMicros, &v.Shadow, &v.AppliedAuto, &v.RevertedAt, &v.RevertChangeID, &v.Rule, &v.RuleVersion)
 	if err != nil {
 		return v, err
 	}
@@ -89,9 +111,26 @@ func scanAdSuggestion(row pgx.Row) (adSuggestionOut, error) {
 	return v, nil
 }
 
-var adSuggestionStatuses = map[string]bool{"open": true, "dismissed": true, "expired": true, "measuring": true, "testing": true, "judged": true}
+var adSuggestionStatuses = map[string]bool{"open": true, "dismissed": true, "expired": true, "measuring": true, "testing": true, "judged": true, "acknowledged": true, "shadow": true}
+
+var adSuggestionAutonomies = map[string]bool{"auto": true, "approve": true, "alert": true}
+
+// adSuggestionKind matches a kind filter: a lever (budget_up) or an alert
+// (alert.spend_anomaly), lowercase.
+var adSuggestionKind = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)?$`)
+
+// adSuggestionsOrder is the suggestions list's order: open first, then
+// measuring and testing, judged, and the rest, newest first.
+const adSuggestionsOrder = `ORDER BY CASE x.status WHEN 'open' THEN 0 WHEN 'measuring' THEN 1 WHEN 'testing' THEN 1 WHEN 'judged' THEN 2 ELSE 3 END, x.updated_at DESC, x.id`
 
 func (s *Server) listAdSuggestions(w http.ResponseWriter, r *http.Request) {
+	s.listAdQueue(w, r, adSuggestionsOrder)
+}
+
+// listAdQueue lists the findings queue (ad_suggestions) in order: the
+// suggestions routes and the findings routes (ad_findings.go) differ only
+// in it.
+func (s *Server) listAdQueue(w http.ResponseWriter, r *http.Request, order string) {
 	a := accessFrom(r.Context())
 	brand, ok := s.brandFilter(w, r)
 	if !ok {
@@ -116,11 +155,27 @@ func (s *Server) listAdSuggestions(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := q.Get("status"); v != "" {
 		if !adSuggestionStatuses[v] {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "status is open, dismissed, expired, measuring, testing or judged")
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "status is open, dismissed, expired, measuring, testing, judged, acknowledged or shadow")
 			return
 		}
 		args = append(args, v)
 		where += ` AND x.status = $` + strconv.Itoa(len(args))
+	}
+	if v := q.Get("autonomy"); v != "" {
+		if !adSuggestionAutonomies[v] {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "autonomy is auto, approve or alert")
+			return
+		}
+		args = append(args, v)
+		where += ` AND x.autonomy = $` + strconv.Itoa(len(args))
+	}
+	if v := q.Get("kind"); v != "" {
+		if !adSuggestionKind.MatchString(v) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is a finding kind, such as budget_down or alert.target_stale")
+			return
+		}
+		args = append(args, v)
+		where += ` AND x.kind = $` + strconv.Itoa(len(args))
 	}
 	where += brand.sql(`x.brand_id`, &args)
 	limit, ok := pageLimit(w, r, 100, 500)
@@ -128,9 +183,7 @@ func (s *Server) listAdSuggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args = append(args, limit)
-	rows, err := s.pool.Query(r.Context(), `SELECT `+adSuggestionCols+` `+adSuggestionFrom+` WHERE `+where+`
-		ORDER BY CASE x.status WHEN 'open' THEN 0 WHEN 'measuring' THEN 1 WHEN 'testing' THEN 1 WHEN 'judged' THEN 2 ELSE 3 END, x.updated_at DESC, x.id
-		LIMIT $`+strconv.Itoa(len(args)), args...)
+	rows, err := s.pool.Query(r.Context(), `SELECT `+adSuggestionCols+` `+adSuggestionFrom+` WHERE `+where+` `+order+` LIMIT $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -148,71 +201,18 @@ func (s *Server) listAdSuggestions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) refreshAdSuggestions(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	if err := adsuggest.Enqueue(r.Context(), s.pool, a.WorkspaceID, time.Now()); err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
-}
-
-// loadAdSuggestion reads one open suggestion the caller may decide,
-// answering the error itself when it can't.
-func (s *Server) loadAdSuggestion(w http.ResponseWriter, r *http.Request, a *access) (adSuggestionOut, bool) {
-	id := r.PathValue("id")
-	if !isUUID(id) {
-		writeError(w, r, http.StatusNotFound, "not_found", "suggestion not found")
-		return adSuggestionOut{}, false
-	}
-	v, err := scanAdSuggestion(s.pool.QueryRow(r.Context(), `SELECT `+adSuggestionCols+` `+adSuggestionFrom+` WHERE x.workspace_id = $1 AND x.id = $2`, a.WorkspaceID, id))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
-		writeError(w, r, http.StatusNotFound, "not_found", "suggestion not found")
-		return v, false
-	}
+	queued, next, err := adsuggest.EnqueueOnce(r.Context(), s.pool, a.WorkspaceID, time.Now())
 	if err != nil {
 		s.internal(w, r, err)
-		return v, false
+		return
 	}
-	if !a.writes(v.BrandID) {
-		writeError(w, r, http.StatusForbidden, "forbidden", "you can only decide suggestions for your own brands")
-		return v, false
-	}
-	if v.Status != "open" {
-		writeError(w, r, http.StatusConflict, "not_active", "this suggestion is "+v.Status+", not open")
-		return v, false
-	}
-	return v, true
+	writeJSON(w, http.StatusAccepted, refreshAnswer{Queued: queued, NextAt: next})
 }
 
-func (s *Server) approveAdSuggestion(w http.ResponseWriter, r *http.Request) {
-	a := accessFrom(r.Context())
-	// An optional body: {"test": true} tests a budget suggestion inside the
-	// network (ad_tests.go) instead of making it.
-	var in struct {
-		Test bool `json:"test"`
-	}
-	if r.ContentLength != 0 && !decode(w, r, &in) {
-		return
-	}
-	v, ok := s.loadAdSuggestion(w, r, a)
-	if !ok {
-		return
-	}
-	// A person approves; an agent only a suggestion that saves money on a
-	// brand's own campaign, where an extension lets that brand's savings
-	// apply on their own (Options.AdAutoApprove).
-	auto := a.ActorType != "human"
-	if auto && (in.Test || !s.adAutoApproves(r.Context(), a.WorkspaceID, v)) {
-		writeError(w, r, http.StatusForbidden, "forbidden", "only a person approves this suggestion, in Outflare under Paid ads, Suggestions; agents change campaigns with the campaign calls, which follow their grants")
-		return
-	}
-	c, ok := s.loadAdCampaign(w, r, nil, a, v.CampaignID)
-	if !ok {
-		return
-	}
-	if in.Test {
-		s.testAdSuggestion(w, r, a, v, c)
-		return
-	}
+// approveCampaignChange makes a finding's change of the kinds the
+// campaign calls know (pause, resume, budget, keywords, bidding) exactly
+// as those calls do, and starts measuring it.
+func (s *Server) approveCampaignChange(w http.ResponseWriter, r *http.Request, a *access, v adSuggestionOut, c adCampaignRow, auto bool) {
 	var kind string
 	var after adsync.ChangeState
 	switch v.Kind {
@@ -258,19 +258,8 @@ func (s *Server) approveAdSuggestion(w http.ResponseWriter, r *http.Request) {
 		nb := int64(b)
 		after.DailyBudgetMicros = &nb
 	}
-	if c.status == connectors.AdRemoved {
-		writeError(w, r, http.StatusConflict, "not_active", "the campaign was removed on the platform")
-		return
-	}
 	if s.adChangeQueued(w, r, c.id, kind) || !s.adsManagerFor(w, r, a.WorkspaceID, c.integrationID) {
 		return
-	}
-	// The rate the window is planned on: the days the suggestion read.
-	var rate float64
-	if conv, ok := v.Evidence["conversions"].(float64); ok {
-		if days, ok := v.Evidence["days"].(float64); ok && days > 0 {
-			rate = conv / days
-		}
 	}
 	var out adSuggestionOut
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
@@ -286,7 +275,7 @@ func (s *Server) approveAdSuggestion(w http.ResponseWriter, r *http.Request) {
 		if tag.RowsAffected() == 0 {
 			return errAdSuggestionTaken("this suggestion was decided a moment ago")
 		}
-		if err := adsuggest.Started(r.Context(), tx, v.ID, v.Kind, rate, time.Now().UTC()); err != nil {
+		if err := adsuggest.Started(r.Context(), tx, v.ID, v.Kind, 0, time.Now().UTC()); err != nil {
 			return err
 		}
 		if err := recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "ad_suggestion.approved", "ad_suggestion", v.ID,
@@ -307,13 +296,6 @@ func (s *Server) approveAdSuggestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, out)
-}
-
-// adAutoApproves says whether an agent may approve a suggestion without a
-// person: only a kind that saves money, on a brand's campaign (never one
-// every brand shares), when the extension's hook allows it for the brand.
-func (s *Server) adAutoApproves(ctx context.Context, ws string, v adSuggestionOut) bool {
-	return s.adAutoApprove != nil && adsuggest.Saves(v.Kind) && v.BrandID != nil && *v.BrandID != "" && s.adAutoApprove(ctx, ws, *v.BrandID, v.Kind)
 }
 
 // SetAdAutoApprove replaces the hook that lets agents approve saving
@@ -406,46 +388,6 @@ func (s *Server) keywordManagerFor(w http.ResponseWriter, r *http.Request, ws, i
 		return false
 	}
 	return true
-}
-
-func (s *Server) dismissAdSuggestion(w http.ResponseWriter, r *http.Request) {
-	a := accessFrom(r.Context())
-	v, ok := s.loadAdSuggestion(w, r, a)
-	if !ok {
-		return
-	}
-	var out adSuggestionOut
-	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		var actor *string
-		if a.ActorID != "" {
-			actor = &a.ActorID
-		}
-		tag, err := tx.Exec(r.Context(), `UPDATE ad_suggestions SET status = 'dismissed', decided_by = $2, decided_at = now(), updated_at = now()
-			WHERE id = $1 AND status = 'open'`, v.ID, actor)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return errAdSuggestionTaken("this suggestion was decided a moment ago")
-		}
-		if err := recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "ad_suggestion.dismissed", "ad_suggestion", v.ID,
-			map[string]any{"suggestion_id": v.ID, "campaign_id": v.CampaignID, "connector": v.Connector, "kind": v.Kind, "brand_id": v.BrandID},
-			map[string]any{"connector": v.Connector, "kind": v.Kind}); err != nil {
-			return err
-		}
-		out, err = scanAdSuggestion(tx.QueryRow(r.Context(), `SELECT `+adSuggestionCols+` `+adSuggestionFrom+` WHERE x.id = $1`, v.ID))
-		return err
-	})
-	var conflict errAdSuggestionTaken
-	if errors.As(err, &conflict) {
-		writeError(w, r, http.StatusConflict, "not_active", string(conflict))
-		return
-	}
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 // listAdRecommendations asks the platform live for its own

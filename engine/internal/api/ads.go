@@ -337,6 +337,13 @@ func (s *Server) updateAdAccount(w http.ResponseWriter, r *http.Request) {
 				WHERE x.workspace_id = $1 AND x.ad_entity_id = e.id AND e.ad_account_id = $2 AND e.brand_id IS NULL`, a.WorkspaceID, id, brandID); err != nil {
 				return err
 			}
+			// An ad account on a brand means ads will be written from its
+			// knowledge sheet, so the website is read daily from now on.
+			if brandID != nil {
+				if err := s.knowledgeRefreshOn(r.Context(), tx, a.WorkspaceID, *brandID); err != nil {
+					return err
+				}
+			}
 		}
 		meta := map[string]any{"connector": out.Connector}
 		if req.Brand != nil {
@@ -385,6 +392,11 @@ type adTotals struct {
 	LinkClicks       *int64   `json:"link_clicks"`
 	LandingPageViews *int64   `json:"landing_page_views"`
 	VideoViews       *int64   `json:"video_views"`
+	// Every conversion the platform counted, its secondary actions
+	// included (Google's all conversions), and their value; null where no
+	// day had them.
+	AllConversions           *float64 `json:"all_conversions"`
+	AllConversionValueMicros *int64   `json:"all_conversion_value_micros"`
 	// reachImpressions are the impressions on days with a reach.
 	reachImpressions *int64
 }
@@ -392,7 +404,7 @@ type adTotals struct {
 // dest is where a row of adSums scans to.
 func (t *adTotals) dest() []any {
 	return []any{&t.SpendMicros, &t.Impressions, &t.Clicks, &t.Conversions, &t.ConversionValueMicros,
-		&t.DailyReach, &t.reachImpressions, &t.LinkClicks, &t.LandingPageViews, &t.VideoViews}
+		&t.DailyReach, &t.reachImpressions, &t.LinkClicks, &t.LandingPageViews, &t.VideoViews, &t.AllConversions, &t.AllConversionValueMicros}
 }
 
 func (t *adTotals) derive() {
@@ -421,7 +433,8 @@ func (t *adTotals) derive() {
 const adSums = `COALESCE(sum(m.spend_micros), 0)::bigint, COALESCE(sum(m.impressions), 0)::bigint, COALESCE(sum(m.clicks), 0)::bigint,
 	sum(m.conversions)::float8, sum(m.conversion_value_micros)::bigint,
 	sum(m.reach)::bigint, sum(m.impressions) FILTER (WHERE m.reach IS NOT NULL)::bigint,
-	sum(m.link_clicks)::bigint, sum(m.landing_page_views)::bigint, sum(m.video_views)::bigint`
+	sum(m.link_clicks)::bigint, sum(m.landing_page_views)::bigint, sum(m.video_views)::bigint,
+	sum(m.all_conversions)::float8, sum(m.all_conversion_value_micros)::bigint`
 
 type adFilter struct {
 	from, to string
@@ -737,7 +750,8 @@ func (s *Server) adsSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"from": f.from, "to": f.to, "group": group, "data": data, "totals": totals,
 		"notes": []string{"Money is in micros (millionths) of each account's currency; rows in different currencies are never added together.",
-			"Conversions, their value and platform_roas are what each platform claims. Platforms count overlapping conversions, so never add them across platforms."}})
+			"Conversions, their value and platform_roas are what each platform claims. Platforms count overlapping conversions, so never add them across platforms.",
+			"all_conversions also counts the platform's secondary conversion actions (Google's all conversions); conversions are the primary ones its bidding uses."}})
 }
 
 func (s *Server) syncAds(w http.ResponseWriter, r *http.Request) {

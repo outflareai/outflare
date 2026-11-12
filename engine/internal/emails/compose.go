@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	stdhtml "html"
 	"net/mail"
 	"slices"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/brands"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 )
 
@@ -56,6 +58,11 @@ func invalid(msg string) error { return refuse(400, "invalid_request", msg) }
 const (
 	VarUnsubscribe = "unsubscribe_url"
 	VarEmailID     = "email_id"
+	// The brand's postal address on one line, and its legal name (or its
+	// name), from "About your company". Lifecycle email carries the
+	// address in its footer even when the template leaves it out.
+	VarBrandAddress   = "brand_address"
+	VarBrandLegalName = "brand_legal_name"
 )
 
 // Compose fills in d and returns the email to queue. d.ID is set if empty.
@@ -196,6 +203,17 @@ func (s *Service) Compose(ctx context.Context, q jobs.Querier, d Draft) (NewEmai
 	}
 	unsubscribe := s.UnsubscribeURL(e.ID)
 	data[VarUnsubscribe], data[VarEmailID] = unsubscribe, e.ID
+	var business brands.Business
+	var brandName string
+	if e.BrandID != nil {
+		var err error
+		business, brandName, err = brands.Load(ctx, q, e.WorkspaceID, *e.BrandID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return e, err
+		}
+	}
+	data[VarBrandAddress], data[VarBrandLegalName] = business.Address.String(), business.Name(brandName)
+	footer := business.Footer(brandName)
 	out, err := Render(subject, html, text, defs, data)
 	if err != nil {
 		return e, invalid("the content has a mistake in " + err.Error())
@@ -209,21 +227,51 @@ func (s *Service) Compose(ctx context.Context, q jobs.Querier, d Draft) (NewEmai
 	if strings.TrimSpace(out.Subject) == "" {
 		return e, invalid("the subject is empty once filled in")
 	}
-	// Lifecycle email always carries a way out, even if the template
-	// forgot one.
-	if purpose == "lifecycle" && !strings.Contains(subject+html+text, VarUnsubscribe) {
-		if out.HTML != "" {
-			out.HTML += `<p style="font-size:12px;color:#6b7280;margin-top:24px"><a href="` + unsubscribe + `" style="color:#6b7280">Unsubscribe</a></p>`
-		}
-		if out.Text != "" {
-			out.Text += "\n\nUnsubscribe: " + unsubscribe
-		}
+	// Lifecycle email always carries a way out and the brand's postal
+	// address (CAN-SPAM, the Spam Act, PECR), even if the template forgot
+	// them.
+	if purpose == "lifecycle" {
+		all := subject + html + text
+		needUnsub := !strings.Contains(all, VarUnsubscribe)
+		needAddr := footer != "" && !strings.Contains(all, VarBrandAddress)
+		out.HTML, out.Text = addFooter(out.HTML, out.Text, unsubscribe, footer, needUnsub, needAddr)
 	}
 	if out.Text == "" && out.HTML != "" {
 		out.Text = PlainText(out.HTML)
 	}
 	e.Subject, e.HTML, e.Text = out.Subject, out.HTML, out.Text
 	return e, nil
+}
+
+// addFooter adds the brand's address line and an unsubscribe link to the
+// end of each part that has content.
+func addFooter(html, text, unsubscribe, address string, unsub, addr bool) (string, string) {
+	if !unsub && !addr {
+		return html, text
+	}
+	if html != "" {
+		var parts []string
+		if addr {
+			parts = append(parts, stdhtml.EscapeString(address))
+		}
+		if unsub {
+			parts = append(parts, `<a href="`+stdhtml.EscapeString(unsubscribe)+`" style="color:#6b7280">Unsubscribe</a>`)
+		}
+		html += `<p style="font-size:12px;color:#6b7280;margin-top:24px">` + strings.Join(parts, "<br>") + `</p>`
+	}
+	if text != "" {
+		text += "\n\n"
+		if addr {
+			text += address
+			if unsub {
+				text += "\n"
+			}
+		}
+		if unsub {
+			text += "Unsubscribe: " + unsubscribe
+		}
+	}
+	return html, text
 }
 
 func stripNUL(s string) string { return strings.ReplaceAll(s, "\x00", "") }

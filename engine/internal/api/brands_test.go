@@ -77,6 +77,26 @@ func TestBrandsContextAndFilters(t *testing.T) {
 		t.Fatalf("stale brand context: %v", e)
 	}
 
+	// Business details: entered once, checked, and read by agents.
+	owner.must(400, "PATCH", base+"/brands/repocket/context", map[string]any{"address": map[string]any{"line1": "1 Example St", "city": "Sydney", "country": "ZZ"}})
+	owner.must(400, "PATCH", base+"/brands/repocket/context", map[string]any{"address": map[string]any{"city": "Sydney", "country": "AU"}})
+	owner.must(400, "PATCH", base+"/brands/repocket/context", map[string]any{"tax_id": strings.Repeat("1", 61)})
+	biz := owner.must(200, "PATCH", base+"/brands/repocket/context", map[string]any{
+		"legal_name": " Repocket Example Pty Ltd ", "tax_id": "ABN 00 000 000 000",
+		"address": map[string]any{"line1": "Level 2, 10 Example Street", "city": "Sydney", "region": "NSW", "postal_code": "2000", "country": "au"},
+	})
+	if biz["legal_name"] != "Repocket Example Pty Ltd" || biz["address"].(map[string]any)["country"] != "AU" ||
+		biz["address_text"] != "Level 2, 10 Example Street, Sydney NSW 2000, Australia" || biz["version"] != 3.0 {
+		t.Fatalf("business details: %v", biz)
+	}
+	if md := owner.must(200, "GET", base+"/context?brand=repocket", nil)["markdown"].(string); !strings.Contains(md, "- Postal address: Level 2, 10 Example Street, Sydney NSW 2000, Australia") ||
+		!strings.Contains(md, "- Legal name: Repocket Example Pty Ltd") {
+		t.Fatalf("agent context without business details:\n%s", md)
+	}
+	if same := owner.must(200, "PATCH", base+"/brands/repocket/context", map[string]any{"address": biz["address"]}); same["version"] != 3.0 {
+		t.Fatalf("unchanged address bumped the version: %v", same["version"])
+	}
+
 	// Memories at two levels: company and brand.
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Jack approves new domains", "pinned": true})
 	rm := owner.must(201, "POST", base+"/memories", map[string]any{"text": "No discounts over 20%", "brand_id": "repocket"})
@@ -515,7 +535,7 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 	if check := owner.must(200, "POST", base+"/recipients/check", map[string]any{"emails": []string{"li@one-io.example"}, "brand": "geonode"})["data"].([]any)[0].(map[string]any); check["allowed"] != true {
 		t.Fatalf("same brand: %v", check)
 	}
-	owner.must(404, "POST", base+"/recipients/check", map[string]any{"emails": []string{"li@one-io.example"}, "brand": "nope"})
+	owner.must(404, "POST", "/v1/brands/nope/recipients/check", map[string]any{"emails": []string{"li@one-io.example"}})
 
 	owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"mailbox_ids": []string{boxes["bo@acme.test"]}})
 	repSeq := sequence("Repocket founders", "repocket")
@@ -538,27 +558,22 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 		t.Fatalf("rules event: %+v", ev)
 	}
 
-	// Reports by brand.
+	// Each brand's report counts only its own.
 	// (Sends are dated by the test clock, blocks by the database's.)
-	byBrand := func(query string) map[string]map[string]any {
-		rows := map[string]map[string]any{}
-		for _, r := range owner.must(200, "GET", base+"/reports?group_by=brand"+query, nil)["rows"].([]any) {
-			rows[r.(map[string]any)["name"].(string)] = r.(map[string]any)
-		}
-		return rows
+	totals := func(brand, query string) map[string]any {
+		return owner.must(200, "GET", "/v1/brands/"+brand+"/reports?"+query, nil)["totals"].(map[string]any)
 	}
-	if rows := byBrand("&from=2030-01-01&to=2030-01-31"); rows["Geonode"]["sent"] != 2.0 || rows["Repocket"] != nil {
-		t.Fatalf("sends by brand: %v", rows)
+	if g, r := totals(geonode, "from=2030-01-01&to=2030-01-31"), totals(repocket, "from=2030-01-01&to=2030-01-31"); g["sent"] != 2.0 || r["sent"] != 0.0 {
+		t.Fatalf("sends by brand: %v %v", g, r)
 	}
-	if rows := byBrand(""); rows["Repocket"]["blocked"] != 2.0 || rows["Geonode"] != nil {
-		t.Fatalf("blocks by brand: %v", rows)
+	if g, r := totals(geonode, ""), totals(repocket, ""); r["blocked"] != 2.0 || g["blocked"] != 0.0 {
+		t.Fatalf("blocks by brand: %v %v", g, r)
 	}
 	if r := owner.must(200, "GET", base+"/reports?brand=repocket&from=2030-01-01&to=2030-01-31", nil); r["totals"].(map[string]any)["sent"] != 0.0 {
 		t.Fatalf("repocket report: %v", r["totals"])
 	}
-	out := owner.must(200, "GET", base+"/outcomes/report?group_by=brand&from=2030-01-01&to=2030-01-31", nil)
-	if r0 := out["rows"].([]any)[0].(map[string]any); r0["name"] != "Geonode" || r0["sent"] != 2.0 {
-		t.Fatalf("outcomes by brand: %v", out["rows"])
+	if out := owner.must(200, "GET", "/v1/brands/"+geonode+"/outcomes/report?from=2030-01-01&to=2030-01-31", nil); out["totals"].(map[string]any)["sent"] != 2.0 {
+		t.Fatalf("geonode outcomes: %v", out["totals"])
 	}
 	if r := owner.must(200, "GET", base+"/outcomes/report?brand=repocket&from=2030-01-01&to=2030-01-31", nil); r["totals"].(map[string]any)["sent"] != 0.0 {
 		t.Fatalf("repocket outcomes: %v", r["totals"])

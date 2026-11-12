@@ -8,6 +8,9 @@
 // OUTFLARE_BRAND=<handle> makes get_context and the list tools default to
 // one brand; the agent can still ask for others.
 //
+// OUTFLARE_MCP_TOOLS=all lists every tool; by default the app sees the core
+// set, and find_tools and call_tool reach the rest (see toolbox.ts).
+//
 // OUTFLARE_MCP_HTTP=127.0.0.1:<port> serves Streamable HTTP instead, for the
 // engine to proxy at /mcp (see http.ts); it then needs
 // OUTFLARE_MCP_PROXY_SECRET and takes each session's token from the request.
@@ -16,6 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createClient } from "@outflare/sdk";
 import { createServer, VERSION } from "./server.js";
 import { serveHttp } from "./http.js";
+import { toolMode } from "./toolbox.js";
 
 // opt reads the optional setting OUTFLARE_<name>.
 function opt(name: string): string | undefined {
@@ -48,11 +52,14 @@ async function main() {
     }
     workspace = data.token.workspace_id ?? undefined;
   }
+  const meta = await client.GET("/v1/meta").catch(() => undefined);
   const server = createServer({
     client,
     workspace: workspace ?? env("WORKSPACE"),
     readOnly: ["1", "true", "yes"].includes((opt("MCP_READ_ONLY") ?? "").toLowerCase()),
     brand: opt("BRAND"),
+    tools: toolMode(opt("MCP_TOOLS")),
+    version: (meta?.data as { version?: string } | undefined)?.version,
   });
   await server.connect(new StdioServerTransport());
 }

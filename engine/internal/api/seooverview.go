@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,13 +30,22 @@ import (
 const trendWeeks = 4
 
 type seoOverviewWeek struct {
-	Week               string   `json:"week"`
-	BrandedClicks      *float64 `json:"branded_clicks"`
-	BrandedImpressions *float64 `json:"branded_impressions"`
-	SearchClicks       *float64 `json:"search_clicks"`
-	SearchImpressions  *float64 `json:"search_impressions"`
-	Visitors           *float64 `json:"visitors"`
-	Sessions           *float64 `json:"sessions"`
+	Week                  string   `json:"week"`
+	BrandedClicks         *float64 `json:"branded_clicks"`
+	BrandedImpressions    *float64 `json:"branded_impressions"`
+	NonBrandedClicks      *float64 `json:"non_branded_clicks"`
+	NonBrandedImpressions *float64 `json:"non_branded_impressions"`
+	SearchClicks          *float64 `json:"search_clicks"`
+	SearchImpressions     *float64 `json:"search_impressions"`
+	SearchCTR             *float64 `json:"search_ctr"`
+	SearchPosition        *float64 `json:"search_position"`
+	Visitors              *float64 `json:"visitors"`
+	Sessions              *float64 `json:"sessions"`
+	SearchConversions     *float64 `json:"search_conversions"`
+	KeywordsTop10         *float64 `json:"keywords_top10"`
+	KeywordsTracked       *float64 `json:"keywords_tracked"`
+	AIMentionRate         *float64 `json:"ai_mention_rate"`
+	AIRecommendRate       *float64 `json:"ai_recommend_rate"`
 }
 
 type seoOverviewSnapshot struct {
@@ -45,6 +56,7 @@ type seoOverviewSnapshot struct {
 	ReferringDomains *float64 `json:"referring_domains"`
 	OrganicTraffic   *float64 `json:"organic_traffic"`
 	OrganicKeywords  *float64 `json:"organic_keywords"`
+	Top3             *float64 `json:"top3"`
 }
 
 type seoTrend struct {
@@ -68,8 +80,12 @@ type seoOverviewBrand struct {
 	Weeks  []seoOverviewWeek     `json:"weeks"`
 	SEO    []seoOverviewSnapshot `json:"seo"`
 	Trends map[string]seoTrend   `json:"trends"`
-	Sites  []seoOverviewSite     `json:"sites"`
-	Fixes  *int                  `json:"open_fixes"`
+	// PreviousWeeks are as many weeks as Weeks, just before them, and
+	// Period sets the whole period against them.
+	PreviousWeeks []seoOverviewWeek   `json:"previous_weeks"`
+	Period        map[string]seoTrend `json:"period"`
+	Sites         []seoOverviewSite   `json:"sites"`
+	Fixes         *int                `json:"open_fixes"`
 	// SEOStatus says why the SEO snapshot numbers are there or not.
 	SEOStatus seoOverviewStatus `json:"seo_status"`
 	// Sources says, for search and visitors, whether the brand's websites
@@ -106,24 +122,22 @@ type seoOverviewBrandRef struct {
 func (s *Server) seoOverview(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ws := a.WorkspaceID
-	weeks := 12
-	if v := r.URL.Query().Get("weeks"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 2*trendWeeks || n > 52 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "weeks should be a number from 8 to 52")
-			return
-		}
-		weeks = n
+	// Whole weeks, Monday to Sunday, ending with the last one that is over,
+	// or the weeks a from and to fall in.
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	latest := today.AddDate(0, 0, -int((today.Weekday()+6)%7)-1)
+	from, to, err := overviewRange(r.URL.Query(), latest)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+		return
 	}
 	sel, ok := s.brandFilter(w, r)
 	if !ok {
 		return
 	}
-
-	// Whole weeks, Monday to Sunday, ending with the last one that is over.
-	today := time.Now().UTC().Truncate(24 * time.Hour)
-	to := today.AddDate(0, 0, -int((today.Weekday()+6)%7)-1)
-	from := to.AddDate(0, 0, -7*weeks+1)
+	// The period before: as many weeks, ending the day before from.
+	weeks := int(to.Sub(from).Hours()/24+1) / 7
+	prevFrom := from.AddDate(0, 0, -7*weeks)
 
 	brands, err := s.loadBrands(r.Context(), ws, nil, "active")
 	if err != nil {
@@ -203,7 +217,7 @@ func (s *Server) seoOverview(w http.ResponseWriter, r *http.Request) {
 			"search":  sourceOf(e.Hosts, measured, func(m hostMeasures) bool { return m.search }),
 			"traffic": sourceOf(e.Hosts, measured, func(m hostMeasures) bool { return m.traffic }),
 		}
-		if err := s.fillSEOOverview(r.Context(), ws, e, from, to, seesSites); err != nil {
+		if err := s.fillSEOOverview(r.Context(), ws, e, from, to, to.Equal(latest), seesSites); err != nil {
 			s.internal(w, r, err)
 			return
 		}
@@ -212,16 +226,79 @@ func (s *Server) seoOverview(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []*seoOverviewBrand{}
 	}
-	notes := []string{"Branded search counts the search console queries that name the brand. Consoles hide rare queries, so it is a floor, not a total."}
+	notes := []string{
+		"Branded search counts the search console queries that name the brand. Consoles hide rare queries, so it is a floor, not a total.",
+		"Non-branded clicks are search clicks minus branded clicks, from the same stored Search Console totals.",
+		"Visitors are all channels, not organic only.",
+		"SEO snapshot tiles use one connector (Ahrefs when it has a snapshot in the period) so the arrows compare like with like.",
+		"Organic sign-ups are search-landing conversions already stored from product analytics. Keyword shares, AI mention rate and competitor share of voice also come from stored reads only.",
+	}
 	if !seesSites {
 		notes = append(notes, "Site audits and fixes need the seo.read scope, so they are left out.")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"from":  from.Format(time.DateOnly),
-		"to":    to.Format(time.DateOnly),
-		"data":  out,
-		"notes": notes,
+		"from":          from.Format(time.DateOnly),
+		"to":            to.Format(time.DateOnly),
+		"previous_from": prevFrom.Format(time.DateOnly),
+		"previous_to":   from.AddDate(0, 0, -1).Format(time.DateOnly),
+		"data":          out,
+		"notes":         notes,
 	})
+}
+
+// maxOverviewWeeks is the longest period the overview shows: two years,
+// so a year can be set against the year before.
+const maxOverviewWeeks = 104
+
+// overviewRange reads the period the overview shows: whole weeks, Monday to
+// Sunday. from and to (dates) pick the weeks they fall in, never past the
+// latest week that is over; weeks counts back from to (default 12).
+func overviewRange(q url.Values, latest time.Time) (from, to time.Time, err error) {
+	monday := func(d time.Time) time.Time { return d.AddDate(0, 0, -int((d.Weekday()+6)%7)) }
+	parse := func(name string) (time.Time, bool, error) {
+		v := q.Get(name)
+		if v == "" {
+			return time.Time{}, false, nil
+		}
+		d, err := time.Parse(time.DateOnly, v)
+		if err != nil {
+			return d, false, fmt.Errorf("%s should be a date, YYYY-MM-DD", name)
+		}
+		return d, true, nil
+	}
+	to = latest
+	t, hasTo, err := parse("to")
+	if err != nil {
+		return from, to, err
+	}
+	if hasTo {
+		if t = monday(t).AddDate(0, 0, 6); t.Before(latest) {
+			to = t
+		}
+	}
+	f, hasFrom, err := parse("from")
+	if err != nil {
+		return from, to, err
+	}
+	if hasFrom {
+		from = monday(f)
+		if from.After(to) {
+			return from, to, fmt.Errorf("from should be before %s, the end of the last week that is over", to.Format(time.DateOnly))
+		}
+		if to.Sub(from) > time.Duration(7*maxOverviewWeeks)*24*time.Hour {
+			return from, to, fmt.Errorf("pick at most %d weeks", maxOverviewWeeks)
+		}
+		return from, to, nil
+	}
+	weeks := 12
+	if v := q.Get("weeks"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < trendWeeks || n > maxOverviewWeeks {
+			return from, to, fmt.Errorf("weeks should be a number from %d to %d", trendWeeks, maxOverviewWeeks)
+		}
+		weeks = n
+	}
+	return to.AddDate(0, 0, -7*weeks+1), to, nil
 }
 
 // workspaceHosts lists every website the workspace has data for, with
@@ -342,16 +419,24 @@ func likeAny(terms []string) []string {
 	return out
 }
 
-func (s *Server) fillSEOOverview(ctx context.Context, ws string, e *seoOverviewBrand, from, to time.Time, seesSites bool) error {
-	e.Weeks = []seoOverviewWeek{}
+func (s *Server) fillSEOOverview(ctx context.Context, ws string, e *seoOverviewBrand, from, to time.Time, latest, seesSites bool) error {
 	e.SEO = []seoOverviewSnapshot{}
 	e.Sites = []seoOverviewSite{}
-	for d := from; !d.After(to); d = d.AddDate(0, 0, 7) {
-		e.Weeks = append(e.Weeks, seoOverviewWeek{Week: d.Format(time.DateOnly)})
+	// Read the period before as well, and at least the 2*trendWeeks the
+	// trends compare.
+	weeks := int(to.Sub(from).Hours()/24+1) / 7
+	prevFrom := from.AddDate(0, 0, -7*weeks)
+	start := to.AddDate(0, 0, -7*2*trendWeeks+1)
+	if prevFrom.Before(start) {
+		start = prevFrom
+	}
+	var all []seoOverviewWeek
+	for d := start; !d.After(to); d = d.AddDate(0, 0, 7) {
+		all = append(all, seoOverviewWeek{Week: d.Format(time.DateOnly)})
 	}
 	byWeek := map[string]*seoOverviewWeek{}
-	for i := range e.Weeks {
-		byWeek[e.Weeks[i].Week] = &e.Weeks[i]
+	for i := range all {
+		byWeek[all[i].Week] = &all[i]
 	}
 	set := func(p **float64, v *float64) {
 		if v != nil {
@@ -369,7 +454,7 @@ func (s *Server) fillSEOOverview(ctx context.Context, ws string, e *seoOverviewB
 			GROUP BY host, day
 		)
 		SELECT to_char(date_trunc('week', day), 'YYYY-MM-DD'), sum(v), sum(s), sum(c), sum(i) FROM d GROUP BY 1`,
-		ws, e.Hosts, from, to)
+		ws, e.Hosts, start, to)
 	if err != nil {
 		return err
 	}
@@ -392,64 +477,40 @@ func (s *Server) fillSEOOverview(ctx context.Context, ws string, e *seoOverviewB
 		return err
 	}
 
-	if len(e.Terms) > 0 {
-		rows, err = s.pool.Query(ctx, `
-			WITH q AS (
-				SELECT day, max(clicks) c, max(impressions) i
-				FROM analytics_daily
-				WHERE workspace_id = $1 AND report = 'search_queries' AND key <> '' AND host = ANY($2) AND day BETWEEN $3 AND $4
-				  AND lower(key) LIKE ANY($5)
-				GROUP BY host, day, key
-			)
-			SELECT to_char(date_trunc('week', day), 'YYYY-MM-DD'), sum(c), sum(i) FROM q GROUP BY 1`,
-			ws, e.Hosts, from, to, likeAny(e.Terms))
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var week string
-			var c, i *float64
-			if err := rows.Scan(&week, &c, &i); err != nil {
-				rows.Close()
-				return err
-			}
-			if wk := byWeek[week]; wk != nil {
-				set(&wk.BrandedClicks, c)
-				set(&wk.BrandedImpressions, i)
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
+	// Split branded and non-branded from query rows. A week with search
+	// totals but no query rows stays unknown: missing query data is not
+	// zero branded clicks.
+	if err := s.fillOverviewQueries(ctx, ws, e, start, to, byWeek, set); err != nil {
+		return err
 	}
-	// Weeks the search consoles covered but no query named the brand are
-	// zero, not unknown.
-	for i := range e.Weeks {
-		if e.Weeks[i].BrandedClicks == nil && e.Weeks[i].SearchImpressions != nil {
-			zero := 0.0
-			e.Weeks[i].BrandedClicks, e.Weeks[i].BrandedImpressions = &zero, &zero
-		}
+	for i := range all {
+		fillNonBranded(&all[i])
 	}
 
 	// SEO snapshots: per day, Ahrefs first (its DR is the one people quote),
-	// the brand's main website for the rating, links added up.
+	// the brand's main website for the rating, links added up. The latest
+	// weeks run up to today, so the newest snapshot shows.
+	end := to
+	if latest {
+		end = time.Now().UTC()
+	}
 	rows, err = s.pool.Query(ctx, `
 		SELECT DISTINCT ON (host, day) to_char(day, 'YYYY-MM-DD'), host, connector, metrics
 		FROM seo_snapshots
 		WHERE workspace_id = $1 AND report = 'overview' AND key = '' AND host = ANY($2) AND day BETWEEN $3 AND $4
-		ORDER BY host, day, connector <> 'ahrefs', synced_at DESC`, ws, e.Hosts, from.AddDate(0, 0, -7), time.Now().UTC())
+		ORDER BY host, day, connector <> 'ahrefs', synced_at DESC`, ws, e.Hosts, start.AddDate(0, 0, -7), end)
 	if err != nil {
 		return err
 	}
 	type snap struct {
 		host, connector string
 		m               struct {
-			DR *float64 `json:"domain_rating"`
-			BL *float64 `json:"backlinks"`
-			RD *float64 `json:"referring_domains"`
-			OT *float64 `json:"organic_traffic"`
-			OK *float64 `json:"organic_keywords"`
+			DR   *float64 `json:"domain_rating"`
+			BL   *float64 `json:"backlinks"`
+			RD   *float64 `json:"referring_domains"`
+			OT   *float64 `json:"organic_traffic"`
+			OK   *float64 `json:"organic_keywords"`
+			Top3 *float64 `json:"top3"`
 		}
 	}
 	days := map[string][]snap{}
@@ -484,12 +545,39 @@ func (s *Server) fillSEOOverview(ctx context.Context, ws string, e *seoOverviewB
 		v := *a + *b
 		return &v
 	}
-	for _, d := range keys {
-		o := seoOverviewSnapshot{Day: d}
-		for _, sn := range days[d] {
-			if o.Connector == "" || sn.connector == "ahrefs" {
-				o.Connector = sn.connector
+	// One connector for the whole series, so a later DataForSEO snapshot
+	// is not compared with an earlier Ahrefs one. Ahrefs wins when it
+	// has any snapshot in the window.
+	pref := ""
+	for i := len(keys) - 1; i >= 0 && pref == ""; i-- {
+		for _, sn := range days[keys[i]] {
+			if sn.connector == "ahrefs" {
+				pref = "ahrefs"
+				break
 			}
+			if pref == "" {
+				pref = sn.connector
+			}
+		}
+	}
+	if pref == "ahrefs" {
+		// Keep Ahrefs even when a later day only has another tool.
+	} else if pref == "" {
+		pref = "ahrefs"
+	}
+	var snaps []seoOverviewSnapshot
+	for _, d := range keys {
+		var used []snap
+		for _, sn := range days[d] {
+			if sn.connector == pref {
+				used = append(used, sn)
+			}
+		}
+		if len(used) == 0 {
+			continue
+		}
+		o := seoOverviewSnapshot{Day: d, Connector: pref}
+		for _, sn := range used {
 			if sn.m.DR != nil && (o.DomainRating == nil || len(e.Hosts) > 0 && sn.host == e.Hosts[0]) {
 				o.DomainRating = sn.m.DR
 			}
@@ -497,19 +585,79 @@ func (s *Server) fillSEOOverview(ctx context.Context, ws string, e *seoOverviewB
 			o.ReferringDomains = add(o.ReferringDomains, sn.m.RD)
 			o.OrganicTraffic = add(o.OrganicTraffic, sn.m.OT)
 			o.OrganicKeywords = add(o.OrganicKeywords, sn.m.OK)
+			o.Top3 = add(o.Top3, sn.m.Top3)
 		}
-		e.SEO = append(e.SEO, o)
+		snaps = append(snaps, o)
+	}
+	// One snapshot from before the period, so its line starts at the start.
+	first := from.AddDate(0, 0, -7).Format(time.DateOnly)
+	for _, o := range snaps {
+		if o.Day >= first {
+			e.SEO = append(e.SEO, o)
+		}
 	}
 
+	if err := s.fillOverviewSuccess(ctx, ws, e, start, to, byWeek, set); err != nil {
+		return err
+	}
+	// The weeks shown, and as many before them.
+	shown := len(all) - weeks
+	e.Weeks = slices.Clone(all[shown:])
+	e.PreviousWeeks = slices.Clone(all[shown-weeks : shown])
+
 	e.Trends = map[string]seoTrend{
-		"branded_search":    weeklyTrend(e.Weeks, func(w seoOverviewWeek) *float64 { return w.BrandedClicks }),
-		"search_clicks":     weeklyTrend(e.Weeks, func(w seoOverviewWeek) *float64 { return w.SearchClicks }),
-		"visitors":          weeklyTrend(e.Weeks, func(w seoOverviewWeek) *float64 { return w.Visitors }),
-		"domain_rating":     snapshotTrend(e.SEO, to, func(s seoOverviewSnapshot) *float64 { return s.DomainRating }),
-		"backlinks":         snapshotTrend(e.SEO, to, func(s seoOverviewSnapshot) *float64 { return s.Backlinks }),
-		"referring_domains": snapshotTrend(e.SEO, to, func(s seoOverviewSnapshot) *float64 { return s.ReferringDomains }),
-		"organic_traffic":   snapshotTrend(e.SEO, to, func(s seoOverviewSnapshot) *float64 { return s.OrganicTraffic }),
-		"organic_keywords":  snapshotTrend(e.SEO, to, func(s seoOverviewSnapshot) *float64 { return s.OrganicKeywords }),
+		"branded_search":      weeklyTrend(all, func(w seoOverviewWeek) *float64 { return w.BrandedClicks }),
+		"non_branded_search":  weeklyTrend(all, func(w seoOverviewWeek) *float64 { return w.NonBrandedClicks }),
+		"search_clicks":       weeklyTrend(all, func(w seoOverviewWeek) *float64 { return w.SearchClicks }),
+		"search_ctr":          weeklyTrendAvg(all, func(w seoOverviewWeek) *float64 { return w.SearchCTR }, false),
+		"search_position":     weeklyTrendAvg(all, func(w seoOverviewWeek) *float64 { return w.SearchPosition }, true),
+		"visitors":            weeklyTrend(all, func(w seoOverviewWeek) *float64 { return w.Visitors }),
+		"search_conversions":  weeklyTrend(all, func(w seoOverviewWeek) *float64 { return w.SearchConversions }),
+		"keywords_top3":       snapshotTrend(snaps, func(s seoOverviewSnapshot) *float64 { return s.Top3 }),
+		"keywords_top10":      weeklyTrendAvg(all, func(w seoOverviewWeek) *float64 { return w.KeywordsTop10 }, false),
+		"ai_mention_rate":     weeklyTrendAvg(all, func(w seoOverviewWeek) *float64 { return w.AIMentionRate }, false),
+		"ai_recommend_rate":   weeklyTrendAvg(all, func(w seoOverviewWeek) *float64 { return w.AIRecommendRate }, false),
+		"share_of_voice":      seoTrend{Direction: "unknown"},
+		"share_of_voice_top3": seoTrend{Direction: "unknown"},
+		"domain_rating":       snapshotTrend(snaps, func(s seoOverviewSnapshot) *float64 { return s.DomainRating }),
+		"backlinks":           snapshotTrend(snaps, func(s seoOverviewSnapshot) *float64 { return s.Backlinks }),
+		"referring_domains":   snapshotTrend(snaps, func(s seoOverviewSnapshot) *float64 { return s.ReferringDomains }),
+		"organic_traffic":     snapshotTrend(snaps, func(s seoOverviewSnapshot) *float64 { return s.OrganicTraffic }),
+		"organic_keywords":    snapshotTrend(snaps, func(s seoOverviewSnapshot) *float64 { return s.OrganicKeywords }),
+	}
+	// The whole period against the one before: totals for counts, the
+	// mean for rates and positions, and for snapshots the latest against
+	// the last one before the period began.
+	before := from.AddDate(0, 0, -1).Format(time.DateOnly)
+	week := func(v func(seoOverviewWeek) *float64) seoTrend {
+		return trendOf(sumWeeks(e.Weeks, v), sumWeeks(e.PreviousWeeks, v))
+	}
+	mean := func(v func(seoOverviewWeek) *float64, lowerIsBetter bool) seoTrend {
+		return meanTrend(e.Weeks, e.PreviousWeeks, v, lowerIsBetter)
+	}
+	snapshot := func(v func(seoOverviewSnapshot) *float64) seoTrend { return snapshotPeriod(snaps, before, v) }
+	e.Period = map[string]seoTrend{
+		"branded_search":      week(func(w seoOverviewWeek) *float64 { return w.BrandedClicks }),
+		"non_branded_search":  week(func(w seoOverviewWeek) *float64 { return w.NonBrandedClicks }),
+		"search_clicks":       week(func(w seoOverviewWeek) *float64 { return w.SearchClicks }),
+		"search_ctr":          mean(func(w seoOverviewWeek) *float64 { return w.SearchCTR }, false),
+		"search_position":     mean(func(w seoOverviewWeek) *float64 { return w.SearchPosition }, true),
+		"visitors":            week(func(w seoOverviewWeek) *float64 { return w.Visitors }),
+		"search_conversions":  week(func(w seoOverviewWeek) *float64 { return w.SearchConversions }),
+		"keywords_top3":       snapshot(func(s seoOverviewSnapshot) *float64 { return s.Top3 }),
+		"keywords_top10":      mean(func(w seoOverviewWeek) *float64 { return w.KeywordsTop10 }, false),
+		"ai_mention_rate":     mean(func(w seoOverviewWeek) *float64 { return w.AIMentionRate }, false),
+		"ai_recommend_rate":   mean(func(w seoOverviewWeek) *float64 { return w.AIRecommendRate }, false),
+		"share_of_voice":      {Direction: "unknown"},
+		"share_of_voice_top3": {Direction: "unknown"},
+		"domain_rating":       snapshot(func(s seoOverviewSnapshot) *float64 { return s.DomainRating }),
+		"backlinks":           snapshot(func(s seoOverviewSnapshot) *float64 { return s.Backlinks }),
+		"referring_domains":   snapshot(func(s seoOverviewSnapshot) *float64 { return s.ReferringDomains }),
+		"organic_traffic":     snapshot(func(s seoOverviewSnapshot) *float64 { return s.OrganicTraffic }),
+		"organic_keywords":    snapshot(func(s seoOverviewSnapshot) *float64 { return s.OrganicKeywords }),
+	}
+	if err := s.fillOverviewShareOfVoice(ctx, ws, e, to, from.AddDate(0, 0, -1)); err != nil {
+		return err
 	}
 
 	if !seesSites {
@@ -728,49 +876,56 @@ func listOr(l []string, none string) string {
 
 // weeklyTrend compares the last trendWeeks weeks with the ones before.
 func weeklyTrend(weeks []seoOverviewWeek, v func(seoOverviewWeek) *float64) seoTrend {
-	sum := func(ws []seoOverviewWeek) *float64 {
-		var t *float64
-		for _, w := range ws {
-			if x := v(w); x != nil {
-				if t == nil {
-					t = new(float64)
-				}
-				*t += *x
-			}
-		}
-		return t
-	}
 	n := len(weeks)
 	if n < 2*trendWeeks {
 		return trendOf(nil, nil)
 	}
-	return trendOf(sum(weeks[n-trendWeeks:]), sum(weeks[n-2*trendWeeks:n-trendWeeks]))
+	return trendOf(sumWeeks(weeks[n-trendWeeks:], v), sumWeeks(weeks[n-2*trendWeeks:n-trendWeeks], v))
+}
+
+// sumWeeks adds up one number over weeks; nil when no week measured it.
+func sumWeeks(weeks []seoOverviewWeek, v func(seoOverviewWeek) *float64) *float64 {
+	var t *float64
+	for _, w := range weeks {
+		if x := v(w); x != nil {
+			if t == nil {
+				t = new(float64)
+			}
+			*t += *x
+		}
+	}
+	return t
+}
+
+// lastSnapshot is the newest value on or before a day.
+func lastSnapshot(snaps []seoOverviewSnapshot, day string, v func(seoOverviewSnapshot) *float64) (*float64, string) {
+	for i := len(snaps) - 1; i >= 0; i-- {
+		if snaps[i].Day <= day {
+			if x := v(snaps[i]); x != nil {
+				return x, snaps[i].Day
+			}
+		}
+	}
+	return nil, ""
 }
 
 // snapshotTrend compares the latest snapshot with the last one at least
 // trendWeeks weeks older.
-func snapshotTrend(snaps []seoOverviewSnapshot, to time.Time, v func(seoOverviewSnapshot) *float64) seoTrend {
-	var cur, prev *float64
-	var curDay string
-	for i := len(snaps) - 1; i >= 0; i-- {
-		if x := v(snaps[i]); x != nil {
-			cur, curDay = x, snaps[i].Day
-			break
-		}
-	}
+func snapshotTrend(snaps []seoOverviewSnapshot, v func(seoOverviewSnapshot) *float64) seoTrend {
+	cur, curDay := lastSnapshot(snaps, "9999-12-31", v)
 	if cur == nil {
 		return trendOf(nil, nil)
 	}
 	last, _ := time.Parse(time.DateOnly, curDay)
-	cutoff := last.AddDate(0, 0, -7*trendWeeks).Format(time.DateOnly)
-	for i := len(snaps) - 1; i >= 0; i-- {
-		if snaps[i].Day <= cutoff {
-			if x := v(snaps[i]); x != nil {
-				prev = x
-				break
-			}
-		}
-	}
+	prev, _ := lastSnapshot(snaps, last.AddDate(0, 0, -7*trendWeeks).Format(time.DateOnly), v)
+	return trendOf(cur, prev)
+}
+
+// snapshotPeriod compares the latest snapshot with the last one on or
+// before the day before the period.
+func snapshotPeriod(snaps []seoOverviewSnapshot, before string, v func(seoOverviewSnapshot) *float64) seoTrend {
+	cur, _ := lastSnapshot(snaps, "9999-12-31", v)
+	prev, _ := lastSnapshot(snaps, before, v)
 	return trendOf(cur, prev)
 }
 

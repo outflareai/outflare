@@ -70,7 +70,7 @@ func TestAdTargeting(t *testing.T) {
 	}
 	tg := owner.must(200, "GET", base+"/ads/campaigns/"+gcamp+"/targeting", nil)
 	tt := tg["targeting"].(map[string]any)
-	if tg["supported"] != true || len(tg["bidding_methods"].([]any)) != 2 || tt["bidding"].(map[string]any)["strategy"] != "maximize_conversions" ||
+	if tg["supported"] != true || len(tg["bidding_methods"].([]any)) != 3 || tt["bidding"].(map[string]any)["strategy"] != "maximize_conversions" ||
 		tt["bidding"].(map[string]any)["target_cpa_micros"] != 4_000_000.0 || len(tt["countries"].([]any)) != 1 || tt["countries"].([]any)[0] != "AU" ||
 		tt["audiences"].([]any)[0].(map[string]any)["name"] != "Trial users" {
 		t.Fatalf("google targeting: %v", tg)
@@ -143,9 +143,12 @@ func TestAdTargeting(t *testing.T) {
 	}
 
 	// The bidding ladder on Google: no target, 30 conversions in four weeks.
-	exec(`UPDATE ad_entities SET bidding_strategy = 'maximize_conversions', platform_target_cpa_micros = NULL, target_cost_per_conversion_micros = NULL WHERE id = $1`, gcamp)
+	exec(`UPDATE ad_entities SET bidding_strategy = 'maximize_conversions', platform_target_cpa_micros = NULL, platform_target_roas = NULL, target_cost_per_conversion_micros = NULL WHERE id = $1`, gcamp)
 	exec(`DELETE FROM ad_changes WHERE ad_entity_id = $1`, gcamp)
 	exec(`DELETE FROM ad_metrics_daily WHERE ad_entity_id = $1`, gcamp)
+	// The brand's rules out of shadow mode, so the finding is offered.
+	exec(`INSERT INTO ad_brand_economics (brand_id, workspace_id, shadow_mode) SELECT a.brand_id, a.workspace_id, false FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
+		WHERE e.id = $1 AND a.brand_id IS NOT NULL ON CONFLICT (brand_id) DO UPDATE SET shadow_mode = false`, gcamp)
 	exec(`INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros, conversions)
 		SELECT $1, current_date - d, $2, 'EUR', 20000000, 1.5 FROM generate_series(1, 28) d`, gcamp, ws)
 	run := &adsuggest.Runner{Pool: e.pool, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
@@ -157,7 +160,8 @@ func TestAdTargeting(t *testing.T) {
 		s := s.(map[string]any)
 		if s["kind"] == "bidding_target" {
 			sid = s["id"].(string)
-			if s["proposed"].(map[string]any)["target_cpa_micros"] != 13_340_000.0 {
+			// What a conversion cost, to the cent and never above it.
+			if s["proposed"].(map[string]any)["target_cpa_micros"] != 13_330_000.0 {
 				t.Fatalf("ladder: %v", s)
 			}
 		}
@@ -169,7 +173,7 @@ func TestAdTargeting(t *testing.T) {
 	if sug["status"] != "measuring" || !strings.Contains(sug["window_note"].(string), "14 days to settle") {
 		t.Fatalf("approved: %v", sug)
 	}
-	if c := apply(map[string]any{"change": map[string]any{"id": sug["change_id"]}}); c["after"].(map[string]any)["bidding"].(map[string]any)["target_cpa_micros"] != 13_340_000.0 {
+	if c := apply(map[string]any{"change": map[string]any{"id": sug["change_id"]}}); c["after"].(map[string]any)["bidding"].(map[string]any)["target_cpa_micros"] != 13_330_000.0 {
 		t.Fatalf("ladder change: %v", c)
 	}
 

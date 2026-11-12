@@ -79,7 +79,7 @@ Decide for the `of_aid` cookie when the browser has one. Without it, make an id 
 import { createClient, flagsBootstrapTag } from "@outflare/sdk";
 
 const anonymousId = cookies.get("of_aid") ?? crypto.randomUUID();
-const { data } = await gtm.POST("/v1/workspaces/{ws}/flags/evaluate", {
+const { data } = await gtm.POST("/v1/brands/{brand}/flags/evaluate", {
   params: { path: { ws } },
   body: { anonymous_id: anonymousId, url: request.url, user_agent: request.headers.get("user-agent") ?? "" },
 });

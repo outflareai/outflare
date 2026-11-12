@@ -56,7 +56,7 @@ Add up to 100,000 emails or domains at once with `POST /v1/brands/{brand}/suppre
 Brands are separate businesses (`plans/brands/README.md`, decision 5), so an opt-out applies to the brand it came from: an unsubscribe link, a reply asking to stop, a lead or person deleted with "never email", a journey's do-not-contact step and an entry added under `/v1/brands/{brand}/` carry that brand (`brand_id`), and only that brand's sends and lead imports count it. Some entries apply to every brand (`brand_id` null):
 
 - hard bounces, spam complaints and sequencer blocklists, which are facts about the address and hurt sending everywhere;
-- what a workspace admin applies to every brand: `all_brands: true` on the brand route, or `POST /v1/workspaces/{ws}/suppressions`, which adds for every brand as before. A member or token kept to some brands can't (`403`). One brand's opt-in never clears an entry applied to every brand.
+- what a workspace admin applies to every brand: `all_brands: true` on the brand route, or `POST /v1/brands/{brand}/suppressions`, which adds for every brand as before. A member or token kept to some brands can't (`403`). One brand's opt-in never clears an entry applied to every brand.
 
 A brand's list shows its own entries and those for every brand. A brand removes only its own entries; one for every brand is removed with `DELETE /v1/workspaces/{ws}/suppressions/{id}`. Each brand keeps its own entry for an address, so when a second brand opts out the same address, both brands stop and the others still send. `GET /v1/brands/{brand}/suppressions` is deprecated: without `?brand=` it is the workspace's first brand's view, and `?brand=all` lists everything.
 

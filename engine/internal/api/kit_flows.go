@@ -36,7 +36,7 @@ func newKitRef(id, key *string) *kitRef {
 // planFlows adds the kit's smart lists, rules and journeys to plan: each is
 // reused when the kit added it before, a conflict when something else has
 // its name, and added otherwise.
-func planFlows(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit, plan *kitPlan) error {
+func planFlows(ctx context.Context, tx pgx.Tx, ws, brand string, k playbooks.Kit, plan *kitPlan) error {
 	type part struct {
 		kind, key, name, table, live, what, adds string
 	}
@@ -57,8 +57,8 @@ func planFlows(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit, plan 
 	}
 	for _, p := range parts {
 		it := kitItem{Kind: p.kind, Key: p.key, Label: p.name, Action: kitAdd, Detail: p.adds}
-		err := tx.QueryRow(ctx, `SELECT id::text FROM `+p.table+` WHERE workspace_id = $1 AND kit_id = $2 AND kit_key = $3 AND `+p.live,
-			ws, k.ID, p.key).Scan(&it.existing)
+		err := tx.QueryRow(ctx, `SELECT id::text FROM `+p.table+` WHERE workspace_id = $1 AND kit_id = $2 AND kit_key = $3 AND `+p.live+`
+			AND brand_id IS NOT DISTINCT FROM `+kitBrandSQL("$1", "$4"), ws, k.ID, p.key, brand).Scan(&it.existing)
 		switch {
 		case err == nil:
 			it.Action, it.Detail = kitReuse, "the kit added it before; it stays as it is"
@@ -66,8 +66,8 @@ func planFlows(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit, plan 
 			return err
 		default:
 			var taken bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+p.table+` WHERE workspace_id = $1 AND lower(name) = lower($2) AND `+p.live+`)`,
-				ws, p.name).Scan(&taken); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+p.table+` WHERE workspace_id = $1 AND lower(name) = lower($2) AND `+p.live+`
+				AND brand_id IS NOT DISTINCT FROM `+kitBrandSQL("$1", "$3")+`)`, ws, p.name, brand).Scan(&taken); err != nil {
 				return err
 			}
 			if taken {
@@ -79,9 +79,15 @@ func planFlows(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit, plan 
 	return nil
 }
 
+// kitBrandSQL is the brand a kit sets up: the one named by brand (a
+// parameter, "" for none), else the workspace's first.
+func kitBrandSQL(ws, brand string) string {
+	return "COALESCE(NULLIF(" + brand + ", '')::uuid, outflare_first_brand(" + ws + "))"
+}
+
 // flowScopes says what applying the plan's flows needs beyond
 // catalog.manage, or "".
-func flowScopes(plan *kitPlan, a *access) error {
+func flowScopes(plan *kitPlan, a *access, brand string) error {
 	var lists, journeysToo bool
 	for _, it := range plan.Items {
 		if it.Action != kitAdd {
@@ -91,8 +97,10 @@ func flowScopes(plan *kitPlan, a *access) error {
 		journeysToo = journeysToo || it.Kind == "journey"
 	}
 	switch {
-	case (lists || journeysToo) && !a.writes(nil):
-		return errDenied("a kit's smart lists, rules and journeys are for every brand, which needs access to every brand")
+	case (lists || journeysToo) && brand == "" && !a.writes(nil):
+		return errDenied("a kit's smart lists, rules and journeys set up the workspace's first brand from this route, which needs access to every brand; apply it on the brand's own route")
+	case (lists || journeysToo) && brand != "" && !a.writes(&brand):
+		return errDenied("a kit's smart lists, rules and journeys are the brand's, which needs access to that brand")
 	case lists && !a.has(auth.ScopeCustomersManage):
 		return errDenied("this kit adds smart lists and rules, which needs the customers.manage scope")
 	case journeysToo && !a.has(auth.ScopeEmailsManage):
@@ -103,7 +111,7 @@ func flowScopes(plan *kitPlan, a *access) error {
 
 // applyFlows adds the plan's new smart lists, rules and journeys, in tx,
 // with values for the kit's inputs.
-func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan *kitPlan, values map[string]string) error {
+func applyFlows(ctx context.Context, tx pgx.Tx, a *access, brand string, k playbooks.Kit, plan *kitPlan, values map[string]string) error {
 	ws, p := a.WorkspaceID, &a.principal
 	ids := map[string]string{}
 	adding := map[string]bool{}
@@ -128,12 +136,12 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan
 			continue
 		}
 		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2 AND status <> 'archived')`,
-			ws, values[in.Name]).Scan(&ok); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2 AND status <> 'archived'
+			AND brand_id IS NOT DISTINCT FROM `+kitBrandSQL("$1", "$3")+`)`, ws, values[in.Name], brand).Scan(&ok); err != nil {
 			return err
 		}
 		if !ok {
-			return errInvalid(in.Name + " is not a sequence in this workspace")
+			return errInvalid(in.Name + " is not a sequence of this brand")
 		}
 	}
 	flows, err := k.Resolve(values, ids)
@@ -158,7 +166,7 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan
 		}
 		id := ids["smart_list."+l.Key]
 		if _, err := tx.Exec(ctx, `INSERT INTO smart_lists (id, workspace_id, brand_id, name, description, kind, rules, match, refreshed_at, created_by, kit_id, kit_key)
-			VALUES ($1, $2, outflare_first_brand($2), $3, $4, $5, $6, $7, $8, $9, $10, $11)`, id, ws, l.Name, l.Description, l.Kind, raw, l.Match, refreshed, createdBy, k.ID, l.Key); err != nil {
+			VALUES ($1, $2, `+kitBrandSQL("$2", "$12")+`, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, id, ws, l.Name, l.Description, l.Kind, raw, l.Match, refreshed, createdBy, k.ID, l.Key, brand); err != nil {
 			return err
 		}
 		if l.Kind == smartlists.KindSmart {
@@ -178,11 +186,11 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan
 		v := ruleView{Name: r.Name, Description: r.Description, RecordType: r.Rule.RecordType, Trigger: r.Rule.Trigger, Conditions: r.Rule.Conditions,
 			Match: r.Rule.Match, EmitEvent: r.Rule.Emit, Fire: r.Rule.Fire, CooldownSeconds: r.Rule.Cooldown}
 		id := ids["rule."+r.Key]
-		// Kits set up the workspace's first brand, like their lists.
+		// A kit sets up its brand, like its lists.
 		if _, err := tx.Exec(ctx, `INSERT INTO rules (id, workspace_id, brand_id, name, description, record_type, trigger_kind, trigger, conditions, match,
 			emit_event, fire, cooldown_seconds, manual_edits, watch_events, watch_fields, list_id, created_by, kit_id, kit_key)
-			VALUES ($1, $2, outflare_first_brand($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
-			append(append([]any{id, ws, v.Name, v.Description}, ruleColumns(v)...), createdBy, k.ID, r.Key)...); err != nil {
+			VALUES ($1, $2, `+kitBrandSQL("$2", "$20")+`, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+			append(append([]any{id, ws, v.Name, v.Description}, ruleColumns(v)...), createdBy, k.ID, r.Key, brand)...); err != nil {
 			return err
 		}
 		data := ruleData(v)
@@ -195,7 +203,7 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan
 		if !adding["journey."+j.Key] {
 			continue
 		}
-		if err := kitJourneyTemplates(ctx, tx, ws, j.Steps); err != nil {
+		if err := kitJourneyTemplates(ctx, tx, ws, brand, j.Steps); err != nil {
 			return err
 		}
 		filter, _ := json.Marshal(j.TriggerFilter)
@@ -204,9 +212,9 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan
 		id := ids["journey."+j.Key]
 		if _, err := tx.Exec(ctx, `INSERT INTO journeys (id, workspace_id, brand_id, name, description, trigger_kind, trigger_event, trigger_filter,
 			entry, goal_event, steps, created_by, exit_events, exit_conditions, kit_id, kit_key)
-			VALUES ($1, $2, outflare_first_brand($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+			VALUES ($1, $2, `+kitBrandSQL("$2", "$16")+`, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 			id, ws, j.Name, j.Description, j.TriggerKind, j.TriggerEvent, filter, j.Entry, j.GoalEvent, steps, createdBy, j.ExitEvents, exitConds,
-			k.ID, j.Key); err != nil {
+			k.ID, j.Key, brand); err != nil {
 			return err
 		}
 		if err := record(ctx, tx, p, ws, "journey.created", "journey", id,
@@ -221,7 +229,7 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan
 // templates of the purpose each step sends (lifecycle, or transactional
 // for transactional_email) that aren't archived: the kit's own drafts, or
 // a template with the same handle the workspace already had.
-func kitJourneyTemplates(ctx context.Context, tx pgx.Tx, ws string, steps []journeys.Step) error {
+func kitJourneyTemplates(ctx context.Context, tx pgx.Tx, ws, brand string, steps []journeys.Step) error {
 	for _, st := range steps {
 		want := "lifecycle"
 		switch st.Kind {
@@ -233,7 +241,8 @@ func kitJourneyTemplates(ctx context.Context, tx pgx.Tx, ws string, steps []jour
 		}
 		ref := st.Template
 		var purpose, status string
-		err := tx.QueryRow(ctx, `SELECT purpose, status FROM email_templates WHERE workspace_id = $1 AND handle = $2`, ws, ref).Scan(&purpose, &status)
+		err := tx.QueryRow(ctx, `SELECT purpose, status FROM email_templates WHERE workspace_id = $1 AND handle = $2
+			AND brand_id = `+kitBrandSQL("$1", "$3"), ws, ref, brand).Scan(&purpose, &status)
 		switch {
 		case err != nil:
 			return err

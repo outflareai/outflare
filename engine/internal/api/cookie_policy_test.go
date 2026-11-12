@@ -198,4 +198,15 @@ func TestCookiePolicyKeepsItselfUpToDate(t *testing.T) {
 	if code, _, _ := get("/cookie-policy/00000000-0000-0000-0000-000000000000"); code != 404 {
 		t.Fatalf("hosted unknown: %d", code)
 	}
+
+	// The site's brand's legal name and address say who runs it.
+	var brand string
+	if err := e.pool.QueryRow(context.Background(), `SELECT brand_id FROM site_keys WHERE id = $1`, id).Scan(&brand); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(200, "PATCH", base+"/brands/"+brand+"/context", map[string]any{"legal_name": "Northpeak Example Ltd",
+		"address": map[string]any{"line1": "1 Example Way", "city": "Leeds", "country": "GB"}})
+	if code, _, body := get("/cookie-policy/" + id); code != 200 || !strings.Contains(body, "This site is run by Northpeak Example Ltd, 1 Example Way, Leeds, United Kingdom.") {
+		t.Fatalf("hosted without its owner: %d %s", code, body)
+	}
 }

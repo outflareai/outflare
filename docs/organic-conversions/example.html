@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Organic conversions — example data</title>
+<style>
+  :root {
+    --bg: #0c0c0e;
+    --card: #161618;
+    --border: #2a2a2e;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --accent: #e4e4e7;
+    --banner: #7c2d12;
+    --banner-text: #ffedd5;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  }
+  html.light {
+    --bg: #fafafa;
+    --card: #ffffff;
+    --border: #e4e4e7;
+    --text: #18181b;
+    --muted: #71717a;
+    --accent: #27272a;
+    --banner: #9a3412;
+    --banner-text: #fff7ed;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+    padding: 28px 36px 48px;
+    max-width: 1180px;
+  }
+  .banner {
+    background: var(--banner);
+    color: var(--banner-text);
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .lede { color: var(--muted); font-size: 13px; max-width: 42rem; margin: 0 0 20px; }
+  .meta { color: var(--muted); font-size: 12px; margin: 0 0 16px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  .stat { border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 14px 16px; }
+  .stat .k { font-size: 11px; color: var(--muted); }
+  .stat .v { font-size: 22px; font-weight: 600; margin-top: 4px; letter-spacing: -0.03em; }
+  .stat .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .gaps { border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 10px 14px; margin: 0 0 24px; color: var(--muted); font-size: 13px; }
+  .gaps li { margin: 4px 0; }
+  h2 { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 28px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: none; }
+  td.n, th.n { text-align: right; font-family: var(--mono); font-size: 12px; }
+  td.path { font-family: var(--mono); font-size: 12px; }
+  .sub { color: var(--muted); font-size: 11px; font-family: var(--sans); }
+  .muted { color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+</style>
+</head>
+<body>
+  <div class="banner">Example data — fictional Northpeak workspace on example.com, not a customer’s numbers</div>
+  <h1>Organic conversions</h1>
+  <p class="lede">First-touch Organic Search signups and revenue by landing page and search group, from PostHog events. A payment is counted once: payment_succeeded when it exists, otherwise a paid service_purchased that is not a trial or a wallet top-up.</p>
+  <p class="meta">Oct 14 – Nov 10 from Northpeak Web, stored to Nov 10. Attribution: first-touch organic. Currency: USD.</p>
+  <div class="stats">
+    <div class="stat"><div class="k">Organic sessions</div><div class="v">9,140</div></div>
+    <div class="stat"><div class="k">Signups</div><div class="v">128</div><div class="s">1.4%</div></div>
+    <div class="stat"><div class="k">Payments</div><div class="v">41</div><div class="s">0.4%</div></div>
+    <div class="stat"><div class="k">Revenue</div><div class="v">$4,280</div><div class="s">USD, counted once</div></div>
+  </div>
+  <ul class="gaps">
+    <li>Signups and payments are attributed to the person’s first Organic Search landing page, not the page of the event itself.</li>
+    <li>Conversion rates compare first-touch conversions with organic sessions that started on the same page, so they are directional.</li>
+    <li>A landing page can match more than one search group. Group totals can overlap and must not be added together; use the site totals for a unique sum.</li>
+    <li>Revenue is USD only. Payments in other currencies are left out.</li>
+    <li>2 landing pages did not match a content search group and are listed as Ungrouped.</li>
+  </ul>
+  <h2>By search group</h2>
+  <p class="hint">A page can match more than one group, so do not add these totals together. Site totals above are unique. Unmatched pages are Ungrouped.</p>
+  <table>
+    <thead><tr><th>Group</th><th class="n">Pages</th><th class="n">Organic sessions</th><th class="n">Signups</th><th class="n">Payments</th><th class="n">Revenue</th></tr></thead>
+    <tbody>
+      <tr><td>Guides</td><td class="n">3</td><td class="n">3,420</td><td class="n">58 (1.7%)</td><td class="n">19 (0.6%)</td><td class="n">$2,110</td></tr>
+      <tr><td>Pricing</td><td class="n">2</td><td class="n">1,980</td><td class="n">31 (1.6%)</td><td class="n">12 (0.6%)</td><td class="n">$1,280</td></tr>
+      <tr><td>Commercial pages</td><td class="n">3</td><td class="n">3,220</td><td class="n">49 (1.5%)</td><td class="n">18 (0.6%)</td><td class="n">$1,820</td></tr>
+      <tr><td>Compare</td><td class="n">1</td><td class="n">1,240</td><td class="n">18 (1.5%)</td><td class="n">6 (0.5%)</td><td class="n">$540</td></tr>
+      <tr><td>Blog</td><td class="n">4</td><td class="n">1,610</td><td class="n">14 (0.9%)</td><td class="n">3 (0.2%)</td><td class="n">$270</td></tr>
+      <tr><td class="muted">Ungrouped</td><td class="n">2</td><td class="n">890</td><td class="n">7 (0.8%)</td><td class="n">1 (0.1%)</td><td class="n">$80</td></tr>
+    </tbody>
+  </table>
+  <h2>By landing page</h2>
+  <table>
+    <thead><tr><th>Landing page</th><th class="n">Organic sessions</th><th class="n">Signups</th><th class="n">Payments</th><th class="n">Revenue</th><th class="n">Search clicks</th></tr></thead>
+    <tbody>
+      <tr><td class="path">/guides/vpn-setup<div class="sub">Guides</div></td><td class="n">1,840</td><td class="n">32 (1.7%)</td><td class="n">11 (0.6%)</td><td class="n">$1,240</td><td class="n">2,410</td></tr>
+      <tr><td class="path">/pricing<div class="sub">Pricing</div></td><td class="n">1,610</td><td class="n">24 (1.5%)</td><td class="n">9 (0.6%)</td><td class="n">$990</td><td class="n">1,880</td></tr>
+      <tr><td class="path">/compare/northpeak-vs-example<div class="sub">Compare</div></td><td class="n">1,240</td><td class="n">18 (1.5%)</td><td class="n">6 (0.5%)</td><td class="n">$540</td><td class="n">960</td></tr>
+      <tr><td class="path">/guides/what-is-residential<div class="sub">Guides</div></td><td class="n">920</td><td class="n">16 (1.7%)</td><td class="n">5 (0.5%)</td><td class="n">$540</td><td class="n">1,120</td></tr>
+      <tr><td class="path">/blog/what-is-a-proxy<div class="sub">Blog</div></td><td class="n">780</td><td class="n">8 (1.0%)</td><td class="n">2 (0.3%)</td><td class="n">$180</td><td class="n">2,040</td></tr>
+      <tr><td class="path">/fr/pricing<div class="sub">Grouped as /pricing · Pricing</div></td><td class="n">370</td><td class="n">7 (1.9%)</td><td class="n">3 (0.8%)</td><td class="n">$290</td><td class="n">210</td></tr>
+      <tr><td class="path">/about</td><td class="n">410</td><td class="n">4 (1.0%)</td><td class="n">1 (0.2%)</td><td class="n">$80</td><td class="n">155</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

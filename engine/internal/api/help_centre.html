@@ -14,6 +14,7 @@
 {{if .Set.SocialImageURL}}<meta property="og:image" content="{{.Set.SocialImageURL}}"><meta name="twitter:card" content="summary_large_image">{{end}}
 {{if .Set.FaviconURL}}<link rel="icon" href="{{.Set.FaviconURL}}">{{end}}
 {{if .FontURL}}<link rel="stylesheet" href="{{.FontURL}}">{{end}}
+{{if and .Address (eq .Page "home") (not .Preview)}}<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":{{.LegalName}}{{if .Website}},"url":{{.Website}}{{end}},"address":{"@type":"PostalAddress","streetAddress":{{.Address}}}}</script>{{end}}
 {{if and .Article (not .Preview)}}<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":{{.Article.Title}},"dateModified":{{.Article.Updated.Format "2006-01-02T15:04:05Z07:00"}}{{if .Canonical}},"mainEntityOfPage":{{.Canonical}}{{end}}}</script>{{end}}
 <style>
 :root{ {{.Style}} }
@@ -144,6 +145,7 @@ footer{background:var(--footer);color:var(--footer-ink);border-top:1px solid rgb
 .fcols .social{justify-content:flex-start;margin-top:14px}
 .fcols .brand{margin-bottom:10px}
 .ftext{opacity:.65;margin:0}
+.faddr{font-size:12px;margin-top:10px}
 .powered{opacity:.45;font-size:12px;margin-top:14px}
 @media (max-width:860px){.grid{grid-template-columns:1fr 1fr}.article{grid-template-columns:1fr}.toc{display:none}.two{grid-template-columns:1fr}}
 @media (max-width:560px){.meta .tools{margin-left:0;width:100%}.grid{grid-template-columns:1fr}.links a:not(.site){display:none}.wrap{padding:0 16px}.head{flex-direction:column}}
@@ -317,6 +319,7 @@ document.querySelectorAll("[data-copy]").forEach(function(b){b.addEventListener(
     <div>
       <a class="brand" href="{{.Base}}">{{if .Set.LogoURL}}<img src="{{.Set.LogoURL}}" alt="{{.Name}}">{{else}}<span>{{.Name}}</span>{{end}}</a>
       {{if .Set.FooterText}}<p class="ftext">{{.Set.FooterText}}</p>{{end}}
+      {{template "address" .}}
       {{template "social" .}}
     </div>
     {{if .Set.FooterLinks}}<nav class="flinks" aria-label="Footer">{{range .Set.FooterLinks}}<a href="{{.URL}}">{{.Label}}</a>{{end}}</nav>{{end}}
@@ -327,9 +330,12 @@ document.querySelectorAll("[data-copy]").forEach(function(b){b.addEventListener(
     {{if .Set.FooterLinks}}<nav class="flinks" aria-label="Footer">{{range .Set.FooterLinks}}<a href="{{.URL}}">{{.Label}}</a>{{end}}</nav>{{end}}
     {{template "social" .}}
     {{if .Set.FooterText}}<p class="ftext">{{.Set.FooterText}}</p>{{end}}
+    {{template "address" .}}
   </div>
   {{end}}
 </footer>
 {{end}}
+
+{{define "address"}}{{if .Address}}<p class="ftext faddr">{{.LegalName}}, {{.Address}}</p>{{end}}{{end}}
 
 {{define "social"}}{{if .Social}}<div class="social">{{range .Social}}<a href="{{index $.Set.Social .}}" aria-label="{{socialName .}}">{{social .}}</a>{{end}}</div>{{end}}{{end}}

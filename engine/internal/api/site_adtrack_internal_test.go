@@ -222,3 +222,84 @@ func TestSiteAdCookiesFollowMarketingConsent(t *testing.T) {
 		t.Errorf("with marketing: %v", ids)
 	}
 }
+
+// Direct mode (plans/ad-tracker.md, T8): a page with a tracker campaign's
+// ofc and no ofclk names a click key, sends it as direct, keeps it for the
+// tab's visit and fills it into the page's {ofclk} links; a redirect's
+// ofclk is used as it is.
+func TestSiteScriptDirectClick(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	type result struct {
+		Bodies []struct {
+			Batch []struct {
+				Type       string
+				Properties map[string]any
+			}
+		}
+		Stored  map[string]string
+		Links   []string
+		ClickID string
+	}
+	run := func(opts map[string]any) result {
+		t.Helper()
+		opts["loaded"] = true
+		b, _ := json.Marshal(opts)
+		out, err := exec.Command(node, "testdata/run_site.mjs", "site.js", string(b)).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		var r result
+		if err := json.Unmarshal(out, &r); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return r
+	}
+	page := func(r result) map[string]any {
+		t.Helper()
+		for _, b := range r.Bodies {
+			for _, e := range b.Batch {
+				if e.Type == "page" {
+					return e.Properties
+				}
+			}
+		}
+		t.Fatalf("no page view: %+v", r)
+		return nil
+	}
+	keyRe := regexp.MustCompile(`^[a-z0-9]{16}$`)
+	links := []string{"https://offers.northpeak.example/o?sub1={ofclk}", "https://offers.northpeak.example/o?sub1=%7Bofclk%7D", "https://northpeak.example/about"}
+
+	first := run(map[string]any{"href": "https://northpeak.example/winter?ofc=7k2m9qxa&clickid=net-9", "links": links})
+	p := page(first)
+	key, _ := p["ofclk"].(string)
+	if !keyRe.MatchString(key) || p["direct"] != true || p["ofc"] != "7k2m9qxa" || first.ClickID != key {
+		t.Fatalf("direct page view: %v, clickId %q", p, first.ClickID)
+	}
+	if first.Stored["of_dclk_7k2m9qxa"] != key {
+		t.Fatalf("stored: %v", first.Stored)
+	}
+	if first.Links[0] != "https://offers.northpeak.example/o?sub1="+key || first.Links[1] != "https://offers.northpeak.example/o?sub1="+key ||
+		first.Links[2] != links[2] {
+		t.Fatalf("links: %v", first.Links)
+	}
+
+	// A reload in the same tab keeps the key.
+	again := run(map[string]any{"href": "https://northpeak.example/winter?ofc=7k2m9qxa", "stored": first.Stored})
+	if page(again)["ofclk"] != key {
+		t.Fatalf("reload: %v", page(again))
+	}
+
+	// A redirect's ofclk is used as it is, not as direct.
+	redirect := run(map[string]any{"href": "https://northpeak.example/winter?ofc=7k2m9qxa&ofclk=abcdefgh12345678", "links": links[:1]})
+	if p := page(redirect); p["ofclk"] != "abcdefgh12345678" || p["direct"] != nil || redirect.Links[0] != "https://offers.northpeak.example/o?sub1=abcdefgh12345678" {
+		t.Fatalf("redirect page view: %v, links %v", p, redirect.Links)
+	}
+
+	// Without ofc there is no click key.
+	if plain := run(map[string]any{"href": "https://northpeak.example/winter?utm_source=x"}); page(plain)["ofclk"] != nil || plain.ClickID != "" {
+		t.Fatalf("plain page view: %v", page(plain))
+	}
+}

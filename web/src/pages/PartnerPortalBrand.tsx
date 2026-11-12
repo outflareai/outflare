@@ -288,7 +288,7 @@ export function PartnerPortalBrand({
             your terms before promoting. Existing email accounts use the same
             customer record.
           </p>
-          <pre className="overflow-x-auto rounded-lg border bg-muted/30 p-4 text-[11px] leading-6">{`POST /v1/workspaces/{workspace}/partner-programs/{program}/portal-sessions
+          <pre className="overflow-x-auto rounded-lg border bg-muted/30 p-4 text-[11px] leading-6">{`POST /v1/brands/{brand}/partner-programs/{program}/portal-sessions
 { "customer_id": "your_authenticated_user_id" }`}</pre>
           <p className="text-xs leading-6 text-muted-foreground">
             Use a backend API token with partners.conversions. The returned URL

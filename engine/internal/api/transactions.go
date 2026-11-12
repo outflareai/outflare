@@ -302,7 +302,12 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	var v transactionView
 	var created, merged bool
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	base := n
+	err := s.retryTx(ctx, "create_transaction", func(tx pgx.Tx) error {
+		// Each try starts again: a person found or made by a try that was
+		// rolled back isn't there.
+		n = base
+		v, created, merged = transactionView{}, false, false
 		if err := lockTransaction(ctx, tx, a.Brand, n.Kind, n.SourceID); err != nil {
 			return err
 		}

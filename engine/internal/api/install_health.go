@@ -27,7 +27,7 @@ const (
 	// siteScriptVersion is the version /site.js sends (VERSION in site.js);
 	// siteScriptMinVersion is the oldest the server still takes as is.
 	// Copies from before the script sent a version count as "1".
-	siteScriptVersion    = 16
+	siteScriptVersion    = 17
 	siteScriptMinVersion = 1
 
 	// A site key whose site sent visits but none for this long is silent.
@@ -401,8 +401,8 @@ func deprecatedOps() []string {
 
 func (s *Server) getInstallHealth(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	brand := ""
-	if ref := r.URL.Query().Get("brand"); ref != "" {
+	brand := a.Brand
+	if ref := r.URL.Query().Get("brand"); brand == "" && ref != "" {
 		id, err := s.brandIDFor(r.Context(), a.WorkspaceID, ref)
 		if err == nil && !a.sees(&id) {
 			err = errNotFound
@@ -412,7 +412,7 @@ func (s *Server) getInstallHealth(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		brand = id
-	} else if a.Brands != nil {
+	} else if brand == "" && a.Brands != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "brand is required: this token sees only some brands")
 		return
 	}

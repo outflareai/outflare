@@ -14,7 +14,7 @@ import { SendLift } from "@/components/send-lift";
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const zones: string[] = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone") ?? [];
-const variables = ["first_name", "last_name", "company", "title", "website", "sender_first_name", "sender_name", "unsubscribe_url"];
+const variables = ["first_name", "last_name", "company", "title", "website", "sender_first_name", "sender_name", "unsubscribe_url", "brand_address", "brand_legal_name"];
 
 const statusTone = { draft: "grey", active: "green", paused: "grey", archived: "grey" } as const;
 const statusLabel = { draft: "Draft", active: "Sending", paused: "Paused", archived: "Archived" } as const;

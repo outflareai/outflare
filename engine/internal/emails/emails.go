@@ -109,6 +109,27 @@ func (s *Service) Register(q *jobs.Queue) {
 // Attach makes connecting an email provider integration add it here.
 func (s *Service) Attach(store *connectors.Store) {
 	store.OnConnect = append(store.OnConnect, s.connected)
+	store.OnDisconnect = append(store.OnDisconnect, s.disconnecting)
+}
+
+// disconnecting hands the default on when the default provider's
+// integration is about to be deleted: the oldest other active provider of
+// the same channel becomes the default, so sends that name no provider
+// still have one. It runs inside the disconnecting transaction.
+func (s *Service) disconnecting(ctx context.Context, tx pgx.Tx, i connectors.Integration) error {
+	var id, channel string
+	err := tx.QueryRow(ctx, `UPDATE email_providers SET is_default = false, updated_at = now()
+		WHERE workspace_id = $1 AND integration_id = $2 AND is_default RETURNING id, channel`, i.WorkspaceID, i.ID).Scan(&id, &channel)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE email_providers SET is_default = true, updated_at = now()
+		WHERE id = (SELECT id FROM email_providers WHERE workspace_id = $1 AND channel = $2 AND id <> $3
+		            AND integration_id <> $4 ORDER BY (status = 'active') DESC, created_at LIMIT 1)`, i.WorkspaceID, channel, id, i.ID)
+	return err
 }
 
 // NewID makes an email id, for content that must name it before Queue.

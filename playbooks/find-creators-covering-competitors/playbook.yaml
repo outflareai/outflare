@@ -45,13 +45,13 @@ inputs:
     optional: true
 steps:
   - say: Read the brand's context, and check its setup kit is applied so the Partnerships board and creator fields are there.
-    tools: [getBrandContext, listRecordTypes]
+    tools: [getBrandContext, listBrandRecordTypes]
   - say: Look at partnerships already on the board, so nobody is pitched twice.
     tools: [listBrandRecords]
   - say: Find reviews, comparisons and sponsored posts about each competitor from the last twelve months, with the brand's social watches and web search.
     tools: [createBrandSocialWatch, checkBrandSocialWatch, listBrandSocialItems]
   - say: For each creator behind them, find or add a person with their platforms, audience size, topics and past sponsors, and a partnership at Found.
-    tools: [lookupRecords, createBrandRecord, updateBrandRecord]
+    tools: [lookupBrandRecords, createBrandRecord, updateBrandRecord]
   - say: Vet each one (topic fit, recent views, how the review read) and move them to Vetted or Declined with a one-line reason.
     tools: [updateBrandRecord]
   - say: Draft a short pitch for each vetted creator that names what they said about the competitor and why your product is worth a look, as a sequence held until a person approves the sends.

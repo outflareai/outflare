@@ -250,7 +250,7 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
         <Loading />
       ) : (
         <>
-          <UnassignedConnections key={integrations.map((i) => i.id + (i.brand_id ?? "") + i.brand_kind).join()} ws={ws} brands={brands} canManage={canManage} onOpen={(id) => { const i = integrations.find((x) => x.id === id); if (i) setSharing(i); }} />
+          <UnassignedConnections key={integrations.map((i) => i.id + (i.brand_id ?? "") + i.brand_kind).join()} ws={ws} brands={brands} canManage={canManage} onChanged={load} onOpen={(id) => { const i = integrations.find((x) => x.id === id); if (i) setSharing(i); }} />
           <section className="space-y-3">
             <h2 className="flex items-baseline gap-2 text-[13px] font-semibold">Connected {integrations.length > 0 && <span className="font-mono text-[12px] font-normal text-muted-foreground">{integrations.length}</span>}</h2>
             {integrations.length === 0 ? (

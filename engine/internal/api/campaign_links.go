@@ -439,9 +439,12 @@ type trackingLinkView struct {
 	Clicks int `json:"clicks"`
 	// Landed is how many of those clicks reached a page with the site's
 	// script.
-	Landed    int       `json:"landed"`
-	CreatedAt time.Time `json:"created_at"`
-	code      *string
+	Landed int `json:"landed"`
+	// SuspectClicks are those a fraud signal flagged (a hosting network,
+	// repeat clicks): kept and counted, but left out of caps.
+	SuspectClicks int       `json:"suspect_clicks"`
+	CreatedAt     time.Time `json:"created_at"`
+	code          *string
 }
 
 func (s *Server) listTrackingLinks(w http.ResponseWriter, r *http.Request) {
@@ -457,7 +460,8 @@ func (s *Server) listTrackingLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.pool.Query(r.Context(), `SELECT l.id::text, l.url, l.content, l.term, l.redirect_code,
 			(SELECT count(*) FROM tracking_link_clicks k WHERE k.link_id = l.id AND NOT k.likely_bot)::int,
-			(SELECT count(*) FROM tracking_link_clicks k WHERE k.link_id = l.id AND NOT k.likely_bot AND k.landed_at IS NOT NULL)::int, l.created_at
+			(SELECT count(*) FROM tracking_link_clicks k WHERE k.link_id = l.id AND NOT k.likely_bot AND k.landed_at IS NOT NULL)::int,
+			(SELECT count(*) FROM tracking_link_clicks k WHERE k.link_id = l.id AND NOT k.likely_bot AND cardinality(k.fraud_reasons) > 0)::int, l.created_at
 		FROM tracking_links l WHERE l.workspace_id = $1 AND l.campaign_id = $2 ORDER BY l.created_at DESC, l.id`, a.WorkspaceID, c.ID)
 	if err != nil {
 		s.internal(w, r, err)
@@ -465,7 +469,7 @@ func (s *Server) listTrackingLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (trackingLinkView, error) {
 		v := trackingLinkView{CampaignID: c.ID}
-		err := row.Scan(&v.ID, &v.URL, &v.Content, &v.Term, &v.code, &v.Clicks, &v.Landed, &v.CreatedAt)
+		err := row.Scan(&v.ID, &v.URL, &v.Content, &v.Term, &v.code, &v.Clicks, &v.Landed, &v.SuspectClicks, &v.CreatedAt)
 		v.finish(*c, base)
 		return v, err
 	})

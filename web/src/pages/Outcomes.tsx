@@ -122,11 +122,13 @@ function OutcomesPage({ ws, canManage, go }: { ws: string; canManage: boolean; g
   // The sidebar's brand narrows the report; with brands, it can compare them.
   const { query: brandQuery, active: brands } = useBrand(ws);
   const brandKey = brandQuery.brand ?? "";
+  const pickedId = brands.find((b) => b.handle === brandKey)?.id;
 
   useEffect(() => {
     let live = true;
     setError("");
-    api.GET("/v1/workspaces/{ws}/outcomes/report", { params: { path: { ws }, query: { from, to, group_by: group, currency, ...brandQuery } } }).then(({ data, error }) => {
+    if (!pickedId) return;
+    api.GET("/v1/brands/{brand}/outcomes/report", { params: { path: { brand: pickedId }, query: { from, to, group_by: group, currency } } }).then(({ data, error }) => {
       if (!live) return;
       if (error) return setError(errorMessage(error));
       setReport(data);
@@ -159,7 +161,6 @@ function OutcomesPage({ ws, canManage, go }: { ws: string; canManage: boolean; g
         </select>
         <select aria-label="Group by" className={field} value={group} onChange={(e) => setGroup(e.target.value as Group)}>
           <option value="sequence">By sequence</option>
-          {brands.length > 1 && <option value="brand">By brand</option>}
           <option value="none">Whole workspace</option>
         </select>
         <select aria-label="Currency" className={field} value={currency} onChange={(e) => setCurrency(e.target.value)}>
@@ -1185,9 +1186,11 @@ function Sources({ ws, syncs, canManage, go, onChange }: { ws: string; syncs: Ou
 // ---- Export ----
 
 function ExportMenu({ ws, from, to, group, currency }: { ws: string; from: string; to: string; group: Group; currency: string }) {
+  // The picked brand's data.
+  const brandId = useBrand(ws).brand?.id;
   const link = (dataset: string, format = "csv") => {
     const q = new URLSearchParams({ dataset, format, from, to, currency, ...(dataset === "report" ? { group_by: group === "none" ? "sequence" : group } : {}) });
-    return `/v1/workspaces/${ws}/outcomes/export?${q}`;
+    return `/v1/brands/${brandId ?? ""}/outcomes/export?${q}`;
   };
   const download = (href: string) => {
     const a = document.createElement("a");

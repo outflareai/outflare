@@ -96,6 +96,11 @@ def test_paginate_follows_next_cursor():
     assert seen[1].url.params["cursor"] == "c2" and seen[1].url.params["limit"] == "2"
 
 
+def test_is_held_for_a_change_waiting_on_the_action_layer():
+    assert is_held({"action": {"id": "x"}, "approval_required": True, "message": "waiting for a person"})
+    assert not is_held({"id": "x"})
+
+
 def test_csv_upload_and_mission_header():
     def handler(req, n):
         return httpx.Response(202, json={"mission_action": {"id": "x"}, "approval_required": True})

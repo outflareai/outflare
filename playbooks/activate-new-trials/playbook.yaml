@@ -37,7 +37,7 @@ inputs:
     optional: true
 steps:
   - say: Look at the events new users send in their first week and pick the one that best marks activation, unless one was given.
-    tools: [listEventDefinitions, listBrandCustomerEvents]
+    tools: [listBrandEventDefinitions, listBrandCustomerEvents]
   - say: Check what the setup kit would add, then add it with those events. Its list, rule and journey arrive as drafts.
     tools: [previewKit, applyKit]
   - say: Rewrite the two emails in the brand's voice, and dry-run the rule to see how many sign-ups it would have caught.

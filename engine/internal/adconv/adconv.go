@@ -140,7 +140,10 @@ type payload struct {
 }
 
 // Register adds the job handler.
-func (s *Sender) Register(q *jobs.Queue) { q.Handle(JobSend, s.job) }
+func (s *Sender) Register(q *jobs.Queue) {
+	q.Handle(JobSend, s.job)
+	q.Handle(JobPayers, s.payersJob)
+}
 
 func (s *Sender) now() time.Time {
 	if s.Now != nil {
@@ -208,7 +211,8 @@ func (s *Sender) Tick(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	// The payers lists refresh once a day (payers.go).
+	return s.queuePayers(ctx)
 }
 
 // Match queues the events rules match that have not been queued yet: the
@@ -218,6 +222,10 @@ func (s *Sender) Tick(ctx context.Context) error {
 // queues only the events that meet them (matchFiltered); one whose
 // definition is archived queues nothing. ws "" matches every workspace.
 func Match(ctx context.Context, q conversions.Querier, ws string) (int64, error) {
+	ledger, err := hasLedger(ctx, q)
+	if err != nil {
+		return 0, err
+	}
 	tag, err := q.Exec(ctx, `
 		INSERT INTO ad_conversion_sends (workspace_id, rule_id, event_row_id, record_id, event_id, occurred_at)
 		SELECT r.workspace_id, r.id, e.id, e.record_id, `+conversionID+`, e.occurred_at
@@ -230,6 +238,7 @@ func Match(ctx context.Context, q conversions.Querier, ws string) (int64, error)
 		WHERE r.enabled AND ($1 = '' OR r.workspace_id::text = $1)
 		  AND (r.conversion_id IS NULL OR (d.archived_at IS NULL AND d.filters = '[]'::jsonb))
 		  AND (a.brand_id IS NULL OR e.brand_id = a.brand_id)
+		  AND `+roleFilterSQL(ledger)+`
 		  AND `+oneCopy("r.id")+`
 		ON CONFLICT (rule_id, event_row_id) DO NOTHING`, ws, fmt.Sprintf("%d seconds", int(window.Seconds())))
 	if err != nil {
@@ -409,6 +418,10 @@ func (e dbError) Unwrap() error { return e.error }
 type rule struct {
 	id, ws, integrationID, connector, eventType, targetID, targetName string
 	valueProperty, valueUnit, currency                                string
+	// accountID is the ad account; feedRole and customerType are the
+	// rule's part in the conversion feed (feed.go), and feed the account's.
+	accountID, feedRole, customerType string
+	feed                              Feed
 	// brand is the ad account's brand ("": none, so the first brand's
 	// settings).
 	brand string
@@ -467,12 +480,12 @@ func (s *Sender) SendRule(ctx context.Context, ws, ruleID string) (Result, error
 		}
 		return res, err
 	}
-	sender, ok := o.Connector.(connectors.ConversionSender)
-	if !ok {
+	if _, ok := o.Connector.(connectors.ConversionSender); !ok {
 		err := connectors.Errf(connectors.ErrInvalid, "%s cannot take conversions yet", o.Connector.Definition().Name)
 		s.failAll(ctx, ruleID, err.Error(), &res)
 		return res, err
 	}
+	_, hasFeed := o.Connector.(connectors.FeedSender)
 	mode, err := s.consentMode(ctx, ws, r.brand)
 	if err != nil {
 		return res, dbError{err}
@@ -494,7 +507,7 @@ func (s *Sender) SendRule(ctx context.Context, ws, ruleID string) (Result, error
 				return res, dbError{err}
 			}
 			if reason != "" {
-				if err := s.mark(ctx, q.id, "skipped", reason, nil, nil, ""); err != nil {
+				if err := s.mark(ctx, q.id, "skipped", reason, nil, nil, "", sendRow{}); err != nil {
 					return res, dbError{err}
 				}
 				res.Skipped++
@@ -507,22 +520,26 @@ func (s *Sender) SendRule(ctx context.Context, ws, ruleID string) (Result, error
 		if len(convs) == 0 {
 			continue
 		}
-		results, err := sender.SendConversions(ctx, o.Client, o.Creds, r.acct, target, convs)
+		results, transport, requestID, err := s.deliver(ctx, ws, o, &r, target, convs)
+		if hasFeed {
+			feedMetrics(transport, results, err)
+		}
+		via := sendRow{transport: transport, requestID: requestID}
 		if err != nil {
 			if connectors.KindOf(err) == connectors.ErrUnavailable {
 				// Try again later; give up after maxAttempts.
 				for _, q := range byIndex {
 					if q.attempts+1 >= maxAttempts {
-						_ = s.mark(ctx, q.id, "failed", err.Error(), nil, nil, "")
+						_ = s.mark(ctx, q.id, "failed", err.Error(), nil, nil, "", via)
 						res.Failed++
 					} else {
-						_, _ = s.Pool.Exec(ctx, `UPDATE ad_conversion_sends SET attempts = attempts + 1, reason = $2, updated_at = now() WHERE id = $1`, q.id, trim(err.Error(), 500))
+						_, _ = s.Pool.Exec(ctx, `UPDATE ad_conversion_sends SET attempts = attempts + 1, reason = $2, transport = $3, updated_at = now() WHERE id = $1`, q.id, trim(err.Error(), 500), transport)
 					}
 				}
 				return res, err
 			}
 			for _, q := range byIndex {
-				_ = s.mark(ctx, q.id, "failed", err.Error(), nil, nil, "")
+				_ = s.mark(ctx, q.id, "failed", err.Error(), nil, nil, "", via)
 				res.Failed++
 			}
 			return res, err
@@ -550,13 +567,13 @@ func (s *Sender) SendRule(ctx context.Context, ws, ruleID string) (Result, error
 			default:
 				res.Failed++
 			}
-			if err := s.mark(ctx, q.id, status, cr.Reason, cr.MatchKeys, cv.ValueMicros, cv.Currency); err != nil {
+			if err := s.mark(ctx, q.id, status, cr.Reason, cr.MatchKeys, cv.ValueMicros, cv.Currency, via); err != nil {
 				return res, dbError{err}
 			}
 		}
 		// A conversion the platform said nothing about is not left waiting.
 		for _, q := range byIndex {
-			if err := s.mark(ctx, q.id, "failed", "the platform gave no answer for it", nil, nil, ""); err != nil {
+			if err := s.mark(ctx, q.id, "failed", "the platform gave no answer for it", nil, nil, "", via); err != nil {
 				return res, dbError{err}
 			}
 			res.Failed++
@@ -567,18 +584,20 @@ func (s *Sender) SendRule(ctx context.Context, ws, ruleID string) (Result, error
 
 func (s *Sender) loadRule(ctx context.Context, ws, id string) (rule, error) {
 	var r rule
-	var meta []byte
+	var meta, feed []byte
 	var defID *string
 	err := s.Pool.QueryRow(ctx, `
 		SELECT r.id, r.workspace_id, a.integration_id, a.connector, r.event_type, r.target_id, r.target_name,
 			r.value_property, r.value_unit, r.currency, r.fixed_value_micros,
-			a.external_id, a.name, a.currency, a.time_zone, a.meta, d.id::text, coalesce(a.brand_id::text, '')
+			a.external_id, a.name, a.currency, a.time_zone, a.meta, d.id::text, coalesce(a.brand_id::text, ''),
+			a.id, r.feed_role, r.customer_type, a.feed
 		FROM ad_conversion_rules r JOIN ad_accounts a ON a.id = r.ad_account_id
 		LEFT JOIN conversion_definitions d ON d.id = r.conversion_id
 		WHERE r.workspace_id = $1 AND r.id = $2 AND r.enabled`, ws, id).Scan(
 		&r.id, &r.ws, &r.integrationID, &r.connector, &r.eventType, &r.targetID, &r.targetName,
 		&r.valueProperty, &r.valueUnit, &r.currency, &r.fixed,
-		&r.acct.ID, &r.acct.Name, &r.acct.Currency, &r.acct.TimeZone, &meta, &defID, &r.brand)
+		&r.acct.ID, &r.acct.Name, &r.acct.Currency, &r.acct.TimeZone, &meta, &defID, &r.brand,
+		&r.accountID, &r.feedRole, &r.customerType, &feed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, connectors.ErrNotFound
 	}
@@ -586,6 +605,7 @@ func (s *Sender) loadRule(ctx context.Context, ws, id string) (rule, error) {
 		return r, dbError{err}
 	}
 	_ = json.Unmarshal(meta, &r.acct.Meta)
+	_ = json.Unmarshal(feed, &r.feed)
 	if defID != nil {
 		d, err := conversions.GetByID(ctx, s.Pool, ws, *defID)
 		if err != nil {
@@ -677,6 +697,9 @@ func (s *Sender) build(ctx context.Context, ws string, r rule, mode string, q qu
 		}
 	}
 	cv.ValueMicros, cv.Currency = value(r, q.props)
+	if cv.CustomerType, err = s.customerType(ctx, ws, r, q); err != nil {
+		return cv, "", err
+	}
 	return cv, "", nil
 }
 
@@ -847,14 +870,17 @@ func num(v any) (float64, bool) {
 	return 0, false
 }
 
-func (s *Sender) mark(ctx context.Context, id, status, reason string, keys []string, valueMicros *int64, currency string) error {
+// mark records how a send went; via says the path it took and the data
+// feed's request id, when it was sent at all.
+func (s *Sender) mark(ctx context.Context, id, status, reason string, keys []string, valueMicros *int64, currency string, via sendRow) error {
 	if keys == nil {
 		keys = []string{}
 	}
 	_, err := s.Pool.Exec(ctx, `UPDATE ad_conversion_sends SET status = $2, reason = $3, match_keys = $4, value_micros = $5, currency = $6,
 			attempts = attempts + CASE WHEN $2 IN ('sent', 'failed') THEN 1 ELSE 0 END,
-			sent_at = CASE WHEN $2 = 'sent' THEN now() ELSE sent_at END, updated_at = now()
-		WHERE id = $1`, id, status, trim(reason, 500), keys, valueMicros, currency)
+			sent_at = CASE WHEN $2 = 'sent' THEN now() ELSE sent_at END, updated_at = now(),
+			transport = COALESCE(NULLIF($7, ''), transport), request_id = COALESCE(NULLIF($8, ''), request_id)
+		WHERE id = $1`, id, status, trim(reason, 500), keys, valueMicros, currency, via.transport, via.requestID)
 	return err
 }
 

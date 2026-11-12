@@ -11,9 +11,13 @@
     "preview": "vite preview",
     "test:ai-account-brands": "node tests/ai-account-brands.mjs",
     "test:app-signin": "node tests/app-signin.mjs",
+    "test:ads": "node tests/ads.mjs",
     "test:stale-build-reload": "node tests/stale-build-reload.mjs",
     "test:partner-page": "node tests/partner-page.mjs",
-    "test:partner-settings": "node tests/partner-settings.mjs"
+    "test:partner-settings": "node tests/partner-settings.mjs",
+    "test:link-orders": "node tests/link-orders.mjs",
+    "test:api-panel": "node tests/api-panel.mjs",
+    "test:lead-import": "node tests/lead-import.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.4",

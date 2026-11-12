@@ -24,6 +24,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/missions"
+	"github.com/outflareai/outflare/engine/internal/paidads"
 )
 
 // The action layer (ADR 13). Every change an agent token makes goes
@@ -626,6 +627,13 @@ func (s *Server) actionGate(w http.ResponseWriter, r *http.Request, a *access, n
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	path := actionPath(r)
+
+	// Removing a campaign, an ad or a keyword can't be undone: no grant and
+	// no approval lets an agent do it.
+	if adRemoval.MatchString(strings.TrimSuffix(r.URL.Path, "/")) {
+		writeError(w, r, http.StatusForbidden, "person_only", "removing a campaign, an ad or a keyword can't be undone, so only a person, signed in, removes one: ask them to do it in Outflare under Paid ads")
+		return
+	}
 
 	why, err := s.alwaysPerson(ctx, a.WorkspaceID, r, head)
 	if err != nil {
@@ -1433,6 +1441,29 @@ var (
 	// adTargetingChange is a change to a campaign's bidding, audiences or
 	// countries: an agent's always waits for a person.
 	adTargetingChange = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/campaigns/[0-9a-fA-F-]{36}/(bidding|audiences|countries)$`)
+	// adFeedChange is the new customer acquisition goal on an account
+	// (PUT /v1/brands/{brand}/ads/accounts/{id}/feed): it changes how every
+	// campaign bids, so an agent's always waits for a person.
+	adFeedChange = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/accounts/[0-9a-fA-F-]{36}/feed$`)
+	// adFindingRevert undoes an applied finding (POST
+	// /v1/brands/{brand}/ads/findings/{id}/revert). Undoing a change that
+	// could only spend less (a saving, an overspend pause) spends more
+	// again, so an agent's always waits for a person; undoing one that
+	// spent more is a saving and follows the grant. Approving a finding is
+	// the handler's to refuse: an agent approves only a saving the
+	// extension allows (approveFinding).
+	adFindingRevert = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/findings/([0-9a-fA-F-]{36})/revert$`)
+	// adAccountChange is a change to an ad account itself (Google's
+	// Required Minimum Functionality, ad_rmf.go): a conversion action
+	// created, a callout added or removed, a portfolio bidding strategy
+	// created or its target moved. An agent's always waits for a person:
+	// a strategy's target moves what every campaign on it spends, and the
+	// others change what the whole account shows or counts.
+	adAccountChange = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/accounts/[0-9a-fA-F-]{36}/(conversion-actions|callouts|bidding-strategies)(/[^/]+)?$`)
+	// adRemoval removes a campaign, an ad or a keyword, which can't be
+	// undone on the platform: the action layer refuses an agent's outright
+	// (403 person_only), and the handler takes a person's own session.
+	adRemoval = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/(campaigns|items|keywords)/[0-9a-fA-F-]{36}/remove$`)
 	// adBudgetRaiseMax is the largest raise of a campaign's daily budget
 	// an agent makes on its own: a fifth. More always needs a person.
 	adBudgetRaiseMax = 0.2
@@ -1447,6 +1478,32 @@ var (
 func (s *Server) adsHold(ctx context.Context, ws string, r *http.Request, body map[string]any, g grantRule) (string, string, error) {
 	if r.Method == http.MethodPost && adTargetingChange.MatchString(strings.TrimSuffix(r.URL.Path, "/")) {
 		return ruleAlwaysPerson, "changing how a campaign bids, its audiences or its countries can change what it spends and whom it reaches, so a person always approves it", nil
+	}
+	if m := adAccountChange.FindStringSubmatch(strings.TrimSuffix(r.URL.Path, "/")); m != nil && r.Method != http.MethodGet {
+		switch m[1] {
+		case "bidding-strategies":
+			return ruleAlwaysPerson, "a portfolio bidding strategy's target sets what every campaign on it spends, so a person always approves creating or changing one", nil
+		case "conversion-actions":
+			return ruleAlwaysPerson, "a new conversion action changes what the account counts, and bidding with it, so a person always approves it", nil
+		}
+		return ruleAlwaysPerson, "an account's callouts show under every ad it runs, so a person always approves adding or removing one", nil
+	}
+	if r.Method == http.MethodPut && adFeedChange.MatchString(strings.TrimSuffix(r.URL.Path, "/")) {
+		return ruleAlwaysPerson, "the new customer acquisition goal changes how every campaign on the account bids, so a person always approves it", nil
+	}
+	if f := adFindingRevert.FindStringSubmatch(strings.TrimSuffix(r.URL.Path, "/")); f != nil && r.Method == http.MethodPost {
+		var kind string
+		err := s.pool.QueryRow(ctx, `SELECT kind FROM ad_suggestions WHERE workspace_id = $1 AND id = $2`, ws, f[1]).Scan(&kind)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", nil // the handler answers the missing finding
+		}
+		if err != nil {
+			return "", "", err
+		}
+		if l, ok := paidads.LeverOf(kind); !ok || l.SpendsMore != "yes" {
+			return ruleAlwaysPerson, "undoing a change that saved money or protected the budget spends more again, so a person always approves it", nil
+		}
+		return "", "", nil
 	}
 	m := adCampaignChange.FindStringSubmatch(strings.TrimSuffix(r.URL.Path, "/"))
 	if m == nil {

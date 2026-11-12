@@ -34,6 +34,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/tagmanager"
 	"github.com/outflareai/outflare/engine/internal/connectors/tgapp"
 	"github.com/outflareai/outflare/engine/internal/connectors/verifiers"
+	"github.com/outflareai/outflare/engine/internal/connectors/workspace"
 	"github.com/outflareai/outflare/engine/internal/connectors/x"
 	"github.com/outflareai/outflare/integrations"
 )
@@ -60,6 +61,7 @@ func Available() []c.Connector {
 	out = append(out, ads.All()...)
 	out = append(out, cms.All()...)
 	out = append(out, tgapp.Connector{})
+	out = append(out, workspace.Connector{})
 	out = append(out, reddit.All()...)
 	out = append(out, engain.All()...)
 	out = append(out, x.All()...)

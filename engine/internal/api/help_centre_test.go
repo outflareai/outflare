@@ -238,4 +238,17 @@ func TestHelpCentreBrands(t *testing.T) {
 	if l := owner.must(200, "GET", base+"/help-centres?brand=repocket", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["name"] != "Repocket Help" {
 		t.Fatalf("brand list = %v", l)
 	}
+
+	// The brand's business details: in the footer and the Organization
+	// markup, from About your company.
+	if strings.Contains(body, "PostalAddress") {
+		t.Fatal("no address yet, no markup")
+	}
+	owner.must(200, "PATCH", base+"/brands/geonode/context", map[string]any{"legal_name": "Geonode Example Inc",
+		"address": map[string]any{"line1": "1 Example Ave", "city": "Austin", "region": "TX", "postal_code": "78701", "country": "US"}})
+	body = helpGet(t, e.h, "GET", "/h/"+geo["slug"].(string)+"/", "", "").Body.String()
+	if !strings.Contains(body, `<p class="ftext faddr">Geonode Example Inc, 1 Example Ave, Austin TX 78701, United States</p>`) ||
+		!strings.Contains(body, `"@type":"Organization","name":"Geonode Example Inc"`) {
+		t.Fatalf("help centre without the brand's address = %s", body)
+	}
 }

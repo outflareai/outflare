@@ -255,8 +255,12 @@ function CompetitorsPage({ ws, go }: Props) {
         onRead={(k) => discover([k]).then(() => setTimeout(() => setReload((n) => n + 1), 15000))}
         onTrack={track}
         onStatus={(id, status) => {
-          const c = list.find((x) => x.id === id);
-          if (c) setStatus(c, status).then(() => setReload((n) => n + 1));
+          // A site said no to long ago may be past the first page of the list.
+          const c = list.find((x) => x.id === id) ?? ({ id, status } as SEOCompetitor);
+          setStatus(c, status).then(() => {
+            if (status === "tracked") toast("Tracking it as a competitor.");
+            setReload((n) => n + 1);
+          });
         }}
       />
       {error && <ErrorText>{error}</ErrorText>}
@@ -768,10 +772,17 @@ function KeywordResults({ ws, site, keyword, reload, busy, onClose, onRead, onTr
                         <Button onClick={() => onStatus(it.competitor!.id, "tracked")} aria-label={`Yes, track ${it.domain}`}>Yes</Button>
                         <Button variant="ghost" onClick={() => onStatus(it.competitor!.id, "dismissed")} aria-label={`No, ${it.domain} is not a competitor`}>No</Button>
                       </>
+                    ) : it.competitor?.status === "tracked" ? (
+                      <Badge tone="blue">{label.tracked}</Badge>
                     ) : it.competitor ? (
-                      <Badge tone={it.competitor.status === "tracked" ? "blue" : "grey"}>{label[it.competitor.status]}</Badge>
+                      <>
+                        <Badge tone="grey">{label[it.competitor.status]}</Badge>
+                        <Button variant="ghost" onClick={() => onStatus(it.competitor!.id, "tracked")} aria-label={`Track ${it.domain} as a competitor`} title="You said no to this site before; track it as a competitor after all">
+                          Track
+                        </Button>
+                      </>
                     ) : (
-                      <Button variant="ghost" onClick={() => onTrack(it.domain)} aria-label={`Track ${it.domain}`}>Track</Button>
+                      <Button variant="ghost" onClick={() => onTrack(it.domain)} aria-label={`Track ${it.domain} as a competitor`}>Track</Button>
                     )}
                   </div>
                 </li>

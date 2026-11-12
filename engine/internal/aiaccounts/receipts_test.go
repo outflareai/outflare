@@ -66,6 +66,10 @@ func TestReadReceipt(t *testing.T) {
 		{"team seats", Message{Body: teamSeats, Subject: "Receipt", Date: when, DKIM: []string{"openai.com"}}, true,
 			Receipt{Vendor: "openai", Provider: "chatgpt", Plan: "Team", Currency: "USD", ChargedOn: "2026-10-14", PeriodStart: "2026-11-02", PeriodEnd: "2026-12-02", Identifiers: map[string]string{}}},
 		{"unsigned", Message{Body: claudeMax, Date: when}, false, Receipt{}},
+		{"a sign-in alert", Message{Body: "We noticed a new sign-in to your OpenAI account.\nIf this was you, no action is needed.", Subject: "New sign-in to your OpenAI account", Date: when, DKIM: []string{"tm.openai.com"}}, false, Receipt{}},
+		{"a newsletter", Message{Body: "Try 4 new image styles in ChatGPT today.", Subject: "4 new image styles to try", Date: when, DKIM: []string{"email.openai.com"}}, false, Receipt{}},
+		{"a confirmation without a total", Message{Body: "Thanks for subscribing to Claude Max 5x.", Subject: "Your Max subscription is confirmed", Date: when, DKIM: []string{"mail.anthropic.com"}}, true,
+			Receipt{Vendor: "anthropic", Provider: "claude", Plan: "Max 5x", ChargedOn: "2026-10-14", Identifiers: map[string]string{}}},
 		{"another company's receipt through stripe", Message{Body: "Receipt from Northpeak Notes\nTotal $8.00", Date: when, DKIM: []string{"stripe.com"}}, false, Receipt{}},
 	} {
 		t.Run(c.name, func(t *testing.T) {

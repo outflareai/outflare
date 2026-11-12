@@ -322,6 +322,12 @@ func TestBrandSetupOneClickInstalls(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Checking it reads what says whose it is: the accounts, the web
+	// containers and the sites they tag.
+	checked := owner.must(200, "POST", "/v1/workspaces/"+ws+"/integrations/"+gtmID+"/test", nil)["account"].(map[string]any)["details"].(map[string]any)
+	if checked["accounts"] != "Northpeak" || checked["containers"] != "Blog (GTM-BLOG), Main site (GTM-MAIN)" || checked["sites"] != "blog.example, northpeak.example" {
+		t.Fatalf("details: %v", checked)
+	}
 	cs := owner.must(200, "GET", setup+"/tag-containers?integration_id="+gtmID, nil)["data"].([]any)
 	if len(cs) != 2 || cs[0].(map[string]any)["public_id"] != "GTM-MAIN" || cs[0].(map[string]any)["matches_website"] != true {
 		t.Fatalf("containers, the website's first and no app containers: %v", cs)

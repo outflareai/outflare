@@ -31,8 +31,10 @@ A module adds a kind with `alerts.Register` (an id, a title, the scope needed to
 
 Alert emails are Outflare's own account email (the one that sends sign-in links), so they work with no setup. They name what happened and link to it, and never quote a reply, a review or a page. Each person gets at most 50 a day; the rest wait in the app, and the digest says how many. Who caused the alert (the person who labelled the reply) is not emailed about it.
 
-- `PUT /v1/workspaces/{ws}/alerts/settings` with `kind` and `email`: `owner` (the default: the person it is for, else the owners and admins), `admins` or `off`; it is the route's brand's (`PUT /v1/brands/{brand}/alerts/settings`), else `brand_id`'s, else the workspace's first brand's; `null` goes back to the default. Needs `workspace.manage`.
-- `PUT /v1/workspaces/{ws}/alerts/mutes` with `kind` and `muted`: anyone can stop a kind for themselves.
+- `PUT /v1/brands/{brand}/alerts/settings` with `kind` and `email`: `owner` (the default: the person it is for, else the owners and admins), `admins` or `off`, for that brand; `null` goes back to the default. Needs `workspace.manage`.
+- `PUT /v1/brands/{brand}/alerts/mutes` with `kind` and `muted`: anyone can stop a kind for themselves.
+
+The workspace routes for alert settings and mutes answer 410 `route_moved`: each brand has its own.
 
 ## Slack
 
@@ -40,7 +42,7 @@ Connect Slack under Connectors, through Slack's consent screen (when the server 
 
 ## Seeing alerts
 
-Listing alerts needs `workspace.read` and the scope of the part of Outflare each kind comes from (`inbox.read` for replies, `customers.read` for visitors). A brand's alerts are `GET /v1/brands/{brand}/alerts`; the workspace route (`GET /v1/brands/{brand}/alerts`) is deprecated and lists the brand `?brand=` picks, else the workspace's first. Who hears about each kind is the workspace's setting (`.../alerts/settings`), and a brand's own choice (`PUT /v1/brands/{brand}/alerts/settings`) wins over it for that brand's alerts. Mutes are each person's own.
+Listing alerts needs `workspace.read` and the scope of the part of Outflare each kind comes from (`inbox.read` for replies, `customers.read` for visitors). A brand's alerts are `GET /v1/brands/{brand}/alerts`; the workspace route (`GET /v1/workspaces/{ws}/alerts`) is deprecated and lists the brand `?brand=` picks, else the workspace's first. Who hears about each kind is the brand's own setting (`PUT /v1/brands/{brand}/alerts/settings`). Mutes are each person's own.
 
 ## In your CRM
 

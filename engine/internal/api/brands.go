@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/outflareai/outflare/engine/internal/brands"
@@ -427,7 +428,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "live", "page-speed", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-pages", "ai-visibility-settings", "backlinks", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail", "telegram"}
+var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "live", "page-speed", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-pages", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "workspace-brands", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail", "telegram"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".
@@ -629,9 +630,9 @@ func (s *Server) createBrand(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		err := tx.QueryRow(ctx, `
-			INSERT INTO brands (workspace_id, name, handle, website, domains, platforms, links, created_by, business_model, revenue_models, logo_url, colors, presence_top_every_days)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, ''), COALESCE($10, '{}'::text[]), COALESCE($11, ''), COALESCE($12, '{}'::jsonb), $13) RETURNING id`,
-			a.WorkspaceID, *req.Name, handle, website, domains, platforms, links, a.ActorID, req.BusinessModel, req.RevenueModels, req.LogoURL, req.Colors, presenceDefaultEveryDays).Scan(&id)
+			INSERT INTO brands (workspace_id, name, handle, website, domains, platforms, links, created_by, business_model, revenue_models, logo_url, colors, presence_top_every_days, presence_rest_every_days)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, ''), COALESCE($10, '{}'::text[]), COALESCE($11, ''), COALESCE($12, '{}'::jsonb), $13, $14) RETURNING id`,
+			a.WorkspaceID, *req.Name, handle, website, domains, platforms, links, a.ActorID, req.BusinessModel, req.RevenueModels, req.LogoURL, req.Colors, presenceDefaultEveryDays, presenceDefaultRestEveryDays).Scan(&id)
 		if err != nil {
 			return brandUnique(err)
 		}
@@ -652,6 +653,10 @@ func (s *Server) createBrand(w http.ResponseWriter, r *http.Request) {
 		// With a page reader connected, the brand's website is read for its
 		// social links straight away, as suggestions.
 		if website != "" {
+			// Its logo and main colour, from its own site, when not given.
+			if err := enqueueBrandLook(ctx, tx, a.WorkspaceID, id, "created"); err != nil {
+				return err
+			}
 			if _, err := s.enqueueLinkDiscovery(ctx, tx, a.WorkspaceID, id, "created"); err != nil {
 				return err
 			}
@@ -718,6 +723,9 @@ func (s *Server) updateBrand(w http.ResponseWriter, r *http.Request) {
 			return brandUnique(err)
 		}
 		if req.Website != nil && *req.Website != "" && *req.Website != b.Website {
+			if err := enqueueBrandLook(ctx, tx, a.WorkspaceID, b.ID, "website:"+*req.Website); err != nil {
+				return err
+			}
 			if _, err := s.enqueueLinkDiscovery(ctx, tx, a.WorkspaceID, b.ID, "website:"+*req.Website); err != nil {
 				return err
 			}
@@ -806,6 +814,14 @@ type brandContextView struct {
 	Voice     string      `json:"voice"`
 	Rules     string      `json:"rules"`
 	Notes     string      `json:"notes"`
+	// Who stands behind the brand: its legal name, tax or company number
+	// and postal address, which email footers, the help centre, the
+	// cookie policy and agents reuse.
+	LegalName string         `json:"legal_name"`
+	TaxID     string         `json:"tax_id"`
+	Address   brands.Address `json:"address"`
+	// The address on one line, or "" when there is none.
+	AddressText string `json:"address_text"`
 	// Knowledge is what the brand's website says it offers, read by the
 	// workspace's page reader and AI model and edited by people.
 	Knowledge       BrandKnowledge `json:"knowledge"`
@@ -827,6 +843,34 @@ type brandContextView struct {
 	// The brand's active findings, nearest review first (at most 20):
 	// what was learned about its marketing, as data for an agent.
 	Findings []findingView `json:"findings,omitempty"`
+	// ---- Knowledge sheet review (paid ads) ----
+	// Whether the knowledge can be trusted for ads: who reviewed it and
+	// when, whether a read changed what the brand sells since, whether the
+	// website is read daily, and knowledge_trusted (reviewed, unchanged
+	// since, last read worked), which the ads draft writer requires.
+	KnowledgeReviewedAt         *time.Time `json:"knowledge_reviewed_at"`
+	KnowledgeReviewedBy         *string    `json:"knowledge_reviewed_by"`
+	KnowledgeChangedSinceReview bool       `json:"knowledge_changed_since_review"`
+	KnowledgeRefreshDaily       bool       `json:"knowledge_refresh_daily"`
+	KnowledgeTrusted            bool       `json:"knowledge_trusted"`
+}
+
+// brandBusinessFields are the brand's business details kept as text; the
+// address is checked on its own.
+var brandBusinessFields = []struct {
+	key, label string
+	max        int
+}{
+	{"legal_name", "Legal name", brands.MaxLegalName},
+	{"tax_id", "Tax or company number", brands.MaxTaxID},
+}
+
+// brandContextInputs are every text field an edit can set.
+func brandContextInputs() []struct {
+	key, label string
+	max        int
+} {
+	return append(slices.Clone(brandContextFields), brandBusinessFields...)
 }
 
 func (v *brandContextView) field(key string) *string {
@@ -843,6 +887,10 @@ func (v *brandContextView) field(key string) *string {
 		return &v.Rules
 	case "notes":
 		return &v.Notes
+	case "legal_name":
+		return &v.LegalName
+	case "tax_id":
+		return &v.TaxID
 	}
 	return nil
 }
@@ -852,24 +900,39 @@ func (v *brandContextView) field(key string) *string {
 func (s *Server) loadBrandContext(ctx context.Context, ws, id string) (brandContextView, error) {
 	v := brandContextView{Version: 1}
 	var dismissed *time.Time
+	var address []byte
 	err := s.pool.QueryRow(ctx, `
 		SELECT b.id, b.name, b.handle, b.website, b.platforms, b.links,
 		       COALESCE(c.about, ''), COALESCE(c.audience, ''), COALESCE(c.goals, ''), COALESCE(c.voice, ''),
 		       COALESCE(c.rules, ''), COALESCE(c.notes, ''), b.logo_url, b.colors, COALESCE(c.version, 1), c.updated_at, ac.display_name,
 		       c.onboarding_dismissed_at,
-		       COALESCE(c.knowledge, '{}'), c.knowledge_read_at, COALESCE(c.knowledge_pages, 0), COALESCE(c.knowledge_error, '')
+		       COALESCE(c.knowledge, '{}'), c.knowledge_read_at, COALESCE(c.knowledge_pages, 0), COALESCE(c.knowledge_error, ''),
+		       COALESCE(c.legal_name, ''), COALESCE(c.tax_id, ''), COALESCE(c.address, '{}')
 		FROM brands b
 		LEFT JOIN brand_context c ON c.brand_id = b.id
 		LEFT JOIN actors ac ON ac.id = c.updated_by
 		WHERE b.id = $1 AND b.workspace_id = $2`, id, ws,
 	).Scan(&v.BrandID, &v.Name, &v.Handle, &v.Website, &v.Platforms, &v.Links, &v.About, &v.Audience, &v.Goals, &v.Voice,
 		&v.Rules, &v.Notes, &v.LogoURL, &v.Colors, &v.Version, &v.UpdatedAt, &v.UpdatedBy, &dismissed,
-		&v.Knowledge, &v.KnowledgeReadAt, &v.KnowledgePages, &v.KnowledgeError)
+		&v.Knowledge, &v.KnowledgeReadAt, &v.KnowledgePages, &v.KnowledgeError, &v.LegalName, &v.TaxID, &address)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, errNotFound
 	}
 	if err == nil {
 		err = v.Knowledge.normalise()
+	}
+	if err == nil {
+		err = json.Unmarshal(address, &v.Address)
+		v.AddressText = v.Address.String()
+	}
+	if err == nil {
+		// The sheet's review, so an agent reading the brand sees whether
+		// the knowledge can be trusted for ads.
+		var k knowledgeReview
+		if k, err = loadKnowledgeReview(ctx, s.pool, ws, id); err == nil {
+			v.KnowledgeReviewedAt, v.KnowledgeReviewedBy, v.KnowledgeChangedSinceReview = k.ReviewedAt, k.ReviewedBy, k.ChangedSinceReview
+			v.KnowledgeRefreshDaily, v.KnowledgeTrusted = k.RefreshDaily, k.Trusted
+		}
 	}
 	v.Missing = []string{}
 	for _, k := range brandOnboardingFields {
@@ -909,6 +972,10 @@ type brandContextInput struct {
 	Voice    *string `json:"voice"`
 	Rules    *string `json:"rules"`
 	Notes    *string `json:"notes"`
+	// The brand's business details; an empty address clears it.
+	LegalName *string         `json:"legal_name"`
+	TaxID     *string         `json:"tax_id"`
+	Address   *brands.Address `json:"address"`
 	// The version the edit was made against. When set and the context has
 	// changed since, the update fails with 409 instead of overwriting.
 	Version *int `json:"version"`
@@ -920,6 +987,7 @@ func (in *brandContextInput) field(key string) *string {
 	return map[string]*string{
 		"about": in.About, "audience": in.Audience, "goals": in.Goals,
 		"voice": in.Voice, "rules": in.Rules, "notes": in.Notes,
+		"legal_name": in.LegalName, "tax_id": in.TaxID,
 	}[key]
 }
 
@@ -929,13 +997,20 @@ func (s *Server) updateBrandContext(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	for _, f := range brandContextFields {
+	for _, f := range brandContextInputs() {
 		if p := req.field(f.key); p != nil {
 			*p = strings.TrimSpace(*p)
 			if len(*p) > f.max {
 				writeError(w, r, http.StatusBadRequest, "invalid_request", fmt.Sprintf("%s must be at most %d characters", f.key, f.max))
 				return
 			}
+		}
+	}
+	if req.Address != nil {
+		req.Address.Clean()
+		if err := req.Address.Check(); err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+			return
 		}
 	}
 	b, ok := s.brandFor(w, r, a)
@@ -967,17 +1042,28 @@ func (s *Server) writeBrandContext(ctx context.Context, a *access, brand string,
 			return err
 		}
 		var cur brandContextView
+		var address []byte
 		err := tx.QueryRow(ctx, `
-			SELECT about, audience, goals, voice, rules, notes, version
+			SELECT about, audience, goals, voice, rules, notes, legal_name, tax_id, address, version
 			FROM brand_context WHERE brand_id = $1 FOR UPDATE`, brand,
-		).Scan(&cur.About, &cur.Audience, &cur.Goals, &cur.Voice, &cur.Rules, &cur.Notes, &cur.Version)
+		).Scan(&cur.About, &cur.Audience, &cur.Goals, &cur.Voice, &cur.Rules, &cur.Notes, &cur.LegalName, &cur.TaxID, &address, &cur.Version)
 		if err != nil {
 			return err
 		}
+		if err := json.Unmarshal(address, &cur.Address); err != nil {
+			return err
+		}
 		var changed []string
-		for _, f := range brandContextFields {
+		for _, f := range brandContextInputs() {
 			if p := req.field(f.key); p != nil && *p != *cur.field(f.key) {
 				changed = append(changed, f.key)
+			}
+		}
+		var newAddress []byte
+		if req.Address != nil && *req.Address != cur.Address {
+			changed = append(changed, "address")
+			if newAddress, err = json.Marshal(req.Address); err != nil {
+				return err
 			}
 		}
 		if len(changed) == 0 && req.OnboardingDismissed == nil {
@@ -991,13 +1077,15 @@ func (s *Server) writeBrandContext(ctx context.Context, a *access, brand string,
 			UPDATE brand_context SET
 				about = COALESCE($2, about), audience = COALESCE($3, audience), goals = COALESCE($4, goals),
 				voice = COALESCE($5, voice), rules = COALESCE($6, rules), notes = COALESCE($7, notes),
+				legal_name = COALESCE($11, legal_name), tax_id = COALESCE($12, tax_id), address = COALESCE($13::jsonb, address),
 				version = version + CASE WHEN $9 THEN 1 ELSE 0 END,
 				onboarding_dismissed_at = CASE WHEN $10::boolean IS NULL THEN onboarding_dismissed_at
 				                               WHEN $10 THEN COALESCE(onboarding_dismissed_at, now()) END,
 				updated_at = CASE WHEN $9 THEN now() ELSE updated_at END,
 				updated_by = CASE WHEN $9 THEN $8::uuid ELSE updated_by END
 			WHERE brand_id = $1`,
-			brand, req.About, req.Audience, req.Goals, req.Voice, req.Rules, req.Notes, a.ActorID, bump, req.OnboardingDismissed)
+			brand, req.About, req.Audience, req.Goals, req.Voice, req.Rules, req.Notes, a.ActorID, bump, req.OnboardingDismissed,
+			req.LegalName, req.TaxID, newAddress)
 		if err != nil {
 			return err
 		}

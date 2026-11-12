@@ -13,8 +13,10 @@ import (
 // GoogleAds reads Google Ads accounts through the Google Ads API with the
 // workspace's own Google sign-in. Google retired developer tokens on
 // 9 September 2026: API access now belongs to the Google Cloud project of
-// the sign-in's OAuth app, and Google ignores a token sent anyway. A token
-// a workspace added before then is still sent, and none is asked for.
+// the sign-in's OAuth app, and Google ignores a token sent anyway, so none
+// is asked for or sent; a token a workspace added before then stays sealed
+// in its credentials, unused. Conversions and Customer Match members go
+// through the Data Manager API (datamanager.go) with the same sign-in.
 type GoogleAds struct{}
 
 const (
@@ -27,20 +29,18 @@ func (GoogleAds) Definition() c.Definition {
 	d := def("google_ads", "Google Ads", "https://ads.google.com",
 		"https://developers.google.com/google-ads/api/docs/start", "https://developers.google.com/google-ads/api/docs/get-started/dev-token",
 		"Spend, clicks and conversions per campaign from your Google Ads accounts.",
-		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. It changes a campaign only when you, or an agent within the grants you set, pause or resume it, set its daily budget, bidding, audiences or countries, or add keywords, or when you start, keep or roll back an experiment on it, makes new ads, ad groups and campaigns paused only when you approve them and turns them on only when you say, and adds Outflare's tracking parameters to URL suffixes only when you press Add the template; it sends conversions only to the conversion actions you choose under Paid ads, and adds people only to the Customer Match lists your journeys name.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage, c.CapAdsTracking, c.CapAdsKeywords, c.CapAdsTests, c.CapAdsTargeting, c.CapAdsCreate)
+		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. It changes a campaign only when you, or an agent within the grants you set, pause or resume it, set its daily budget, bidding, audiences or countries, or add keywords, or when you start, keep or roll back an experiment on it, removes a campaign, ad or keyword only when you yourself ask and confirm, creates website conversion actions, account callouts and portfolio bidding strategies only when you ask, makes new ads, ad groups and campaigns paused only when you approve them and turns them on only when you say, and adds Outflare's tracking parameters to URL suffixes only when you press Add the template; it sends conversions only to the conversion actions you choose under Paid ads, and adds people only to the Customer Match lists your journeys name.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage, c.CapAdsTracking, c.CapAdsKeywords, c.CapAdsTests, c.CapAdsTargeting, c.CapAdsCreate, c.CapAdsFeed)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
 		TokenURL: "https://oauth2.googleapis.com/token",
-		Scopes:   []string{scopeAdWords, "openid", "email"},
-		Params:   map[string]string{"access_type": "offline", "prompt": "consent"},
+		// The Data Manager scope sends conversions and fills customer
+		// lists; a sign-in made before it was asked for is told to connect
+		// again (ReconnectNeeded).
+		Scopes: []string{scopeAdWords, scopeDataManager, "openid", "email"},
+		Params: map[string]string{"access_type": "offline", "prompt": "consent"},
 	}
 	return d
-}
-
-func (GoogleAds) SetupFields() []c.Field {
-	return []c.Field{{Name: "developer_token", Label: "Developer token (no longer needed)", Secret: true, Optional: true,
-		Help: "Google stopped requiring developer tokens in September 2026. Leave this empty."}}
 }
 
 func (g GoogleAds) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Account, error) {
@@ -58,8 +58,7 @@ func (GoogleAds) base(cl *c.Client) string {
 }
 
 func (GoogleAds) call(cl *c.Client, creds c.Creds, loginID string) *call {
-	return newCall(cl, "Google Ads").bearer(creds["access_token"]).
-		set("developer-token", creds["developer_token"]).set("login-customer-id", loginID)
+	return newCall(cl, "Google Ads").bearer(creds["access_token"]).set("login-customer-id", loginID)
 }
 
 func (g GoogleAds) accessible(ctx context.Context, cl *c.Client, creds c.Creds) ([]string, error) {
@@ -122,11 +121,81 @@ type gaqlRow struct {
 			TargetRoas float64 `json:"targetRoas"`
 		} `json:"maximizeConversionValue"`
 		googleTracking
+		// The findings queue's reads (google_findings.go): the networks
+		// the campaign is on, and a portfolio bidding strategy, if any.
+		NetworkSettings struct {
+			TargetSearchNetwork  bool `json:"targetSearchNetwork"`
+			TargetContentNetwork bool `json:"targetContentNetwork"`
+		} `json:"networkSettings"`
+		BiddingStrategy string `json:"biddingStrategy"`
 	} `json:"campaign"`
 	ConversionAction struct {
-		ID   flexInt `json:"id"`
-		Name string  `json:"name"`
+		ID     flexInt `json:"id"`
+		Name   string  `json:"name"`
+		Type   string  `json:"type"`
+		Status string  `json:"status"`
+		// The conversion actions list (google_rmf.go).
+		Category                       string  `json:"category"`
+		PrimaryForGoal                 bool    `json:"primaryForGoal"`
+		CountingType                   string  `json:"countingType"`
+		ClickThroughLookbackWindowDays flexInt `json:"clickThroughLookbackWindowDays"`
+		ValueSettings                  struct {
+			DefaultValue          *flexNum `json:"defaultValue"`
+			DefaultCurrencyCode   string   `json:"defaultCurrencyCode"`
+			AlwaysUseDefaultValue bool     `json:"alwaysUseDefaultValue"`
+		} `json:"valueSettings"`
+		TagSnippets []struct {
+			Type          string `json:"type"`
+			PageFormat    string `json:"pageFormat"`
+			GlobalSiteTag string `json:"globalSiteTag"`
+			EventSnippet  string `json:"eventSnippet"`
+		} `json:"tagSnippets"`
 	} `json:"conversionAction"`
+	// Account callouts and portfolio strategies (google_rmf.go).
+	CustomerAsset struct {
+		ResourceName string `json:"resourceName"`
+		Asset        string `json:"asset"`
+		Status       string `json:"status"`
+	} `json:"customerAsset"`
+	Asset struct {
+		ID           flexInt `json:"id"`
+		CalloutAsset struct {
+			CalloutText string `json:"calloutText"`
+		} `json:"calloutAsset"`
+	} `json:"asset"`
+	BiddingStrategy struct {
+		ID                    flexInt `json:"id"`
+		Name                  string  `json:"name"`
+		Type                  string  `json:"type"`
+		Status                string  `json:"status"`
+		CampaignCount         flexInt `json:"campaignCount"`
+		EffectiveCurrencyCode string  `json:"effectiveCurrencyCode"`
+		TargetCpa             struct {
+			TargetCpaMicros flexInt `json:"targetCpaMicros"`
+		} `json:"targetCpa"`
+		MaximizeConversions struct {
+			TargetCpaMicros flexInt `json:"targetCpaMicros"`
+		} `json:"maximizeConversions"`
+		TargetRoas struct {
+			TargetRoas float64 `json:"targetRoas"`
+		} `json:"targetRoas"`
+		MaximizeConversionValue struct {
+			TargetRoas float64 `json:"targetRoas"`
+		} `json:"maximizeConversionValue"`
+	} `json:"biddingStrategy"`
+	// The conversion feed's goal rows (google_feed.go).
+	Goal struct {
+		ResourceName string `json:"resourceName"`
+		GoalType     string `json:"goalType"`
+	} `json:"goal"`
+	CampaignGoalConfig struct {
+		ResourceName string `json:"resourceName"`
+		Campaign     string `json:"campaign"`
+	} `json:"campaignGoalConfig"`
+	UserListCustomerType struct {
+		ResourceName         string `json:"resourceName"`
+		CustomerTypeCategory string `json:"customerTypeCategory"`
+	} `json:"userListCustomerType"`
 	AdGroup struct {
 		ID     flexInt `json:"id"`
 		Name   string  `json:"name"`
@@ -134,8 +203,11 @@ type gaqlRow struct {
 		googleTracking
 	} `json:"adGroup"`
 	AdGroupAd struct {
-		Status string `json:"status"`
-		Ad     struct {
+		Status        string `json:"status"`
+		PolicySummary struct {
+			ApprovalStatus string `json:"approvalStatus"`
+		} `json:"policySummary"`
+		Ad struct {
 			ID        flexInt  `json:"id"`
 			Name      string   `json:"name"`
 			Type      string   `json:"type"`
@@ -167,6 +239,18 @@ type gaqlRow struct {
 			Text      string `json:"text"`
 			MatchType string `json:"matchType"`
 		} `json:"keyword"`
+		ResourceName string `json:"resourceName"`
+		Negative     bool   `json:"negative"`
+		// What Google estimates the keyword must bid, and its quality
+		// score (RMF R.50).
+		PositionEstimates struct {
+			FirstPageCpcMicros     *flexInt `json:"firstPageCpcMicros"`
+			TopOfPageCpcMicros     *flexInt `json:"topOfPageCpcMicros"`
+			FirstPositionCpcMicros *flexInt `json:"firstPositionCpcMicros"`
+		} `json:"positionEstimates"`
+		QualityInfo struct {
+			QualityScore flexInt `json:"qualityScore"`
+		} `json:"qualityInfo"`
 	} `json:"adGroupCriterion"`
 	Recommendation struct {
 		ResourceName string `json:"resourceName"`
@@ -195,14 +279,90 @@ type gaqlRow struct {
 		Location struct {
 			GeoTargetConstant string `json:"geoTargetConstant"`
 		} `json:"location"`
+		// The findings queue's exclusions and negatives (google_findings.go).
+		Status      string  `json:"status"`
+		BidModifier float64 `json:"bidModifier"`
+		Keyword     struct {
+			Text      string `json:"text"`
+			MatchType string `json:"matchType"`
+		} `json:"keyword"`
+		Device struct {
+			Type string `json:"type"`
+		} `json:"device"`
+		AdSchedule struct {
+			DayOfWeek   string  `json:"dayOfWeek"`
+			StartHour   flexInt `json:"startHour"`
+			StartMinute string  `json:"startMinute"`
+			EndHour     flexInt `json:"endHour"`
+			EndMinute   string  `json:"endMinute"`
+		} `json:"adSchedule"`
+		Placement struct {
+			URL string `json:"url"`
+		} `json:"placement"`
+		MobileApplication struct {
+			AppID string `json:"appId"`
+		} `json:"mobileApplication"`
+		YoutubeChannel struct {
+			ChannelID string `json:"channelId"`
+		} `json:"youtubeChannel"`
+		YoutubeVideo struct {
+			VideoID string `json:"videoId"`
+		} `json:"youtubeVideo"`
+		BrandList struct {
+			SharedSet string `json:"sharedSet"`
+		} `json:"brandList"`
 	} `json:"campaignCriterion"`
+	// The findings queue's reads (google_findings.go): a brand list shared
+	// set, a place's numbers, a Display placement's numbers.
+	SharedSet struct {
+		ResourceName string `json:"resourceName"`
+		Name         string `json:"name"`
+		Type         string `json:"type"`
+	} `json:"sharedSet"`
+	GeographicView struct {
+		CountryCriterionID flexInt `json:"countryCriterionId"`
+	} `json:"geographicView"`
+	GroupPlacementView struct {
+		Placement     string `json:"placement"`
+		PlacementType string `json:"placementType"`
+		DisplayName   string `json:"displayName"`
+		TargetURL     string `json:"targetUrl"`
+	} `json:"groupPlacementView"`
 	GeoTargetConstant struct {
 		ResourceName string `json:"resourceName"`
 		CountryCode  string `json:"countryCode"`
 		TargetType   string `json:"targetType"`
 	} `json:"geoTargetConstant"`
+	// The paid ads intelligence layer's reads (google_clicks.go,
+	// google_changes.go).
+	ClickView struct {
+		Gclid       string `json:"gclid"`
+		AdGroupAd   string `json:"adGroupAd"`
+		Keyword     string `json:"keyword"`
+		KeywordInfo struct {
+			Text      string `json:"text"`
+			MatchType string `json:"matchType"`
+		} `json:"keywordInfo"`
+	} `json:"clickView"`
+	ChangeEvent struct {
+		ResourceName            string         `json:"resourceName"`
+		ChangeDateTime          string         `json:"changeDateTime"`
+		UserEmail               string         `json:"userEmail"`
+		ClientType              string         `json:"clientType"`
+		ChangeResourceType      string         `json:"changeResourceType"`
+		ResourceChangeOperation string         `json:"resourceChangeOperation"`
+		ChangedFields           string         `json:"changedFields"`
+		Campaign                string         `json:"campaign"`
+		OldResource             map[string]any `json:"oldResource"`
+		NewResource             map[string]any `json:"newResource"`
+	} `json:"changeEvent"`
+	RecommendationSubscription struct {
+		Type   string `json:"type"`
+		Status string `json:"status"`
+	} `json:"recommendationSubscription"`
 	Segments struct {
 		Date                 string `json:"date"`
+		Device               string `json:"device"`
 		ConversionActionName string `json:"conversionActionName"`
 		Keyword              struct {
 			Info struct {
@@ -210,6 +370,10 @@ type gaqlRow struct {
 				MatchType string `json:"matchType"`
 			} `json:"info"`
 		} `json:"keyword"`
+		AdNetworkType string  `json:"adNetworkType"`
+		Hour          flexInt `json:"hour"`
+		// How a search matched its keyword (RMF R.70).
+		SearchTermMatchType string `json:"searchTermMatchType"`
 	} `json:"segments"`
 	Metrics struct {
 		CostMicros       flexInt `json:"costMicros"`
@@ -217,6 +381,15 @@ type gaqlRow struct {
 		Clicks           flexInt `json:"clicks"`
 		Conversions      flexNum `json:"conversions"`
 		ConversionsValue flexNum `json:"conversionsValue"`
+		// Search impression share lost, 0 to 1 (google_findings.go).
+		SearchBudgetLostImpressionShare flexNum `json:"searchBudgetLostImpressionShare"`
+		SearchRankLostImpressionShare   flexNum `json:"searchRankLostImpressionShare"`
+		// Every conversion, secondary actions included (RMF R.10, R.20),
+		// and the bidding strategy report's averages, in micros (R.130).
+		AllConversions      *flexNum `json:"allConversions"`
+		AllConversionsValue *flexNum `json:"allConversionsValue"`
+		AverageCpc          flexNum  `json:"averageCpc"`
+		CostPerConversion   flexNum  `json:"costPerConversion"`
 	} `json:"metrics"`
 }
 
@@ -402,7 +575,8 @@ func (g GoogleAds) SetCampaignDailyBudget(ctx context.Context, cl *c.Client, cre
 }
 
 func (g GoogleAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdDay, error) {
-	q := fmt.Sprintf("SELECT campaign.id, campaign.name, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date BETWEEN '%s' AND '%s'",
+	q := fmt.Sprintf("SELECT campaign.id, campaign.name, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, "+
+		"metrics.all_conversions, metrics.all_conversions_value FROM campaign WHERE segments.date BETWEEN '%s' AND '%s'",
 		mustDate(from).Format("2006-01-02"), mustDate(to).Format("2006-01-02"))
 	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
 	if err != nil {
@@ -411,9 +585,11 @@ func (g GoogleAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct
 	out := make([]c.AdDay, 0, len(rows))
 	for _, r := range rows {
 		m := r.Metrics
-		out = append(out, c.AdDay{CampaignID: fmt.Sprint(int64(r.Campaign.ID)), CampaignName: r.Campaign.Name, Date: r.Segments.Date,
+		d := c.AdDay{CampaignID: fmt.Sprint(int64(r.Campaign.ID)), CampaignName: r.Campaign.Name, Date: r.Segments.Date,
 			SpendMicros: int64(m.CostMicros), Impressions: int64(m.Impressions), Clicks: int64(m.Clicks),
-			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue)))})
+			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue)))}
+		d.AllConversions, d.AllConversionValueMicros = allConversions(r)
+		out = append(out, d)
 	}
 	acts, err := g.actions(ctx, cl, creds, acct, "campaign", "campaign.id", from, to)
 	if err != nil {
@@ -474,7 +650,8 @@ func (g GoogleAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acc
 			"ad_group_ad.ad.final_url_suffix, ad_group_ad.ad.tracking_url_template, ad_group.final_url_suffix, ad_group.tracking_url_template, " +
 			"campaign.final_url_suffix, campaign.tracking_url_template, customer.final_url_suffix, customer.tracking_url_template, " +
 			"ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, " +
-			"ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.ad.responsive_display_ad.descriptions FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'"
+			"ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.ad.responsive_display_ad.descriptions, " +
+			"ad_group_ad.policy_summary.approval_status FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'"
 	default:
 		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
 	}
@@ -514,6 +691,7 @@ func (g GoogleAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acc
 				c.AdDetailURL:              link,
 				c.AdDetailURLTags:          suffix,
 				c.AdDetailTrackingTemplate: template,
+				c.AdDetailPolicy:           strings.ToLower(r.AdGroupAd.PolicySummary.ApprovalStatus),
 			})}
 		// Ads without a link of their own (Performance Max assets, app
 		// ads) say nothing either way.
@@ -531,7 +709,8 @@ func (g GoogleAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, 
 	if !ok {
 		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
 	}
-	q := fmt.Sprintf("SELECT %s, %s, %s, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM %s WHERE segments.date BETWEEN '%s' AND '%s'",
+	q := fmt.Sprintf("SELECT %s, %s, %s, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, "+
+		"metrics.all_conversions, metrics.all_conversions_value FROM %s WHERE segments.date BETWEEN '%s' AND '%s'",
 		it.id, it.name, it.parent, it.from, mustDate(from).Format("2006-01-02"), mustDate(to).Format("2006-01-02"))
 	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
 	if err != nil {
@@ -546,6 +725,7 @@ func (g GoogleAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, 
 		}
 		d.Date, d.SpendMicros, d.Impressions, d.Clicks = r.Segments.Date, int64(m.CostMicros), int64(m.Impressions), int64(m.Clicks)
 		d.Conversions, d.ConversionValueMicros = ptrF(float64(m.Conversions)), ptrI(c.Micros(float64(m.ConversionsValue)))
+		d.AllConversions, d.AllConversionValueMicros = allConversions(r)
 		out = append(out, d)
 	}
 	acts, err := g.actions(ctx, cl, creds, acct, it.from, it.id, from, to)
@@ -562,6 +742,8 @@ func (g GoogleAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, 
 // without impressions that day aren't reported.
 func (g GoogleAds) AdKeywordDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdKeywordDay, error) {
 	q := fmt.Sprintf("SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, "+
+		"ad_group_criterion.position_estimates.first_page_cpc_micros, ad_group_criterion.position_estimates.top_of_page_cpc_micros, "+
+		"ad_group_criterion.position_estimates.first_position_cpc_micros, ad_group_criterion.quality_info.quality_score, "+
 		"segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM keyword_view WHERE segments.date BETWEEN '%s' AND '%s'",
 		mustDate(from).Format("2006-01-02"), mustDate(to).Format("2006-01-02"))
 	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
@@ -574,7 +756,9 @@ func (g GoogleAds) AdKeywordDays(ctx context.Context, cl *c.Client, creds c.Cred
 		out = append(out, c.AdKeywordDay{ID: fmt.Sprint(int64(k.CriterionID)), AdGroupID: fmt.Sprint(int64(r.AdGroup.ID)), Text: k.Keyword.Text,
 			MatchType: strings.ToLower(k.Keyword.MatchType), Status: status(k.Status), Date: r.Segments.Date,
 			SpendMicros: int64(m.CostMicros), Impressions: int64(m.Impressions), Clicks: int64(m.Clicks),
-			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue)))})
+			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue))),
+			AdKeywordEstimates: keywordEstimates(k.PositionEstimates.FirstPageCpcMicros, k.PositionEstimates.TopOfPageCpcMicros,
+				k.PositionEstimates.FirstPositionCpcMicros, int(k.QualityInfo.QualityScore))})
 	}
 	return out, nil
 }
@@ -583,7 +767,7 @@ func (g GoogleAds) AdKeywordDays(ctx context.Context, cl *c.Client, creds c.Cred
 // with the keyword each matched. Google leaves out searches made by too
 // few people.
 func (g GoogleAds) AdSearchTermDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdSearchTermDay, error) {
-	q := fmt.Sprintf("SELECT search_term_view.search_term, segments.keyword.info.text, segments.keyword.info.match_type, ad_group.id, "+
+	q := fmt.Sprintf("SELECT search_term_view.search_term, segments.keyword.info.text, segments.keyword.info.match_type, segments.search_term_match_type, ad_group.id, "+
 		"segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM search_term_view WHERE segments.date BETWEEN '%s' AND '%s'",
 		mustDate(from).Format("2006-01-02"), mustDate(to).Format("2006-01-02"))
 	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
@@ -597,7 +781,7 @@ func (g GoogleAds) AdSearchTermDays(ctx context.Context, cl *c.Client, creds c.C
 			continue
 		}
 		out = append(out, c.AdSearchTermDay{Term: r.SearchTermView.SearchTerm, AdGroupID: fmt.Sprint(int64(r.AdGroup.ID)), KeywordText: kw.Text,
-			KeywordMatchType: strings.ToLower(kw.MatchType), Date: r.Segments.Date,
+			KeywordMatchType: strings.ToLower(kw.MatchType), MatchType: searchMatch(r.Segments.SearchTermMatchType), Date: r.Segments.Date,
 			SpendMicros: int64(m.CostMicros), Impressions: int64(m.Impressions), Clicks: int64(m.Clicks),
 			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue)))})
 	}
@@ -684,6 +868,14 @@ func (g GoogleAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Cr
 		if cv.ConsentGranted {
 			row["consent"] = map[string]string{"adUserData": "GRANTED"}
 		}
+		// A first-time customer or a returning one, for Google's new
+		// customer acquisition goal, when the rule knows.
+		switch cv.CustomerType {
+		case c.CustomerNew:
+			row["customerType"] = "NEW"
+		case c.CustomerReturning:
+			row["customerType"] = "RETURNING"
+		}
 		results[i].MatchKeys = keys
 		body = append(body, row)
 		sentIdx = append(sentIdx, i)
@@ -754,52 +946,6 @@ func (g GoogleAds) Audiences(ctx context.Context, cl *c.Client, creds c.Creds, a
 		out = append(out, c.AdAudience{ID: fmt.Sprint(int64(r.UserList.ID)), Name: r.UserList.Name})
 	}
 	return out, nil
-}
-
-// SyncAudience adds the person to a Customer Match list, or removes them,
-// through an offline user data job: create it, add the one operation,
-// run it. Google processes the job on its own time, and matches the
-// hashed identifiers on its side.
-func (g GoogleAds) SyncAudience(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, audienceID, change string, p c.AudienceMember) error {
-	emails := p.GoogleEmails
-	if len(emails) == 0 {
-		emails = p.Emails
-	}
-	var ids []map[string]string
-	for _, e := range emails {
-		ids = append(ids, map[string]string{"hashedEmail": e})
-	}
-	for _, ph := range p.Phones {
-		ids = append(ids, map[string]string{"hashedPhoneNumber": ph})
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	meta := map[string]any{"userList": "customers/" + acct.ID + "/userLists/" + audienceID}
-	if p.ConsentGranted {
-		meta["consent"] = map[string]string{"adUserData": "GRANTED", "adPersonalization": "GRANTED"}
-	}
-	k := g.call(cl, creds, acct.Meta["login_customer_id"])
-	var job struct {
-		ResourceName string `json:"resourceName"`
-	}
-	err := k.post(ctx, g.base(cl)+"/customers/"+esc(acct.ID)+"/offlineUserDataJobs:create",
-		map[string]any{"job": map[string]any{"type": "CUSTOMER_MATCH_USER_LIST", "customerMatchUserListMetadata": meta}}, &job)
-	if err != nil {
-		return err
-	}
-	if !strings.HasPrefix(job.ResourceName, "customers/"+acct.ID+"/offlineUserDataJobs/") {
-		return c.Errf(c.ErrUnavailable, "Google Ads made no user data job")
-	}
-	op := "create"
-	if change == c.AudienceRemove {
-		op = "remove"
-	}
-	if err := k.post(ctx, g.base(cl)+"/"+job.ResourceName+":addOperations",
-		map[string]any{"operations": []any{map[string]any{op: map[string]any{"userIdentifiers": ids}}}}, nil); err != nil {
-		return err
-	}
-	return k.post(ctx, g.base(cl)+"/"+job.ResourceName+":run", map[string]any{}, nil)
 }
 
 // gclidFromCookie reads the gclid from the Google tag's _gcl_aw cookie,

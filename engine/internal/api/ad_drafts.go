@@ -63,24 +63,31 @@ type adDraftOut struct {
 	LiveAt       *time.Time         `json:"live_at"`
 	CreatedAt    time.Time          `json:"created_at"`
 	UpdatedAt    time.Time          `json:"updated_at"`
+	// Checks are what the writer was warned about (ad_draft_checks.go):
+	// never a refusal, for a person to weigh before approving.
+	Checks []adDraftCheck `json:"checks"`
 }
 
 const adDraftCols = `d.id, d.brand_id, a.id, a.name, a.connector, a.currency, d.kind, c.id, c.name, g.id, g.name, d.content, d.reason, d.status, d.made, d.error,
-	d.created_by, d.action_id, d.approved_by, d.approved_at, d.made_at, d.live_by, d.live_at, d.created_at, d.updated_at`
+	d.created_by, d.action_id, d.approved_by, d.approved_at, d.made_at, d.live_by, d.live_at, d.created_at, d.updated_at, d.checks`
 
 const adDraftFrom = `FROM ad_drafts d JOIN ad_accounts a ON a.id = d.ad_account_id
 	LEFT JOIN ad_entities c ON c.id = d.campaign_entity_id LEFT JOIN ad_entities g ON g.id = d.ad_group_entity_id`
 
 func scanAdDraft(row pgx.Row) (adDraftOut, error) {
 	var v adDraftOut
-	var content, made []byte
+	var content, made, checks []byte
 	err := row.Scan(&v.ID, &v.BrandID, &v.AccountID, &v.AccountName, &v.Connector, &v.Currency, &v.Kind, &v.CampaignID, &v.CampaignName, &v.AdGroupID, &v.AdGroupName,
-		&content, &v.Reason, &v.Status, &made, &v.Error, &v.CreatedBy, &v.ActionID, &v.ApprovedBy, &v.ApprovedAt, &v.MadeAt, &v.LiveBy, &v.LiveAt, &v.CreatedAt, &v.UpdatedAt)
+		&content, &v.Reason, &v.Status, &made, &v.Error, &v.CreatedBy, &v.ActionID, &v.ApprovedBy, &v.ApprovedAt, &v.MadeAt, &v.LiveBy, &v.LiveAt, &v.CreatedAt, &v.UpdatedAt, &checks)
 	if err != nil {
 		return v, err
 	}
 	_ = json.Unmarshal(content, &v.Content)
 	_ = json.Unmarshal(made, &v.Made)
+	_ = json.Unmarshal(checks, &v.Checks)
+	if v.Checks == nil {
+		v.Checks = []adDraftCheck{}
+	}
 	v.Content.Kind = v.Kind
 	return v, nil
 }
@@ -141,6 +148,9 @@ type adDraftIn struct {
 	CampaignID string `json:"campaign_id"`
 	AdGroupID  string `json:"ad_group_id"`
 	Reason     string `json:"reason"`
+	// OverrideKnowledge lets a person write this one draft although the
+	// brand's knowledge sheet isn't reviewed (knowledgeGate). Agents can't.
+	OverrideKnowledge bool `json:"override_knowledge"`
 }
 
 // adDraftPlace is where a draft goes, as read from the mirror.
@@ -268,6 +278,18 @@ func (s *Server) createAdDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok || !checkAdDraft(w, r, cr, in.AdDraft, p) {
 		return
 	}
+	// The sheet the ad is written from must be one a person signed off;
+	// then the draft's claims and shape are checked against it, as
+	// warnings for the person who approves it.
+	if !s.knowledgeGate(w, r, a, in.OverrideKnowledge) {
+		return
+	}
+	checks, err := s.adDraftChecks(r.Context(), a.WorkspaceID, a.Brand, in.AdDraft, p)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	checksJSON, _ := json.Marshal(checks)
 	content, _ := json.Marshal(in.AdDraft)
 	var actor, action *string
 	if a.ActorID != "" {
@@ -277,14 +299,14 @@ func (s *Server) createAdDraft(w http.ResponseWriter, r *http.Request) {
 		action = &id
 	}
 	var out adDraftOut
-	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		var id string
-		if err := tx.QueryRow(r.Context(), `INSERT INTO ad_drafts (workspace_id, brand_id, ad_account_id, campaign_entity_id, ad_group_entity_id, kind, content, reason, created_by, action_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-			a.WorkspaceID, a.Brand, p.accountID, p.campaign, p.group, in.Kind, content, in.Reason, actor, action).Scan(&id); err != nil {
+		if err := tx.QueryRow(r.Context(), `INSERT INTO ad_drafts (workspace_id, brand_id, ad_account_id, campaign_entity_id, ad_group_entity_id, kind, content, reason, created_by, action_id, checks)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+			a.WorkspaceID, a.Brand, p.accountID, p.campaign, p.group, in.Kind, content, in.Reason, actor, action, checksJSON).Scan(&id); err != nil {
 			return err
 		}
-		if err := s.recordAdDraft(r.Context(), tx, a, "ad_draft.written", id, p.connector, in.Kind, nil); err != nil {
+		if err := s.recordAdDraft(r.Context(), tx, a, "ad_draft.written", id, p.connector, in.Kind, map[string]any{"checks": len(checks), "override_knowledge": in.OverrideKnowledge}); err != nil {
 			return err
 		}
 		var err error
@@ -371,12 +393,21 @@ func (s *Server) updateAdDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok || !checkAdDraft(w, r, cr, in.AdDraft, p) {
 		return
 	}
+	if !s.knowledgeGate(w, r, a, in.OverrideKnowledge) {
+		return
+	}
 	in.AdDraft.Kind = v.Kind
+	checks, err := s.adDraftChecks(r.Context(), a.WorkspaceID, a.Brand, in.AdDraft, p)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	checksJSON, _ := json.Marshal(checks)
 	content, _ := json.Marshal(in.AdDraft)
 	var out adDraftOut
-	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(r.Context(), `UPDATE ad_drafts SET content = $2, reason = CASE WHEN $3 = '' THEN reason ELSE $3 END, updated_at = now()
-			WHERE id = $1 AND status = 'draft'`, v.ID, content, in.Reason)
+	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(r.Context(), `UPDATE ad_drafts SET content = $2, reason = CASE WHEN $3 = '' THEN reason ELSE $3 END, checks = $4, updated_at = now()
+			WHERE id = $1 AND status = 'draft'`, v.ID, content, in.Reason, checksJSON)
 		if err != nil {
 			return err
 		}

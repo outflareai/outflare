@@ -26,6 +26,18 @@ type Version struct {
 	Policy
 	Version   int
 	Published time.Time
+	// Owner is who runs the site: the brand's legal name and postal
+	// address from "About your company", read when the policy is shown
+	// (not stored with it), or "" when the brand has no address.
+	Owner string
+}
+
+// owner is the sentence naming who runs the site, or "".
+func (v Version) owner() string {
+	if v.Owner == "" {
+		return ""
+	}
+	return "This site is run by " + v.Owner + "."
 }
 
 func (v Version) intro() string {
@@ -71,6 +83,9 @@ func cell(s string) string {
 func (v Version) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n%s\n", v.title(), v.intro())
+	if o := v.owner(); o != "" {
+		fmt.Fprintf(&b, "\n%s\n", o)
+	}
 	for _, c := range v.Categories {
 		if len(c.Vendors) == 0 {
 			continue
@@ -96,6 +111,9 @@ func (v Version) Markdown() string {
 func (v Version) Text() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\n%s\n", strings.ToUpper(v.title()), v.intro())
+	if o := v.owner(); o != "" {
+		fmt.Fprintf(&b, "\n%s\n", o)
+	}
 	for _, c := range v.Categories {
 		if len(c.Vendors) == 0 {
 			continue
@@ -126,6 +144,9 @@ func (v Version) HTML() string {
 	e := html.EscapeString
 	var b strings.Builder
 	fmt.Fprintf(&b, `<div class="of-cookie-policy"><p>%s</p>`, e(v.intro()))
+	if o := v.owner(); o != "" {
+		fmt.Fprintf(&b, `<p>%s</p>`, e(o))
+	}
 	b.WriteString(`<p><button type="button" class="of-cookie-policy-settings" data-outflare-consent-open>Change your cookie choices</button></p>`)
 	for _, c := range v.Categories {
 		if len(c.Vendors) == 0 {

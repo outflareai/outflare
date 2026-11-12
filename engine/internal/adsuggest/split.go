@@ -19,11 +19,18 @@ type Arm struct {
 	Days        int     `json:"days"`
 }
 
-func (a Arm) cpa() float64 { return totals{Spend: a.Spend, Conv: a.Conv}.cpa() }
+func (a Arm) cpa() float64 { return numbers{Spend: a.Spend, Conv: a.Conv}.cost() }
 
 // testSettle is how long a trial takes to settle before its days count:
 // a new bid target makes the bidding learn again, a budget much less.
 var testSettle = map[string]int{"bidding": 7, "budget": 3}
+
+// A test's window aims for wantConv conversions in the smaller arm and
+// is judged splitLagDays after it ends, for conversions reported late.
+const (
+	wantConv     = 30.0
+	splitLagDays = 3
+)
 
 // SplitWindow is how long a test runs: its settling days, then long enough
 // for wantConv conversions in the smaller arm at the campaign's rate,
@@ -39,12 +46,12 @@ func SplitWindow(kind string, convPerDay float64, splitPercent int) (settle, day
 	need = max(need, 14)
 	days = min(settle+need, maxWindow)
 	note = fmt.Sprintf("Runs %d days: %d to settle, then compared until the smaller side has about %d conversions (at least two weeks). Judged %d days after it ends, for late conversions.",
-		days, settle, int(wantConv), lagDays)
+		days, settle, int(wantConv), splitLagDays)
 	return settle, days, note
 }
 
 // SplitLag is how many days after a test ends it is judged.
-const SplitLag = lagDays
+const SplitLag = splitLagDays
 
 // z is how many standard errors apart the arms' conversions per unit of
 // spend are. Given the conversions both arms got, each one is the trial's
@@ -62,7 +69,7 @@ func z(control, trial Arm) float64 {
 // SplitVerdict compares the arms. kind is what the trial changes; target
 // the campaign's target cost per conversion, if it has one.
 func SplitVerdict(kind string, control, trial Arm, target *int64) (verdict, note string, score float64) {
-	if control.Conv < minConv || trial.Conv < minConv {
+	if control.Conv < minPayers || trial.Conv < minPayers {
 		return NotSure, fmt.Sprintf("Too few conversions to tell: %.0f in the campaign, %.0f in the trial.", control.Conv, trial.Conv), 0
 	}
 	score = z(control, trial)

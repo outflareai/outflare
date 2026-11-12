@@ -31,7 +31,7 @@ A rule changes while it is a draft or paused.
 Event and absence rules are about people. An audience rule is about its list's records: people, or companies for a [list of companies](lists.md#lists-of-companies) (`record_type: account`). A change rule can watch any record type, such as `deal`.
 
 ```sh
-curl -X POST "$OUTFLARE_URL/v1/workspaces/$WS/rules" \
+curl -X POST "$OUTFLARE_URL/v1/brands/$BRAND/rules" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H 'Content-Type: application/json' \
   -d '{"name": "Stalled after sign-up",
        "trigger": {"kind": "absence", "start_event": "signed_up", "event": "product_activated", "within_seconds": 604800},
@@ -66,7 +66,7 @@ Every firing is recorded once per rule, record and episode. A retry, a replayed 
 - **What happened before the rule went live.** A rule acts only on events from its `activated_at`. Activating it again after a pause starts afresh: timers that ran out while it was paused are dropped.
 - **Late data.** An event that arrives more than a day after it happened updates history but fires nothing. A backfill or an import never sets automations off.
 - **Browser events.** Anyone with a site key can send them, so they never fire a rule, as with journeys.
-- **Events not approved in the catalog.** A name the workspace hasn't approved arrives quarantined ([customers.md](customers.md#product-events)) and drives nothing.
+- **Paused events.** A name someone paused in the catalog (status `quarantined`) drives nothing until it is approved again. New names are approved as they arrive ([customers.md](customers.md#new-event-names)).
 - **Changes someone made by hand.** A correction in the app or a `PATCH` with source `manual` doesn't fire a change rule unless the rule sets `manual_edits: true`. Changes from your product (`first_party`), a CRM sync, enrichment or an import do.
 - **Merged and archived records.**
 

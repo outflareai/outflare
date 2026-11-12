@@ -383,6 +383,8 @@ func (s *Server) updateAnalyticsSite(w http.ResponseWriter, r *http.Request) {
 				`DELETE FROM search_segments WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
 				`DELETE FROM search_completeness WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
 				`DELETE FROM page_conversion_syncs WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
+				`DELETE FROM organic_conversions WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
+				`DELETE FROM organic_conversion_syncs WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
 			} {
 				if _, err := tx.Exec(r.Context(), q, a.WorkspaceID, o.ID, id); err != nil {
 					return err
@@ -392,6 +394,7 @@ func (s *Server) updateAnalyticsSite(w http.ResponseWriter, r *http.Request) {
 			for _, q := range []string{
 				`UPDATE analytics_syncs SET backfilled = false WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
 				`UPDATE page_conversion_syncs SET backfilled_at = NULL WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
+				`UPDATE organic_conversion_syncs SET backfilled_at = NULL WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
 			} {
 				if _, err := tx.Exec(r.Context(), q, a.WorkspaceID, o.ID, id); err != nil {
 					return err

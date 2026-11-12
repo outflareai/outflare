@@ -13,6 +13,9 @@ import { ago, plural } from "../format";
 import type { Tab } from "../App";
 import { ConnectorLogo } from "@/components/connector-logo";
 import { SmartListDetail, SmartListSheet } from "./SmartLists";
+import { UploadPeople } from "@/components/upload-people";
+import { WontBeEmailed } from "@/components/wont-be-emailed";
+import { ImportLeadsDialog } from "./Leads";
 
 // One row of the Lists page: a lead list or a smart list.
 type Row = { id: string; name: string; description?: string | null; brand_id?: string | null; lead?: LeadList; smart?: SmartList };
@@ -94,6 +97,7 @@ function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage
   const [smart, setSmart] = useState<SmartList[] | null>(null);
   const [editingSmart, setEditingSmart] = useState<SmartList | "new" | null>(null);
   const [choosing, setChoosing] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [providers, setProviders] = useState<DataProvider[]>([]);
   const [profiles, setProfiles] = useState<CustomerProfile[]>([]);
   const [editing, setEditing] = useState<LeadList | "new" | null>(null);
@@ -159,7 +163,21 @@ function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage
             if (k === "smart") {
               if (brandID) setEditingSmart("new");
               else toast("Smart lists belong to one brand: pick it in the brand switcher first.", "error");
+            } else if (k === "upload") {
+              if (brandID) setUploading(true);
+              else toast("Lists of people belong to one brand: pick it in the brand switcher first.", "error");
             } else setEditing("new");
+          }}
+        />
+      )}
+      {uploading && brandID && (
+        <UploadPeople
+          brand={brandID}
+          onClose={() => { setUploading(false); load(); }}
+          onDone={(l) => {
+            setUploading(false);
+            load();
+            setOpen(l.id);
           }}
         />
       )}
@@ -339,7 +357,7 @@ function SmartLine({ list }: { list: SmartList }) {
 }
 
 // NewListChoice asks which kind of list to make.
-function NewListChoice({ onClose, onPick }: { onClose: () => void; onPick: (k: "smart" | "lead") => void }) {
+function NewListChoice({ onClose, onPick }: { onClose: () => void; onPick: (k: "smart" | "lead" | "upload") => void }) {
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
@@ -354,7 +372,11 @@ function NewListChoice({ onClose, onPick }: { onClose: () => void; onPick: (k: "
           </button>
           <button type="button" className="rounded-md border p-3 text-left hover:bg-muted/50" onClick={() => onPick("lead")}>
             <span className="block font-medium">Lead list</span>
-            <span className="block text-[12px] text-muted-foreground">New people found with a data provider search, or imported from a CSV.</span>
+            <span className="block text-[12px] text-muted-foreground">New people to reach out to, found with a data provider search or imported from a CSV of leads.</span>
+          </button>
+          <button type="button" className="rounded-md border p-3 text-left hover:bg-muted/50" onClick={() => onPick("upload")}>
+            <span className="block font-medium">Upload a CSV of people</span>
+            <span className="block text-[12px] text-muted-foreground">Your own users, customers or subscribers from a spreadsheet, by email or your own user id. Ready to send a broadcast to.</span>
           </button>
         </div>
       </SheetContent>
@@ -391,6 +413,7 @@ function ListDetail({
   const [sort, setSort] = useState<"score" | "added" | "email">("score");
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
     const [l, r, m] = await Promise.all([
@@ -478,6 +501,7 @@ function ListDetail({
         action={
           canManage && (
             <>
+              {!isSearch && <Button onClick={() => setImporting(true)}>Import leads</Button>}
               {isSearch && !running && (
                 <Button disabled={starting} onClick={() => start(last ? "refresh" : "build")}>{last ? "Refresh now" : "Build list"}</Button>
               )}
@@ -486,7 +510,6 @@ function ListDetail({
               <Menu
                 items={[
                   canEnrich && !running && { label: "Fill in missing details", onClick: () => start("enrich") },
-                  !isSearch && { label: "Import leads into this list", onClick: () => go("leads") },
                   { label: "Add to a sequence", onClick: () => go("sequences") },
                   { label: "Delete list", onClick: remove, danger: true },
                 ]}
@@ -495,6 +518,19 @@ function ListDetail({
           )
         }
       />
+
+      {importing && (
+        <ImportLeadsDialog
+          ws={ws}
+          list={list}
+          go={go}
+          onClose={() => setImporting(false)}
+          onDone={() => {
+            load();
+            onChanged();
+          }}
+        />
+      )}
 
       <Stats cols={4}>
         <Stat label="Leads" value={list.leads.toLocaleString()} />
@@ -539,7 +575,7 @@ function ListDetail({
         <h2 className="text-[13px] font-semibold">Leads in this list</h2>
         {list.leads === 0 && !q ? (
           <Empty title={isSearch ? (running ? "Building…" : "No leads yet") : "No leads yet"}>
-            {isSearch ? (running ? "Leads appear here as each page of results finishes." : "Build the list to search for people and add the ones that fit.") : <>Import a CSV on <button className="underline" onClick={() => go("leads")}>Leads</button> and choose this list, or add leads through the API.</>}
+            {isSearch ? (running ? "Leads appear here as each page of results finishes." : "Build the list to search for people and add the ones that fit.") : canManage ? <><button className="underline" onClick={() => setImporting(true)}>Import a CSV</button> into this list, or add leads through the API.</> : "Leads are added by CSV import or through the API."}
           </Empty>
         ) : (
           <DataTable
@@ -581,7 +617,7 @@ function ListDetail({
                 cell: ({ row: { original: m } }) => (
                   <span className="inline-flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-[12px]">{m.email}</span>
-                    {m.suppressed && <Badge tone="red" title="On the suppression list: never emailed">Won't be emailed</Badge>}
+                    {m.suppressed && <WontBeEmailed why={m.suppression} />}
                   </span>
                 ),
               },

@@ -335,9 +335,13 @@ Sender ids are numbers, as in EmailBison; each mailbox keeps its number in `emai
 
 A supplier connector that implements `connectors.PushVendor` (Cheap Inboxes does, in `cheapinboxes/push.go`) can also be set up from Outflare, so nobody copies a URL and token by hand. `PATCH .../mailbox-sync {"push": true}` mints a token with `mailboxes.read` and `mailboxes.manage` (the caller needs those and `integrations.manage`), seals it in `vendor_syncs`, and queues `vendor.push_connect`. That job calls `ConnectPush` once, never retried, since a second try could add a second connection. `POST .../mailboxes/push` queues `vendor.push`, which calls `PushMailboxes` (link, then sync, 399 at a time). Turning push off, or disconnecting the supplier, revokes the token and calls `DisconnectPush`. The state is `push` in `GET .../mailbox-sync`: `available`, `state` (off, connecting, on, failed), `base_url`, `last_result` and `error`.
 
+## Google Workspace (team email into the CRM)
+
+`google_workspace` reads the team's work mail into the CRM with the company's own Google Cloud service account, so nobody has to sign in one by one. Connect it with the service account's JSON key and an address in the Workspace to test with; in the Google Admin console (Security, API controls, Domain-wide delegation) give the service account's client id `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/calendar.readonly`. Outflare tests it by reading only that user's mailbox address. An admin then chooses it in the brand's CRM email rollout ([customers.md](customers.md#email-with-your-contacts)); it never sends or changes anything in Google.
+
 ## Calendars and CRMs (outcomes)
 
-Calendar and CRM connectors feed the Outcomes page and `GET /v1/workspaces/{ws}/outcomes/report`. A connection with the `meetings.sync` capability is read every 15 minutes, or straight away with `POST /v1/workspaces/{ws}/outcomes/syncs/{integration_id}/run`. Only events with a lead among the attendees are stored; the rest of a calendar is never copied.
+Calendar and CRM connectors feed the Outcomes page and `GET /v1/brands/{brand}/outcomes/report`. A connection with the `meetings.sync` capability is read every 15 minutes, or straight away with `POST /v1/workspaces/{ws}/outcomes/syncs/{integration_id}/run`. Only events with a lead among the attendees are stored; the rest of a calendar is never copied.
 
 | Connector | Connect with | Reads | Writes |
 | --- | --- | --- | --- |

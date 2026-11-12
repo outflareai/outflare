@@ -111,6 +111,8 @@ function BrandCompany({ ws, brand, brandId, canManage }: { ws: string; brand: st
 
       <ContextCard ws={ws} context={c} canManage={canManage} onSaved={load} />
 
+      <BusinessCard ws={ws} context={c} canManage={canManage} onSaved={load} />
+
       <LookCard ws={ws} context={c} canManage={canManage} onSaved={load} />
 
       <Card
@@ -268,18 +270,51 @@ function ContextCard({ ws, context: c, canManage, onSaved }: { ws: string; conte
   );
 }
 
+// Brands whose website was already asked for its logo and colour while
+// this page was open, so a visit asks once, not on every render.
+const lookAsked = new Set<string>();
+
 // The brand's logo and colours, which its consent banner's brand look
-// (and anything else on brand) starts from.
+// (and anything else on brand) starts from. Whatever is empty is found on
+// the brand's own website: when the brand is created or its website
+// changes, and when this card opens with no logo yet.
 function LookCard({ ws, context: c, canManage, onSaved }: { ws: string; context: BrandContext; canManage: boolean; onSaved: () => void }) {
   const [logo, setLogo] = useState(c.logo_url);
   const [colors, setColors] = useState(c.colors);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [finding, setFinding] = useState(false);
+  const [broken, setBroken] = useState(false);
   useEffect(() => {
     setLogo(c.logo_url);
     setColors(c.colors);
   }, [c.logo_url, c.colors]);
+  useEffect(() => setBroken(false), [logo]);
   const dirty = logo !== c.logo_url || JSON.stringify(colors) !== JSON.stringify(c.colors);
+  const missing = !c.logo_url || !c.colors.primary;
+
+  const find = useCallback(async () => {
+    lookAsked.add(c.brand_id);
+    setFinding(true);
+    const { error } = await api.POST("/v1/workspaces/{ws}/brands/{brand}/look/find", { params: { path: { ws, brand: c.brand_id } } });
+    if (error) {
+      setFinding(false);
+      return setError(errorMessage(error));
+    }
+    // The read takes a few seconds: look again until it has landed.
+    for (const wait of [3000, 4000, 6000, 8000]) {
+      await new Promise((r) => setTimeout(r, wait));
+      onSaved();
+    }
+    setFinding(false);
+  }, [ws, c.brand_id, onSaved]);
+
+  useEffect(() => {
+    if (canManage && c.website && !c.logo_url && !lookAsked.has(c.brand_id)) void find();
+  }, [canManage, c.website, c.logo_url, c.brand_id, find]);
+  useEffect(() => {
+    if (c.logo_url && c.colors.primary) setFinding(false);
+  }, [c.logo_url, c.colors.primary]);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -294,11 +329,32 @@ function LookCard({ ws, context: c, canManage, onSaved }: { ws: string; context:
 
   const labels = { primary: "Main colour", background: "Background", text: "Text" } as const;
   const placeholders = { primary: "#1d4ed8", background: "#ffffff", text: "#111827" } as const;
+  const shown = /^https:\/\//.test(logo.trim()) && !broken;
+  const findButton =
+    canManage && c.website && missing ? (
+      <Button type="button" variant="ghost" disabled={finding} onClick={() => void find()}>
+        {finding ? "Looking on your website…" : "Find on website"}
+      </Button>
+    ) : undefined;
   return (
-    <Card title="Logo and colours" description="This brand's website consent banner and help centre use these in their brand look.">
+    <Card title="Logo and colours" description="This brand's website consent banner and help centre use these in their brand look." action={findButton}>
       <form onSubmit={save} className="space-y-3">
         <fieldset disabled={!canManage} className="space-y-3">
-          <Input label="Logo" value={logo} onChange={(e) => setLogo(e.target.value)} placeholder="https://northpeak.example/logo.svg" hint="The https address of an image, such as an SVG or PNG on your site." />
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <Input
+                label="Logo"
+                value={logo}
+                onChange={(e) => setLogo(e.target.value)}
+                hint={c.website ? `The https address of an image. Left empty, Outflare looks for it on ${c.website}.` : "The https address of an image, such as an SVG or PNG on your site."}
+              />
+            </div>
+            {shown && (
+              <span className="mt-6 flex size-8 shrink-0 items-center justify-center overflow-hidden rounded border bg-white">
+                <img src={logo.trim()} alt="" className="max-h-full max-w-full object-contain" onError={() => setBroken(true)} />
+              </span>
+            )}
+          </div>
           <div className="grid gap-3 sm:grid-cols-3">
             {(Object.keys(labels) as (keyof typeof labels)[]).map((k) => (
               <div key={k} className="flex items-end gap-2">
@@ -312,6 +368,86 @@ function LookCard({ ws, context: c, canManage, onSaved }: { ws: string; context:
         </fieldset>
         <ErrorText>{error}</ErrorText>
         {canManage && <Button type="submit" disabled={busy || !dirty}>{busy ? "Saving…" : "Save"}</Button>}
+      </form>
+    </Card>
+  );
+}
+
+type Address = BrandContext["address"];
+const emptyAddress: Address = { line1: "", line2: "", city: "", region: "", postal_code: "", country: "" };
+
+// Who stands behind the brand: entered once here, then email footers
+// ({{brand_address}}), the help centre, the cookie policy and agents use it.
+function BusinessCard({ ws, context: c, canManage, onSaved }: { ws: string; context: BrandContext; canManage: boolean; onSaved: () => void }) {
+  const initial = () => ({ legal_name: c.legal_name, tax_id: c.tax_id, address: { ...emptyAddress, ...c.address } });
+  const [form, setForm] = useState(initial);
+  const [countries, setCountries] = useState<{ key: string; label: string }[]>([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const saved = JSON.stringify(initial());
+  const dirty = JSON.stringify(form) !== saved;
+  useEffect(() => {
+    if (!dirty) setForm(initial());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saved]);
+  useEffect(() => {
+    void api.GET("/v1/brands/{brand}/catalog/option-sets", { params: { path: { brand: c.brand_id } } }).then(({ data }) => {
+      const set = data?.data.find((o) => o.key === "country");
+      if (set) setCountries(set.options.map((o) => ({ key: o.key, label: o.label })));
+    });
+  }, [c.brand_id]);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/brands/{brand}/context", { params: { path: { ws, brand: c.brand_id } }, body: form });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast("Saved. Email footers, the help centre and the cookie policy use it from now on.");
+    onSaved();
+  }
+
+  const setAddr = (k: keyof Address) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, address: { ...f.address, [k]: e.target.value } }));
+  const ro = !canManage;
+  return (
+    <Card
+      title="Business details"
+      description={<>The business behind {c.name}. Lifecycle email adds the address to its footer (or put <code>{"{{brand_address}}"}</code> where you want it), and the help centre and cookie policy show it.</>}
+    >
+      <form onSubmit={save} className="space-y-3">
+        <fieldset disabled={ro} className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input label="Legal name" value={form.legal_name} onChange={(e) => setForm({ ...form, legal_name: e.target.value })} maxLength={200} placeholder="Northpeak Pty Ltd" hint={`Leave empty to use ${c.name}.`} />
+            <Input label="Tax or company number" value={form.tax_id} onChange={(e) => setForm({ ...form, tax_id: e.target.value })} maxLength={60} placeholder="ABN 00 000 000 000" />
+          </div>
+          <Input label="Street address" value={form.address.line1} onChange={setAddr("line1")} maxLength={200} placeholder="Level 2, 10 Example Street" />
+          <Input label="Address line 2" value={form.address.line2} onChange={setAddr("line2")} maxLength={200} placeholder="Optional" />
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Input label="City" value={form.address.city} onChange={setAddr("city")} maxLength={200} placeholder="Sydney" />
+            <Input label="State or region" value={form.address.region} onChange={setAddr("region")} maxLength={200} placeholder="NSW" />
+            <Input label="Postcode" value={form.address.postal_code} onChange={setAddr("postal_code")} maxLength={200} placeholder="2000" />
+          </div>
+          {countries.length > 0 ? (
+            <label className="block text-sm">
+              <span className="mb-1.5 block text-[13px] font-medium">Country</span>
+              <select className={cn(field, "w-full")} value={form.address.country} onChange={setAddr("country")}>
+                <option value="">Choose a country</option>
+                {countries.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+            </label>
+          ) : (
+            <Input label="Country" value={form.address.country} onChange={setAddr("country")} maxLength={2} placeholder="AU" hint="A two-letter code, such as AU or US." />
+          )}
+        </fieldset>
+        {c.address_text && !dirty && <p className="text-xs text-muted-foreground">Footers show: {c.legal_name || c.name}, {c.address_text}</p>}
+        <ErrorText>{error}</ErrorText>
+        {canManage && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" disabled={busy || !dirty}>{busy ? "Saving…" : "Save"}</Button>
+            {dirty && <Button type="button" variant="ghost" onClick={() => { setForm(initial()); setError(""); }}>Discard changes</Button>}
+          </div>
+        )}
       </form>
     </Card>
   );

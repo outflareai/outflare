@@ -50,6 +50,9 @@ var Erased = []Ref{
 	{"partner_lead_submissions", "record_id"},
 	// Privacy exports of what was kept about them: the files go too.
 	{"privacy_exports", "record_id"},
+	// The ad click that acquired them and their payments in the paid ads
+	// ledger: the person's own, so they go with them.
+	{"ad_acquisitions", "record_id"}, {"ad_revenue", "record_id"},
 }
 
 // Kept are the Follows columns whose rows stay when a record is erased,

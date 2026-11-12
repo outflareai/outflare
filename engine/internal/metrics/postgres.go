@@ -533,6 +533,7 @@ func (p *Postgres) query() []prometheus.Metric {
 			SELECT 'analytics' AS module, a.last_error_code AS code, a.integration_id FROM analytics_syncs a WHERE a.failures >= 3
 			UNION ALL SELECT 'search_console', y.last_error_code, y.integration_id FROM search_syncs y WHERE y.failures >= 3
 			UNION ALL SELECT 'page_conversions', c.last_error_code, c.integration_id FROM page_conversion_syncs c WHERE c.failures >= 3
+			UNION ALL SELECT 'organic_conversions', o.last_error_code, o.integration_id FROM organic_conversion_syncs o WHERE o.failures >= 3
 			UNION ALL SELECT 'ads', d.last_error_code, d.integration_id FROM ad_syncs d WHERE d.failures >= 3
 			UNION ALL SELECT 'seo', e.last_error_code, e.integration_id FROM seo_syncs e WHERE e.failures >= 3
 			UNION ALL SELECT 'seo_site_' || f.kind, f.last_error_code, f.integration_id FROM seo_site_read_failures f

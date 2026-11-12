@@ -25,6 +25,7 @@ import { registerInsightTools } from "./insights.js";
 import { registerRedditTools } from "./reddit.js";
 import { registerSupplierTools } from "./suppliers.js";
 import { registerPartnerTools } from "./partners.js";
+import { CORE, TOOLS_HINT, Toolbox, registerToolbox, type ToolMode } from "./toolbox.js";
 
 const inboxCategories = [
   "interested", "meeting_booked", "question", "referral", "not_now", "objection",
@@ -45,6 +46,10 @@ export type ServerOptions = {
   readOnly?: boolean;
   /** A brand handle or id that list tools and get_context use when the agent names none. */
   brand?: string;
+  /** "core" (the default) lists the core tools plus find_tools and call_tool, which reach every tool; "all" lists every tool. */
+  tools?: ToolMode;
+  /** The version the server reports to apps: the Outflare server's own, when known. */
+  version?: string;
 };
 
 type Result<T> = { data?: T; error?: unknown; response: Response };
@@ -146,6 +151,8 @@ export function nextStep(code: string, message = ""): string | undefined {
       return "Read the plan again with get_infra_plan and send the amounts its quote shows.";
     case "idempotency_in_progress":
       return "The same request is still running. Wait a moment and retry with the same key.";
+    case "knowledge_unreviewed":
+      return "Ads are written only from a brand knowledge sheet a person has reviewed. Show the person the sheet (get_brand_knowledge; read_error says if the read failed and which connection to add) and ask them to mark it reviewed in Outflare under Paid ads, Set up (review_brand_knowledge works from their own session only). Do not override it yourself.";
   }
   return message.includes("scope") ? "This app or token isn't allowed to do this. Give the person the link in the message and say which permission to turn on." : undefined;
 }
@@ -229,7 +236,7 @@ const steps = z
   )
   .max(20);
 
-export function createServer({ client: gtm, workspace, readOnly = false, brand: defaultBrand }: ServerOptions): McpServer {
+export function createServer({ client: gtm, workspace, readOnly = false, brand: defaultBrand, tools: mode = "core", version = VERSION }: ServerOptions): McpServer {
   const ws = workspace;
   // Every call names the tool it runs for and the agent's app (Claude,
   // Cursor...), so the server's product events show what agents do and
@@ -249,7 +256,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       name: "outflare",
       title: "Outflare",
-      version: VERSION,
+      version,
       description: "Run your marketing from your AI app: leads, lists, cold email sequences, replies, mailboxes and missions in your Outflare workspace.",
       websiteUrl: "https://outflare.ai",
       // Apps show this mark next to the server instead of a generic globe.
@@ -281,13 +288,21 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         "Then check get_connection_request. When an answer lists gaps, offer the fix it names. Connected EmailBison, Instantly and Smartlead accounts sync every 5 minutes; " +
         "a new account's first plan needs review_platform_plan.\n\n" +
         "Missions are retired: what they did stays readable (list_missions, get_mission), and nothing changes one. Work as your token on the action layer (list_actions shows what ran, waits or was refused), or run_playbook for Outflare's agent. " +
-        "A write answered 202 with an action waits for a person: poll get_action, never approve it yourself. If a tool is missing, request_connection.\n\n" +
+        "A write answered 202 with an action waits for a person: poll get_action, never approve it yourself. If a tool seems missing, search with find_tools; if a service is missing, request_connection.\n\n" +
+        "Finding tools: " + TOOLS_HINT + "\n\n" +
         "Errors: a failed call says the code and a Next step line; follow it. forbidden means you aren't allowed: give the person the link in the message and say which permission to turn on; do not retry.",
     },
   );
+  // Every tool goes in the toolbox, which find_tools searches and call_tool
+  // runs; only the core set is listed unless the app asked for all of them.
+  const box = new Toolbox();
   const register = server.registerTool.bind(server) as (...a: unknown[]) => unknown;
-  server.registerTool = ((name: string, config: unknown, cb: (...a: unknown[]) => unknown) =>
-    register(name, config, (...a: unknown[]) => toolCall.run(name, () => cb(...a)))) as typeof server.registerTool;
+  server.registerTool = ((name: string, config: Parameters<Toolbox["add"]>[1], cb: (...a: unknown[]) => unknown) => {
+    const run = (...a: unknown[]) => toolCall.run(name, () => cb(...a));
+    box.add(name, config, run);
+    if (mode === "all" || CORE.has(name)) return register(name, config, run);
+    return undefined;
+  }) as unknown as typeof server.registerTool;
   const path = {
     get ws() {
       return ws;
@@ -352,10 +367,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Workspace numbers",
       description: "Mailbox health and capacity, sends, replies and bounces for the last 24 hours and 7 days, and unread replies. With a brand, that brand's mailboxes and sequences. For what is wrong and how to fix it, use get_status.",
-      inputSchema: { brand: brandParam },
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/stats", { params: { path, query: withBrand(q) } })),
+    ({ brand }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/stats", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -1212,11 +1227,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         sequence_id: id.optional(),
         mailbox_id: id.optional(),
         domain: z.string().optional(),
-        brand: brandParam,
+        brand: brandRef,
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/reports", { params: { path, query: withBrand(q) } })),
+    ({ brand, ...q }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/reports", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -1864,8 +1879,14 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       description:
         "One brand's answer from stored data, free: weekly branded search (search console queries naming the brand), search clicks and visitors, " +
         "domain rating, backlinks and referring domains, each with a trend (up, down, flat) comparing the last 4 weeks with the 4 before, plus audited sites' health and open fixes. " +
+        "`period` sets the whole chosen period against as many weeks before it. " +
         "Start here when asked how SEO or a brand is doing.",
-      inputSchema: { brand: brandRef, weeks: z.number().int().min(8).max(52).optional().describe("Weeks to return. Default 12.") },
+      inputSchema: {
+        brand: brandRef,
+        weeks: z.number().int().min(4).max(104).optional().describe("Weeks back from the last week that is over. Default 12."),
+        from: z.string().optional().describe("First day, YYYY-MM-DD: the period starts on that week's Monday. Overrides weeks."),
+        to: z.string().optional().describe("Last day, YYYY-MM-DD: the period ends on that week's Sunday."),
+      },
       annotations: read,
     },
     ({ brand, ...q }) => callCompact(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/seo/overview", { params: { path: { brand: b }, query: q } }))),
@@ -1928,12 +1949,12 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         group_by: z.enum(["none", "sequence", "brand"]).optional(),
         sequence_id: id.optional(),
         mission_id: id.optional().describe("Only meetings, deals and spend recorded for this mission."),
-        brand: brandParam,
+        brand: brandRef,
         currency: z.string().length(3).optional().describe("Default USD. Other currencies are left out, not converted."),
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/outcomes/report", { params: { path, query: withBrand(q) } })),
+    ({ brand, ...q }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/outcomes/report", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -2262,10 +2283,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "Lifecycle email overview",
       description:
         "How far lifecycle and transactional email setup has got (provider connected, delivery events working, domain verified, test sent, real email sent) and 30 days of sends, deliveries, bounces and complaints. Start here before helping someone send receipts, resets or onboarding email.",
-      inputSchema: {},
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/email-overview", { params: { path } })),
+    ({ brand }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/email-overview", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -2378,13 +2399,21 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Everything one address was sent",
       description: "One person's lifecycle email history: counts (delivered, bounced, opened, clicked), whether they are suppressed and why, their lead if any, and every event of every email to them, newest first. Page with cursor=next_cursor.",
-      inputSchema: { address: z.string(), limit: z.number().int().min(1).max(500).optional(), cursor },
+      inputSchema: { address: z.string(), brand: brandRef, limit: z.number().int().min(1).max(500).optional(), cursor },
       annotations: read,
     },
-    ({ address, ...query }) => call(() => gtm.GET("/v1/workspaces/{ws}/email-recipients/{address}", { params: { path: { ws, address }, query } })),
+    ({ address, brand, ...query }) =>
+      call(() =>
+        onBrand(withBrand({ brand }).brand ?? "",
+          (b) => gtm.GET("/v1/brands/{brand}/email-recipients/{address}", { params: { path: { brand: b, address }, query } }),
+        ),
+      ),
   );
 
-  if (readOnly) return server;
+  if (readOnly) {
+    registerToolbox(server, box, readOnly);
+    return server;
+  }
 
   // Changing the team directory and the company accounts.
 
@@ -2936,6 +2965,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         campaign: z.string().uuid().optional().describe("A tracking campaign's id."),
         status: z.enum(["approved", "pending", "declined"]).optional(),
         offer: z.string().uuid().optional().describe("An offer's id."),
+        suspect: z.boolean().optional().describe("true for only the conversions a fraud signal flagged (datacenter_network, repeat_click, fast_conversion), false for only the others."),
         before: z.string().optional().describe("The converted_at of the last one you have, for the next page."),
       },
       annotations: read,
@@ -3196,6 +3226,73 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
           gtm.PUT("/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow", { params: { path: { brand: b, id: campaign, link } }, body: { flow_id } }),
         ),
       ),
+  );
+
+  const weightQuery = {
+    metric: z.enum(["revenue", "conversions"]).optional().describe("revenue (per click, the default) or conversions (the conversion rate)."),
+    days: z.number().int().min(1).max(90).optional().describe("How many days back the clicks count; 14 when left out."),
+  };
+  const weightList = z
+    .array(z.object({ destination_id: z.string().uuid(), weight: z.number().int().min(0).max(10000) }))
+    .min(1)
+    .max(220);
+  const weightSource = z.enum(["suggestion", "manual"]).optional().describe("suggestion when applying suggested weights; manual when left out.");
+
+  server.registerTool(
+    "get_tracking_link_weight_suggestions",
+    {
+      title: "Suggest a redirect link's weights",
+      description:
+        "For each list of a redirect link's paths (its landers, and the offers and pages after them), each one's clicks, conversions, revenue and chance to be the best, and the weights that would send more clicks to the better ones. Bots, suspect clicks and declined conversions are left out. Nothing changes until set_tracking_link_weights applies them; show the person the change first.",
+      inputSchema: { brand: brandRef, campaign: campaignRef, link: z.string().uuid().describe("The link's id (list_tracking_links)."), ...weightQuery },
+      annotations: read,
+    },
+    ({ brand, campaign, link, ...query }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          gtm.GET("/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/weight-suggestions", { params: { path: { brand: b, id: campaign, link }, query } }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "set_tracking_link_weights",
+    {
+      title: "Set a redirect link's weights",
+      description: "Set the weights of some of a redirect link's destinations (default or a path's), changing nothing else. A link that routes by a flow is refused: use set_flow_weights.",
+      inputSchema: { brand: brandRef, campaign: campaignRef, link: z.string().uuid().describe("The link's id (list_tracking_links)."), weights: weightList, source: weightSource },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, campaign, link, ...body }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          gtm.PATCH("/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/weights", { params: { path: { brand: b, id: campaign, link } }, body }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_flow_weight_suggestions",
+    {
+      title: "Suggest a flow's weights",
+      description: "As get_tracking_link_weight_suggestions, for a flow, from the clicks of every link that routes by it.",
+      inputSchema: { brand: brandRef, flow: z.string().uuid(), ...weightQuery },
+      annotations: read,
+    },
+    ({ brand, flow, ...query }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/flows/{id}/weight-suggestions", { params: { path: { brand: b, id: flow }, query } }))),
+  );
+
+  server.registerTool(
+    "set_flow_weights",
+    {
+      title: "Set a flow's weights",
+      description: "Set the weights of some of a flow's destinations, changing nothing else, for every link that routes by it.",
+      inputSchema: { brand: brandRef, flow: z.string().uuid(), weights: weightList, source: weightSource },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, flow, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/flows/{id}/weights", { params: { path: { brand: b, id: flow } }, body }))),
   );
 
   const trafficSourceParam = z.object({
@@ -3538,10 +3635,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "New or known people per channel",
       description:
         "For every channel: conversions credited to people who weren't a record yet when they visited (cold) and to people who already were (warm), and revenue from each person's first payment (new) and later ones (repeat), net of refunds, per currency.",
-      inputSchema: { ...attributionRange, brand: attributionBrand },
+      inputSchema: { ...attributionRange, brand: brandRef },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/customers", { params: { path, query } })),
+    ({ brand, ...query }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/attribution/customers", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -3550,10 +3647,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "Lifetime value by first channel",
       description:
         "People whose first conversion was between from and to, by the channel that first brought them (first touch), with how many have paid and everything they have paid since, in total and per person.",
-      inputSchema: { from: attributionRange.from, to: attributionRange.to, brand: attributionBrand },
+      inputSchema: { from: attributionRange.from, to: attributionRange.to, brand: brandRef },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/cohorts", { params: { path, query } })),
+    ({ brand, ...query }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/attribution/cohorts", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -3562,10 +3659,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "Credit per company",
       description:
         "Credit rolled up from people to their company: for every company, how many of its people converted, the conversions and revenue credited to them under the model, the channel with the most credit, and the deals it won between from and to.",
-      inputSchema: { ...attributionRange, brand: attributionBrand },
+      inputSchema: { ...attributionRange, brand: brandRef },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/accounts", { params: { path, query } })),
+    ({ brand, ...query }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/attribution/accounts", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -3574,10 +3671,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "Won deal value per channel",
       description:
         "Deals won between from and to, spread across channels in proportion to the credit (under the model) of the conversions their people (the deal's people, its contact and everyone at its company) had before it closed. Deals with no credited people are counted as unattributed.",
-      inputSchema: { ...attributionRange, brand: attributionBrand },
+      inputSchema: { ...attributionRange, brand: brandRef },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/deals", { params: { path, query } })),
+    ({ brand, ...query }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/attribution/deals", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -3931,17 +4028,167 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Change how a campaign bids",
       description:
-        "Ask Google Ads to switch the campaign to maximize_conversions (optionally with target_cpa_micros, micros of the account's currency) or maximize_conversion_value (optionally with target_roas, 3 is three times spend). " +
+        "Ask Google Ads to switch the campaign to maximize_conversions (optionally with target_cpa_micros, micros of the account's currency), maximize_conversion_value (optionally with target_roas, 3 is three times spend), " +
+        "or portfolio with bidding_strategy_id (a strategy from list_ad_bidding_strategies, whose own target applies). " +
         "Answers the queued change, as pause_ad_campaign. Always waits for a person's approval; bidding takes one to two weeks to settle afterwards.",
       inputSchema: { brand: brandRef,
         campaign_id: id,
-        strategy: z.enum(["maximize_conversions", "maximize_conversion_value"]),
+        strategy: z.enum(["maximize_conversions", "maximize_conversion_value", "portfolio"]),
+        target_cpa_micros: z.number().int().min(10000).max(1000000000000).optional(),
+        target_roas: z.number().min(0.01).max(1000).optional(),
+        bidding_strategy_id: z.string().max(30).optional().describe("With strategy portfolio: the strategy's id on Google Ads."),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ brand, campaign_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/campaigns/{id}/bidding", { params: { path: { brand: b, id: campaign_id } }, body }))),
+  );
+
+  const adAccount = { brand: brandRef, account_id: id.describe("The ad account's id (list_ad_accounts).") };
+  const accountPath = (b: string, account_id: string) => ({ path: { brand: b, id: account_id } });
+
+  server.registerTool(
+    "list_ad_account_conversion_actions",
+    {
+      title: "An ad account's conversion actions and their website code",
+      description:
+        "Read a Google Ads account's conversion actions live: type, category, status, whether bidding uses them (primary), counting and click window, and for website ones the code to put on the site " +
+        "(global_site_tag on every page, event_snippet on the page the conversion happens on). Other platforms answer connector_invalid.",
+      inputSchema: adAccount,
+      annotations: read,
+    },
+    ({ brand, account_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/accounts/{id}/conversion-actions", { params: accountPath(b, account_id) }))),
+  );
+
+  server.registerTool(
+    "create_ad_website_conversion",
+    {
+      title: "Create a website conversion action",
+      description:
+        "Create a website conversion action on a Google Ads account. Answers the queued account change; once get_ad_account_change says applied, list_ad_account_conversion_actions shows its website code. " +
+        "Always waits for a person's approval. Needs ads.manage.",
+      inputSchema: { ...adAccount,
+        name: z.string().min(1).max(100),
+        category: z.enum(["purchase", "sign_up", "lead", "page_view", "contact", "other"]),
+        counting: z.enum(["one", "many"]).optional().describe("one conversion per click (leads, sign-ups) or every one (purchases). Default one."),
+        click_window_days: z.number().int().min(1).max(90).optional().describe("Default 30."),
+        default_value_micros: z.number().int().min(0).optional().describe("The value when the page sends none, in micros of currency."),
+        currency: z.string().length(3).optional().describe("Default the account's currency."),
+        always_use_default: z.boolean().optional(),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ brand, account_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/accounts/{id}/conversion-actions", { params: accountPath(b, account_id), body }))),
+  );
+
+  server.registerTool(
+    "list_ad_callouts",
+    {
+      title: "An ad account's callouts",
+      description: "Read the callouts linked to a Google Ads account itself, live: short lines (up to 25 characters) shown under every ad it runs.",
+      inputSchema: adAccount,
+      annotations: read,
+    },
+    ({ brand, account_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/accounts/{id}/callouts", { params: accountPath(b, account_id) }))),
+  );
+
+  server.registerTool(
+    "add_ad_callout",
+    {
+      title: "Add a callout to an ad account",
+      description: "Add an account-level callout on Google Ads (up to 25 characters). Answers the queued account change. Always waits for a person's approval. Needs ads.manage.",
+      inputSchema: { ...adAccount, text: z.string().min(1).max(25) },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ brand, account_id, text }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/accounts/{id}/callouts", { params: accountPath(b, account_id), body: { text } }))),
+  );
+
+  server.registerTool(
+    "remove_ad_callout",
+    {
+      title: "Remove a callout from an ad account",
+      description: "Take a callout (its id from list_ad_callouts) off a Google Ads account. Answers the queued account change. Always waits for a person's approval. Needs ads.manage.",
+      inputSchema: { ...adAccount, callout_id: z.string().max(30) },
+      annotations: { ...write, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    },
+    ({ brand, account_id, callout_id }) =>
+      call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/ads/accounts/{id}/callouts/{asset}", { params: { path: { brand: b, id: account_id, asset: callout_id } } }))),
+  );
+
+  server.registerTool(
+    "list_ad_bidding_strategies",
+    {
+      title: "An ad account's portfolio bidding strategies",
+      description: "Read a Google Ads account's portfolio bidding strategies live: type, status, target and how many campaigns bid with each.",
+      inputSchema: adAccount,
+      annotations: read,
+    },
+    ({ brand, account_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/accounts/{id}/bidding-strategies", { params: accountPath(b, account_id) }))),
+  );
+
+  server.registerTool(
+    "create_ad_bidding_strategy",
+    {
+      title: "Create a portfolio bidding strategy",
+      description:
+        "Create a portfolio Target CPA (type target_cpa with target_cpa_micros) or Target ROAS (type target_roas with target_roas) strategy on a Google Ads account; put campaigns on it with set_ad_campaign_bidding (strategy portfolio). " +
+        "Answers the queued account change. Always waits for a person's approval. Needs ads.manage.",
+      inputSchema: { ...adAccount,
+        name: z.string().min(1).max(255),
+        type: z.enum(["target_cpa", "target_roas"]),
         target_cpa_micros: z.number().int().min(10000).max(1000000000000).optional(),
         target_roas: z.number().min(0.01).max(1000).optional(),
       },
       annotations: { ...write, openWorldHint: true },
     },
-    ({ brand, campaign_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/campaigns/{id}/bidding", { params: { path: { brand: b, id: campaign_id } }, body }))),
+    ({ brand, account_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/accounts/{id}/bidding-strategies", { params: accountPath(b, account_id), body }))),
+  );
+
+  server.registerTool(
+    "update_ad_bidding_strategy",
+    {
+      title: "Move a portfolio strategy's target",
+      description:
+        "Move a portfolio strategy's target (target_cpa_micros or target_roas, as its type takes) or rename it; every campaign on it bids to the new target. " +
+        "Answers the queued account change. Always waits for a person's approval. Needs ads.manage.",
+      inputSchema: { ...adAccount,
+        strategy_id: z.string().max(30).describe("The strategy's id from list_ad_bidding_strategies."),
+        name: z.string().max(255).optional(),
+        target_cpa_micros: z.number().int().min(10000).max(1000000000000).optional(),
+        target_roas: z.number().min(0.01).max(1000).optional(),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ brand, account_id, strategy_id, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/ads/accounts/{id}/bidding-strategies/{strategy}", { params: { path: { brand: b, id: account_id, strategy: strategy_id } }, body }))),
+  );
+
+  server.registerTool(
+    "get_ad_bidding_strategy_report",
+    {
+      title: "Portfolio bidding strategies with their numbers",
+      description:
+        "Every portfolio bidding strategy of the brand's Google Ads accounts, read live with its type, status, clicks, impressions, cost, average CPC, conversions, all conversions and cost per conversion over the range. " +
+        "Money in micros of each strategy's currency; accounts Google refused are under errors.",
+      inputSchema: { brand: brandRef,
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("First day (YYYY-MM-DD). Default 27 days before to."),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        account_id: id.optional(),
+      },
+      annotations: { ...read, openWorldHint: true },
+    },
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/bidding-strategies", { params: { path: { brand: b }, query: q } }))),
+  );
+
+  server.registerTool(
+    "get_ad_account_change",
+    {
+      title: "How a change to an ad account ended",
+      description: "Read one queued change to an ad account (a conversion action, callout or bidding strategy): queued, applied (with what the platform made in result, and verified_at once read back) or failed with why.",
+      inputSchema: { ...adAccount, change_id: id },
+      annotations: read,
+    },
+    ({ brand, account_id, change_id }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/accounts/{id}/changes/{change}", { params: { path: { brand: b, id: account_id, change: change_id } } }))),
   );
 
   server.registerTool(
@@ -3972,7 +4219,17 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
   const adDraftContent = {
     name: z.string().max(255).optional().describe("A new ad group's or campaign's name (and a Meta ad's)."),
     final_url: z.string().url().describe("The full address the ad links to."),
-    headlines: z.array(z.string()).max(15).describe("Google: 3 to 15, at most 30 characters each. Meta: exactly one."),
+    headlines: z
+      .array(z.string())
+      .max(15)
+      .describe(
+        "Google: 3 to 15, at most 30 characters each; write 11 or more distinct ones across the keywords people search, benefits, features, calls to action and authority, in sentence case, 20 characters or fewer where it reads well, every claim from the brand's knowledge sheet (no prices or promises it lacks, no superlatives, no competitor names). Meta: exactly one.",
+      ),
+    headline_pins: z
+      .array(z.number().int().min(0).max(3))
+      .max(15)
+      .optional()
+      .describe("Google: one entry per headline, 0 unpinned, 1 to 3 the pinned position. Leave out for the one evergreen ad per ad group; at most one challenger with partial pins, three variants per pinned position."),
     descriptions: z.array(z.string()).max(4).optional().describe("Google: 2 to 4, at most 90 characters each. Meta: at most one."),
     path1: z.string().max(15).optional(),
     path2: z.string().max(15).optional(),
@@ -4022,7 +4279,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       description:
         "Write a draft from the brand's knowledge and site: a new ad in an ad group (ad_group_id; an ad set on Meta), a new ad group with keywords and an ad in a campaign (campaign_id; Google), " +
         "or a new search campaign with a daily budget, countries and an ad group (account_id; Google). Read the campaign's ads and search terms first, and say why it should do better in reason. " +
-        "Nothing is made on the platform until a person approves it in Outflare, and it is made paused; a person turns it on.",
+        "Nothing is made on the platform until a person approves it in Outflare, and it is made paused; a person turns it on. " +
+        "Refused with knowledge_unreviewed until a person has reviewed the brand's knowledge sheet (get_brand_knowledge); the answer's checks list warnings (a price the sheet lacks, a superlative, a competitor's name, few headlines, thin pins, title case, a crowded ad group) for the person to weigh.",
       inputSchema: {
         brand: z.string().min(1).describe("The brand's id from list_brands."),
         kind: z.enum(["ad", "ad_group", "campaign"]),
@@ -4316,10 +4574,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "The channels an agent can work on, and whether each is ready",
       description:
         "The channel framework's catalog: every channel (paid ads, content, social, communities, email outreach, link building, press, SEO, reviews) with what it needs connected, the actions an agent can take on it and their approval category, the reads it decides from, how it is measured, its playbooks, and its readiness: ready, connect_first (with the connection to add) or needs_data. Read it before choosing what to work on for a brand.",
-      inputSchema: { brand: z.string().optional().describe("Readiness for one brand: its handle or id from list_brands.") },
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/channels", { params: { path, query: withBrand(q) } })),
+    ({ brand }) => callCompact(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/channels", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -4534,12 +4792,15 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       description:
         "Changes Outflare suggests after each sync (budget_up, budget_down, pause, resume; on Google search campaigns keyword_add, negative_add and keyword_split; on Google, bidding_target), each with its reason and the numbers behind it. " +
         "Open ones wait for a person to approve in Outflare (Paid ads, Suggestions); approved ones are measured over a window (measure_from to measure_until) and judged worked, did_not_work or not_sure. " +
+        "The same rows as list_ad_findings, in status order: alerts (autonomy alert) and changes applied on their own (applied_auto) sit beside the suggestions, each with its autonomy, impact_micros, unit and rule. " +
         "To make a change yourself, use pause_ad_campaign, resume_ad_campaign or set_ad_campaign_budget, which follow your grant.",
       inputSchema: {
         connector: z.string().optional().describe("One network, such as google_ads."),
         account_id: id.optional(),
         campaign_id: id.optional(),
-        status: z.enum(["open", "dismissed", "expired", "measuring", "testing", "judged"]).optional(),
+        status: z.enum(["open", "dismissed", "expired", "measuring", "testing", "judged", "acknowledged", "shadow"]).optional(),
+        autonomy: z.enum(["auto", "approve", "alert"]).optional(),
+        kind: z.string().optional().describe("One kind, such as budget_down or alert.spend_anomaly."),
         limit: z.number().int().min(1).max(500).optional(),
         brand: oneBrand,
       },
@@ -4734,6 +4995,211 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       annotations: { ...write, idempotentHint: true },
     },
     ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/ads/settings", { params: { path: { brand: b } }, body }))),
+  );
+
+  // Paid ads in one unit: cost per new paying customer (plans/paid-ads).
+  server.registerTool(
+    "get_ad_economics",
+    {
+      title: "What a new paying customer may cost the brand",
+      description:
+        "The brand's paid ads economics: target cost per new paying customer and per sign-up (micros of currency), the acquisition window (days after an ad click a sign-up or first payment still counts), payback months, gross margin, and whether rules only record what they would do (shadow_mode). Every change the rules find waits for a person unless the server's extension lets savings apply on their own (capability ad_suggestions_auto in GET /v1/meta). set is false while the brand reads the defaults.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/economics", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "set_ad_economics",
+    {
+      title: "Set what a new paying customer may cost the brand",
+      description:
+        "Change the brand's paid ads economics: send only the fields to change; a target or the margin sent as null is cleared. Turning shadow_mode off is a person's decision and is refused from an agent (person_only): ask them to do it under Paid ads, Set up.",
+      inputSchema: {
+        brand: brandRef,
+        currency: z.string().length(3).optional(),
+        target_cost_per_payer_micros: z.number().int().min(1).nullable().optional().describe("What a new paying customer may cost, in micros of the currency (1,000,000 = one unit). Null clears it."),
+        target_cost_per_signup_micros: z.number().int().min(1).nullable().optional().describe("What a sign-up may cost, in micros. Null clears it."),
+        acquisition_window_days: z.number().int().min(1).max(365).optional(),
+        payback_months: z.number().int().min(1).max(60).optional(),
+        gross_margin_percent: z.number().int().min(1).max(100).nullable().optional(),
+        shadow_mode: z.boolean().optional().describe("Only a person can turn this off."),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/ads/economics", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "get_ads_performance",
+    {
+      title: "Cost per new paying customer per campaign, ad group or ad",
+      description:
+        "Each campaign (or ad group or ad) of the brand's ad accounts over a range: spend, clicks and the network's own conversions beside Outflare's own count of the sign-ups and first-time payers its clicks brought, what each cost against the brand's target (target_status), the revenue from new and returning customers, lifetime revenue of the people it acquired, payback and the spend trend. Money per currency, never converted. window_days recomputes with another acquisition window (at most 90).",
+      inputSchema: {
+        brand: brandRef,
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        level: z.enum(["campaign", "ad_group", "ad"]).optional(),
+        connector: z.string().optional().describe("One network, such as google_ads."),
+        account_id: id.optional(),
+        campaign_id: id.optional(),
+        window_days: z.number().int().min(1).max(90).optional(),
+        customers: z.enum(["all", "new", "returning"]).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...q }) => callCompact(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/performance", { params: { path: { brand: b }, query: q } }))),
+  );
+
+  server.registerTool(
+    "list_ad_acquisitions",
+    {
+      title: "The people the brand's ads acquired",
+      description:
+        "Each person a paid click brought, newest click first: their record, the campaign, ad group, ad and keyword, when they clicked, signed up and first paid, how many payments they made and what they paid to date. customers: new (people who paid) or returning (paid more than once). Needs customers.read.",
+      inputSchema: {
+        brand: brandRef,
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        campaign_id: id.optional(),
+        customers: z.enum(["all", "new", "returning"]).optional(),
+        limit: limit(500),
+        cursor,
+        fields,
+      },
+      annotations: read,
+    },
+    ({ brand, ...q }) => callCompact(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/acquisitions", { params: { path: { brand: b }, query: q } }))),
+  );
+
+  server.registerTool(
+    "get_ads_setup",
+    {
+      title: "The steps to measuring ads in cost per new paying customer",
+      description:
+        "The guided path for a brand, each step with done, where it stands and the page and tool that fix it: the website script, sign-ups and payments as events, a billing connection, an ad account on the brand, conversions sent back, the tracking template on Google ads, the economics, the knowledge sheet reviewed and the consent setting.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/setup", { params: { path: { brand: b } } }))),
+  );
+
+  // ---- Paid ads findings: the decision queue by brand, ranked for a
+  // person, with approve, dismiss, acknowledge and revert. ----
+  server.registerTool(
+    "list_ad_findings",
+    {
+      title: "The brand's paid ads findings, ranked for a decision",
+      description:
+        "Outflare's findings on a brand's campaigns: changes it proposes (budget_up, budget_down, pause, resume, keyword_add, negative_add, keyword_pause, ad_pause, target_tighten, target_loosen, bidding_target, exclusion_add, consolidate), alerts (alert.*) and savings it applied on its own (applied_auto), each with its reason as a yes/no question, the numbers behind it (evidence), the unit they are in (payers: new paying customers from Outflare's own ledger; platform_conversions until the brand sets a target), its expected change in cost per new paying customer (impact_micros, negative is better), the rule that made it, and its verdict once judged (worked, did_not_work, not_sure). " +
+        "Ranked for a person: open decisions by impact first, then alerts, then savings applied this week (revert_ad_finding undoes one), then measuring and judged. Only a person approves what can spend more, under Paid ads; rows with shadow true are what the rules would have done while the brand's rules are in shadow mode.",
+      inputSchema: {
+        brand: brandRef,
+        status: z.enum(["open", "dismissed", "expired", "measuring", "testing", "judged", "acknowledged", "shadow"]).optional(),
+        autonomy: z.enum(["auto", "approve", "alert"]).optional(),
+        kind: z.string().optional().describe("One kind, such as budget_down or alert.target_stale."),
+        campaign_id: id.optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...q }) => callCompact(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/findings", { params: { path: { brand: b }, query: q } }))),
+  );
+
+  server.registerTool(
+    "approve_ad_finding",
+    {
+      title: "Approve a paid ads finding, making its change",
+      description:
+        "Makes the finding's change on the network (an ad_changes row, list_ad_changes) and starts measuring it over the brand's judgement window. A person approves; an agent may approve only a saving (budget_down, pause, negative_add, keyword_pause, ad_pause, target_tighten, exclusion_add) where the server's extension allows it (capability ad_suggestions_auto in GET /v1/meta); anything else is refused (forbidden) and waits for a person under Paid ads. test: true tests a budget or bidding_target finding inside the network first.",
+      inputSchema: { brand: brandRef, finding_id: id.describe("From list_ad_findings."), test: z.boolean().optional() },
+      annotations: write,
+    },
+    ({ brand, finding_id, test }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/findings/{id}/approve", { params: { path: { brand: b, id: finding_id } }, body: test ? { test } : undefined }))),
+  );
+
+  server.registerTool(
+    "dismiss_ad_finding",
+    {
+      title: "Dismiss a paid ads finding",
+      description: "Leaves the campaign as it is. The next run may find it again if it still holds.",
+      inputSchema: { brand: brandRef, finding_id: id.describe("From list_ad_findings.") },
+      annotations: write,
+    },
+    ({ brand, finding_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/findings/{id}/dismiss", { params: { path: { brand: b, id: finding_id } } }))),
+  );
+
+  server.registerTool(
+    "acknowledge_ad_finding",
+    {
+      title: "Acknowledge a paid ads alert",
+      description: "Closes an alert (a finding with autonomy alert) once it is handled; nothing changes on the network, and it is raised again later if it still holds.",
+      inputSchema: { brand: brandRef, finding_id: id.describe("From list_ad_findings, with autonomy alert.") },
+      annotations: write,
+    },
+    ({ brand, finding_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/findings/{id}/acknowledge", { params: { path: { brand: b, id: finding_id } } }))),
+  );
+
+  server.registerTool(
+    "revert_ad_finding",
+    {
+      title: "Undo an applied paid ads finding",
+      description:
+        "Makes the inverse of an applied finding's change as a new change carried out by the same job: the budget restored, a paused campaign resumed, a negative keyword or exclusion taken out, a paused keyword or ad enabled again, the target put back. The finding keeps its verdict and shows reverted_at and revert_change_id. Refused (not_active) when the change hasn't applied yet, was already reverted, or has no inverse here (a consolidation).",
+      inputSchema: { brand: brandRef, finding_id: id.describe("From list_ad_findings: one that is measuring or judged with a change_id.") },
+      annotations: write,
+    },
+    ({ brand, finding_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/findings/{id}/revert", { params: { path: { brand: b, id: finding_id } } }))),
+  );
+
+  server.registerTool(
+    "get_ad_feed",
+    {
+      title: "Outflare's conversion feed on an ad account",
+      description:
+        "The three conversion actions Outflare made on the account (sign-up, first payment, repeat payment), the rules that feed them, the paying customers list and its last refresh, " +
+        "the new customer acquisition goal, and the transport sends take (data_manager, or ads_api after Google refused the destination). " +
+        "setup_needed has a reconnect entry when a person must connect Google Ads again for the Data Manager permission; agents never handle sign-ins. ready is false until create_ad_feed ran.",
+      inputSchema: { brand: brandRef, account_id: id.describe("One of the brand's ad accounts, from list_ad_accounts.") },
+      annotations: read,
+    },
+    ({ brand, account_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ads/accounts/{id}/feed", { params: { path: { brand: b, id: account_id } } }))),
+  );
+
+  server.registerTool(
+    "create_ad_feed",
+    {
+      title: "Set up Outflare's conversion feed on an ad account",
+      description:
+        "Makes on the Google Ads account three conversion actions that take uploaded clicks (Outflare sign-up; Outflare first payment, the primary one; Outflare repeat payment), " +
+        "a Customer Match list of paying customers refreshed daily, and three conversion rules that send sign-ups, each person's first payment as a NEW customer and their later payments as RETURNING, " +
+        "through Google's Data Manager API. Safe to repeat: existing actions and lists are reused; 409 once the feed is set up.",
+      inputSchema: { brand: brandRef, account_id: id.describe("One of the brand's ad accounts, from list_ad_accounts.") },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ brand, account_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ads/accounts/{id}/feed", { params: { path: { brand: b, id: account_id } } }))),
+  );
+
+  server.registerTool(
+    "update_ad_feed",
+    {
+      title: "Set the new customer acquisition goal",
+      description:
+        "Sets the account's new customer acquisition goal on every active and paused campaign: off, bid_higher (bid more for new customers, serve everyone) or new_only (serve new customers only; needs 1,000 people on the paying customers list, else payers_list_too_small). " +
+        "additional_value_micros is added to a new customer's first conversion for bidding. transport data_manager puts an account that fell back to ads_api back on the Data Manager API. An agent's change always waits for a person.",
+      inputSchema: {
+        brand: brandRef,
+        account_id: id.describe("One of the brand's ad accounts, from list_ad_accounts."),
+        nca: z.enum(["off", "bid_higher", "new_only"]).optional(),
+        additional_value_micros: z.number().int().min(0).optional().describe("Micros of the account's currency added to a new customer's first conversion."),
+        transport: z.enum(["data_manager"]).optional(),
+      },
+      annotations: { ...write, idempotentHint: true, openWorldHint: true },
+    },
+    ({ brand, account_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/ads/accounts/{id}/feed", { params: { path: { brand: b, id: account_id } }, body }))),
   );
 
   server.registerTool(
@@ -8324,6 +8790,29 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
   );
 
   server.registerTool(
+    "get_organic_conversions",
+    {
+      title: "Read organic signups and payments by landing page or search group",
+      description:
+        "First-touch Organic Search signups and payments for an SEO site, from the workspace's own PostHog, attributed to the person's first organic landing page and grouped with the brand's current content search groups. " +
+        "Payments use payment_succeeded when it exists, and a paid service_purchased (not a trial, not a wallet top-up) only when no payment_succeeded has the same person, calendar day and amount, so the same payment is never counted twice. Revenue is USD only. " +
+        "group=page lists landing pages; group=cluster lists search groups, with unmatched pages in Ungrouped. Groups can overlap, so do not add group totals together; use totals for a unique sum. " +
+        "Conversion rates are directional (first-touch conversions versus organic sessions that started on the page). Defaults to the last 28 days stored. Reads only what the sync stored. " +
+        "This is not get_site_conversions, which uses session-scoped events you choose on the Keywords conversions report.",
+      inputSchema: { brand: brandRef,
+        site_id: id,
+        from: z.string().optional().describe("YYYY-MM-DD"),
+        to: z.string().optional().describe("YYYY-MM-DD"),
+        group: z.enum(["page", "cluster"]).optional(),
+        sort: z.enum(["revenue", "payments", "signups", "sessions", "signup_conversion_rate", "payment_conversion_rate", "clicks"]).optional(),
+        limit: z.number().int().min(1).max(1000).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, site_id, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/seo-sites/{site}/organic-conversions", { params: { path: { brand: b, site: site_id }, query } }))),
+  );
+
+  server.registerTool(
     "list_page_targets",
     {
       title: "List the keyword each page targets",
@@ -9424,10 +9913,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Get alert settings",
       description:
-        "The kinds of alert, who gets each by email for the workspace and each brand that chose differently (owner: the person it is for, else the owners and admins; admins; off), and the kinds you muted for yourself.",
+        "The kinds of alert, who gets each by email for one brand (owner: the person it is for, else the owners and admins; admins; off), and the kinds you muted for yourself. Each brand has its own.",
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/alerts/settings", { params: { path } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/alerts/settings", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -9435,17 +9925,17 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Choose where an alert goes",
       description:
-        "Sets where a kind of alert goes, for the workspace or one brand (brand_id). email: owner (the person it is for, else the owners and admins), admins, off, or null to follow the workspace or default. slack_integration_id and slack_channel (from list_alert_channels) post it to a channel in the workspace's own Slack; both null stops posting. Fields left out stay as they are.",
+        "Sets where a kind of alert goes for one brand. email: owner (the person it is for, else the owners and admins), admins, off, or null to go back to the default. slack_integration_id and slack_channel (from list_alert_channels) post it to a channel in the workspace's own Slack; both null stops posting. Fields left out stay as they are.",
       inputSchema: {
         kind: z.string().describe("A kind from get_alert_settings, such as reply.hot."),
         email: z.enum(["owner", "admins", "off"]).nullable().optional(),
         slack_integration_id: id.nullable().optional(),
         slack_channel: z.string().nullable().optional(),
-        brand_id: id.optional(),
+        brand: brandRef,
       },
       annotations: { ...write, idempotentHint: true },
     },
-    (body) => call(() => gtm.PUT("/v1/workspaces/{ws}/alerts/settings", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/alerts/settings", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -9658,7 +10148,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
 
   const automationSettings = {
     name: z.string().min(1).max(200).optional(),
-    brand_id: id.nullable().optional().describe("Run for one brand only, taking only its events. Null for every brand."),
     inputs: z.record(z.string(), z.string().max(500)).optional().describe("Values for the playbook's inputs, by name (get_playbook lists them)."),
     kind: z.enum(["schedule", "event"]).optional().describe("schedule: every day, week or month. event: when an event from the webhook catalog happens."),
     cadence: z.enum(["daily", "weekly", "monthly"]).nullable().optional(),
@@ -9679,10 +10168,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "List playbook automations",
       description: "Playbooks set to run by themselves on a schedule or an event, with their status (draft waits for a person's approval; held says why in held_reason), next run and this month's spend.",
-      inputSchema: { playbook_id: z.string().max(60).optional() },
+      inputSchema: { brand: brandRef, playbook_id: z.string().max(60).optional() },
       annotations: read,
     },
-    ({ playbook_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/playbook-automations", { params: { path: { ws }, query: { playbook_id } } })),
+    ({ brand, playbook_id }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/playbook-automations", { params: { path: { brand: b }, query: { playbook_id } } }))),
   );
 
   server.registerTool(
@@ -9692,10 +10181,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       description:
         "Creates a draft automation; nothing runs until a person approves it in Outflare (agents can't). Left out settings come from the playbook's suggestion (get_playbook, automation). " +
         "Each run is an agent run of the playbook by Outflare's agent, with this mode and the spend limits.",
-      inputSchema: { playbook_id: z.string().min(1).max(60), ...automationSettings },
+      inputSchema: { brand: brandRef, playbook_id: z.string().min(1).max(60), ...automationSettings },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/playbook-automations", { params: { path: { ws } }, body })),
+    ({ brand, ...body }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.POST("/v1/brands/{brand}/playbook-automations", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -9703,10 +10192,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Change a playbook automation",
       description: "Anything but the name sends it back to draft, to wait for a person's approval again.",
-      inputSchema: { automation_id: id, ...automationSettings },
+      inputSchema: { brand: brandRef, automation_id: id, ...automationSettings },
       annotations: write,
     },
-    ({ automation_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/playbook-automations/{id}", { params: { path: { ws, id: automation_id } }, body })),
+    ({ brand, automation_id, ...body }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.PATCH("/v1/brands/{brand}/playbook-automations/{id}", { params: { path: { brand: b, id: automation_id } }, body }))),
   );
 
   server.registerTool(
@@ -9714,10 +10203,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Pause a playbook automation",
       description: "Stops new runs; runs already started carry on. A person approves it again to turn it back on.",
-      inputSchema: { automation_id: id },
+      inputSchema: { brand: brandRef, automation_id: id },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ automation_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/playbook-automations/{id}/pause", { params: { path: { ws, id: automation_id } } })),
+    ({ brand, automation_id }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.POST("/v1/brands/{brand}/playbook-automations/{id}/pause", { params: { path: { brand: b, id: automation_id } } }))),
   );
 
   server.registerTool(
@@ -9725,10 +10214,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Run an automation now",
       description: "Starts a run of an active automation now, inside its approved limits, without moving its schedule. Answers with the run's mission.",
-      inputSchema: { automation_id: id },
+      inputSchema: { brand: brandRef, automation_id: id },
       annotations: write,
     },
-    ({ automation_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/playbook-automations/{id}/run", { params: { path: { ws, id: automation_id } } })),
+    ({ brand, automation_id }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.POST("/v1/brands/{brand}/playbook-automations/{id}/run", { params: { path: { brand: b, id: automation_id } } }))),
   );
 
   server.registerTool(
@@ -9736,10 +10225,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "An automation's runs",
       description: "The runs an automation started, newest first: agent_runs when Outflare's agent runs it (on the action layer, with their turns, held changes and spend), data for the missions of an outside agent's runs.",
-      inputSchema: { automation_id: id },
+      inputSchema: { brand: brandRef, automation_id: id },
       annotations: read,
     },
-    ({ automation_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/playbook-automations/{id}/runs", { params: { path: { ws, id: automation_id } } })),
+    ({ brand, automation_id }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/playbook-automations/{id}/runs", { params: { path: { brand: b, id: automation_id } } }))),
   );
 
   server.registerTool(
@@ -9747,10 +10236,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Delete a playbook automation",
       description: "No more runs. Its past runs stay as missions.",
-      inputSchema: { automation_id: id },
+      inputSchema: { brand: brandRef, automation_id: id },
       annotations: { ...write, destructiveHint: true, idempotentHint: true },
     },
-    ({ automation_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/playbook-automations/{id}", { params: { path: { ws, id: automation_id } } })),
+    ({ brand, automation_id }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.DELETE("/v1/brands/{brand}/playbook-automations/{id}", { params: { path: { brand: b, id: automation_id } } }))),
   );
 
   server.registerTool(
@@ -10006,10 +10495,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       description:
         "Adds a company found only from visitors' IP addresses (in_crm false in list_website_visitors) to the CRM as a prospect, marked as " +
         "from a lookup, and puts its visitors on it. Lookups never add companies on their own; use the CRM's company when it has one.",
-      inputSchema: { domain: z.string().describe("The company's domain as list_website_visitors shows it.") },
+      inputSchema: { brand: brandRef, domain: z.string().describe("The company's domain as list_website_visitors shows it.") },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/visitors/companies", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.POST("/v1/brands/{brand}/visitors/companies", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -11039,13 +11528,23 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
 
   const broadcastFields = {
     name: z.string().max(200).optional(),
-    template: z.string().optional().describe("A lifecycle template's handle or id."),
-    topic: z.string().nullable().optional().describe("A topic's key; the template's when left out."),
+    template: z.string().optional().describe("A lifecycle template's handle or id; a transactional one for a service message."),
+    topic: z.string().nullable().optional().describe("A topic's key; the template's when left out. A service message has none."),
     from: z.string().optional().describe("The sender; the template's when left out."),
-    audience: z
-      .object({ kind: z.enum(["topic", "records"]), record_ids: z.array(z.string()).max(10000).optional() })
+    service: z
+      .boolean()
       .optional()
-      .describe("topic (default): everyone the topic may go to. records: just these customer records."),
+      .describe(
+        "A service message (a change to the service people use, an end date), not marketing: skips marketing consent, topics, caps and quiet hours, with no unsubscribe link. Needs a transactional template and a records or list audience. Suppressed addresses are still never sent. Use it only for real service notices.",
+      ),
+    audience: z
+      .object({
+        kind: z.enum(["topic", "records", "list"]),
+        record_ids: z.array(z.string()).max(10000).optional(),
+        ref: z.string().optional().describe("For kind list: the id of a saved list or segment (list_smart_lists) or of a lead list (list_lead_lists)."),
+      })
+      .optional()
+      .describe("topic (default): everyone the topic may go to. records: just these customer records. list: everyone in a saved list or segment when it sends."),
     data: z.record(z.string(), z.unknown()).optional().describe("Template variables for everyone; each person's own fields are under person, such as person.first_name."),
     track: z.object({ opens: z.boolean().nullable().optional(), clicks: z.boolean().nullable().optional() }).optional(),
     exclude: exclusion,
@@ -11084,7 +11583,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Draft a broadcast",
       description:
-        "A draft that sends a published lifecycle template to people on customer records: a topic's subscribers, or a list of records. Nothing is sent until send_email_broadcast. " +
+        "A draft that sends a published lifecycle template to people on customer records: a topic's subscribers, a saved list or segment, or a list of records. Nothing is sent until send_email_broadcast. " +
         "People who left the topic or all marketing email, and prospects who never agreed to marketing email, are skipped.",
       inputSchema: { brand: brandRef, ...broadcastFields, name: z.string().max(200), template: z.string() },
       annotations: write,
@@ -11101,6 +11600,28 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       annotations: write,
     },
     ({ brand, broadcast, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/email-broadcasts/{id}", { params: { path: { brand: b, id: broadcast } }, body }))),
+  );
+
+  server.registerTool(
+    "import_people",
+    {
+      title: "Import people",
+      description:
+        "Up to 10,000 people (a CSV of sign-ups, an export of account ids), each with an email, a user_id (the workspace's own id) or both. " +
+        "Matched by user_id, then email; only an email nobody in the brand holds makes a new person. With list_id, everyone is added to that static list, ready for a broadcast to the list.",
+      inputSchema: {
+        brand: brandRef,
+        people: z
+          .array(z.object({ email: z.string().optional(), user_id: z.string().max(500).optional(), name: z.string().max(200).optional() }))
+          .min(1)
+          .max(10000),
+        origin: z.enum(["first_party", "prospect", "import"]).optional().describe("first_party: your own users or customers. prospect: a list you bought or found. import (default): unknown."),
+        acquired_via: z.string().optional().describe("A short lowercase label such as csv (default) or admin_export."),
+        list_id: z.string().optional().describe("A static list's id to add them to (list_smart_lists)."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/import", { params: { path: { brand: b } }, body }))),
   );
 
   const liftQuery = {
@@ -11811,6 +12332,19 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/lifecycle", { params: { path: { brand: b, record } } }))),
   );
 
+  server.registerTool(
+    "get_record_relationship",
+    {
+      title: "What the brand already has with a card's company",
+      description:
+        "The relationship check before reaching out from a prospect, partnership, company or person: whether its company is already a customer, its deals, the brand's other pipelines it is in, when anyone last emailed, heard from or met them, whether the conversation went stale, and who on the team has emailed them (for a warm intro). Flags sum it up.",
+      inputSchema: { brand: brandRef, record: z.string().describe("The record's id: a prospect, partnership, company or person.") },
+      annotations: read,
+    },
+    ({ brand, record }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/relationship", { params: { path: { brand: b, record } } }))),
+  );
+
   // Live metrics per company and person (docs/metrics.md).
   const metricFields = {
     name: z.string().min(1).max(100).optional(),
@@ -12054,5 +12588,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     ({ brand, email_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/emails/{id}/cancel", { params: { path: { brand: b, id: email_id } } }))),
   );
 
+  registerToolbox(server, box, readOnly);
   return server;
 }

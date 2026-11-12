@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -349,10 +350,13 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	results := make([]eventResult, len(msgs))
-	totals := ingestTotals{names: map[string]*seenName{}}
+	var results []eventResult
+	var totals ingestTotals
 	now := time.Now().UTC()
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err = s.retryTx(ctx, "ingest_customer_events", func(tx pgx.Tx) error {
+		// Each try starts again from the first event.
+		results = make([]eventResult, len(msgs))
+		totals = ingestTotals{names: map[string]*seenName{}}
 		c, err := loadCatalog(ctx, tx, a.WorkspaceID, deref(brand), false)
 		if err != nil {
 			return err
@@ -384,7 +388,7 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			results[i] = res
 		}
-		if err := saveEventNames(ctx, tx, a.WorkspaceID, c.Brand, totals.names); err != nil {
+		if err := saveEventNames(ctx, tx, a.WorkspaceID, c.Brand, totals.names, false); err != nil {
 			return err
 		}
 		counts := map[string]any{"accepted": 0, "duplicate": 0, "rejected": 0, "events": len(msgs), "records_created": totals.created, "identities_added": totals.identities, "possible_duplicates": totals.duplicates, "records_merged": totals.merged, "names": len(totals.names)}
@@ -405,25 +409,41 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 
 // saveEventNames keeps one catalog row per name in the brand (a resolved
 // id, catalog.Brand), however many events had it. A name the brand never
-// defined arrives quarantined, so it drives nothing until someone approves
-// it. Each brand has its own catalog (event_definitions_brand_name_idx), so
-// another brand defining the same name changes nothing here.
-func saveEventNames(ctx context.Context, tx pgx.Tx, ws, brand string, names map[string]*seenName) error {
-	for name, n := range names {
-		status := "quarantined"
-		if n.kind != "track" {
-			status = "approved"
+// defined is approved as it arrives, so it is usable straight away. A new
+// track name from outside Outflare (named by the brand's own product, not
+// by Outflare's code) is checked afterwards by the event name check job,
+// which asks a person only when it looks like a typo of a name the brand
+// already has. Each brand has its own catalog
+// (event_definitions_brand_name_idx), so another brand defining the same
+// name changes nothing here.
+func saveEventNames(ctx context.Context, tx pgx.Tx, ws, brand string, names map[string]*seenName, ours bool) error {
+	fresh := false
+	// In name order, so two batches with the same names lock their rows in
+	// the same order and can't deadlock on them.
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		n := names[name]
+		check := "pending"
+		if ours || n.kind != "track" {
+			check = "ok"
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, first_seen_at, last_seen_at, seen_count)
-			SELECT $1, NULLIF($7, '')::uuid, $2, $3, $4, $5, $6
+		var added bool
+		if err := tx.QueryRow(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, first_seen_at, last_seen_at, seen_count, name_check)
+			SELECT $1, NULLIF($7, '')::uuid, $2, 'approved', $3, $4, $5, $6
 			ON CONFLICT (brand_id, name) DO UPDATE SET seen_count = event_definitions.seen_count + EXCLUDED.seen_count,
 				last_seen_at = GREATEST(event_definitions.last_seen_at, EXCLUDED.last_seen_at),
-				first_seen_at = LEAST(COALESCE(event_definitions.first_seen_at, EXCLUDED.first_seen_at), EXCLUDED.first_seen_at)`,
-			ws, name, status, n.first, n.last, n.count, brand); err != nil {
+				first_seen_at = LEAST(COALESCE(event_definitions.first_seen_at, EXCLUDED.first_seen_at), EXCLUDED.first_seen_at)
+			RETURNING xmax = 0`,
+			ws, name, n.first, n.last, n.count, check, brand).Scan(&added); err != nil {
 			return err
 		}
+		if added && check == "pending" {
+			fresh = true
+		}
 	}
-	return nil
+	if !fresh || brand == "" {
+		return nil
+	}
+	return enqueueEventNameCheck(ctx, tx, ws, brand)
 }
 
 // ingestOne stores one message and applies what it says about the person.
@@ -471,6 +491,10 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 		var ok bool
 		if name, ok = eventNameFor(rawName); !ok {
 			return eventError{"invalid_name", "event must have letters in it, such as Order Completed or product.activated"}
+		}
+		// A name a person said is a typo is stored as the name it stands for.
+		if to, ok := c.sameAs[name]; ok {
+			name = to
 		}
 	case "page", "screen":
 		rawName = m.text("name")

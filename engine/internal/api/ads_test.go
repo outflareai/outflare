@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -216,9 +217,16 @@ var googleSuffix = struct {
 	sync.Mutex
 	account, campaign string
 	mutates           []string
-	// uploads are the conversions and adjustments sent, path and body.
+	// uploads are the conversions and adjustments sent, path and body,
+	// through the Ads API and the Data Manager API alike.
 	uploads []string
 	refuse  bool
+	// refuseFeed makes the Data Manager API refuse every request with
+	// this ErrorInfo reason (NOT_ALLOWLISTED), so sends fall back.
+	refuseFeed string
+	// goal is the new customer acquisition goal the account has, as the
+	// GAQL answer ("" for none), set by goals:mutate.
+	goal string
 }{campaign: "gad_campaignid={campaignid}"}
 
 // fakeGoogleAds refuses a developer token other than "dev-ok". Google
@@ -232,7 +240,49 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/v1/events:ingest", "/v1/audienceMembers:ingest", "/v1/audienceMembers:remove":
+		// The Data Manager API: the conversion feed and Customer Match.
+		b, _ := io.ReadAll(r.Body)
+		googleSuffix.Lock()
+		googleSuffix.uploads = append(googleSuffix.uploads, r.URL.Path+" "+string(b))
+		refuse := googleSuffix.refuseFeed
+		googleSuffix.Unlock()
+		if refuse != "" {
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": 400, "status": "INVALID_ARGUMENT", "message": "refused",
+				"details": []any{map[string]any{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": refuse, "domain": "datamanager.googleapis.com"}}}})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"requestId": "req-" + strconv.Itoa(len(b)%1000)})
+	case "/v1/requestStatus:retrieve":
+		json.NewEncoder(w).Encode(map[string]any{"requestStatusPerDestination": []any{map[string]any{"requestStatus": "SUCCESS", "eventsIngestionStatus": map[string]any{"recordCount": "1"}}}})
+	case "/v23/customers/123/conversionActions:mutate", "/v23/customers/123/userLists:mutate", "/v23/customers/123/userListCustomerTypes:mutate",
+		"/v23/customers/123/goals:mutate", "/v23/customers/123/campaignGoalConfigs:mutate":
+		// The conversion feed's configuration.
+		b, _ := io.ReadAll(r.Body)
+		googleSuffix.Lock()
+		googleSuffix.mutates = append(googleSuffix.mutates, r.URL.Path+" "+string(b))
+		name := "customers/123/x/1"
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/conversionActions:mutate"):
+			name = "customers/123/conversionActions/" + strconv.Itoa(600+strings.Count(strings.Join(googleSuffix.mutates, ""), "UPLOAD_CLICKS"))
+		case strings.HasSuffix(r.URL.Path, "/userLists:mutate"):
+			name = "customers/123/userLists/901"
+		case strings.HasSuffix(r.URL.Path, "/userListCustomerTypes:mutate"):
+			name = "customers/123/userListCustomerTypes/901~PURCHASERS"
+		case strings.HasSuffix(r.URL.Path, "/goals:mutate"):
+			name = "customers/123/goals/31"
+			googleSuffix.goal = name
+			if strings.Contains(string(b), `"remove"`) {
+				googleSuffix.goal = ""
+			}
+		case strings.HasSuffix(r.URL.Path, "/campaignGoalConfigs:mutate"):
+			name = "customers/123/campaignGoalConfigs/7~31"
+		}
+		googleSuffix.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"resourceName": name}}})
 	case "/v23/customers/123/adGroupCriteria:mutate", "/v23/customers/123/campaignCriteria:mutate", "/v23/customers/123/adGroups:mutate", "/v23/customers/123/adGroupAds:mutate",
+		"/v23/customers/123/customerAssets:mutate", "/v23/customers/123/biddingStrategies:mutate",
 		"/v23/customers/123/experiments:mutate", "/v23/customers/123/experimentArms:mutate",
 		"/v23/customers/123/experiments/9:scheduleExperiment", "/v23/customers/123/experiments/9:endExperiment", "/v23/customers/123/experiments/9:promoteExperiment":
 		b, _ := io.ReadAll(r.Body)
@@ -243,6 +293,8 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/adGroups:mutate"):
 			name = "customers/123/adGroups/72"
+		case strings.HasSuffix(r.URL.Path, "/biddingStrategies:mutate"):
+			name = "customers/123/biddingStrategies/902"
 		case strings.HasSuffix(r.URL.Path, "/experiments:mutate"):
 			name = "customers/123/experiments/9"
 		case strings.HasSuffix(r.URL.Path, "/experimentArms:mutate"):
@@ -262,7 +314,7 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Ops []map[string]map[string]any `json:"mutateOperations"`
 		}
 		json.Unmarshal(b, &body)
-		made := map[string]string{"campaignBudgets/-1": "campaignBudgets/501", "campaigns/-2": "campaigns/7002", "adGroups/-3": "adGroups/73"}
+		made := map[string]string{"campaignBudgets/-1": "campaignBudgets/501", "campaigns/-2": "campaigns/7002", "adGroups/-3": "adGroups/73", "assets/-1": "assets/555"}
 		var res []any
 		for _, op := range body.Ops {
 			for k, v := range op {
@@ -326,7 +378,7 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		q := string(b)
 		googleSuffix.Lock()
-		accountSuffix, campaignSuffix := googleSuffix.account, googleSuffix.campaign
+		accountSuffix, campaignSuffix, goal := googleSuffix.account, googleSuffix.campaign, googleSuffix.goal
 		googleSuffix.Unlock()
 		if strings.Contains(q, "FROM customer\"") {
 			json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"customer": map[string]any{"id": "123", "descriptiveName": "Acme search", "currencyCode": "EUR", "timeZone": "Pacific/Kiritimati",
@@ -339,7 +391,16 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if m := regexp.MustCompile(`AND '([0-9-]{10})'`).FindStringSubmatch(q); m != nil {
 			day = m[1]
 		}
-		metrics := map[string]any{"costMicros": "9000000", "impressions": "300", "clicks": "12", "conversions": 2.0, "conversionsValue": 80.0}
+		metrics := map[string]any{"costMicros": "9000000", "impressions": "300", "clicks": "12", "conversions": 2.0, "conversionsValue": 80.0, "allConversions": 3.0, "allConversionsValue": 95.0}
+		googleSuffix.Lock()
+		mutated := strings.Join(googleSuffix.mutates, "\n")
+		googleSuffix.Unlock()
+		removedOr := func(resource string) string {
+			if strings.Contains(mutated, `"remove":"customers/123/`+resource+`"`) {
+				return "REMOVED"
+			}
+			return "ENABLED"
+		}
 		row := func(r map[string]any) map[string]any {
 			r["segments"], r["metrics"] = map[string]any{"date": day}, metrics
 			return r
@@ -357,6 +418,21 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"metrics": map[string]any{"costMicros": "500000000", "impressions": "9000", "clicks": "400", "conversions": 50.0}},
 				map[string]any{"campaign": map[string]any{"id": "7001"}, "segments": map[string]any{"date": day},
 					"metrics": map[string]any{"costMicros": "500000000", "impressions": "9100", "clicks": "410", "conversions": 80.0}}}
+		case strings.Contains(q, "conversion_action.name ="), strings.Contains(q, "FROM user_list_customer_type"), strings.Contains(q, "user_list.name ="):
+			// The feed's actions and list are not there yet: made fresh.
+			out = []any{}
+		case strings.Contains(q, "FROM campaign_goal_config"):
+			if goal != "" && strings.Contains(q, goal) {
+				out = []any{map[string]any{"campaignGoalConfig": map[string]any{"resourceName": "customers/123/campaignGoalConfigs/7~31", "campaign": "customers/123/campaigns/7"}}}
+			} else {
+				out = []any{}
+			}
+		case strings.Contains(q, "FROM goal"):
+			if goal != "" {
+				out = []any{map[string]any{"goal": map[string]any{"resourceName": goal, "goalType": "NEW_CUSTOMER_ACQUISITION"}}}
+			} else {
+				out = []any{}
+			}
 		case strings.Contains(q, "FROM campaign_criterion"):
 			out = []any{map[string]any{"campaignCriterion": map[string]any{"resourceName": "customers/123/campaignCriteria/7~501", "type": "USER_LIST",
 				"userList": map[string]any{"userList": "customers/123/userLists/501"}}},
@@ -381,14 +457,54 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			id["segments"] = map[string]any{"date": day, "conversionActionName": "Demo booked"}
 			id["metrics"] = map[string]any{"conversions": 2.0, "conversionsValue": 80.0}
 			out = []any{id}
+		case strings.Contains(q, "conversion_action.tag_snippets"):
+			// The account's conversion actions, the website one made here
+			// among them once it is.
+			out = []any{map[string]any{"conversionAction": map[string]any{"id": "42", "name": "Purchase", "type": "UPLOAD_CLICKS", "category": "PURCHASE", "status": "ENABLED",
+				"primaryForGoal": true, "countingType": "MANY_PER_CLICK", "clickThroughLookbackWindowDays": "30"}}}
+			if strings.Contains(mutated, `"type":"WEBPAGE"`) {
+				out = append(out, map[string]any{"conversionAction": map[string]any{"id": "600", "name": "Sign-up", "type": "WEBPAGE", "category": "SIGNUP", "status": "ENABLED",
+					"primaryForGoal": true, "countingType": "ONE_PER_CLICK", "clickThroughLookbackWindowDays": "30",
+					"tagSnippets": []any{map[string]any{"type": "WEBPAGE", "pageFormat": "HTML", "globalSiteTag": "<script>gtag('config', 'AW-1')</script>", "eventSnippet": "<script>gtag('event', 'conversion')</script>"}}}})
+			}
+		case strings.Contains(q, "FROM customer_asset"):
+			out = []any{map[string]any{"customerAsset": map[string]any{"resourceName": "customers/123/customerAssets/501~CALLOUT", "asset": "customers/123/assets/501", "status": "ENABLED"},
+				"asset": map[string]any{"id": "501", "calloutText": "", "calloutAsset": map[string]any{"calloutText": "Free trial"}}}}
+			if strings.Contains(mutated, `"calloutText":`) {
+				out = append(out, map[string]any{"customerAsset": map[string]any{"status": "ENABLED"}, "asset": map[string]any{"id": "555", "calloutAsset": map[string]any{"calloutText": "Setup in a day"}}})
+			}
+			if strings.Contains(mutated, `"remove":"customers/123/customerAssets/501~CALLOUT"`) {
+				out = out[1:]
+			}
+		case strings.Contains(q, "FROM bidding_strategy"):
+			strat := map[string]any{"id": "900", "name": "Leads tCPA", "type": "TARGET_CPA", "status": "ENABLED", "campaignCount": "1", "effectiveCurrencyCode": "EUR",
+				"targetCpa": map[string]any{"targetCpaMicros": "20000000"}}
+			if strings.Contains(mutated, `"targetCpaMicros":"18000000"`) {
+				strat["targetCpa"] = map[string]any{"targetCpaMicros": "18000000"}
+			}
+			r := map[string]any{"biddingStrategy": strat}
+			if strings.Contains(q, "metrics.clicks") {
+				r["metrics"] = map[string]any{"clicks": "40", "impressions": "900", "costMicros": "80000000", "averageCpc": 2000000.0, "conversions": 4.0, "costPerConversion": 20000000.0, "allConversions": 6.0}
+			}
+			out = []any{r}
+			if strings.Contains(mutated, "biddingStrategies:mutate") && strings.Contains(mutated, `"create"`) && !strings.Contains(q, "bidding_strategy.id = 900") {
+				out = append(out, map[string]any{"biddingStrategy": map[string]any{"id": "902", "name": "Value", "type": "TARGET_ROAS", "status": "ENABLED", "targetRoas": map[string]any{"targetRoas": 4.0}}})
+			}
+		case strings.Contains(q, "campaign.status FROM campaign WHERE campaign.id"):
+			out = []any{map[string]any{"campaign": map[string]any{"id": "7", "status": removedOr("campaigns/7")}}}
+		case strings.Contains(q, "ad_group_ad.status FROM ad_group_ad WHERE ad_group.id"):
+			out = []any{map[string]any{"adGroupAd": map[string]any{"status": removedOr("adGroupAds/71~81")}}}
+		case strings.Contains(q, "ad_group_criterion.status FROM ad_group_criterion WHERE ad_group.id"):
+			out = []any{map[string]any{"adGroupCriterion": map[string]any{"status": removedOr("adGroupCriteria/71~91")}}}
 		case strings.Contains(q, "FROM conversion_action"):
 			out = []any{map[string]any{"conversionAction": map[string]any{"id": "42", "name": "Purchase"}}}
 		case strings.Contains(q, "FROM keyword_view"):
 			out = []any{row(map[string]any{"adGroup": map[string]any{"id": "71"}, "adGroupCriterion": map[string]any{"criterionId": "91", "status": "ENABLED",
-				"keyword": map[string]any{"text": "acme crm", "matchType": "EXACT"}}})}
+				"keyword": map[string]any{"text": "acme crm", "matchType": "EXACT"}, "qualityInfo": map[string]any{"qualityScore": 8},
+				"positionEstimates": map[string]any{"firstPageCpcMicros": "1100000", "topOfPageCpcMicros": "2300000", "firstPositionCpcMicros": "3900000"}}})}
 		case strings.Contains(q, "FROM search_term_view"):
 			r1 := row(map[string]any{"adGroup": map[string]any{"id": "71"}, "searchTermView": map[string]any{"searchTerm": "acme crm pricing"}})
-			r1["segments"].(map[string]any)["keyword"] = map[string]any{"info": map[string]any{"text": "acme crm", "matchType": "EXACT"}}
+			r1["segments"] = map[string]any{"date": day, "searchTermMatchType": "NEAR_EXACT", "keyword": map[string]any{"info": map[string]any{"text": "acme crm", "matchType": "EXACT"}}}
 			out = []any{r1}
 		case strings.Contains(q, "FROM ad_group_ad WHERE segments"):
 			out = []any{row(map[string]any{"adGroup": map[string]any{"id": "71"}, "adGroupAd": map[string]any{"ad": map[string]any{"id": "81"}}})}
@@ -470,8 +586,9 @@ func TestAdsSyncAndReports(t *testing.T) {
 	if n != 90 || cents != 90*2540 || channel != "paid_ads" {
 		t.Fatalf("ledger: %d rows, %d cents, channel %q", n, cents, channel)
 	}
-	if res, err := e.ads.SyncOnce(ctx, ws, id); err != nil || res.Rows != 7 {
-		t.Fatalf("second sync should re-read 7 days: %+v %v", res, err)
+	// The next run within the hour re-reads today and yesterday.
+	if res, err := e.ads.SyncOnce(ctx, ws, id); err != nil || res.Rows != 2 || res.Window != "hourly" {
+		t.Fatalf("second sync should re-read 2 days: %+v %v", res, err)
 	}
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE workspace_id = $1 AND category = 'ads'`, ws).Scan(&n); err != nil || n != 90 {
 		t.Fatalf("re-reading must not duplicate the ledger: %d %v", n, err)
@@ -624,14 +741,14 @@ func TestAdsDeveloperTokenSetup(t *testing.T) {
 		t.Fatalf("sync without a developer token: %+v %v", res, err)
 	}
 
-	owner.must(422, "PUT", base+"/ads/connections/"+id+"/setup", map[string]any{"values": map[string]string{"developer_token": "wrong"}})
-	got := owner.must(200, "PUT", base+"/ads/connections/"+id+"/setup", map[string]any{"values": map[string]string{"developer_token": "dev-ok"}})
-	if len(got["setup_needed"].([]any)) != 0 || got["status"] != "connected" {
-		t.Fatalf("after setup: %v", got)
+	// Google retired developer tokens: there is nothing to set up, and a
+	// token stored earlier is never sent (the fake refuses any but dev-ok).
+	owner.must(400, "PUT", base+"/ads/connections/"+id+"/setup", map[string]any{"values": map[string]string{"developer_token": "dev-ok"}})
+	if err := e.integrations.UpdateCreds(ctx, e.pool, ws, id, connectors.Creds{"access_token": "gt", "developer_token": "old-token-not-sent"}); err != nil {
+		t.Fatal(err)
 	}
-	// The token is sealed with the credentials, never shown back.
 	_, listed := owner.do("GET", base+"/ads/connections", nil)
-	if raw, _ := json.Marshal(listed); strings.Contains(string(raw), "dev-ok") {
+	if raw, _ := json.Marshal(listed); strings.Contains(string(raw), "old-token") {
 		t.Fatal("the developer token leaked into a response")
 	}
 	res, err := e.ads.SyncOnce(ctx, ws, id)

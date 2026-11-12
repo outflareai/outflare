@@ -386,14 +386,18 @@ function Recipient({ ws, address, back, openEmail, go }: { ws: string; address: 
   const [r, setR] = useState<EmailRecipient | null>(null);
   const [error, setError] = useState("");
   const [more, setMore] = useState(false);
+  const brandId = useBrand(ws).brand?.id ?? "";
+  // The picked brand's sends to this address.
+  const get = (cursor?: string) => api.GET("/v1/brands/{brand}/email-recipients/{address}", { params: { path: { brand: brandId, address }, query: cursor ? { cursor } : {} } });
   useEffect(() => {
     setR(null);
-    api.GET("/v1/workspaces/{ws}/email-recipients/{address}", { params: { path: { ws, address } } }).then(({ data, error }) => (data ? setR(data) : setError(errorMessage(error))));
-  }, [ws, address]);
+    if (!brandId) return;
+    get().then(({ data, error }) => (data ? setR(data) : setError(errorMessage(error))));
+  }, [ws, address, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
   async function loadMore() {
     if (!r?.next_cursor) return;
     setMore(true);
-    const { data } = await api.GET("/v1/workspaces/{ws}/email-recipients/{address}", { params: { path: { ws, address }, query: { cursor: r.next_cursor } } });
+    const { data } = await get(r.next_cursor);
     setMore(false);
     if (data) setR({ ...data, events: [...r.events, ...data.events] });
   }

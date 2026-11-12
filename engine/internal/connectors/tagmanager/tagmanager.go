@@ -104,6 +104,23 @@ func (g GTM) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Account, 
 		names = append(names, a.Name)
 	}
 	acct.Details = map[string]string{"accounts": strings.Join(names, ", ")}
+	// The containers and the sites they tag say whose the sign-in is, so
+	// someone can tell which brand the connection belongs to.
+	if cts, err := g.containersOf(ctx, cl, creds, accts); err == nil && len(cts) > 0 {
+		var list, sites []string
+		for _, ct := range cts {
+			list = append(list, ct.Name+" ("+ct.PublicID+")")
+			for _, d := range ct.Domains {
+				if !contains(sites, d) {
+					sites = append(sites, d)
+				}
+			}
+		}
+		acct.Details["containers"] = strings.Join(list, ", ")
+		if len(sites) > 0 {
+			acct.Details["sites"] = strings.Join(sites, ", ")
+		}
+	}
 	return acct, nil
 }
 
@@ -123,6 +140,10 @@ func (g GTM) Containers(ctx context.Context, cl *c.Client, creds c.Creds) ([]c.T
 	if err != nil {
 		return nil, err
 	}
+	return g.containersOf(ctx, cl, creds, accts)
+}
+
+func (g GTM) containersOf(ctx context.Context, cl *c.Client, creds c.Creds, accts []account) ([]c.TagContainer, error) {
 	out := []c.TagContainer{}
 	for _, a := range accts {
 		var resp struct {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/allocation"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/brands"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/holdout"
 	"github.com/outflareai/outflare/engine/internal/leads"
@@ -911,6 +912,10 @@ func (s *Server) previewSequence(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := customers.PersonVars(r.Context(), s.pool, l.ID, vars); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if err := brands.Vars(r.Context(), s.pool, a.WorkspaceID, seq.BrandID, vars); err != nil {
 		s.internal(w, r, err)
 		return
 	}

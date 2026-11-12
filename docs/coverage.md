@@ -62,6 +62,16 @@ Where competitors appear (`GET /coverage/competitor_placements`, the competitor 
 
 Values are worked out when a scan saves pages, and for older rows on the next list read. `access=` filters by how the link is got, `order=` sorts by `value` (default), `domain_rating` or `recent`. Opportunities use the same classification: a free-to-get link scores lower and platforms get no SEO points (`factors.access`).
 
+## Paid link orders
+
+Paid placements the brand buys from sites in its own donor catalog live under `/v1/brands/{brand}/link-orders` (the **Link orders** page in the SEO module, immediately after Backlinks). The catalog is a profile beside a Coverage publisher (`coverage_donor_profiles`); donor attributes such as PBN, niche and casino stay on the profile, not on `coverage_publishers` or `coverage_rates`, so Presence forms do not grow those fields. Publishing an order records a Coverage placement with `arrangement=paid`. Invoices and payments are the existing Coverage ones; recording Paid never sends money. The budget is a Coverage budget with tag `link_orders`, one row per currency. Amounts are the donor price only, and USD and EUR are never summed.
+
+The product guide, including the status machine, the live-check gate on Paid, candidates from the saved link gap, and the Query views, is [link-orders.md](link-orders.md).
+
 ## Validation
 
 `TestBrandCoverage*` exercises brand isolation, permissions, money constraints, imports, source receipts, page loss/recovery, task recurrence, fixed schedules, workspace-only provider credentials, quoted AI results, version invalidation, snapshots and attribution deduplication. The standard API contract validator checks requests, responses and scope declarations. Run the repository race-test shards and regenerate both SDKs after contract changes.
+
+## Link ROI
+
+The Link ROI page, next to Link orders, shows the donor price of each published link against stored Search Console, ranking and referring-domain changes on the target page. See [Link ROI](link-roi.md).
