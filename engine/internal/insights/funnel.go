@@ -194,6 +194,9 @@ type Funnel struct {
 	// day, week or month.
 	Interval string    `json:"interval,omitempty"`
 	AdClicks *AdClicks `json:"ad_clicks,omitempty"`
+	// Location is the time zone Interval's periods are in: the brand's
+	// reporting time zone (B4a), UTC when nil.
+	Location *time.Location `json:"-"`
 }
 
 // Funnel orders.
@@ -1075,7 +1078,8 @@ func (c *Compiled) Run(ctx context.Context, q Querier) (Result, error) {
 	a := args{list: slices.Clone(c.args.list)}
 	period := `NULL::timestamptz`
 	if c.f.Interval != "" {
-		period = `date_trunc(` + a.add(c.f.Interval) + `, t1 AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`
+		z := a.add(zoneName(c.f.Location))
+		period = `date_trunc(` + a.add(c.f.Interval) + `, t1 AT TIME ZONE ` + z + `) AT TIME ZONE ` + z
 	}
 	sql := c.with + `
 		SELECT GROUPING(bk)::int, GROUPING(p)::int, bk, p, ` + strings.Join(sel, ", ") + `
@@ -1173,7 +1177,7 @@ func adClicks(ctx context.Context, q Querier, ws, brand string, f Funnel) (AdCli
 		WHERE e.workspace_id = $1 AND e.level = 'campaign' AND COALESCE(e.brand_id, a.brand_id) = $2
 			AND ($5 = '' OR a.connector = $5) AND ($6 = '' OR strpos(lower(e.name), lower($6)) > 0)
 		GROUP BY m.currency ORDER BY 4 DESC`,
-		ws, brand, f.From.UTC().Format(time.DateOnly), f.To.UTC().Format(time.DateOnly), connector, f.AdClicks.Campaign)
+		ws, brand, f.From.In(zoneOr(f.Location)).Format(time.DateOnly), f.To.In(zoneOr(f.Location)).Format(time.DateOnly), connector, f.AdClicks.Campaign)
 	if err != nil {
 		return AdClickResult{}, err
 	}

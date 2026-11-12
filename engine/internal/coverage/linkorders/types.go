@@ -101,6 +101,13 @@ type Order struct {
 	Domain               string     `json:"domain"`
 	Status               string     `json:"status"`
 	TargetURL            string     `json:"target_url"`
+	TargetID             *uuid.UUID `json:"target_id"`
+	TargetKind           string     `json:"target_kind"`
+	TargetChoice         string     `json:"target_choice"`
+	AnchorPrimary        string     `json:"anchor_primary"`
+	AnchorPrimarySource  string     `json:"anchor_primary_source"`
+	AnchorSecondary      string     `json:"anchor_secondary"`
+	AnchorSecondaryType  string     `json:"anchor_secondary_type"`
 	SlotType             string     `json:"slot_type"`
 	RelRequested         string     `json:"rel_requested"`
 	QuotedAmountMinor    *int64     `json:"quoted_amount_minor"`

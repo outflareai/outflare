@@ -21,6 +21,9 @@ type Lifecycle struct {
 	Step     Step `json:"step"`
 	From, To time.Time
 	Interval string `json:"interval"`
+	// Location is the time zone periods are in: the brand's reporting
+	// time zone (B4a), UTC when nil.
+	Location *time.Location `json:"-"`
 }
 
 // Validate checks the question before it is compiled.
@@ -94,8 +97,13 @@ func CompileLifecycle(ctx context.Context, q Querier, ws, brand string, l Lifecy
 	}
 	pInterval := a.add(l.Interval)
 	pStep := a.add("1 " + l.Interval)
-	pFrom := a.add(truncate(l.From, l.Interval))
-	period := `date_trunc(` + pInterval + `, ` + src.ts + ` AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`
+	pFrom := a.add(truncate(l.From, l.Interval, l.Location))
+	pZone := a.add(zoneName(l.Location))
+	// Periods are wall-clock times in the zone, so a period plus a step is
+	// the next one across daylight-saving changes; they become instants
+	// on the way out.
+	period := `date_trunc(` + pInterval + `, ` + src.ts + ` AT TIME ZONE ` + pZone + `)`
+	from, to := `(`+pFrom+` AT TIME ZONE `+pZone+`)`, `(`+pTo+` AT TIME ZONE `+pZone+`)`
 	// act is each person's active periods; seq adds the period before and
 	// after each, so one pass tells new (no earlier period), returning
 	// (the period just before), resurrected (an earlier one, with a gap)
@@ -105,16 +113,16 @@ func CompileLifecycle(ctx context.Context, q Querier, ws, brand string, l Lifecy
 	), seq AS (
 		SELECT actor, p, lag(p) OVER (PARTITION BY actor ORDER BY p) AS prev, lead(p) OVER (PARTITION BY actor ORDER BY p) AS nxt FROM act
 	)
-	SELECT p,
+	SELECT p AT TIME ZONE ` + pZone + `,
 		count(*) FILTER (WHERE prev IS NULL)::int AS new,
 		count(*) FILTER (WHERE prev = p - ` + pStep + `::interval)::int AS returning,
 		count(*) FILTER (WHERE prev IS NOT NULL AND prev < p - ` + pStep + `::interval)::int AS resurrected,
 		0 AS dormant
-	FROM seq WHERE p >= ` + pFrom + ` AND p < ` + pTo + ` GROUP BY p
+	FROM seq WHERE p >= ` + from + ` AND p < ` + to + ` GROUP BY p
 	UNION ALL
-	SELECT p + ` + pStep + `::interval, 0, 0, 0, count(*)::int
+	SELECT (p + ` + pStep + `::interval) AT TIME ZONE ` + pZone + `, 0, 0, 0, count(*)::int
 	FROM seq WHERE (nxt IS NULL OR nxt > p + ` + pStep + `::interval)
-		AND p + ` + pStep + `::interval >= ` + pFrom + ` AND p + ` + pStep + `::interval < ` + pTo + `
+		AND p + ` + pStep + `::interval >= ` + from + ` AND p + ` + pStep + `::interval < ` + to + `
 	GROUP BY 1`
 	return c, nil
 }
@@ -135,7 +143,7 @@ func joinAnd(where []string) string {
 func (c *CompiledLifecycle) Run(ctx context.Context, q Querier) (LifecycleResult, error) {
 	l := c.l
 	res := LifecycleResult{Label: c.label, Interval: l.Interval, From: l.From, To: l.To, Periods: []LifecyclePeriod{}}
-	ps := periods(l.From, l.To, l.Interval)
+	ps := periods(l.From, l.To, l.Interval, l.Location)
 	byStart := map[int64]int{}
 	for i, p := range ps {
 		res.Periods = append(res.Periods, LifecyclePeriod{Start: p})

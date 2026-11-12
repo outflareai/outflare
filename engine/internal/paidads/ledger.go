@@ -41,8 +41,11 @@ var adKey = map[string]string{LevelCampaign: "campaign", LevelAdGroup: "adset", 
 type PerformanceQuery struct {
 	WorkspaceID, BrandID string
 	Level                string
-	// From and To are dates (UTC), inclusive.
+	// From and To are dates (UTC), inclusive. Ad platforms' days are their
+	// accounts'; events are bucketed in Location (the brand's reporting
+	// time zone, B4a), UTC when nil.
 	From, To time.Time
+	Location *time.Location
 	// Filters, each optional.
 	Connector, AccountID, CampaignID string
 	// WindowDays recomputes acquisitions from visits at read time with this
@@ -127,7 +130,9 @@ func Performance(ctx context.Context, q Querier, p PerformanceQuery) ([]Performa
 	from, to := p.From.UTC().Format(time.DateOnly), p.To.UTC().Format(time.DateOnly)
 	days := int(p.To.Sub(p.From).Hours()/24) + 1
 	prevFrom, prevTo := p.From.AddDate(0, 0, -days).Format(time.DateOnly), p.From.AddDate(0, 0, -1).Format(time.DateOnly)
-	args := []any{p.WorkspaceID, p.BrandID, p.Level, from, to}
+	// $6 and $7: when from begins and the day after to begins, in the
+	// brand's time zone, for the events' timestamps.
+	args := []any{p.WorkspaceID, p.BrandID, p.Level, from, to, DayStart(p.From, p.Location), DayStart(p.To.AddDate(0, 0, 1), p.Location)}
 	where := ""
 	if p.Connector != "" {
 		args = append(args, p.Connector)
@@ -171,7 +176,7 @@ func Performance(ctx context.Context, q Querier, p PerformanceQuery) ([]Performa
 					FROM customer_events e
 					WHERE e.workspace_id = $1 AND e.kind = 'track' AND e.record_id IS NOT NULL
 					  AND COALESCE(e.brand_id, outflare_first_brand(e.workspace_id)) = $2::uuid
-					  AND e.occurred_at >= $4::date AND e.occurred_at < $5::date + 1
+					  AND e.occurred_at >= $6 AND e.occurred_at < $7
 					  AND (e.name = ANY($` + strconv.Itoa(n-1) + `::text[]) OR (e.name = 'payment.succeeded' AND NOT EXISTS (
 						SELECT 1 FROM customer_events p WHERE p.workspace_id = e.workspace_id AND p.record_id = e.record_id AND p.kind = 'track'
 						  AND p.name = 'payment.succeeded' AND (p.occurred_at, p.id) < (e.occurred_at, e.id)
@@ -194,9 +199,9 @@ func Performance(ctx context.Context, q Querier, p PerformanceQuery) ([]Performa
 		prev AS (SELECT m.ad_entity_id, sum(m.spend_micros)::bigint s
 			FROM ad_metrics_daily m WHERE m.workspace_id = $1 AND m.ad_entity_id IN (SELECT id FROM ents) AND m.day BETWEEN $`+pf+`::date AND $`+pt+`::date GROUP BY 1),
 		counts AS (SELECT a.entity_id,
-				count(*) FILTER (WHERE a.signed_up_at >= $4::date AND a.signed_up_at < $5::date + 1)::int AS signups,
-				count(*) FILTER (WHERE a.first_paid_at >= $4::date AND a.first_paid_at < $5::date + 1)::int AS payers,
-				COALESCE(sum(GREATEST(1, extract(epoch from now() - a.first_paid_at) / 2629800)) FILTER (WHERE a.first_paid_at IS NOT NULL AND a.first_paid_at < $5::date + 1), 0)::float8 AS payer_months
+				count(*) FILTER (WHERE a.signed_up_at >= $6 AND a.signed_up_at < $7)::int AS signups,
+				count(*) FILTER (WHERE a.first_paid_at >= $6 AND a.first_paid_at < $7)::int AS payers,
+				COALESCE(sum(GREATEST(1, extract(epoch from now() - a.first_paid_at) / 2629800)) FILTER (WHERE a.first_paid_at IS NOT NULL AND a.first_paid_at < $7), 0)::float8 AS payer_months
 			FROM acq a GROUP BY 1)
 		SELECT ents.id::text, ents.name, ents.external_id, ents.status, ents.connector, ents.account_id::text, ents.account_name, ents.campaign_id::text, ents.currency,
 			COALESCE(spend.s, 0), COALESCE(spend.c, 0), COALESCE(spend.i, 0), spend.cv, spend.acv, COALESCE(prev.s, 0),
@@ -231,21 +236,25 @@ func Performance(ctx context.Context, q Querier, p PerformanceQuery) ([]Performa
 	}
 	// Revenue by measure and currency, from the ledger as stored.
 	returning := `SELECT a.entity_id, 'returning', r.currency, r.value_minor FROM ad_revenue r JOIN acq a ON a.id = r.acquisition_id
-		WHERE r.bucket = 'returning' AND r.occurred_at >= $4::date AND r.occurred_at < $5::date + 1`
+		WHERE r.bucket = 'returning' AND r.occurred_at >= $6 AND r.occurred_at < $7`
 	if p.Level == LevelCampaign {
 		returning = `SELECT r.touch_campaign_entity_id, 'returning', r.currency, r.value_minor FROM ad_revenue r
 		WHERE r.brand_id = $2::uuid AND r.bucket = 'returning' AND r.touch_campaign_entity_id IN (SELECT id FROM ents)
-		  AND r.occurred_at >= $4::date AND r.occurred_at < $5::date + 1`
+		  AND r.occurred_at >= $6 AND r.occurred_at < $7`
 	}
 	rrows, err := q.Query(ctx, `WITH `+ents+`, `+stored+`
 		SELECT x.entity_id::text, x.measure, x.currency, sum(x.value_minor)::bigint FROM (
 			SELECT a.entity_id, 'new' AS measure, r.currency, r.value_minor FROM ad_revenue r JOIN acq a ON a.id = r.acquisition_id
-			WHERE r.bucket = 'new' AND r.occurred_at >= $4::date AND r.occurred_at < $5::date + 1
+			WHERE r.bucket = 'new' AND r.occurred_at >= $6 AND r.occurred_at < $7
 			UNION ALL
 			SELECT a.entity_id, 'lifetime', r.currency, r.value_minor FROM ad_revenue r JOIN acq a ON a.id = r.acquisition_id
-			WHERE r.occurred_at < $5::date + 1
+			WHERE r.occurred_at < $7
 			UNION ALL `+returning+`
-		) x WHERE x.entity_id IN (SELECT id FROM ents) GROUP BY 1, 2, 3`, rargs...)
+		) x WHERE x.entity_id IN (SELECT id FROM ents)
+		  -- Revenue reads the brand-zone bounds ($6, $7); this keeps the
+		  -- date parameters, used by the spend query, typed.
+		  AND $4::date <= $5::date
+		GROUP BY 1, 2, 3`, rargs...)
 	if err != nil {
 		return nil, err
 	}
@@ -347,8 +356,10 @@ func signupNames(ctx context.Context, q Querier, ws, brand string) []string {
 // AcquisitionsQuery is one read of the people the ads acquired.
 type AcquisitionsQuery struct {
 	WorkspaceID, BrandID string
-	// From and To bound clicked_at (dates, inclusive); either may be zero.
+	// From and To bound clicked_at (dates, inclusive, in Location, UTC when
+	// nil); either may be zero.
 	From, To   time.Time
+	Location   *time.Location
 	CampaignID string
 	// Customers: all, new (people who paid) or returning (people who paid
 	// more than once).
@@ -397,12 +408,12 @@ func Acquisitions(ctx context.Context, q Querier, p AcquisitionsQuery) ([]Acquis
 	args := []any{p.WorkspaceID, p.BrandID}
 	where := ``
 	if !p.From.IsZero() {
-		args = append(args, p.From.UTC().Format(time.DateOnly))
-		where += ` AND q.clicked_at >= $` + strconv.Itoa(len(args)) + `::date`
+		args = append(args, DayStart(p.From, p.Location))
+		where += ` AND q.clicked_at >= $` + strconv.Itoa(len(args))
 	}
 	if !p.To.IsZero() {
-		args = append(args, p.To.UTC().Format(time.DateOnly))
-		where += ` AND q.clicked_at < $` + strconv.Itoa(len(args)) + `::date + 1`
+		args = append(args, DayStart(p.To.AddDate(0, 0, 1), p.Location))
+		where += ` AND q.clicked_at < $` + strconv.Itoa(len(args))
 	}
 	if p.CampaignID != "" {
 		args = append(args, p.CampaignID)
@@ -471,3 +482,12 @@ func Acquisitions(ctx context.Context, q Querier, p AcquisitionsQuery) ([]Acquis
 
 // ErrNotFound is for a record the brand doesn't have.
 var ErrNotFound = errors.New("not found")
+
+// DayStart is when the date day (as parsed, midnight UTC) begins in loc,
+// UTC when nil.
+func DayStart(day time.Time, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+}

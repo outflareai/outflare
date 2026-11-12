@@ -30,9 +30,23 @@ func parseWhen(v string, loc *time.Location) (time.Time, bool) {
 func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	// Days are one brand's in its reporting time zone (B4a), UTC across
+	// brands, unless ?timezone= says.
 	tz := q.Get("timezone")
 	if tz == "" {
 		tz = "UTC"
+		if id := oneBrand(sel); id != "" {
+			loc, err := s.brandZone(r.Context(), a.WorkspaceID, id)
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			tz = loc.String()
+		}
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
@@ -74,10 +88,6 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", k+" must be an id")
 			return
 		}
-	}
-	sel, ok := s.brandFilter(w, r)
-	if !ok {
-		return
 	}
 	rep, err := reports.Run(r.Context(), s.pool, a.WorkspaceID, reports.Query{
 		From: from, To: to, GroupBy: group, Timezone: tz,

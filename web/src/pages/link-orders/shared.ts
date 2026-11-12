@@ -11,12 +11,20 @@ export type LinkOrderImpact = components["schemas"]["LinkOrderImpact"];
 export type LinkOrderEquivalent = components["schemas"]["LinkOrderEquivalent"];
 export type LinkOrderStatus = components["schemas"]["LinkOrderStatus"];
 export type Member = components["schemas"]["Member"];
+export type LinkOrderTarget = components["schemas"]["LinkOrderTarget"];
+export type LinkOrderTargetKind = components["schemas"]["LinkOrderTargetKind"];
+export type LinkOrderTargetSuggestion = components["schemas"]["LinkOrderTargetSuggestion"];
+export type LinkOrderTargetSources = components["schemas"]["LinkOrderTargetSources"];
+export type LinkOrderTargetReason = components["schemas"]["LinkOrderTargetReason"];
+export type LinkOrderAnchorOptions = components["schemas"]["LinkOrderAnchorOptions"];
+export type LinkOrderAnchorOption = components["schemas"]["LinkOrderAnchorOption"];
 
-export const sections = ["overview", "catalog", "candidates", "orders", "checks", "impact", "payments"] as const;
+export const sections = ["overview", "catalog", "targets", "candidates", "orders", "checks", "impact", "payments"] as const;
 export type Section = (typeof sections)[number];
 export const sectionLabel: Record<Section, string> = {
   overview: "Overview",
   catalog: "Catalog",
+  targets: "Targets",
   candidates: "Candidates",
   orders: "Orders",
   checks: "Checks",

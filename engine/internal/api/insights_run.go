@@ -3,7 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/insights"
 )
@@ -13,7 +16,14 @@ import (
 // dates unless rng replaces them, and, for a trend, against the period
 // before when compare is set. The result is the same the run endpoints
 // give (funnelOut, TrendResult or RetentionResult).
+//
+// Its days are the brand's, in its reporting time zone (B4a).
 func runSavedInsight(ctx context.Context, q insights.Querier, ws, brand, kind string, spec []byte, rng *dateRange, compare bool, now time.Time) (any, error) {
+	var tz string
+	if err := q.QueryRow(ctx, `SELECT timezone FROM brands WHERE workspace_id = $1 AND id = $2`, ws, brand).Scan(&tz); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	now = now.In(zone(tz))
 	switch kind {
 	case "funnel":
 		var f funnelSpec

@@ -592,3 +592,11 @@ the cost it reports). A cohort of 20 prompts on 4 models, asked once a week,
 is 80 answers a week: typically well under a dollar on small models, more on
 the largest ones. Every answer's cost is recorded in the workspace's AI
 spend, next to missions and reply labelling.
+
+## AI answer share
+
+The **AI answer share** page, under AI visibility, rolls mention rate and share of voice from already-stored runs up by the question's topic (Untagged when it has none), by question set and by question type, week by week. It also counts answers that cite a `/compare` page of the brand or a competitor, after stripping a locale prefix such as `/zh`. It does not start a new run or call a paid provider.
+
+The API is `GET /v1/brands/{brand}/ai-answer-share` (`seo.read`). Agents use `get_ai_answer_share`. `days` defaults to 84.
+
+An example of the page, with fictional data, is in [example.html](ai-answer-share/example.html).

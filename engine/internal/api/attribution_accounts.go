@@ -69,12 +69,12 @@ func (s *Server) attributionAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Deals won in the period, by the company on the deal.
-	args := []any{a.WorkspaceID, f.from, f.to}
+	args := []any{a.WorkspaceID, f.start, f.end}
 	q, err := s.pool.Query(ctx, `SELECT dc.to_id::text, count(*)::int, coalesce(d.currency, ''), coalesce(sum(d.amount_cents), 0)::float8
 		FROM deals d
 		JOIN record_relationships dc ON dc.workspace_id = d.workspace_id AND dc.from_id = d.id AND dc.field_key = 'associated_company' AND dc.valid_to IS NULL
 		LEFT JOIN records dr ON dr.id = d.id
-		WHERE d.workspace_id = $1 AND d.state = 'won' AND d.closed_at >= $2::date AND d.closed_at < $3::date + 1`+
+		WHERE d.workspace_id = $1 AND d.state = 'won' AND d.closed_at >= $2 AND d.closed_at < $3`+
 		f.brand.sql(`dr.brand_id`, &args)+`
 		GROUP BY dc.to_id, d.currency`, args...)
 	if err != nil {
@@ -173,10 +173,10 @@ func (s *Server) attributionDeals(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	args := []any{a.WorkspaceID, f.from, f.to, f.model}
+	args := []any{a.WorkspaceID, f.start, f.end, f.model}
 	won := `SELECT d.id, d.closed_at, d.currency, d.amount_cents, d.record_id FROM deals d
 			LEFT JOIN records dr ON dr.id = d.id
-			WHERE d.workspace_id = $1 AND d.state = 'won' AND d.closed_at >= $2::date AND d.closed_at < $3::date + 1` +
+			WHERE d.workspace_id = $1 AND d.state = 'won' AND d.closed_at >= $2 AND d.closed_at < $3` +
 		f.brand.sql(`dr.brand_id`, &args)
 	matched, matchedWhere := f.creditSQL()
 	sql := `WITH won AS (` + won + `),

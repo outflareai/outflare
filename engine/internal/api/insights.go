@@ -61,43 +61,46 @@ type dateRange struct {
 var datePresets = []string{"today", "yesterday", "last_7_days", "last_14_days", "last_30_days", "last_90_days", "last_180_days",
 	"last_365_days", "this_month", "last_month", "this_year"}
 
-// resolve turns the range into [from, to) in UTC, as of now.
+// resolve turns the range into [from, to), as of now, in now's time zone:
+// callers pass now in the brand's reporting time zone (B4a), so "today" and
+// a date are the brand's days.
 func (d dateRange) resolve(now time.Time) (time.Time, time.Time, error) {
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	day := 24 * time.Hour
+	loc := now.Location()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	tomorrow := today.AddDate(0, 0, 1)
 	if d.Preset != "" {
 		if d.From != "" || d.To != "" {
 			return time.Time{}, time.Time{}, insights.Invalid("date_range is a preset or from and to, not both")
 		}
 		if n, ok := strings.CutPrefix(d.Preset, "last_"); ok {
 			if days, err := strconv.Atoi(strings.TrimSuffix(n, "_days")); err == nil && slices.Contains(datePresets, d.Preset) {
-				return today.Add(-time.Duration(days-1) * day), today.Add(day), nil
+				return today.AddDate(0, 0, -(days - 1)), tomorrow, nil
 			}
 		}
 		switch d.Preset {
 		case "today":
-			return today, today.Add(day), nil
+			return today, tomorrow, nil
 		case "yesterday":
-			return today.Add(-day), today, nil
+			return today.AddDate(0, 0, -1), today, nil
 		case "this_month":
-			return time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC), today.Add(day), nil
+			return time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, loc), tomorrow, nil
 		case "last_month":
-			first := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+			first := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, loc)
 			return first.AddDate(0, -1, 0), first, nil
 		case "this_year":
-			return time.Date(today.Year(), 1, 1, 0, 0, 0, 0, time.UTC), today.Add(day), nil
+			return time.Date(today.Year(), 1, 1, 0, 0, 0, 0, loc), tomorrow, nil
 		}
 		return time.Time{}, time.Time{}, insights.Invalid("date_range.preset is one of " + strings.Join(datePresets, ", "))
 	}
 	if d.From == "" && d.To == "" {
-		return today.Add(-29 * day), today.Add(day), nil
+		return today.AddDate(0, 0, -29), tomorrow, nil
 	}
 	from, err1 := time.Parse(time.DateOnly, d.From)
 	to, err2 := time.Parse(time.DateOnly, d.To)
 	if err1 != nil || err2 != nil || to.Before(from) {
 		return time.Time{}, time.Time{}, insights.Invalid("date_range.from and date_range.to are dates (2026-10-01), from on or before to")
 	}
-	return from, to.Add(day), nil
+	return dayStart(from, loc), dayStart(to.AddDate(0, 0, 1), loc), nil
 }
 
 // funnelSpec is a funnel as the API, saved insights and MCP send it.
@@ -118,7 +121,7 @@ func (f funnelSpec) funnel(now time.Time) (insights.Funnel, error) {
 	if err != nil {
 		return insights.Funnel{}, err
 	}
-	out := insights.Funnel{Steps: f.Steps, Exclusions: f.Exclusions, By: f.By, Order: f.Order, From: from, To: to, Window: f.Window, Breakdown: f.Breakdown, Interval: f.Interval, AdClicks: f.AdClicks}
+	out := insights.Funnel{Steps: f.Steps, Exclusions: f.Exclusions, By: f.By, Order: f.Order, From: from, To: to, Window: f.Window, Breakdown: f.Breakdown, Interval: f.Interval, AdClicks: f.AdClicks, Location: now.Location()}
 	return out, out.Validate()
 }
 
@@ -155,7 +158,7 @@ func (t trendSpec) trend(now time.Time) (insights.Trend, error) {
 	if t.Display != "" && !slices.Contains([]string{"line", "bar", "number", "table"}, t.Display) {
 		return insights.Trend{}, insights.Invalid("display is line, bar, number or table")
 	}
-	out := insights.Trend{Series: t.Series, From: from, To: to, Interval: interval, Breakdown: t.Breakdown, Formula: t.Formula, Compare: t.Compare}
+	out := insights.Trend{Series: t.Series, From: from, To: to, Interval: interval, Breakdown: t.Breakdown, Formula: t.Formula, Compare: t.Compare, Location: now.Location()}
 	return out, out.Validate()
 }
 
@@ -168,7 +171,12 @@ func (s *Server) runTrend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	t, err := in.trend(start)
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	t, err := in.trend(start.In(loc))
 	var res insights.TrendResult
 	if err == nil {
 		err = s.readInsight(r.Context(), func(tx pgx.Tx) error {
@@ -211,7 +219,7 @@ func (t retentionSpec) retention(now time.Time) (insights.Retention, error) {
 	if periods == 0 {
 		periods = map[string]int{"day": 14, "week": 8, "month": 6}[interval]
 	}
-	out := insights.Retention{Start: t.Start, Return: t.Return, From: from, To: to, Interval: interval, Periods: periods}
+	out := insights.Retention{Start: t.Start, Return: t.Return, From: from, To: to, Interval: interval, Periods: periods, Location: now.Location()}
 	return out, out.Validate()
 }
 
@@ -224,7 +232,12 @@ func (s *Server) runRetention(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	q, err := in.retention(start)
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	q, err := in.retention(start.In(loc))
 	var res insights.RetentionResult
 	if err == nil {
 		err = s.readInsight(r.Context(), func(tx pgx.Tx) error {
@@ -261,7 +274,7 @@ func (t lifecycleSpec) lifecycle(now time.Time) (insights.Lifecycle, error) {
 	if interval == "" {
 		interval = "week"
 	}
-	out := insights.Lifecycle{Step: t.Step, From: from, To: to, Interval: interval}
+	out := insights.Lifecycle{Step: t.Step, From: from, To: to, Interval: interval, Location: now.Location()}
 	return out, out.Validate()
 }
 
@@ -275,7 +288,12 @@ func (s *Server) runLifecycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	q, err := in.lifecycle(start)
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	q, err := in.lifecycle(start.In(loc))
 	var res insights.LifecycleResult
 	if err == nil {
 		err = s.readInsight(r.Context(), func(tx pgx.Tx) error {
@@ -336,7 +354,12 @@ func (s *Server) runFunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	f, err := in.funnel(start)
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	f, err := in.funnel(start.In(loc))
 	var res insights.Result
 	if err == nil {
 		err = s.readInsight(r.Context(), func(tx pgx.Tx) error {
@@ -381,7 +404,12 @@ func (s *Server) funnelPeople(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	f, err := in.Funnel.funnel(start)
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	f, err := in.Funnel.funnel(start.In(loc))
 	var people []insights.Person
 	var more bool
 	if err == nil {

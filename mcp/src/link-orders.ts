@@ -124,6 +124,60 @@ export function registerLinkOrderTools(
       ),
   );
 
+  server.registerTool(
+    "list_link_order_targets",
+    {
+      title: "List saved link-order targets",
+      description:
+        "Pages saved as link targets for paid link orders: URL, kind (article or product), title, and whether the page is ticked (selected). A ticked page is offered when an order is requested.",
+      inputSchema: {
+        brand,
+        kind: z.enum(["article", "product"]).optional(),
+        selected: z.enum(["true", "false"]).optional().describe("Omit to list every saved page."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/link-orders/targets", { params: { path: { brand }, query } }),
+      ),
+  );
+
+  server.registerTool(
+    "suggest_link_order_targets",
+    {
+      title: "Suggest pages to build links to",
+      description:
+        "Brand article and product pages ranked from already-stored data only: keyword gaps against tracked competitors (where a competitor ranks top 20 and the brand is behind), and the pages competitor backlinks point to, mapped to the brand page that ranks for the same keywords. " +
+        "Each suggestion lists its reasons and anchor options (primary from SE Ranking when stored; second anchor by type: brand, url, or keyword). This does not call a paid SEO provider.",
+      inputSchema: {
+        brand,
+        kind: z.enum(["article", "product"]).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/link-orders/targets/suggestions", { params: { path: { brand }, query } }),
+      ),
+  );
+
+  server.registerTool(
+    "get_link_order_target_anchors",
+    {
+      title: "Anchor options for a page",
+      description:
+        "Anchor options for one brand page from stored data: primary anchors (SE Ranking keywords first, then the page's saved target keyword, then other stored keywords), and second-anchor options by type (brand, url, keyword). This does not call a paid SEO provider.",
+      inputSchema: { brand, url: z.string().min(1).describe("The brand page URL.") },
+      annotations: read,
+    },
+    ({ brand, url }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/link-orders/targets/anchors", { params: { path: { brand }, query: { page: url } } }),
+      ),
+  );
+
   if (readOnly) {
     return;
   }
@@ -136,7 +190,14 @@ export function registerLinkOrderTools(
       inputSchema: {
         brand,
         donor_profile_id: z.string().uuid(),
-        target_url: z.string().min(1),
+        target_url: z.string().min(1).optional().describe("The brand page. Optional when target_id is set."),
+        target_id: z.string().uuid().optional().describe("A ticked saved target from list_link_order_targets."),
+        target_kind: z.enum(["article", "product"]).optional(),
+        target_choice: z.enum(["manual", "suggested"]).optional(),
+        anchor_primary: z.string().max(500).optional(),
+        anchor_primary_source: z.enum(["manual", "se_ranking", "page_target", "seo_keywords"]).optional(),
+        anchor_secondary: z.string().max(500).optional(),
+        anchor_secondary_type: z.enum(["brand", "url", "keyword"]).optional().describe("Required with anchor_secondary."),
         slot_type: z.string().optional(),
         rel_requested: z.string().optional(),
         guarantee_days: z.number().int().min(0).optional(),

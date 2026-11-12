@@ -4825,6 +4825,7 @@ class Operations(_Mixin):
         platforms: list[Literal["web", "ios", "android", "tv", "desktop", "console", "extension", "api"]] | None = None,
         revenue_models: list[str] | None = None,
         status: Literal["active", "archived"] | None = None,
+        timezone: str | None = None,
         website: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -4853,6 +4854,7 @@ class Operations(_Mixin):
                 "platforms": platforms,
                 "revenue_models": revenue_models,
                 "status": status,
+                "timezone": timezone,
                 "website": website,
             },
             extra_body=extra_body,
@@ -7098,6 +7100,10 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        anchor_primary: str | None = None,
+        anchor_primary_source: Literal["", "manual", "se_ranking", "page_target", "seo_keywords"] | None = None,
+        anchor_secondary: str | None = None,
+        anchor_secondary_type: Literal["", "brand", "url", "keyword"] | None = None,
         donor_profile_id: str,
         guarantee_days: int | None = None,
         notes: str | None = None,
@@ -7105,7 +7111,10 @@ class Operations(_Mixin):
         rel_requested: str | None = None,
         replaces_order_id: str | None = None,
         slot_type: str | None = None,
-        target_url: str,
+        target_choice: Literal["manual", "suggested"] | None = None,
+        target_id: str | None = None,
+        target_kind: Literal["", "article", "product"] | None = None,
+        target_url: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -7113,6 +7122,10 @@ class Operations(_Mixin):
 
         Scope: coverage.manage. Opens a requested order against a catalog donor.
         The guarantee window defaults to the catalog row, then to 30 days.
+        The target is a ticked saved link target (target_id) or a typed
+        target_url. An order may carry two anchors: anchor_primary (with
+        where it came from) and anchor_secondary, whose type is brand, url
+        or keyword.
 
         Needs: the coverage.manage scope.
         POST /v1/brands/{brand}/link-orders
@@ -7122,6 +7135,10 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/link-orders",
             path={"brand": brand},
             body={
+                "anchor_primary": anchor_primary,
+                "anchor_primary_source": anchor_primary_source,
+                "anchor_secondary": anchor_secondary,
+                "anchor_secondary_type": anchor_secondary_type,
                 "donor_profile_id": donor_profile_id,
                 "guarantee_days": guarantee_days,
                 "notes": notes,
@@ -7129,6 +7146,9 @@ class Operations(_Mixin):
                 "rel_requested": rel_requested,
                 "replaces_order_id": replaces_order_id,
                 "slot_type": slot_type,
+                "target_choice": target_choice,
+                "target_id": target_id,
+                "target_kind": target_kind,
                 "target_url": target_url,
             },
             extra_body=extra_body,
@@ -8447,6 +8467,32 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/reddit/experiments",
             path={"brand": brand},
             body={"hypothesis": hypothesis, "name": name, "strategy": strategy},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_report_view(
+        self,
+        *,
+        brand: str | None = None,
+        name: str | None = None,
+        shared: bool | None = None,
+        spec: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save a view of the drill-down report.
+
+        Scope: analytics.manage. A view is its maker's until shared. Its spec is checked as the report would read it.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/report-views
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/report-views",
+            path={"brand": brand},
+            body={"name": name, "shared": shared, "spec": spec},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -10743,6 +10789,27 @@ class Operations(_Mixin):
             path={"record": record, "relationship": relationship, "brand": brand},
             body={"version": version},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_report_view(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a saved view.
+
+        Scope: analytics.manage. A shared view can be deleted by its maker or an admin.
+
+        Needs: the analytics.manage scope.
+        DELETE /v1/brands/{brand}/report-views/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/report-views/{id}",
+            path={"id": id, "brand": brand},
             idempotency_key=idempotency_key,
         )
 
@@ -13050,6 +13117,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         from_: str | None = None,
         to: str | None = None,
         level: Literal["campaign", "ad_group", "ad"] | None = None,
@@ -13079,6 +13147,7 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/ads/performance",
             path={"brand": brand},
             query={
+                "timezone": timezone,
                 "from": from_,
                 "to": to,
                 "level": level,
@@ -13182,6 +13251,31 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/ai-accounts/{id}",
             path={"id": id, "ws": ws},
+        )
+
+    def get_ai_answer_share(
+        self,
+        *,
+        brand: str | None = None,
+        days: int | None = None,
+    ) -> Any:
+        """Read AI answer share of voice by topic.
+
+        Scope: seo.read. Mention rate and share of voice from already-stored AI
+        answer runs, rolled up by the question's topic (Untagged when it has
+        none), by question set, and by question type, week by week. Also counts
+        answers that cite a /compare page of the brand or a competitor, after
+        stripping a locale prefix. This does not start a new run or call a paid
+        provider. `days` defaults to 84 (1 to 365).
+
+        Needs: the seo.read scope.
+        GET /v1/brands/{brand}/ai-answer-share
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ai-answer-share",
+            path={"brand": brand},
+            query={"days": days},
         )
 
     def get_ai_bot_hits(
@@ -13789,6 +13883,7 @@ class Operations(_Mixin):
         brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
+        timezone: str | None = None,
         model: str | None = None,
         match: Literal["all", "identified", "signed_in"] | None = None,
     ) -> Any:
@@ -13806,7 +13901,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/attribution/accounts",
             path={"brand": brand},
-            query={"from": from_, "to": to, "model": model, "match": match},
+            query={"from": from_, "to": to, "timezone": timezone, "model": model, "match": match},
         )
 
     def get_attribution_ads(
@@ -13816,6 +13911,7 @@ class Operations(_Mixin):
         level: Literal["campaign", "adset", "ad"] | None = None,
         from_: str | None = None,
         to: str | None = None,
+        timezone: str | None = None,
         model: str | None = None,
         match: Literal["all", "identified", "signed_in"] | None = None,
     ) -> Any:
@@ -13835,7 +13931,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/attribution/ads",
             path={"brand": brand},
-            query={"level": level, "from": from_, "to": to, "model": model, "match": match},
+            query={"level": level, "from": from_, "to": to, "timezone": timezone, "model": model, "match": match},
         )
 
     def get_attribution_campaigns(
@@ -13847,6 +13943,7 @@ class Operations(_Mixin):
         split: Literal["content"] | None = None,
         from_: str | None = None,
         to: str | None = None,
+        timezone: str | None = None,
         model: str | None = None,
         match: Literal["all", "identified", "signed_in"] | None = None,
     ) -> Any:
@@ -13867,6 +13964,7 @@ class Operations(_Mixin):
                 "split": split,
                 "from": from_,
                 "to": to,
+                "timezone": timezone,
                 "model": model,
                 "match": match,
             },
@@ -13878,6 +13976,7 @@ class Operations(_Mixin):
         brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
+        timezone: str | None = None,
         model: str | None = None,
         match: Literal["all", "identified", "signed_in"] | None = None,
     ) -> Any:
@@ -13898,7 +13997,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/attribution/channels",
             path={"brand": brand},
-            query={"from": from_, "to": to, "model": model, "match": match},
+            query={"from": from_, "to": to, "timezone": timezone, "model": model, "match": match},
         )
 
     def get_attribution_cohorts(
@@ -13907,6 +14006,7 @@ class Operations(_Mixin):
         brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
+        timezone: str | None = None,
     ) -> Any:
         """What people are worth over time, by the channel that first brought them.
 
@@ -13921,7 +14021,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/attribution/cohorts",
             path={"brand": brand},
-            query={"from": from_, "to": to},
+            query={"from": from_, "to": to, "timezone": timezone},
         )
 
     def get_attribution_customers(
@@ -13930,6 +14030,7 @@ class Operations(_Mixin):
         brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
+        timezone: str | None = None,
         model: str | None = None,
         match: Literal["all", "identified", "signed_in"] | None = None,
     ) -> Any:
@@ -13947,7 +14048,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/attribution/customers",
             path={"brand": brand},
-            query={"from": from_, "to": to, "model": model, "match": match},
+            query={"from": from_, "to": to, "timezone": timezone, "model": model, "match": match},
         )
 
     def get_attribution_deals(
@@ -13956,6 +14057,7 @@ class Operations(_Mixin):
         brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
+        timezone: str | None = None,
         model: str | None = None,
         match: Literal["all", "identified", "signed_in"] | None = None,
     ) -> Any:
@@ -13973,7 +14075,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/attribution/deals",
             path={"brand": brand},
-            query={"from": from_, "to": to, "model": model, "match": match},
+            query={"from": from_, "to": to, "timezone": timezone, "model": model, "match": match},
         )
 
     def get_attribution_model(
@@ -14702,6 +14804,7 @@ class Operations(_Mixin):
         from_: str | None = None,
         to: str | None = None,
         model: str | None = None,
+        timezone: str | None = None,
     ) -> Any:
         """Read observed publisher referrals and recorded conversion attribution.
 
@@ -14714,7 +14817,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/coverage/outcomes",
             path={"brand": brand},
-            query={"from": from_, "to": to, "model": model},
+            query={"from": from_, "to": to, "model": model, "timezone": timezone},
         )
 
     def get_coverage_budgets(
@@ -15522,6 +15625,63 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/domain-lookups/{domain}",
             path={"domain": domain, "ws": ws},
+        )
+
+    def get_drilldown_report(
+        self,
+        *,
+        brand: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        timezone: str | None = None,
+        model: str | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
+        group_by: str | None = None,
+        filter: list[str] | None = None,
+        exclude: list[str] | None = None,
+        sort: str | None = None,
+        limit: int | None = None,
+        conversion_time: Literal["visit", "conversion"] | None = None,
+        format: Literal["json", "csv"] | None = None,
+        column: list[str] | None = None,
+        view: str | None = None,
+    ) -> Any:
+        """The drill-down report.
+
+        Scope: analytics.read. The brand's visits, the conversions and revenue credited to them under the attribution
+        model, and ad spend, grouped by up to five levels (`group_by`, comma-separated, in order). Each row has its
+        children (`rows`) and the same metrics, so parents are their children's subtotals; `totals` is the whole range.
+        Dimensions: channel, source, campaign, utm_source, utm_medium, utm_campaign, utm_term, utm_content, landing_path, referrer_host, country, region, city, isp, asn, language, device, device_brand, os, browser, ad_campaign, ad_adset, ad_ad, ad_placement, tracking_campaign, day, hour, weekday. `day`, `hour` and `weekday` are in the report's time zone (the brand's, or `timezone`).
+        Revenue and cost are in the brand's currency, other currencies at the latest exchange rate.
+
+        Cost comes from the ad platforms and splits only by `day` (the ad account's day) and one ad level
+        (`ad_campaign`, `ad_adset` or `ad_ad`); grouped or filtered any other way, cost and the ratios on it are null and
+        `cost_note` says why. Conversions count at the visit's time unless `conversion_time=conversion`.
+        `format=csv` gives the deepest rows, one column per level.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/drilldown
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/drilldown",
+            path={"brand": brand},
+            query={
+                "from": from_,
+                "to": to,
+                "timezone": timezone,
+                "model": model,
+                "match": match,
+                "group_by": group_by,
+                "filter": filter,
+                "exclude": exclude,
+                "sort": sort,
+                "limit": limit,
+                "conversion_time": conversion_time,
+                "format": format,
+                "column": column,
+                "view": view,
+            },
         )
 
     def get_email(
@@ -16763,6 +16923,30 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def get_link_order_target_anchors(
+        self,
+        *,
+        brand: str | None = None,
+        page: str,
+    ) -> Any:
+        """Anchor choices for a page.
+
+        Scope: coverage.read. The primary-anchor choices for any page of the
+        brand (stored SE Ranking keywords first, then the page's keyword
+        target, then other SEO connections' stored keywords, each with its
+        source), and the second-anchor choices by type: brand, url and
+        keyword. Stored data only; no provider call.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/targets/anchors
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/targets/anchors",
+            path={"brand": brand},
+            query={"page": page},
+        )
+
     def get_link_pitch(
         self,
         pitch: str,
@@ -17935,6 +18119,25 @@ class Operations(_Mixin):
             },
         )
 
+    def get_report_view(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get a saved view.
+
+        Scope: analytics.read. A shared view, or one of the caller's own.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/report-views/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/report-views/{id}",
+            path={"id": id, "brand": brand},
+        )
+
     def get_review(
         self,
         id: str,
@@ -18551,6 +18754,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         from_: str | None = None,
         to: str | None = None,
         website: str | None = None,
@@ -18566,7 +18770,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/analytics/tracking",
             path={"brand": brand},
-            query={"from": from_, "to": to, "website": website},
+            query={"timezone": timezone, "from": from_, "to": to, "website": website},
         )
 
     def get_site_cannibalisation(
@@ -20751,6 +20955,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         from_: str | None = None,
         to: str | None = None,
         campaign_id: str | None = None,
@@ -20774,6 +20979,7 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/ads/acquisitions",
             path={"brand": brand},
             query={
+                "timezone": timezone,
                 "from": from_,
                 "to": to,
                 "campaign_id": campaign_id,
@@ -21990,6 +22196,7 @@ class Operations(_Mixin):
         record_id: str | None = None,
         from_: str | None = None,
         to: str | None = None,
+        timezone: str | None = None,
         model: str | None = None,
         match: Literal["all", "identified", "signed_in"] | None = None,
         limit: int | None = None,
@@ -22013,6 +22220,7 @@ class Operations(_Mixin):
                 "record_id": record_id,
                 "from": from_,
                 "to": to,
+                "timezone": timezone,
                 "model": model,
                 "match": match,
                 "limit": limit,
@@ -24671,6 +24879,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         breakdown: str | None = None,
         dropped: bool | None = None,
         funnel: dict[str, Any],
@@ -24693,6 +24902,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/insights/funnel/people",
             path={"brand": brand},
+            query={"timezone": timezone},
             body={
                 "breakdown": breakdown,
                 "dropped": dropped,
@@ -25730,6 +25940,29 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/link-orders/{id}/history",
             path={"id": id, "brand": brand},
+        )
+
+    def list_link_order_targets(
+        self,
+        *,
+        brand: str | None = None,
+        kind: Literal["article", "product"] | None = None,
+        selected: Literal["true", "false"] | None = None,
+    ) -> Any:
+        """List the brand's link targets.
+
+        Scope: coverage.read. The brand's own article and product pages a
+        paid link can point at. selected is the checkbox: only ticked pages
+        are offered when a link is ordered. Ticked pages come first.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/targets
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/targets",
+            path={"brand": brand},
+            query={"kind": kind, "selected": selected},
         )
 
     def list_link_orders(
@@ -27488,6 +27721,24 @@ class Operations(_Mixin):
             query={"type": type, "engain_cursor": engain_cursor, "limit": limit},
         )
 
+    def list_report_views(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List the saved views of the drill-down report.
+
+        Scope: analytics.read. The brand's shared views and the caller's own, by name.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/report-views
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/report-views",
+            path={"brand": brand},
+        )
+
     def list_review_page_days(
         self,
         id: str,
@@ -29002,7 +29253,7 @@ class Operations(_Mixin):
 
         Scope: analytics.read. The pages the link's redirect clicks go to, each chosen in proportion to its weight while
         it has room in its daily click cap, with today's clicks. When every one is capped or stopped, clicks go to the
-        link's own page (fallback_url). Caps count clicks per day in UTC, without link scanners and previews.
+        link's own page (fallback_url). Caps count clicks per day in the brand's reporting time zone, without link scanners and previews.
 
         Needs: the analytics.read scope.
         GET /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations
@@ -33860,6 +34111,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         ad_clicks: dict[str, Any] | None = None,
         breakdown: str | None = None,
         by: Literal["person", "company"] | None = None,
@@ -33889,6 +34141,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/insights/funnel",
             path={"brand": brand},
+            query={"timezone": timezone},
             body={
                 "ad_clicks": ad_clicks,
                 "breakdown": breakdown,
@@ -33908,6 +34161,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         funnel: dict[str, Any],
         limit: int | None = None,
         step: int | None = None,
@@ -33929,6 +34183,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/insights/funnel/correlation",
             path={"brand": brand},
+            query={"timezone": timezone},
             body={"funnel": funnel, "limit": limit, "step": step},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -33938,6 +34193,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         date_range: dict[str, Any] | None = None,
         interval: Literal["day", "week", "month"] | None = None,
         step: dict[str, Any],
@@ -33959,6 +34215,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/insights/lifecycle",
             path={"brand": brand},
+            query={"timezone": timezone},
             body={"date_range": date_range, "interval": interval, "step": step},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -34013,6 +34270,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         date_range: dict[str, Any] | None = None,
         end: dict[str, Any] | None = None,
         exclude: list[dict[str, Any]] | None = None,
@@ -34039,6 +34297,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/insights/paths",
             path={"brand": brand},
+            query={"timezone": timezone},
             body={
                 "date_range": date_range,
                 "end": end,
@@ -34203,6 +34462,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         date_range: dict[str, Any] | None = None,
         interval: Literal["day", "week", "month"] | None = None,
         periods: int | None = None,
@@ -34225,6 +34485,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/insights/retention",
             path={"brand": brand},
+            query={"timezone": timezone},
             body={
                 "date_range": date_range,
                 "interval": interval,
@@ -34344,6 +34605,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         breakdown: str | None = None,
         compare: bool | None = None,
         date_range: dict[str, Any] | None = None,
@@ -34369,6 +34631,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/insights/trend",
             path={"brand": brand},
+            query={"timezone": timezone},
             body={
                 "breakdown": breakdown,
                 "compare": compare,
@@ -34386,6 +34649,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        timezone: str | None = None,
         breakdown: str | None = None,
         dropped: bool | None = None,
         funnel: dict[str, Any],
@@ -34408,7 +34672,43 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/insights/funnel/people/save",
             path={"brand": brand},
+            query={"timezone": timezone},
             body={"breakdown": breakdown, "dropped": dropped, "funnel": funnel, "name": name, "step": step},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def save_link_order_target(
+        self,
+        *,
+        brand: str | None = None,
+        kind: Literal["article", "product"] | None = None,
+        selected: bool | None = None,
+        source: Literal["manual", "suggested"] | None = None,
+        title: str | None = None,
+        url: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save a link target.
+
+        Scope: coverage.manage. Adds a page of the brand's own site as an
+        article or product link target, or updates the saved row with the
+        same address (one row per page: lowercase host without www., no
+        query, fragment or trailing slash). The page must be on the brand's
+        website, domains or SEO sites. kind defaults to a guess from the
+        address (blog, guide and how-to pages are articles). selected
+        defaults to true. source is suggested when a person saves a
+        suggestion. Saving a target never creates an order.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/targets
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/targets",
+            path={"brand": brand},
+            body={"kind": kind, "selected": selected, "source": source, "title": title, "url": url},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -35901,7 +36201,7 @@ class Operations(_Mixin):
         combine with AND, and a condition's values with OR. Fields: country (two-letter code), region, city, isp, asn,
         device (desktop, mobile, tablet), device_brand, os, os_version, browser, browser_version, language, referrer (the
         referring site's host), ip (addresses or ranges such as 203.0.113.0/24), weekday (mon to sun) and hour (0 to 23),
-        both UTC, visitor (unique, or returning within a day, as this server saw them), and field1 to field20. Text
+        in the brand's reporting time zone, visitor (unique, or returning within a day, as this server saw them), and field1 to field20. Text
         matches whole values, without regard to case.
 
         Needs: the analytics.manage scope.
@@ -37219,6 +37519,40 @@ class Operations(_Mixin):
             body={"brand_id": brand_id, "count": count, "goal": goal, "notes": notes, "page": page},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
+        )
+
+    def suggest_link_order_targets(
+        self,
+        *,
+        brand: str | None = None,
+        kind: Literal["article", "product"] | None = None,
+        limit: int | None = None,
+    ) -> Any:
+        """Suggest pages to point a paid link at.
+
+        Scope: coverage.read. The brand's pages ranked by the comparison with
+        tracked competitors, from already-stored data only: the weekly
+        keyword snapshots of the site and its competitors (any SEO
+        connection, SE Ranking included), keywords SE Ranking projects
+        track, the Keywords page's page targets, and competitor link reads
+        already kept. It never calls Ahrefs, DataForSEO or SE Ranking.
+
+        A page scores for each keyword a competitor ranks in the top 20 for
+        while the page is missing or 3 or more places behind
+        (keyword_gap), and for each competitor page that other sites link
+        to and that competes for the same keywords or has a matching
+        address (competitor_links, with its referring domains). Ticked
+        saved targets are always listed; unticked ones never are. Each row
+        has its anchor choices. Suggestions never create orders.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/targets/suggestions
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/targets/suggestions",
+            path={"brand": brand},
+            query={"kind": kind, "limit": limit},
         )
 
     def suggest_stories(
@@ -38980,6 +39314,7 @@ class Operations(_Mixin):
         platforms: list[Literal["web", "ios", "android", "tv", "desktop", "console", "extension", "api"]] | None = None,
         revenue_models: list[str] | None = None,
         status: Literal["active", "archived"] | None = None,
+        timezone: str | None = None,
         website: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -39008,6 +39343,7 @@ class Operations(_Mixin):
                 "platforms": platforms,
                 "revenue_models": revenue_models,
                 "status": status,
+                "timezone": timezone,
                 "website": website,
             },
             extra_body=extra_body,
@@ -41818,12 +42154,19 @@ class Operations(_Mixin):
         id: str,
         *,
         brand: str | None = None,
+        anchor_primary: str | None = None,
+        anchor_primary_source: Any | None = None,
+        anchor_secondary: str | None = None,
+        anchor_secondary_type: Any | None = None,
         donor_profile_id: str | None = None,
         guarantee_days: int | None = None,
         notes: str | None = None,
         owner_user_id: str | None = None,
         rel_requested: str | None = None,
         slot_type: str | None = None,
+        target_choice: Literal["manual", "suggested"] | None = None,
+        target_id: str | None = None,
+        target_kind: Literal["", "article", "product"] | None = None,
         target_url: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -41832,7 +42175,9 @@ class Operations(_Mixin):
 
         Scope: coverage.manage. Fields that are still mutable before publication.
         After approval the donor amount cannot change. Paid, verified, and lost
-        orders cannot be edited.
+        orders cannot be edited. The target and the anchors are fixed once the
+        link is published. Anchor fields not sent keep their stored values,
+        and the four are checked together.
 
         Needs: the coverage.manage scope.
         PATCH /v1/brands/{brand}/link-orders/{id}
@@ -41842,12 +42187,19 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/link-orders/{id}",
             path={"id": id, "brand": brand},
             body={
+                "anchor_primary": anchor_primary,
+                "anchor_primary_source": anchor_primary_source,
+                "anchor_secondary": anchor_secondary,
+                "anchor_secondary_type": anchor_secondary_type,
                 "donor_profile_id": donor_profile_id,
                 "guarantee_days": guarantee_days,
                 "notes": notes,
                 "owner_user_id": owner_user_id,
                 "rel_requested": rel_requested,
                 "slot_type": slot_type,
+                "target_choice": target_choice,
+                "target_id": target_id,
+                "target_kind": target_kind,
                 "target_url": target_url,
             },
             extra_body=extra_body,
@@ -41945,6 +42297,35 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/link-orders/settings",
             path={"brand": brand},
             body={"approver_user_id": approver_user_id, "equivalent_dr_band": equivalent_dr_band},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_link_order_target(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        kind: Literal["article", "product"] | None = None,
+        selected: bool | None = None,
+        title: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Tick, untick or retype a link target.
+
+        Scope: coverage.manage. Send only what changes. selected false
+        unticks the page: it keeps its kind and is no longer offered or
+        suggested. Orders already pointing at it keep their URL.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/link-orders/targets/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/link-orders/targets/{id}",
+            path={"id": id, "brand": brand},
+            body={"kind": kind, "selected": selected, "title": title},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -43203,6 +43584,33 @@ class Operations(_Mixin):
                 "status": status,
                 "strategy": strategy,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_report_view(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        name: str | None = None,
+        shared: bool | None = None,
+        spec: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a saved view.
+
+        Scope: analytics.manage. Rename it, replace its spec, or share it; only its maker can make a shared view private again.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/brands/{brand}/report-views/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/report-views/{id}",
+            path={"id": id, "brand": brand},
+            body={"name": name, "shared": shared, "spec": spec},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

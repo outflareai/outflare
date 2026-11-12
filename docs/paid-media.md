@@ -195,6 +195,11 @@ conversion count is shown next to it for comparison, never added in.
 A campaign with spend and no tracked visits is listed too: it usually has no
 tracking template yet.
 
+Sign-ups, payments and revenue count by the brand's days, in its reporting
+time zone (`?timezone=` overrides it for one report). Spend, clicks and the
+platforms' own numbers stay in each ad account's days, as the platforms
+report them, so near midnight the two can fall a day apart.
+
 `GET /v1/brands/{brand}/attribution/ads` (MCP `get_attribution_ads`) gives the
 same rows. It takes `level` (`campaign`, `adset` or `ad`), `from`, `to`,
 `model` and `brand`. Meta and Google ad sets and ads come with their names and

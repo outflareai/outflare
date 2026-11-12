@@ -20,6 +20,10 @@ const BudgetTag = "link_orders"
 type CreateOrderInput struct {
 	DonorProfileID  uuid.UUID
 	TargetURL       string
+	TargetID        *uuid.UUID
+	TargetKind      string
+	TargetChoice    string
+	Anchors         Anchors
 	SlotType        string
 	RelRequested    string
 	GuaranteeDays   *int
@@ -32,8 +36,12 @@ type CreateOrderInput struct {
 // the catalog row, then to DefaultGuaranteeDays. When ReplacesOrderID is
 // set the lost-order rules apply.
 func CreateOrder(ctx context.Context, tx pgx.Tx, workspaceID, brandID, actorID uuid.UUID, in CreateOrderInput) (*Order, error) {
-	if in.TargetURL == "" {
-		return nil, fmt.Errorf("%w: target_url is required", ErrInvalid)
+	if err := resolveOrderTarget(ctx, tx, workspaceID, brandID, &in.TargetURL, &in.TargetID, &in.TargetKind, &in.TargetChoice); err != nil {
+		return nil, err
+	}
+	anchors, err := NormalizeAnchors(in.Anchors)
+	if err != nil {
+		return nil, err
 	}
 	donor, err := GetDonor(ctx, tx, workspaceID, brandID, in.DonorProfileID)
 	if err != nil {
@@ -67,10 +75,13 @@ func CreateOrder(ctx context.Context, tx pgx.Tx, workspaceID, brandID, actorID u
 		INSERT INTO coverage_link_orders (
 			workspace_id, brand_id, publisher_id, donor_profile_id, status,
 			target_url, slot_type, rel_requested, guarantee_days,
-			replaces_order_id, notes, owner_user_id, created_by
+			replaces_order_id, notes, owner_user_id, created_by,
+			target_id, target_kind, target_choice,
+			anchor_primary, anchor_primary_source, anchor_secondary, anchor_secondary_type
 		)
 		SELECT $1, $2, p.publisher_id, p.id, $3,
-			$4, $5, $6, $7, $8, $9, $10, $11
+			$4, $5, $6, $7, $8, $9, $10, $11,
+			$13, $14, $15, $16, $17, $18, $19
 		FROM coverage_donor_profiles p
 		WHERE p.id = $12 AND p.workspace_id = $1 AND p.brand_id = $2
 		RETURNING id
@@ -78,6 +89,8 @@ func CreateOrder(ctx context.Context, tx pgx.Tx, workspaceID, brandID, actorID u
 		in.TargetURL, in.SlotType, in.RelRequested, guarantee,
 		in.ReplacesOrderID, notes, in.OwnerUserID, nilIfNil(actorID),
 		in.DonorProfileID,
+		in.TargetID, in.TargetKind, in.TargetChoice,
+		anchors.Primary, anchors.PrimarySource, anchors.Secondary, anchors.SecondaryType,
 	).Scan(&id)
 	if err != nil {
 		return nil, err
@@ -141,6 +154,8 @@ func listOrdersQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 	args = append(args, limit)
 	sql := `
 		SELECT o.id, o.publisher_id, o.donor_profile_id, pub.domain, o.status, o.target_url,
+			o.target_id, o.target_kind, o.target_choice,
+			o.anchor_primary, o.anchor_primary_source, o.anchor_secondary, o.anchor_secondary_type,
 			o.slot_type, o.rel_requested, o.quoted_amount_minor, o.quoted_currency, o.donor_amount_minor,
 			o.currency, o.guarantee_days, o.guarantee_until, o.published_url, o.proof_url,
 			o.published_at, o.placement_id, o.agreement_id, o.invoice_id, o.payment_id,
@@ -164,6 +179,8 @@ func listOrdersQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 		var o Order
 		if err := rows.Scan(
 			&o.ID, &o.PublisherID, &o.DonorProfileID, &o.Domain, &o.Status, &o.TargetURL,
+			&o.TargetID, &o.TargetKind, &o.TargetChoice,
+			&o.AnchorPrimary, &o.AnchorPrimarySource, &o.AnchorSecondary, &o.AnchorSecondaryType,
 			&o.SlotType, &o.RelRequested, &o.QuotedAmountMinor, &o.QuotedCurrency, &o.DonorAmountMinor,
 			&o.Currency, &o.GuaranteeDays, &o.GuaranteeUntil, &o.PublishedURL, &o.ProofURL,
 			&o.PublishedAt, &o.PlacementID, &o.AgreementID, &o.InvoiceID, &o.PaymentID,
@@ -181,7 +198,14 @@ func listOrdersQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 
 // PatchOrderInput is the editable fields while the amount is not frozen.
 type PatchOrderInput struct {
-	TargetURL      **string
+	TargetURL **string
+	// TargetID re-points the order at a saved target (nil inside clears
+	// it); TargetKind and TargetChoice follow.
+	TargetID     **uuid.UUID
+	TargetKind   *string
+	TargetChoice *string
+	// Anchors, when set, replaces all four anchor fields.
+	Anchors        *Anchors
 	SlotType       **string
 	RelRequested   **string
 	GuaranteeDays  **int
@@ -225,11 +249,59 @@ func PatchOrder(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id uuid.UU
 		add("donor_profile_id", *in.DonorProfileID)
 		add("publisher_id", d.PublisherID)
 	}
-	if in.TargetURL != nil {
-		if *in.TargetURL == nil || **in.TargetURL == "" {
-			return nil, fmt.Errorf("%w: target_url is required", ErrInvalid)
+	if in.TargetURL != nil && (*in.TargetURL == nil || **in.TargetURL == "") {
+		return nil, fmt.Errorf("%w: target_url is required", ErrInvalid)
+	}
+	if in.TargetURL != nil || in.TargetID != nil || in.TargetKind != nil || in.TargetChoice != nil {
+		if o.Status == StatusPublished {
+			return nil, fmt.Errorf("%w: the target cannot change after publication", ErrConflict)
 		}
-		add("target_url", **in.TargetURL)
+		targetURL, targetID, kind, choice := o.TargetURL, o.TargetID, o.TargetKind, o.TargetChoice
+		if in.TargetURL != nil {
+			targetURL = **in.TargetURL
+		}
+		if in.TargetID != nil {
+			targetID = *in.TargetID
+			if in.TargetURL == nil && targetID != nil {
+				targetURL = "" // take the saved target's URL
+			}
+		} else if in.TargetURL != nil && targetID != nil {
+			// A new URL without a target_id drops the old saved target
+			// unless it is the same page.
+			if t, err := GetTarget(ctx, tx, workspaceID, brandID, *targetID); err != nil || normURL(targetURL) != t.URL {
+				targetID = nil
+			}
+		}
+		if in.TargetKind != nil {
+			kind = *in.TargetKind
+		} else if in.TargetID != nil || in.TargetURL != nil {
+			kind = ""
+		}
+		if in.TargetChoice != nil {
+			choice = *in.TargetChoice
+		} else if in.TargetID != nil || in.TargetURL != nil {
+			choice = ""
+		}
+		if err := resolveOrderTarget(ctx, tx, workspaceID, brandID, &targetURL, &targetID, &kind, &choice); err != nil {
+			return nil, err
+		}
+		add("target_url", targetURL)
+		add("target_id", targetID)
+		add("target_kind", kind)
+		add("target_choice", choice)
+	}
+	if in.Anchors != nil {
+		if o.Status == StatusPublished {
+			return nil, fmt.Errorf("%w: the anchors cannot change after publication", ErrConflict)
+		}
+		an, err := NormalizeAnchors(*in.Anchors)
+		if err != nil {
+			return nil, err
+		}
+		add("anchor_primary", an.Primary)
+		add("anchor_primary_source", an.PrimarySource)
+		add("anchor_secondary", an.Secondary)
+		add("anchor_secondary_type", an.SecondaryType)
 	}
 	if in.SlotType != nil {
 		v := ""
@@ -472,8 +544,15 @@ func Replace(ctx context.Context, tx pgx.Tx, workspaceID, brandID, lostID, actor
 		return nil, fmt.Errorf("%w: donor_profile_id is required", ErrInvalid)
 	}
 	in := CreateOrderInput{
-		DonorProfileID:  donorProfileID,
-		TargetURL:       lost.TargetURL,
+		DonorProfileID: donorProfileID,
+		TargetURL:      lost.TargetURL,
+		TargetID:       lost.TargetID,
+		TargetKind:     lost.TargetKind,
+		TargetChoice:   lost.TargetChoice,
+		Anchors: Anchors{
+			Primary: lost.AnchorPrimary, PrimarySource: lost.AnchorPrimarySource,
+			Secondary: lost.AnchorSecondary, SecondaryType: lost.AnchorSecondaryType,
+		},
 		SlotType:        lost.SlotType,
 		RelRequested:    lost.RelRequested,
 		Notes:           note,

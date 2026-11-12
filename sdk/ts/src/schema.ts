@@ -4384,7 +4384,7 @@ export interface paths {
          * List a redirect link's destinations
          * @description Scope: analytics.read. The pages the link's redirect clicks go to, each chosen in proportion to its weight while
          *     it has room in its daily click cap, with today's clicks. When every one is capped or stopped, clicks go to the
-         *     link's own page (fallback_url). Caps count clicks per day in UTC, without link scanners and previews.
+         *     link's own page (fallback_url). Caps count clicks per day in the brand's reporting time zone, without link scanners and previews.
          */
         get: operations["listTrackingLinkDestinations"];
         /**
@@ -4525,7 +4525,7 @@ export interface paths {
          *     combine with AND, and a condition's values with OR. Fields: country (two-letter code), region, city, isp, asn,
          *     device (desktop, mobile, tablet), device_brand, os, os_version, browser, browser_version, language, referrer (the
          *     referring site's host), ip (addresses or ranges such as 203.0.113.0/24), weekday (mon to sun) and hour (0 to 23),
-         *     both UTC, visitor (unique, or returning within a day, as this server saw them), and field1 to field20. Text
+         *     in the brand's reporting time zone, visitor (unique, or returning within a day, as this server saw them), and field1 to field20. Text
          *     matches whole values, without regard to case.
          */
         put: operations["setTrackingLinkPaths"];
@@ -4738,6 +4738,97 @@ export interface paths {
          * @description Scope: analytics.manage. Sets the weights of the named destinations of the flow, as for a link's, for every link that routes by it.
          */
         patch: operations["setFlowWeights"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/drilldown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The drill-down report
+         * @description Scope: analytics.read. The brand's visits, the conversions and revenue credited to them under the attribution
+         *     model, and ad spend, grouped by up to five levels (`group_by`, comma-separated, in order). Each row has its
+         *     children (`rows`) and the same metrics, so parents are their children's subtotals; `totals` is the whole range.
+         *     Dimensions: channel, source, campaign, utm_source, utm_medium, utm_campaign, utm_term, utm_content, landing_path, referrer_host, country, region, city, isp, asn, language, device, device_brand, os, browser, ad_campaign, ad_adset, ad_ad, ad_placement, tracking_campaign, day, hour, weekday. `day`, `hour` and `weekday` are in the report's time zone (the brand's, or `timezone`).
+         *     Revenue and cost are in the brand's currency, other currencies at the latest exchange rate.
+         *
+         *     Cost comes from the ad platforms and splits only by `day` (the ad account's day) and one ad level
+         *     (`ad_campaign`, `ad_adset` or `ad_ad`); grouped or filtered any other way, cost and the ratios on it are null and
+         *     `cost_note` says why. Conversions count at the visit's time unless `conversion_time=conversion`.
+         *     `format=csv` gives the deepest rows, one column per level.
+         */
+        get: operations["getDrilldownReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/report-views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the saved views of the drill-down report
+         * @description Scope: analytics.read. The brand's shared views and the caller's own, by name.
+         */
+        get: operations["listReportViews"];
+        put?: never;
+        /**
+         * Save a view of the drill-down report
+         * @description Scope: analytics.manage. A view is its maker's until shared. Its spec is checked as the report would read it.
+         */
+        post: operations["createReportView"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/report-views/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a saved view
+         * @description Scope: analytics.read. A shared view, or one of the caller's own.
+         */
+        get: operations["getReportView"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a saved view
+         * @description Scope: analytics.manage. A shared view can be deleted by its maker or an admin.
+         */
+        delete: operations["deleteReportView"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a saved view
+         * @description Scope: analytics.manage. Rename it, replace its spec, or share it; only its maker can make a shared view private again.
+         */
+        patch: operations["updateReportView"];
         trace?: never;
     };
     "/v1/brands/{brand}/landers": {
@@ -10426,6 +10517,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/link-orders/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the brand's link targets
+         * @description Scope: coverage.read. The brand's own article and product pages a
+         *     paid link can point at. selected is the checkbox: only ticked pages
+         *     are offered when a link is ordered. Ticked pages come first.
+         */
+        get: operations["listBrandLinkOrderTargets"];
+        put?: never;
+        /**
+         * Save a link target
+         * @description Scope: coverage.manage. Adds a page of the brand's own site as an
+         *     article or product link target, or updates the saved row with the
+         *     same address (one row per page: lowercase host without www., no
+         *     query, fragment or trailing slash). The page must be on the brand's
+         *     website, domains or SEO sites. kind defaults to a guess from the
+         *     address (blog, guide and how-to pages are articles). selected
+         *     defaults to true. source is suggested when a person saves a
+         *     suggestion. Saving a target never creates an order.
+         */
+        post: operations["saveBrandLinkOrderTarget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/targets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Tick, untick or retype a link target
+         * @description Scope: coverage.manage. Send only what changes. selected false
+         *     unticks the page: it keeps its kind and is no longer offered or
+         *     suggested. Orders already pointing at it keep their URL.
+         */
+        patch: operations["updateBrandLinkOrderTarget"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/targets/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Suggest pages to point a paid link at
+         * @description Scope: coverage.read. The brand's pages ranked by the comparison with
+         *     tracked competitors, from already-stored data only: the weekly
+         *     keyword snapshots of the site and its competitors (any SEO
+         *     connection, SE Ranking included), keywords SE Ranking projects
+         *     track, the Keywords page's page targets, and competitor link reads
+         *     already kept. It never calls Ahrefs, DataForSEO or SE Ranking.
+         *
+         *     A page scores for each keyword a competitor ranks in the top 20 for
+         *     while the page is missing or 3 or more places behind
+         *     (keyword_gap), and for each competitor page that other sites link
+         *     to and that competes for the same keywords or has a matching
+         *     address (competitor_links, with its referring domains). Ticked
+         *     saved targets are always listed; unticked ones never are. Each row
+         *     has its anchor choices. Suggestions never create orders.
+         */
+        get: operations["suggestBrandLinkOrderTargets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/targets/anchors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Anchor choices for a page
+         * @description Scope: coverage.read. The primary-anchor choices for any page of the
+         *     brand (stored SE Ranking keywords first, then the page's keyword
+         *     target, then other SEO connections' stored keywords, each with its
+         *     source), and the second-anchor choices by type: brand, url and
+         *     keyword. Stored data only; no provider call.
+         */
+        get: operations["getBrandLinkOrderTargetAnchors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/link-orders": {
         parameters: {
             query?: never;
@@ -10446,6 +10662,10 @@ export interface paths {
          * Request a link order
          * @description Scope: coverage.manage. Opens a requested order against a catalog donor.
          *     The guarantee window defaults to the catalog row, then to 30 days.
+         *     The target is a ticked saved link target (target_id) or a typed
+         *     target_url. An order may carry two anchors: anchor_primary (with
+         *     where it came from) and anchor_secondary, whose type is brand, url
+         *     or keyword.
          */
         post: operations["createBrandLinkOrder"];
         delete?: never;
@@ -10479,7 +10699,9 @@ export interface paths {
          * Update a link order
          * @description Scope: coverage.manage. Fields that are still mutable before publication.
          *     After approval the donor amount cannot change. Paid, verified, and lost
-         *     orders cannot be edited.
+         *     orders cannot be edited. The target and the anchors are fixed once the
+         *     link is published. Anchor fields not sent keep their stored values,
+         *     and the four are checked together.
          */
         patch: operations["updateBrandLinkOrder"];
         trace?: never;
@@ -13096,6 +13318,34 @@ export interface paths {
          *     refused samples are left out.
          */
         get: operations["getBrandAIVisibility"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ai-answer-share": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read AI answer share of voice by topic
+         * @description Scope: seo.read. Mention rate and share of voice from already-stored AI
+         *     answer runs, rolled up by the question's topic (Untagged when it has
+         *     none), by question set, and by question type, week by week. Also counts
+         *     answers that cite a /compare page of the brand or a competitor, after
+         *     stripping a locale prefix. This does not start a new run or call a paid
+         *     provider. `days` defaults to 84 (1 to 365).
+         */
+        get: operations["getBrandAIAnswerShare"];
         put?: never;
         post?: never;
         delete?: never;
@@ -41350,6 +41600,137 @@ export interface components {
          * @enum {string}
          */
         RedirectMode: "302" | "307" | "meta" | "double_meta";
+        DrilldownMetrics: {
+            /** @description The report's custom columns, by name; null where a value is missing or divides by zero. */
+            custom: {
+                [key: string]: number | null;
+            };
+            visits: number;
+            /** @description Distinct browsers. */
+            visitors: number;
+            /** @description Credited conversions: shares under the shared models. */
+            conversions: number;
+            /** @description In the brand's currency. */
+            revenue: number;
+            /** @description Ad spend in the brand's currency; null where the grouping can't split it. */
+            cost: number | null;
+            profit: number | null;
+            /** @description (revenue - cost) / cost. */
+            roi: number | null;
+            /** @description revenue / cost. */
+            roas: number | null;
+            /** @description conversions / visits. */
+            cr: number | null;
+            /** @description revenue / visits. */
+            epv: number | null;
+            /** @description cost / conversions. */
+            cpa: number | null;
+        };
+        DrilldownRow: {
+            /** @description The row's value at each level so far; empty string for none. */
+            keys: string[];
+            metrics: components["schemas"]["DrilldownMetrics"];
+            rows: components["schemas"]["DrilldownRow2"][];
+        };
+        DrilldownRow2: {
+            /** @description The row's value at each level so far; empty string for none. */
+            keys: string[];
+            metrics: components["schemas"]["DrilldownMetrics"];
+            rows: components["schemas"]["DrilldownRow3"][];
+        };
+        DrilldownRow3: {
+            /** @description The row's value at each level so far; empty string for none. */
+            keys: string[];
+            metrics: components["schemas"]["DrilldownMetrics"];
+            rows: components["schemas"]["DrilldownRow4"][];
+        };
+        DrilldownRow4: {
+            /** @description The row's value at each level so far; empty string for none. */
+            keys: string[];
+            metrics: components["schemas"]["DrilldownMetrics"];
+            rows: components["schemas"]["DrilldownRow5"][];
+        };
+        DrilldownRow5: {
+            /** @description The row's value at each level so far; empty string for none. */
+            keys: string[];
+            metrics: components["schemas"]["DrilldownMetrics"];
+            /** @description Empty: the fifth level has no children. */
+            rows: unknown[];
+        };
+        DrilldownReport: {
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            timezone: string;
+            model: string;
+            /** @enum {string} */
+            conversion_time: "visit" | "conversion";
+            currency: string;
+            group_by: string[];
+            cost_available: boolean;
+            cost_note: string | null;
+            totals: components["schemas"]["DrilldownMetrics"];
+            rows: components["schemas"]["DrilldownRow"][];
+            /** @description Rows past the limit were left out; the totals still count them. */
+            truncated: boolean;
+        };
+        /** @description The drill-down report's settings, as its query parameters name them, and the app's display settings. */
+        ReportViewSpec: {
+            group_by?: string[];
+            /** @description dimension:value */
+            filters?: string[];
+            /** @description dimension:value */
+            excludes?: string[];
+            sort?: string;
+            limit?: number;
+            /** @enum {string} */
+            conversion_time?: "visit" | "conversion";
+            model?: string;
+            /** @description Empty for the brand's. */
+            timezone?: string;
+            /** @description A preset (today, yesterday, last_7_days … last_365_days, this_month, last_month, this_year) or fixed from and to. */
+            date_range?: {
+                preset?: string;
+                /** Format: date */
+                from?: string;
+                /** Format: date */
+                to?: string;
+            };
+            columns?: {
+                name: string;
+                /** @example revenue / visits */
+                formula: string;
+                /** @enum {string} */
+                format?: "number" | "percent" | "money";
+            }[];
+            /** @description The app's own: shown columns, their order, density, the chart. Stored as it is (at most 16 KB). */
+            display?: {
+                [key: string]: unknown;
+            };
+        };
+        ReportView: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            name: string;
+            spec: components["schemas"]["ReportViewSpec"];
+            /** @description Seen by the brand's whole team; otherwise only by its maker. */
+            shared: boolean;
+            /** @description The caller made it. */
+            mine: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ReportViewInput: {
+            /** @description Required when saving a new view. */
+            name?: string;
+            spec?: components["schemas"]["ReportViewSpec"];
+            shared?: boolean;
+        };
         TrackerWeightsInput: {
             weights: {
                 /** Format: uuid */
@@ -41459,7 +41840,7 @@ export interface components {
                 weight: number;
                 /** @description Clicks a day it takes; null for no cap, 0 stops it. */
                 daily_click_cap: number | null;
-                /** @description Its clicks today (UTC), without link scanners and previews. */
+                /** @description Its clicks today in the brand's reporting time zone, without link scanners and previews. */
                 clicks_today: number;
                 /** @description It takes clicks now: a weight above 0 and room in its cap. For an offer, its own cap_reached (GET .../offers) says whether the offer still takes them. */
                 open: boolean;
@@ -41651,7 +42032,7 @@ export interface components {
             missing_click_id: boolean;
             /** @description The URL a click goes to: url with the click id its network takes added. */
             tracking_url: string;
-            /** @description Its clicks today (UTC), without link scanners and previews. */
+            /** @description Its clicks today in the brand's reporting time zone, without link scanners and previews. */
             clicks_today: number;
             /** @description Its conversions today (UTC), without declined ones. */
             conversions_today: number;
@@ -41774,7 +42155,7 @@ export interface components {
             cta_urls: string[];
             /** @description The script tag the lander's page carries: it adds the click id to its links to /click. It stores nothing in the browser. */
             script: string;
-            /** @description Clicks on its calls to action today (UTC), without link scanners and previews. */
+            /** @description Clicks on its calls to action today in the brand's reporting time zone, without link scanners and previews. */
             lander_clicks_today: number;
             /** @description How many link destinations it is. */
             destinations: number;
@@ -47980,6 +48361,90 @@ export interface components {
             input_cents_per_million?: number;
             output_cents_per_million?: number;
         };
+        AIAnswerShare: {
+            days: number;
+            /** Format: date-time */
+            from: string;
+            note: string;
+            totals: components["schemas"]["AIAnswerShareTotals"];
+            /** @description Rolled up by the question's topic. */
+            clusters: components["schemas"]["AIAnswerShareGroup"][];
+            question_sets: components["schemas"]["AIAnswerShareGroup"][];
+            question_types: components["schemas"]["AIAnswerShareGroup"][];
+            compare: components["schemas"]["AIAnswerShareCompare"];
+            weeks: components["schemas"]["AIAnswerShareWeek"][];
+        };
+        AIAnswerShareTotals: {
+            answers: number;
+            questions: number;
+            /** @description Topics other than Untagged that have at least one stored answer. */
+            clusters: number;
+            mention_rate: number | null;
+            share_of_voice: number | null;
+            recommend_rate: number | null;
+            citation_rate: number | null;
+            compare_citation_rate: number | null;
+            competitors: components["schemas"]["AIAnswerShareRival"][];
+        };
+        AIAnswerShareGroup: {
+            key: string;
+            label: string;
+            /** @enum {string} */
+            kind: "topic" | "question_set" | "question_type";
+            questions: number;
+            answers: number;
+            named: number;
+            recommended: number;
+            cited: number;
+            compare_cited: number;
+            mention_rate: number | null;
+            share_of_voice: number | null;
+            recommend_rate: number | null;
+            citation_rate: number | null;
+            compare_citation_rate: number | null;
+            competitors: components["schemas"]["AIAnswerShareRival"][];
+            weeks: components["schemas"]["AIAnswerShareWeek"][];
+        };
+        AIAnswerShareRival: {
+            name: string;
+            answers: number;
+            mention_rate: number | null;
+            share_of_voice: number | null;
+            recommended: number;
+        };
+        AIAnswerShareWeek: {
+            /** Format: date */
+            week: string;
+            answers: number;
+            named: number;
+            mention_rate: number | null;
+            share_of_voice: number | null;
+            compare_cited: number;
+            compare_citation_rate: number | null;
+        };
+        AIAnswerShareCompare: {
+            answers: number;
+            brand_cited: number;
+            competitor_cited: number;
+            brand_rate: number | null;
+            competitor_rate: number | null;
+            pages: components["schemas"]["AIAnswerShareComparePage"][];
+            weeks: components["schemas"]["AIAnswerShareCompareWeek"][];
+        };
+        AIAnswerShareComparePage: {
+            url: string;
+            owner: string;
+            competitor?: string;
+            answers: number;
+        };
+        AIAnswerShareCompareWeek: {
+            /** Format: date */
+            week: string;
+            answers: number;
+            brand_cited: number;
+            competitor_cited: number;
+            brand_rate: number | null;
+        };
         AIVisibilitySettings: {
             models: (components["schemas"]["AISampleModel"] & {
                 provider_name: string;
@@ -48800,6 +49265,7 @@ export interface components {
             /** @description For weekly digests: 0 is Sunday. */
             weekday: number;
             hour: number;
+            /** @description The IANA time zone the digest is sent and counted in; the brand's reporting time zone until set. */
             timezone: string;
             /** @enum {string} */
             recipients: "none" | "admins" | "members";
@@ -50250,6 +50716,19 @@ export interface components {
             domain: string;
             status: components["schemas"]["LinkOrderStatus"];
             target_url: string;
+            /**
+             * Format: uuid
+             * @description The saved link target, when the order was opened from one.
+             */
+            target_id: string | null;
+            /** @enum {string} */
+            target_kind: "" | "article" | "product";
+            /** @enum {string} */
+            target_choice: "manual" | "suggested";
+            anchor_primary: string;
+            anchor_primary_source: components["schemas"]["LinkOrderAnchorSource"];
+            anchor_secondary: string;
+            anchor_secondary_type: components["schemas"]["LinkOrderSecondaryAnchorType"];
             slot_type: string;
             rel_requested: string;
             /** Format: int64 */
@@ -50306,6 +50785,95 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /**
+         * @description An article page or a product (or product section) page of the brand's own site.
+         * @enum {string}
+         */
+        LinkOrderTargetKind: "article" | "product";
+        /**
+         * @description Where a primary anchor came from: se_ranking is stored SE Ranking keyword data, page_target the page's keyword target, seo_keywords another SEO connection's stored keywords, manual typed. Empty when there is no primary anchor.
+         * @enum {string}
+         */
+        LinkOrderAnchorSource: "" | "manual" | "se_ranking" | "page_target" | "seo_keywords";
+        /**
+         * @description The second anchor's type, picked by a person. Empty when there is no second anchor.
+         * @enum {string}
+         */
+        LinkOrderSecondaryAnchorType: "" | "brand" | "url" | "keyword";
+        LinkOrderTarget: {
+            /** Format: uuid */
+            id: string;
+            url: string;
+            kind: components["schemas"]["LinkOrderTargetKind"];
+            title: string;
+            /** @description The checkbox: only ticked targets are offered when ordering a link. */
+            selected: boolean;
+            /** @enum {string} */
+            source: "manual" | "suggested";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LinkOrderAnchorOption: {
+            text: string;
+            /**
+             * @description Where the text came from.
+             * @enum {string}
+             */
+            source: "se_ranking" | "page_target" | "seo_keywords" | "brand" | "url";
+            /** @description The page's stored position for the keyword, when known. */
+            position: number | null;
+            /** @description Monthly searches, from the stored snapshot. */
+            volume: number | null;
+        };
+        LinkOrderAnchorOptions: {
+            /** @description SE Ranking keywords first, then the page target, then other stored keywords. */
+            primary: components["schemas"]["LinkOrderAnchorOption"][];
+            secondary: {
+                brand: components["schemas"]["LinkOrderAnchorOption"][];
+                url: components["schemas"]["LinkOrderAnchorOption"][];
+                /** @description The page's other keywords (the primary list without its first). */
+                keyword: components["schemas"]["LinkOrderAnchorOption"][];
+            };
+        };
+        LinkOrderTargetReason: {
+            /** @enum {string} */
+            kind: "keyword_gap" | "competitor_links";
+            competitor: string;
+            keyword: string;
+            /** @description The competitor's stored position. */
+            position: number | null;
+            /** @description The page's stored position; null when it is not ranking. */
+            your_position: number | null;
+            volume: number | null;
+            competitor_url: string;
+            /** @description Sites linking to the competitor's page, from stored link reads. */
+            referring_domains: number;
+        };
+        LinkOrderTargetSuggestion: {
+            url: string;
+            kind: components["schemas"]["LinkOrderTargetKind"];
+            /** @description True when the kind comes from the address, not a saved target. */
+            kind_guessed: boolean;
+            /** Format: uuid */
+            target_id: string | null;
+            selected: boolean;
+            /** @description Orders the list only. */
+            score: number;
+            competitors: string[];
+            reasons: components["schemas"]["LinkOrderTargetReason"][];
+            anchors: components["schemas"]["LinkOrderAnchorOptions"];
+        };
+        LinkOrderTargetSources: {
+            /** @description Stored SE Ranking keyword rows for the brand's pages. */
+            se_ranking_keywords: number;
+            other_keywords: number;
+            page_targets: number;
+            competitors: string[];
+            competitor_keywords: number;
+            competitor_link_pages: number;
         };
         LinkOrderEvent: {
             /** Format: uuid */
@@ -58259,6 +58827,11 @@ export interface components {
              * @example USD
              */
             currency: string;
+            /**
+             * @description The time zone the brand reports in (IANA): reports bucket days and hours in it, and tracker caps reset at its midnight. Stored times stay in UTC. UTC by default.
+             * @example Europe/Berlin
+             */
+            timezone: string;
             /** @description The brand context's version. */
             context_version: number;
             counts: {
@@ -58363,6 +58936,8 @@ export interface components {
             manual_edit_days?: number;
             /** @description The currency the brand reports money in, such as EUR. Transactions saved from now on are converted to it. */
             currency?: string;
+            /** @description The time zone the brand reports in, an IANA name such as Europe/Berlin or America/New_York. Changes how reports read stored times, so past days regroup; nothing stored changes. */
+            timezone?: string;
         };
         SiteCookie: {
             /** Format: uuid */
@@ -62346,8 +62921,10 @@ export interface components {
     parameters: {
         /** @description First day, such as 2026-09-27. Default: 27 days before to. */
         AttributionFrom: string;
-        /** @description Last day, such as 2026-10-24. Default: today. */
+        /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
         AttributionTo: string;
+        /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+        ReportTimezone: string;
         /** @description all (the default); identified: only visits the person was identified on (signed in, named by a form or an identify call, or clicking a tracked link in an email Outflare sent), and only credit on those visits; signed_in: the same, but only browsers the person identified on through the workspace's own product (a sign-in, form or identify call), leaving out ones known only from an email click, which a forwarded email can put on someone else. Visits known only by the browser's cookie are left out, and so are conversions that matched none. */
         AttributionMatch: "all" | "identified" | "signed_in";
         /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
@@ -71530,6 +72107,216 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getDrilldownReport: {
+        parameters: {
+            query?: {
+                /** @description First day, such as 2026-09-27. Default: 27 days before to. */
+                from?: components["parameters"]["AttributionFrom"];
+                /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
+                to?: components["parameters"]["AttributionTo"];
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
+                /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
+                model?: components["parameters"]["AttributionModel"];
+                /** @description all (the default); identified: only visits the person was identified on (signed in, named by a form or an identify call, or clicking a tracked link in an email Outflare sent), and only credit on those visits; signed_in: the same, but only browsers the person identified on through the workspace's own product (a sign-in, form or identify call), leaving out ones known only from an email click, which a forwarded email can put on someone else. Visits known only by the browser's cookie are left out, and so are conversions that matched none. */
+                match?: components["parameters"]["AttributionMatch"];
+                /** @description Up to five dimensions, comma-separated. Default channel. */
+                group_by?: string;
+                /** @description dimension:value, such as country:US. Values of one dimension are either-or; dimensions all apply. */
+                filter?: string[];
+                /** @description dimension:value to leave out. */
+                exclude?: string[];
+                /** @description A metric (visits, visitors, conversions, revenue, cost, profit, roi, roas, cr, epv, cpa); - for largest first. Default -visits. */
+                sort?: string;
+                /** @description Rows per parent at each level. */
+                limit?: number;
+                conversion_time?: "visit" | "conversion";
+                format?: "json" | "csv";
+                /** @description A custom column, name:formula, such as rpv:revenue/visits: arithmetic (+ - * / and brackets) over the metrics and numbers. Each row gets it under metrics.custom. */
+                column?: string[];
+                /** @description A saved view (GET .../report-views) whose settings fill in what the request doesn't say. */
+                view?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DrilldownReport"];
+                    "text/csv": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listReportViews: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The views. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ReportView"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createReportView: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportViewInput"];
+            };
+        };
+        responses: {
+            /** @description The view. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportView"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getReportView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportView"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteReportView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateReportView: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportViewInput"];
+            };
+        };
+        responses: {
+            /** @description The view now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportView"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listLanders: {
         parameters: {
             query?: {
@@ -73324,8 +74111,10 @@ export interface operations {
             query?: {
                 /** @description First day, such as 2026-09-27. Default: 27 days before to. */
                 from?: components["parameters"]["AttributionFrom"];
-                /** @description Last day, such as 2026-10-24. Default: today. */
+                /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
                 to?: components["parameters"]["AttributionTo"];
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
                 model?: components["parameters"]["AttributionModel"];
                 /** @description all (the default); identified: only visits the person was identified on (signed in, named by a form or an identify call, or clicking a tracked link in an email Outflare sent), and only credit on those visits; signed_in: the same, but only browsers the person identified on through the workspace's own product (a sign-in, form or identify call), leaving out ones known only from an email click, which a forwarded email can put on someone else. Visits known only by the browser's cookie are left out, and so are conversions that matched none. */
@@ -73365,8 +74154,10 @@ export interface operations {
                 split?: "content";
                 /** @description First day, such as 2026-09-27. Default: 27 days before to. */
                 from?: components["parameters"]["AttributionFrom"];
-                /** @description Last day, such as 2026-10-24. Default: today. */
+                /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
                 to?: components["parameters"]["AttributionTo"];
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
                 model?: components["parameters"]["AttributionModel"];
                 /** @description all (the default); identified: only visits the person was identified on (signed in, named by a form or an identify call, or clicking a tracked link in an email Outflare sent), and only credit on those visits; signed_in: the same, but only browsers the person identified on through the workspace's own product (a sign-in, form or identify call), leaving out ones known only from an email click, which a forwarded email can put on someone else. Visits known only by the browser's cookie are left out, and so are conversions that matched none. */
@@ -73408,8 +74199,10 @@ export interface operations {
             query?: {
                 /** @description First day, such as 2026-09-27. Default: 27 days before to. */
                 from?: components["parameters"]["AttributionFrom"];
-                /** @description Last day, such as 2026-10-24. Default: today. */
+                /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
                 to?: components["parameters"]["AttributionTo"];
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
                 model?: components["parameters"]["AttributionModel"];
                 /** @description all (the default); identified: only visits the person was identified on (signed in, named by a form or an identify call, or clicking a tracked link in an email Outflare sent), and only credit on those visits; signed_in: the same, but only browsers the person identified on through the workspace's own product (a sign-in, form or identify call), leaving out ones known only from an email click, which a forwarded email can put on someone else. Visits known only by the browser's cookie are left out, and so are conversions that matched none. */
@@ -73462,8 +74255,10 @@ export interface operations {
             query?: {
                 /** @description First day, such as 2026-09-27. Default: 27 days before to. */
                 from?: components["parameters"]["AttributionFrom"];
-                /** @description Last day, such as 2026-10-24. Default: today. */
+                /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
                 to?: components["parameters"]["AttributionTo"];
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
             };
             header?: never;
             path: {
@@ -73507,8 +74302,10 @@ export interface operations {
             query?: {
                 /** @description First day, such as 2026-09-27. Default: 27 days before to. */
                 from?: components["parameters"]["AttributionFrom"];
-                /** @description Last day, such as 2026-10-24. Default: today. */
+                /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
                 to?: components["parameters"]["AttributionTo"];
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
                 model?: components["parameters"]["AttributionModel"];
                 /** @description all (the default); identified: only visits the person was identified on (signed in, named by a form or an identify call, or clicking a tracked link in an email Outflare sent), and only credit on those visits; signed_in: the same, but only browsers the person identified on through the workspace's own product (a sign-in, form or identify call), leaving out ones known only from an email click, which a forwarded email can put on someone else. Visits known only by the browser's cookie are left out, and so are conversions that matched none. */
@@ -73567,8 +74364,10 @@ export interface operations {
             query?: {
                 /** @description First day, such as 2026-09-27. Default: 27 days before to. */
                 from?: components["parameters"]["AttributionFrom"];
-                /** @description Last day, such as 2026-10-24. Default: today. */
+                /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
                 to?: components["parameters"]["AttributionTo"];
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
                 model?: components["parameters"]["AttributionModel"];
                 /** @description all (the default); identified: only visits the person was identified on (signed in, named by a form or an identify call, or clicking a tracked link in an email Outflare sent), and only credit on those visits; signed_in: the same, but only browsers the person identified on through the workspace's own product (a sign-in, form or identify call), leaving out ones known only from an email click, which a forwarded email can put on someone else. Visits known only by the browser's cookie are left out, and so are conversions that matched none. */
@@ -73616,8 +74415,10 @@ export interface operations {
                 level?: "campaign" | "adset" | "ad";
                 /** @description First day, such as 2026-09-27. Default: 27 days before to. */
                 from?: components["parameters"]["AttributionFrom"];
-                /** @description Last day, such as 2026-10-24. Default: today. */
+                /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
                 to?: components["parameters"]["AttributionTo"];
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
                 model?: components["parameters"]["AttributionModel"];
                 /** @description all (the default); identified: only visits the person was identified on (signed in, named by a form or an identify call, or clicking a tracked link in an email Outflare sent), and only credit on those visits; signed_in: the same, but only browsers the person identified on through the workspace's own product (a sign-in, form or identify call), leaving out ones known only from an email click, which a forwarded email can put on someone else. Visits known only by the browser's cookie are left out, and so are conversions that matched none. */
@@ -73666,8 +74467,10 @@ export interface operations {
                 record_id?: string;
                 /** @description First day, such as 2026-09-27. Default: 27 days before to. */
                 from?: components["parameters"]["AttributionFrom"];
-                /** @description Last day, such as 2026-10-24. Default: today. */
+                /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
                 to?: components["parameters"]["AttributionTo"];
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
                 model?: components["parameters"]["AttributionModel"];
                 /** @description all (the default); identified: only visits the person was identified on (signed in, named by a form or an identify call, or clicking a tracked link in an email Outflare sent), and only credit on those visits; signed_in: the same, but only browsers the person identified on through the workspace's own product (a sign-in, form or identify call), leaving out ones known only from an email click, which a forwarded email can put on someone else. Visits known only by the browser's cookie are left out, and so are conversions that matched none. */
@@ -73989,6 +74792,8 @@ export interface operations {
     getSiteAnalytics: {
         parameters: {
             query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 from?: string;
                 to?: string;
                 /** @description Only this website (a host from the websites list, such as app.example.com). */
@@ -78410,6 +79215,8 @@ export interface operations {
     getAdsPerformance: {
         parameters: {
             query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 from?: string;
                 to?: string;
                 level?: "campaign" | "ad_group" | "ad";
@@ -78466,6 +79273,8 @@ export interface operations {
     listAdAcquisitions: {
         parameters: {
             query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
                 /** @description Clicks on or after this day. */
                 from?: string;
                 /** @description Clicks on or before this day. */
@@ -81134,6 +81943,196 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandLinkOrderTargets: {
+        parameters: {
+            query?: {
+                kind?: components["schemas"]["LinkOrderTargetKind"];
+                selected?: "true" | "false";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved targets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["LinkOrderTarget"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    saveBrandLinkOrderTarget: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    url: string;
+                    kind?: components["schemas"]["LinkOrderTargetKind"];
+                    title?: string;
+                    selected?: boolean;
+                    /** @enum {string} */
+                    source?: "manual" | "suggested";
+                };
+            };
+        };
+        responses: {
+            /** @description The saved target, updated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderTarget"];
+                };
+            };
+            /** @description A new target. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderTarget"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandLinkOrderTarget: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    kind?: components["schemas"]["LinkOrderTargetKind"];
+                    title?: string;
+                    selected?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The target. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderTarget"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    suggestBrandLinkOrderTargets: {
+        parameters: {
+            query?: {
+                kind?: components["schemas"]["LinkOrderTargetKind"];
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ranked suggestions and the stored data they used. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["LinkOrderTargetSuggestion"][];
+                        sources: components["schemas"]["LinkOrderTargetSources"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandLinkOrderTargetAnchors: {
+        parameters: {
+            query: {
+                /** @description The page's address (its full URL). */
+                page: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page, normalised, and its anchor choices. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        url: string;
+                        anchors: components["schemas"]["LinkOrderAnchorOptions"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listBrandLinkOrders: {
         parameters: {
             query?: {
@@ -81200,7 +82199,25 @@ export interface operations {
                 "application/json": {
                     /** Format: uuid */
                     donor_profile_id: string;
-                    target_url: string;
+                    /** @description The page the link points at. Required unless target_id is sent; with target_id it must be the same page. */
+                    target_url?: string;
+                    /**
+                     * Format: uuid
+                     * @description A ticked saved link target. Its URL and kind fill target_url and target_kind.
+                     */
+                    target_id?: string | null;
+                    /** @enum {string} */
+                    target_kind?: "" | "article" | "product";
+                    /**
+                     * @description suggested when the page is the one Outflare suggested, kept as is. Default manual.
+                     * @enum {string}
+                     */
+                    target_choice?: "manual" | "suggested";
+                    anchor_primary?: string;
+                    anchor_primary_source?: components["schemas"]["LinkOrderAnchorSource"];
+                    /** @description A second, separate anchor. Needs anchor_secondary_type and must differ from anchor_primary. */
+                    anchor_secondary?: string;
+                    anchor_secondary_type?: components["schemas"]["LinkOrderSecondaryAnchorType"];
                     slot_type?: string;
                     rel_requested?: string;
                     guarantee_days?: number | null;
@@ -81279,6 +82296,16 @@ export interface operations {
                     /** Format: uuid */
                     donor_profile_id?: string;
                     target_url?: string;
+                    /** Format: uuid */
+                    target_id?: string | null;
+                    /** @enum {string} */
+                    target_kind?: "" | "article" | "product";
+                    /** @enum {string} */
+                    target_choice?: "manual" | "suggested";
+                    anchor_primary?: string | null;
+                    anchor_primary_source?: components["schemas"]["LinkOrderAnchorSource"] | null;
+                    anchor_secondary?: string | null;
+                    anchor_secondary_type?: components["schemas"]["LinkOrderSecondaryAnchorType"] | null;
                     slot_type?: string | null;
                     rel_requested?: string | null;
                     guarantee_days?: number | null;
@@ -86250,6 +87277,34 @@ export interface operations {
                         /** Format: date-time */
                         from: string;
                     };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandAIAnswerShare: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Totals, clusters, question sets, question types, /compare citations, and weekly points. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIAnswerShare"];
                 };
             };
             400: components["responses"]["Error"];
@@ -95922,7 +96977,7 @@ export interface operations {
                 /** @description A date (inclusive) or RFC 3339 time. Default now. */
                 to?: string;
                 group_by?: "day" | "week" | "sequence" | "step" | "mailbox" | "domain" | "brand";
-                /** @description IANA zone for dates and day buckets. Default UTC. */
+                /** @description IANA zone for dates and day buckets. Default: the brand's reporting time zone (UTC across brands). */
                 timezone?: string;
                 sequence_id?: string;
                 mailbox_id?: string;
@@ -104594,7 +105649,10 @@ export interface operations {
     };
     runFunnel: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
+            };
             header?: never;
             path: {
                 /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
@@ -104623,7 +105681,10 @@ export interface operations {
     };
     listFunnelPeople: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
+            };
             header?: never;
             path: {
                 /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
@@ -104665,7 +105726,10 @@ export interface operations {
     };
     saveFunnelPeople: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
+            };
             header?: never;
             path: {
                 /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
@@ -104709,7 +105773,10 @@ export interface operations {
     };
     runFunnelCorrelation: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
+            };
             header?: never;
             path: {
                 /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
@@ -104747,7 +105814,10 @@ export interface operations {
     };
     runPaths: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
+            };
             header?: never;
             path: {
                 /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
@@ -104865,7 +105935,10 @@ export interface operations {
     };
     runTrend: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
+            };
             header?: never;
             path: {
                 /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
@@ -104894,7 +105967,10 @@ export interface operations {
     };
     runRetention: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
+            };
             header?: never;
             path: {
                 /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
@@ -104923,7 +105999,10 @@ export interface operations {
     };
     runLifecycle: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
+            };
             header?: never;
             path: {
                 /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
@@ -120091,6 +121170,8 @@ export interface operations {
                 to?: string;
                 /** @description An existing Outflare attribution model key; defaults to the workspace model. */
                 model?: string;
+                /** @description The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones. */
+                timezone?: components["parameters"]["ReportTimezone"];
             };
             header?: never;
             path: {

@@ -18,6 +18,7 @@ import (
 
 // Lists that take limit but do not page, and why.
 var unpagedLists = map[string]string{
+	"suggestBrandLinkOrderTargets":   "a ranking by score computed on the fly, capped at 200",
 	"getAnalyticsHistory":            "a time series bounded by from and to",
 	"getBrandAnalyticsHistory":       "a time series bounded by from and to",
 	"getSEOHistory":                  "a time series bounded by from and to",

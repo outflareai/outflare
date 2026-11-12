@@ -83,14 +83,21 @@ func (s *Server) createLinkOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		DonorProfileID  string  `json:"donor_profile_id"`
-		TargetURL       string  `json:"target_url"`
-		SlotType        string  `json:"slot_type"`
-		RelRequested    string  `json:"rel_requested"`
-		GuaranteeDays   *int    `json:"guarantee_days"`
-		Notes           *string `json:"notes"`
-		OwnerUserID     *string `json:"owner_user_id"`
-		ReplacesOrderID *string `json:"replaces_order_id"`
+		DonorProfileID      string  `json:"donor_profile_id"`
+		TargetURL           string  `json:"target_url"`
+		TargetID            *string `json:"target_id"`
+		TargetKind          string  `json:"target_kind"`
+		TargetChoice        string  `json:"target_choice"`
+		AnchorPrimary       string  `json:"anchor_primary"`
+		AnchorPrimarySource string  `json:"anchor_primary_source"`
+		AnchorSecondary     string  `json:"anchor_secondary"`
+		AnchorSecondaryType string  `json:"anchor_secondary_type"`
+		SlotType            string  `json:"slot_type"`
+		RelRequested        string  `json:"rel_requested"`
+		GuaranteeDays       *int    `json:"guarantee_days"`
+		Notes               *string `json:"notes"`
+		OwnerUserID         *string `json:"owner_user_id"`
+		ReplacesOrderID     *string `json:"replaces_order_id"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -103,10 +110,24 @@ func (s *Server) createLinkOrder(w http.ResponseWriter, r *http.Request) {
 	req := linkorders.CreateOrderInput{
 		DonorProfileID: donorID,
 		TargetURL:      strings.TrimSpace(in.TargetURL),
-		SlotType:       in.SlotType,
-		RelRequested:   in.RelRequested,
-		GuaranteeDays:  in.GuaranteeDays,
-		Notes:          in.Notes,
+		TargetKind:     in.TargetKind,
+		TargetChoice:   in.TargetChoice,
+		Anchors: linkorders.Anchors{
+			Primary: in.AnchorPrimary, PrimarySource: in.AnchorPrimarySource,
+			Secondary: in.AnchorSecondary, SecondaryType: in.AnchorSecondaryType,
+		},
+		SlotType:      in.SlotType,
+		RelRequested:  in.RelRequested,
+		GuaranteeDays: in.GuaranteeDays,
+		Notes:         in.Notes,
+	}
+	if in.TargetID != nil && *in.TargetID != "" {
+		id, err := uuid.Parse(*in.TargetID)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "target_id must be a UUID")
+			return
+		}
+		req.TargetID = &id
 	}
 	if in.OwnerUserID != nil && *in.OwnerUserID != "" {
 		id, err := uuid.Parse(*in.OwnerUserID)
@@ -130,7 +151,7 @@ func (s *Server) createLinkOrder(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err := recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "link_orders.created", "brand", a.Brand, map[string]any{"brand_id": a.Brand, "status": o.Status}, map[string]any{"brand_id": a.Brand}); err != nil {
+		if err := recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "link_orders.created", "brand", a.Brand, map[string]any{"brand_id": a.Brand, "status": o.Status, "target_choice": o.TargetChoice, "target_kind": o.TargetKind, "anchor_primary_source": o.AnchorPrimarySource, "anchor_secondary_type": o.AnchorSecondaryType}, map[string]any{"brand_id": a.Brand, "target_choice": o.TargetChoice, "target_kind": o.TargetKind, "anchor_primary_source": o.AnchorPrimarySource, "anchor_secondary_type": o.AnchorSecondaryType}); err != nil {
 			return err
 		}
 		out = o
@@ -180,6 +201,69 @@ func (s *Server) updateLinkOrder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	setStr("target_url", &in.TargetURL)
+	if v, ok := raw["target_id"]; ok {
+		if v == nil {
+			var n *uuid.UUID
+			in.TargetID = &n
+		} else {
+			s, _ := v.(string)
+			tid, err := uuid.Parse(s)
+			if err != nil {
+				writeError(w, r, http.StatusBadRequest, "invalid_request", "target_id must be a UUID or null")
+				return
+			}
+			in.TargetID = ptrTo(&tid)
+		}
+	}
+	for key, dest := range map[string]**string{"target_kind": &in.TargetKind, "target_choice": &in.TargetChoice} {
+		if v, ok := raw[key]; ok {
+			s, isStr := v.(string)
+			if v != nil && !isStr {
+				writeError(w, r, http.StatusBadRequest, "invalid_request", key+" must be a string")
+				return
+			}
+			*dest = &s
+		}
+	}
+	anchorKeys := []string{"anchor_primary", "anchor_primary_source", "anchor_secondary", "anchor_secondary_type"}
+	for _, key := range anchorKeys {
+		if _, ok := raw[key]; !ok {
+			continue
+		}
+		// Anchors change together: the stored values fill what is not sent.
+		cur, err := linkorders.GetOrder(r.Context(), s.pool, ws, brand, id)
+		if err != nil {
+			s.writeLinkOrderError(w, r, err)
+			return
+		}
+		an := linkorders.Anchors{Primary: cur.AnchorPrimary, PrimarySource: cur.AnchorPrimarySource, Secondary: cur.AnchorSecondary, SecondaryType: cur.AnchorSecondaryType}
+		for _, k := range anchorKeys {
+			v, ok := raw[k]
+			if !ok {
+				continue
+			}
+			str, isStr := v.(string)
+			if v != nil && !isStr {
+				writeError(w, r, http.StatusBadRequest, "invalid_request", k+" must be a string or null")
+				return
+			}
+			switch k {
+			case "anchor_primary":
+				an.Primary = str
+				if _, set := raw["anchor_primary_source"]; !set {
+					an.PrimarySource = ""
+				}
+			case "anchor_primary_source":
+				an.PrimarySource = str
+			case "anchor_secondary":
+				an.Secondary = str
+			case "anchor_secondary_type":
+				an.SecondaryType = str
+			}
+		}
+		in.Anchors = &an
+		break
+	}
 	setStr("slot_type", &in.SlotType)
 	setStr("rel_requested", &in.RelRequested)
 	setStr("notes", &in.Notes)

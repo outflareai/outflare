@@ -9,6 +9,7 @@ import { Button, Empty, ErrorText, Loading, PageHeader, Stat, Stats } from "../u
 import { Overview } from "./link-orders/Overview";
 import { Catalog } from "./link-orders/Catalog";
 import { Candidates } from "./link-orders/Candidates";
+import { Targets } from "./link-orders/Targets";
 import { Orders } from "./link-orders/Orders";
 import { Checks } from "./link-orders/Checks";
 import { Impact } from "./link-orders/Impact";
@@ -262,6 +263,7 @@ function LinkOrdersBrand({ ws, myId, item, can, go }: Props) {
           <div className="mt-4">
             {section === "overview" && <Overview data={data} />}
             {section === "catalog" && <Catalog data={data} cart={cart} setCart={setCart} onOpenDonor={setDonor} />}
+            {section === "targets" && <Targets data={data} />}
             {section === "candidates" && <Candidates data={data} />}
             {section === "orders" && <Orders data={data} openId={orderId} onClose={() => { if (orderId) goSection("orders"); }} />}
             {section === "checks" && <Checks data={data} />}

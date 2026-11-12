@@ -6,6 +6,29 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.94.0] - 2026-11-12
+
+### Added
+
+- AI answer share: see mention rate and share of voice from already-stored AI answers, by topic, with a weekly trend and citations of compare pages. This does not start a new run.
+- A drill-down report groups a brand's visits, credited conversions, revenue and ad spend by up to five levels at once (channel, country, ad campaign, day and more), with subtotals, profit, ROI and conversion rate, filters, sorting and a CSV export.
+- The drill-down report takes custom columns (formulas over its metrics, such as revenue per visit), and its settings can be saved as views: private until shared with the brand's team, with dates that move with today.
+- The Tracker has a Campaigns tab: each tracker campaign with its visits, conversions, revenue, profit and ROI for the last 7 days, and an editor for its traffic source, redirect mode, rule-based paths, landers and offers with weights and their share of the clicks, suggested weights you apply with one click, a shared flow instead, and the campaign URL to paste into the ad network.
+- The Tracker has Offers, Landers and Flows tabs: offers with a token picker, a missing click id warning, payouts by country, caps with a fallback and a test preview; landers with each call to action's click URL and page script; and flows edited like a campaign's paths.
+- A Tracker module with a Report page: visits, conversions, revenue, cost and profit grouped up to five levels deep, with rows to expand or double-click to drill into, filters, saved views, custom columns, a CSV download, and the whole view in a link you can share.
+
+### Changed
+
+- Each brand has a reporting time zone. Attribution and paid ads reports count days in it (with `?timezone=` for one report), and tracker caps and path rules by day or hour follow the brand's midnight. Ad platforms' own numbers stay in their accounts' time zones.
+- Insights, dashboards, site analytics, email reports and the digest now count days in the brand's reporting time zone, so "today" and a chart's days are the brand's. Periods stay whole across daylight-saving changes, and `?timezone=` reads any of them in another zone.
+- Link orders can now target article and product pages: a new Targets tab suggests pages from stored competitor data, you tick the ones to use, and each order gets a primary anchor from SE Ranking plus an optional second anchor (brand, URL, or another keyword).
+
+### Upgrading
+
+- runs migration 0538.
+- runs migration 0541.
+- runs migration 0539.
+
 ## [0.93.0] - 2026-11-12
 
 ### Added

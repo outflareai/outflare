@@ -154,7 +154,13 @@ archived.
   `conversion_events`. Each brand has its own; the workspace route is
   deprecated and acts on the first brand.
 
-Each takes `from`, `to`, `model`, `brand` and `match`. `match=identified`
+Days are the brand's: `from` and `to` are dates in its reporting time zone
+(`timezone` on the brand, UTC unless set), and `to` defaults to its today.
+`?timezone=` reads one report in another zone, such as `America/New_York`;
+reports across brands use UTC. Stored times never change, so changing the
+zone regroups past days.
+
+Each takes `from`, `to`, `timezone`, `model`, `brand` and `match`. `match=identified`
 keeps only the visits the person was identified on (signed in, or named by
 a form or an identify call) and the credit on them: visits known only by
 the browser's cookie are left out, and so are conversions that matched

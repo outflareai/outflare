@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -44,9 +45,15 @@ func dashboardsDigest(ctx context.Context, q digests.Querier, ws, brand string, 
 	if err != nil {
 		return out, err
 	}
-	// The digest's period, as fixed dates (to is inclusive).
-	rng := &dateRange{From: p.Start.UTC().Format(time.DateOnly), To: p.End.UTC().Add(-time.Second).Format(time.DateOnly)}
 	for _, d := range list {
+		// The digest's period, as fixed dates in the brand's reporting time
+		// zone (to is inclusive).
+		var tz string
+		if err := q.QueryRow(ctx, `SELECT timezone FROM brands WHERE id = $1`, d.brand).Scan(&tz); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return out, err
+		}
+		loc := zone(tz)
+		rng := &dateRange{From: p.Start.In(loc).Format(time.DateOnly), To: p.End.In(loc).Add(-time.Second).Format(time.DateOnly)}
 		tiles, err := q.Query(ctx, `SELECT i.name, i.spec FROM dashboard_tiles t JOIN insights i ON i.id = t.insight_id
 			WHERE t.dashboard_id = $1 AND i.kind = 'trend' ORDER BY t.y, t.x, t.created_at LIMIT $2`, d.id, digestTiles)
 		if err != nil {

@@ -204,7 +204,13 @@ func (s *Server) updateAttributionSettings(w http.ResponseWriter, r *http.Reques
 // attributionFilter is what every attribution report reads: from and to
 // (the last 28 days by default), model (the workspace's), brand.
 type attributionFilter struct {
-	from, to string
+	// from and to are the report's first and last days, and start and end
+	// when they begin and when the day after to begins in the report's
+	// time zone (the brand's, B4a): timestamps are compared with those.
+	from, to   string
+	start, end time.Time
+	// loc is the report's time zone.
+	loc *time.Location
 	// ref is the model as asked for (a built-in id, a model's key or
 	// key@version); model is the id its credits are stored under, and
 	// version the workspace model's version, if it is one.
@@ -313,7 +319,29 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 	if ref == "" {
 		ref = settings.Model
 	}
+	// Days are the brand's (B4a), or ?timezone='s; UTC across brands.
+	loc := time.UTC
+	if id := oneBrand(brand); id != "" {
+		if loc, err = s.brandZone(r.Context(), accessFrom(r.Context()).WorkspaceID, id); err != nil {
+			s.internal(w, r, err)
+			return attributionFilter{}, false
+		}
+	}
+	if v := q.Get("timezone"); v != "" {
+		if !validTimezone(v) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "timezone is an IANA time zone, such as Europe/Berlin")
+			return attributionFilter{}, false
+		}
+		loc = zone(v)
+	}
+	if q.Get("to") == "" {
+		to = civilDay(time.Now(), loc)
+		if q.Get("from") == "" {
+			from = to.AddDate(0, 0, -27)
+		}
+	}
 	f := attributionFilter{from: from.Format(time.DateOnly), to: to.Format(time.DateOnly), ref: ref, settings: settings, brand: brand,
+		start: dayStart(from, loc), end: dayStart(to.AddDate(0, 0, 1), loc), loc: loc,
 		identified: match == "identified" || match == "signed_in", signedIn: match == "signed_in"}
 	model, version, err := attribution.Resolve(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, groupBrand(brand), ref)
 	if errors.Is(err, attribution.ErrUnknownModel) && q.Get("model") == "" {
@@ -405,7 +433,7 @@ func moneyList(m map[string]float64) []money {
 // for each group.
 func (s *Server) creditRows(ctx context.Context, ws string, f attributionFilter, join, keys, where string, args []any,
 	add func(key []any, name string, weight float64, currency *string, value *float64) error) error {
-	args = append([]any{ws, f.from, f.to, f.model}, args...)
+	args = append([]any{ws, f.start, f.end, f.model}, args...)
 	// Only credit on a visit the person was identified on, at the
 	// filter's level.
 	j, w := f.creditSQL()
@@ -413,7 +441,7 @@ func (s *Server) creditRows(ctx context.Context, ws string, f attributionFilter,
 	where += w
 	sql := `SELECT ` + keys + `, c.name, sum(cr.weight)::float8, c.currency, sum(cr.weight * c.value_minor)::float8
 		FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id` + join + `
-		WHERE cr.workspace_id = $1 AND cr.model = $4 AND c.occurred_at >= $2::date AND c.occurred_at < $3::date + 1` + where +
+		WHERE cr.workspace_id = $1 AND cr.model = $4 AND c.occurred_at >= $2 AND c.occurred_at < $3` + where +
 		f.brand.sql(`c.brand_id`, &args) + `
 		GROUP BY ` + keys + `, c.name, c.currency`
 	rows, err := s.pool.Query(ctx, sql, args...)
@@ -471,9 +499,9 @@ func (s *Server) attributionChannels(w http.ResponseWriter, r *http.Request) {
 		return rows[ch]
 	}
 
-	args := []any{a.WorkspaceID, f.from, f.to}
+	args := []any{a.WorkspaceID, f.start, f.end}
 	vq, err := s.pool.Query(ctx, `SELECT channel, count(*)::int FROM site_sessions
-		WHERE workspace_id = $1 AND started_at >= $2::date AND started_at < $3::date + 1`+f.visitsSQL("")+f.brand.sql(`brand_id`, &args)+`
+		WHERE workspace_id = $1 AND started_at >= $2 AND started_at < $3`+f.visitsSQL("")+f.brand.sql(`brand_id`, &args)+`
 		GROUP BY channel`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -513,9 +541,9 @@ func (s *Server) attributionChannels(w http.ResponseWriter, r *http.Request) {
 	// Cost: spend the workspace recorded against a channel. Spend with no
 	// channel, or shared across channels, is shown on its own.
 	cost := map[string]map[string]float64{}
-	args = []any{a.WorkspaceID, f.from, f.to}
+	args = []any{a.WorkspaceID, f.start, f.end}
 	cq, err := s.pool.Query(ctx, `SELECT channel, currency, sum(amount_cents)::float8 FROM spend_entries
-		WHERE workspace_id = $1 AND amount_cents IS NOT NULL AND occurred_at >= $2::date AND occurred_at < $3::date + 1`+f.brand.sql(`brand_id`, &args)+`
+		WHERE workspace_id = $1 AND amount_cents IS NOT NULL AND occurred_at >= $2 AND occurred_at < $3`+f.brand.sql(`brand_id`, &args)+`
 		GROUP BY channel, currency`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -616,9 +644,9 @@ func (s *Server) attributionCampaigns(w http.ResponseWriter, r *http.Request) {
 		}
 		return rows[k]
 	}
-	args := []any{a.WorkspaceID, f.from, f.to, channel, tracked}
+	args := []any{a.WorkspaceID, f.start, f.end, channel, tracked}
 	vq, err := s.pool.Query(ctx, `SELECT channel, source, campaign, tracking_campaign_id::text, `+visitContent+`, count(*)::int FROM site_sessions
-		WHERE workspace_id = $1 AND started_at >= $2::date AND started_at < $3::date + 1 AND channel <> '' AND ($4 = '' OR channel = $4)
+		WHERE workspace_id = $1 AND started_at >= $2 AND started_at < $3 AND channel <> '' AND ($4 = '' OR channel = $4)
 		  AND ($5 = '' OR tracking_campaign_id::text = $5)`+f.visitsSQL("")+
 		f.brand.sql(`brand_id`, &args)+`
 		GROUP BY 1, 2, 3, 4, 5`, args...)
@@ -763,11 +791,11 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 	if f.identified {
 		matchSQL = ` AND c.matched_by = 'record'`
 	}
-	args := []any{a.WorkspaceID, f.from, f.to, f.model, name, channel, recordID, before, limit}
+	args := []any{a.WorkspaceID, f.start, f.end, f.model, name, channel, recordID, before, limit}
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.event_id::text, c.name, c.record_id::text, c.brand_id::text, c.occurred_at, c.value_minor, c.currency, c.touches, c.matched_by
 		FROM attribution_conversions c
-		WHERE c.workspace_id = $1 AND c.occurred_at >= $2::date AND c.occurred_at < $3::date + 1
+		WHERE c.workspace_id = $1 AND c.occurred_at >= $2 AND c.occurred_at < $3
 		  AND ($5 = '' OR c.name = $5) AND ($7 = '' OR c.record_id::text = $7)
 		  AND ($6 = '' OR EXISTS (SELECT 1 FROM attribution_credits cr WHERE cr.event_id = c.event_id AND cr.model = $4 AND cr.channel = $6))
 		  AND ($8::timestamptz IS NULL OR c.occurred_at < $8)`+matchSQL+f.brand.sql(`c.brand_id`, &args)+`

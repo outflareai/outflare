@@ -64,6 +64,10 @@ import { WebsiteTracking } from "./pages/WebsiteTracking";
 import { Flags } from "./pages/Flags";
 import { ABTests } from "./pages/ABTests";
 import { CampaignLinks } from "./pages/CampaignLinks";
+import { TrackerReport } from "./pages/TrackerReport";
+import { TrackerCampaigns } from "./pages/TrackerCampaigns";
+import { TrackerFlows } from "./pages/TrackerFlows";
+import { TrackerLanders, TrackerOffers } from "./pages/TrackerOffers";
 import { Channels } from "./pages/Channels";
 import { Funnels } from "./pages/Funnels";
 import { Trends } from "./pages/Trends";
@@ -110,6 +114,7 @@ import { Partners } from "./pages/Partners";
 import { Visitors } from "./pages/Visitors";
 import { SEOOverview } from "./pages/SEOOverview";
 import { AIVisibility } from "./pages/ai-visibility/overview";
+import { AIAnswerShare } from "./pages/AIAnswerShare";
 import { AIQuestions } from "./pages/ai-visibility/questions";
 import { AIAccuracy, AICompetitors, AISources, AITraffic } from "./pages/ai-visibility/more";
 import { AIVisibilitySettings } from "./pages/ai-visibility/settings";
@@ -689,6 +694,11 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "dashboards" && <Dashboards key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
         {ready && ws && tab === "channels" && <Channels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "links" && <CampaignLinks key={ws.id} ws={ws.id} canManage={writer} />}
+        {ready && ws && tab === "tracker" && <TrackerReport key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "tracker-campaigns" && <TrackerCampaigns key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
+        {ready && ws && tab === "tracker-offers" && <TrackerOffers key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "tracker-landers" && <TrackerLanders key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "tracker-flows" && <TrackerFlows key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
         {ready && ws && tab === "tracking" && <WebsiteTracking key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "ideal-customers" && <IdealCustomers key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "brand-accounts" && <BrandAccounts key={ws.id} ws={ws.id} canManage={can("accounts.manage")} />}
@@ -700,6 +710,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "keywords" && <Keywords key={ws.id} ws={ws.id} go={setTab} canManage={can("seo.manage")} />}
         {ready && ws && tab === "organic-conversions" && <OrganicConversions key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-visibility" && <AIVisibility key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} item={item} />}
+        {ready && ws && tab === "ai-answer-share" && <AIAnswerShare key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-questions" && <AIQuestions key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} item={item} />}
         {ready && ws && tab === "ai-competitors" && <AICompetitors key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-sources" && <AISources key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}

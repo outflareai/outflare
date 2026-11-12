@@ -366,6 +366,7 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 		txid = click.key + ":" + in.typ
 	}
 	var offerTotal int64 = -1
+	var offerDay string
 	// First-party fraud signals (B7a): the click's, and a conversion too
 	// soon after it. Flagged, never refused.
 	reasons := fraud.ConversionReasons(click.fraud, click.at, in.at)
@@ -430,11 +431,17 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 		}
 		res.Outcome = "accepted"
 		// A conversion counts against its offer's daily cap, unless declined.
+		// It counts on the brand's day (B4a), as the offer's clicks do.
 		if click.offer != nil && in.status != "declined" {
+			var tz string
+			if err := tx.QueryRow(ctx, `SELECT timezone FROM brands WHERE id = $1`, src.brand).Scan(&tz); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			offerDay = capDay(in.at, zone(tz))
 			err := tx.QueryRow(ctx, `INSERT INTO tracker_offer_days (offer_id, workspace_id, brand_id, day, conversions)
 				SELECT id, workspace_id, brand_id, $2::date, 1 FROM tracker_offers WHERE id = $1
 				ON CONFLICT (offer_id, day) DO UPDATE SET conversions = tracker_offer_days.conversions + 1
-				RETURNING conversions`, *click.offer, capDay(in.at)).Scan(&offerTotal)
+				RETURNING conversions`, *click.offer, offerDay).Scan(&offerTotal)
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
@@ -465,7 +472,7 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 		metrics.TrackerFraudFlag("conversion", fraud.FastConversion)
 	}
 	if err == nil && offerTotal >= 0 {
-		s.caps.seed(conversionCapKey(*click.offer), capDay(in.at), offerTotal)
+		s.caps.seed(conversionCapKey(*click.offer), offerDay, offerTotal)
 	}
 	return res, err
 }

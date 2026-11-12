@@ -59,6 +59,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_tracker_source_postbacks_total` | `outcome` (`queued`, `filtered`, `sent`, `retried`, `rejected`, `unreachable`, `invalid`) | Tracker conversions sent back to traffic sources' postback URLs, by what happened. |
 | `outflare_tracker_fraud_flags_total` | `subject` (`click`, `conversion`), `reason` (`datacenter_network`, `repeat_click`, `fast_conversion`) | Tracker clicks and conversions a first-party fraud signal flagged. |
 | `outflare_tracker_weight_suggestions_seconds` | `outcome` (`success`, `error`) | Time to work out a link's or flow's suggested weights. |
+| `outflare_report_drilldown_seconds` | `outcome` (`success`, `error`) | Time to answer one drill-down report. |
 | `outflare_tracker_lander_clicks_total` | `outcome` (`routed`, `fallback`, `unknown_click`, `wrong_domain`, `error`) | Clicks on landers' calls to action (`/click`), by where they went. |
 | `outflare_tracker_conversion_rows_total` | `via` (`pixel`, `api`, `csv`), `outcome` | Tracker conversions from pixels and uploads, by how they came and what happened. |
 | `outflare_redirect_routes_total` | `outcome` (`path`, `destination`, `fallback`, `shared_domain`) | Clicks on redirect links with destinations, by where they went: a rule-based path's destination, one of the default destinations, the link's own page because every destination was capped or stopped, or the link's own page because the click came on the shared domain, where tracker features are off. A cap reached is normal, so this has a panel and no alert. |
@@ -256,6 +257,8 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareTrackerSuspectClicksHigh` (info): over half of the tracker clicks in 30 minutes were flagged suspect (a hosting network or repeat clicks).
 - `OutflareTrackerWeightSuggestionsSlow` (warning): suggested weights take over 5 seconds for the slowest 5% of links and flows.
 - `OutflareTrackerWeightSuggestionsFailing` (warning): suggested weights failed for 15 minutes.
+- `OutflareDrilldownReportSlow` (warning): the drill-down report takes over 10 seconds for the slowest 5%.
+- `OutflareDrilldownReportFailing` (warning): the drill-down report failed for 15 minutes.
 - `OutflareTrackerLanderClicksFailing` (warning): lander clicks (`/click`) have failed for 10 minutes, so visitors on landers reach the fallback page instead of an offer.
 - `OutflareGeoFilesStale` (warning): a server's DB-IP city or network file is over 40 days old, so new visits and clicks get older city and network data.
 - `OutflareGeoDownloadsFailing` (info): DB-IP file downloads failed at every check for a day; the files in use stay until they're stale.

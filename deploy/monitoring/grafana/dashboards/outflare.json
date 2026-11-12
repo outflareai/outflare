@@ -8010,6 +8010,82 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Time to answer the drill-down report, and failures",
+      "description": "How long the drill-down report takes (a brand's visits, credited conversions and spend over the range, grouped by up to five levels): the median and 95th percentile, and failures per minute. Normal is a second or two; it grows with the range and the brand's visits. Slow answers mean the visit or credit queries need an index or a narrower range; failures mean an error, with its request id in the log.",
+      "id": 1073,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 560,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(outflare_report_drilldown_seconds_bucket{job=\"$job\"}[15m])))",
+          "legendFormat": "median",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_report_drilldown_seconds_bucket{job=\"$job\"}[15m])))",
+          "legendFormat": "95th percentile",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(outflare_report_drilldown_seconds_count{job=\"$job\",outcome=\"error\"}[5m])) * 60",
+          "legendFormat": "failures per minute",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failures per minute"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Ad tracking health (paid clicks arriving on sites)",
       "id": 143,

@@ -75,6 +75,9 @@ type Trend struct {
 	Formula string `json:"formula,omitempty"`
 	// Compare adds the same numbers for the period just before.
 	Compare bool `json:"compare,omitempty"`
+	// Location is the time zone days, weeks and months are in: the
+	// brand's reporting time zone (B4a), UTC when nil.
+	Location *time.Location `json:"-"`
 }
 
 // MaxSeries is how many series one trend has.
@@ -277,7 +280,7 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 	pWS, pBrand := a.add(ws), a.add(brand)
 	pFrom, pTo := a.add(t.From), a.add(t.To)
 	c.from, c.to = len(a.list)-2, len(a.list)-1
-	pInterval := a.add(t.Interval)
+	pInterval, pZone := a.add(t.Interval), a.add(zoneName(t.Location))
 	var parts []string
 	for i, s := range t.Series {
 		conv, err := loadConversion(ctx, q, ws, brand, s.Kind, s.Conversion, fmt.Sprintf("series[%d]", i))
@@ -287,7 +290,7 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 		c.labels = append(c.labels, s.DefaultLabel(conv.Name))
 		c.currency = append(c.currency, "")
 		if s.Kind == KindAd {
-			parts = append(parts, adSeries(i, s, t.Breakdown, pWS, pBrand, pFrom, pTo, pInterval, a))
+			parts = append(parts, adSeries(i, s, t.Breakdown, pWS, pBrand, pFrom, pTo, pInterval, pZone, a))
 			if s.Measure == "spend" {
 				c.currency[i] = "?"
 			}
@@ -321,7 +324,7 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 		}
 		// Every row carries its period, its person and its value; the
 		// outer query adds them up per period and over the range.
-		row := `SELECT ` + strconv.Itoa(i) + ` AS i, date_trunc(` + pInterval + `, ` + src.ts + ` AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS p, ` +
+		row := `SELECT ` + strconv.Itoa(i) + ` AS i, date_trunc(` + pInterval + `, ` + src.ts + ` AT TIME ZONE ` + pZone + `) AT TIME ZONE ` + pZone + ` AS p, ` +
 			bk + ` AS bk, ` + src.actor + ` AS actor, `
 		if val == "" {
 			row += `NULL::float8 AS v`
@@ -345,7 +348,7 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 }
 
 // adSeries is the ad networks' daily numbers as a series.
-func adSeries(i int, s Series, breakdown, pWS, pBrand, pFrom, pTo, pInterval string, a *args) string {
+func adSeries(i int, s Series, breakdown, pWS, pBrand, pFrom, pTo, pInterval, pZone string, a *args) string {
 	connector := ""
 	if s.Network != "" {
 		n, _ := networkByID(s.Network)
@@ -375,18 +378,18 @@ func adSeries(i int, s Series, breakdown, pWS, pBrand, pFrom, pTo, pInterval str
 		bk = `left(e.name, 200)`
 	}
 	return `SELECT ` + strconv.Itoa(i) + ` AS i, GROUPING(p)::int AS gp, p, bk, sum(v) AS v, CASE WHEN count(DISTINCT cur) = 1 THEN min(cur) ELSE 'mixed' END AS cur FROM (
-		SELECT date_trunc(` + pInterval + `, m.day::timestamp) AT TIME ZONE 'UTC' AS p, ` + bk + ` AS bk, ` + val + ` AS v, ` + cur + ` AS cur
+		SELECT date_trunc(` + pInterval + `, m.day::timestamp) AT TIME ZONE ` + pZone + ` AS p, ` + bk + ` AS bk, ` + val + ` AS v, ` + cur + ` AS cur
 		FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
-		JOIN ad_metrics_daily m ON m.ad_entity_id = e.id AND m.day >= ` + pFrom + `::date AND m.day < ` + pTo + `::date
+		JOIN ad_metrics_daily m ON m.ad_entity_id = e.id AND m.day >= (` + pFrom + ` AT TIME ZONE ` + pZone + `)::date AND m.day < (` + pTo + ` AT TIME ZONE ` + pZone + `)::date
 		WHERE e.workspace_id = ` + pWS + ` AND e.level = 'campaign' AND COALESCE(e.brand_id, a.brand_id) = ` + pBrand + `
 			AND (` + a.add(connector) + ` = '' OR a.connector = ` + a.add(connector) + `)
 			AND (` + a.add(s.Campaign) + ` = '' OR strpos(lower(e.name), lower(` + a.add(s.Campaign) + `)) > 0)
 		GROUP BY 1, 2, m.currency) r GROUP BY GROUPING SETS ((i, p, bk), (i, bk))`
 }
 
-// periods lists the interval starts between from and to.
-func periods(from, to time.Time, interval string) []time.Time {
-	start := truncate(from, interval)
+// periods lists the interval starts between from and to, in loc.
+func periods(from, to time.Time, interval string, loc *time.Location) []time.Time {
+	start := truncate(from, interval, loc)
 	var out []time.Time
 	for p := start; p.Before(to); p = next(p, interval) {
 		out = append(out, p)
@@ -394,17 +397,38 @@ func periods(from, to time.Time, interval string) []time.Time {
 	return out
 }
 
-func truncate(t time.Time, interval string) time.Time {
-	t = t.UTC()
+// truncate is the start of t's day, week (from Monday, as Postgres's) or
+// month in loc (UTC when nil).
+func truncate(t time.Time, interval string, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	t = t.In(loc)
 	switch interval {
 	case "week":
-		d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+		d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
 		// Postgres weeks start on Monday.
 		return d.AddDate(0, 0, -((int(d.Weekday()) + 6) % 7))
 	case "month":
-		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
 	}
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+}
+
+// zoneOr is loc, UTC when nil.
+func zoneOr(loc *time.Location) *time.Location {
+	if loc == nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// zoneName is the Postgres name of loc, UTC when nil.
+func zoneName(loc *time.Location) string {
+	if loc == nil {
+		return "UTC"
+	}
+	return loc.String()
 }
 
 func next(t time.Time, interval string) time.Time {
@@ -443,7 +467,7 @@ func (c *CompiledTrend) run(ctx context.Context, q Querier, from, to time.Time) 
 		return TrendResult{}, err
 	}
 	defer rows.Close()
-	ps := periods(from, to, c.t.Interval)
+	ps := periods(from, to, c.t.Interval, c.t.Location)
 	n := len(c.t.Series)
 	blank := func() []SeriesResult {
 		out := make([]SeriesResult, n)

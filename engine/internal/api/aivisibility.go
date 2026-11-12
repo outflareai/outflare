@@ -30,6 +30,7 @@ import (
 func (s *Server) routesAIVisibility(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
 	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility", s.onBrand(read, s.getAIVisibility))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-answer-share", s.onBrand(read, s.getAIAnswerShare))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-visibility", s.inBrand(read, s.getAIVisibility))
 	// Settings are the brand's; the workspace route acts on ?brand= or the
 	// first brand.

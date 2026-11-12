@@ -97,6 +97,13 @@ export type UiEvent =
   | "ui.ads_shadow_viewed" // Paid ads: the "What the rules would have done" section opened (rows)
   | "ui.ads_screen_opened" // Paid ads: a screen of the page opened (screen)
   | "ui.ads_report_downloaded" // Paid ads: a report table saved as CSV (report, rows)
+  | "ui.report_grouped" // Tracker report: the group-by levels changed (levels)
+  | "ui.report_filtered" // Tracker report: a filter added (not)
+  | "ui.report_sorted" // Tracker report: sorted by a column (metric, or custom)
+  | "ui.report_drilled" // Tracker report: a row drilled into (level)
+  | "ui.report_downloaded" // Tracker report: saved as CSV (levels)
+  | "ui.report_view_opened" // Tracker report: a saved view opened (shared, mine)
+  | "ui.report_columns_changed" // Tracker report: custom columns changed (custom)
   | "ui.ads_range_changed" // Paid ads: the date range changed (days, custom)
   | "ui.funnel_people_opened" // the people behind a funnel step or drop-off opened (dropped, breakdown)
   | "ui.funnel_correlation_opened" // what converters did differently asked for on a funnel

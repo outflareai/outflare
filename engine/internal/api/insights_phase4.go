@@ -44,7 +44,12 @@ func (s *Server) saveFunnelPeople(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	f, err := in.Funnel.funnel(start)
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	f, err := in.Funnel.funnel(start.In(loc))
 	if err == nil && f.By == insights.ByCompany {
 		err = insights.Invalid("a company funnel's rows are companies: lists hold people, so save a funnel by person")
 	}
@@ -135,7 +140,12 @@ func (s *Server) funnelCorrelation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	f, err := in.Funnel.funnel(start)
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	f, err := in.Funnel.funnel(start.In(loc))
 	var res insights.CorrelationResult
 	if err == nil {
 		err = s.readInsight(r.Context(), func(tx pgx.Tx) error {
@@ -191,7 +201,12 @@ func (s *Server) runPaths(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	p, err := in.paths(start)
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	p, err := in.paths(start.In(loc))
 	var res insights.PathsResult
 	if err == nil {
 		err = s.readInsight(r.Context(), func(tx pgx.Tx) error {
@@ -232,9 +247,13 @@ func scanAnnotation(row pgx.Row) (annotationView, error) {
 func (s *Server) listAnnotations(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	loc, err := s.brandZone(r.Context(), a.WorkspaceID, a.Brand)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	today := civilDay(time.Now(), loc)
 	from, to := today.AddDate(-1, 0, 0), today
-	var err error
 	if v := q.Get("from"); v != "" {
 		if from, err = time.Parse(time.DateOnly, v); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "from is a date (YYYY-MM-DD)")

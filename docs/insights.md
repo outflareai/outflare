@@ -33,6 +33,13 @@ Filters use `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `contains`, `not_contai
 
 ## Options
 
+Every insight counts days, weeks and months in the brand's reporting time
+zone (`timezone` on the brand, UTC unless set): a preset's "today" is the
+brand's, a `from`/`to` date is the brand's day, and a period's `start` carries
+the brand's offset (`2026-10-26T00:00:00+01:00`). `?timezone=` on a run reads
+it in another zone. Saved insights, dashboard tiles, shared dashboards, alerts
+on a number and the digest use the brand's zone too.
+
 - `date_range`: when people did step 1. A `preset` (`today`, `yesterday`, `last_7_days` … `last_365_days`, `this_month`, `last_month`, `this_year`) moves with today, so a saved funnel stays current; or fixed `from` and `to` dates. Up to 366 days. Default: the last 30 days.
 - `breakdown`: split every step by a property of step 1, such as `utm_campaign` or `network`. The 25 largest groups are shown and the rest are `$other`.
 - **By A/B test version.** `experiment:<flag key>` (in a breakdown or a filter) is the version of that [A/B test](ab-tests.md) each person was first shown, from the website script's Experiment Viewed, or empty when they weren't in the test. Split a funnel by it to see where each version wins or loses people, or keep a trend to one version with a filter such as `{"property": "experiment:pricing-headline", "op": "eq", "value": "b"}`. In the app, pick the test under **Break down by → A/B test version**. It works for every step kind except ad spend.

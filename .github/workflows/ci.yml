@@ -375,6 +375,15 @@ jobs:
       - name: Paid ads page against mocked API answers
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:ads
+      - name: Tracker report page against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:tracker-report
+      - name: Tracker campaigns page against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:tracker-campaigns
+      - name: Tracker offers, landers and flows pages against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:tracker-library
       - name: Importing leads into a list
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:lead-import

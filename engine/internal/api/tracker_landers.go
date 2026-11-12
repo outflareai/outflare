@@ -172,11 +172,12 @@ func (s *Server) landerClick(w http.ResponseWriter, r *http.Request) {
 	uncounted := bot || len(c.fraud) > 0
 	var d *linkDestination
 	next := onward(list)
-	if n > 0 && n <= len(next) && s.caps.open(next[n-1], capDay(now)) {
-		d = s.take(next[n-1], capDay(now), uncounted)
+	day := capDay(now, t.loc)
+	if n > 0 && n <= len(next) && s.caps.open(next[n-1], day) {
+		d = s.take(next[n-1], day, uncounted)
 	}
 	if d == nil {
-		d = s.route(next, now, uncounted)
+		d = s.route(next, day, uncounted)
 	}
 	link := t.link
 	outcome := "fallback"
@@ -187,7 +188,7 @@ func (s *Server) landerClick(w http.ResponseWriter, r *http.Request) {
 		link.URL = tokens.ExpandKnown(link.URL, destinationValues(t, c.buffered(), formatMicros(c.cost)), trafficsources.DestinationTokens)
 	}
 	target := withParam(tagLink(t.campaign, link), clickKeyParam, c.key)
-	if err := s.saveLanderClick(ctx, c, n, d, bot, uncounted, now); err != nil {
+	if err := s.saveLanderClick(ctx, c, n, d, bot, uncounted, now, day); err != nil {
 		// The person still goes on; the lander click is lost.
 		track.Fail(ctx, s.log, track.Event{Name: "tracker_lander.click_failed", Surface: "system"}, "internal", err)
 		outcome = "error"
@@ -213,12 +214,12 @@ func (c landerSource) buffered() bufferedClick {
 // saveLanderClick keeps a lander click, gives the click the offer it went
 // on to (so its conversions get the offer's terms), and counts it against
 // the destination's and the offer's daily caps.
-func (s *Server) saveLanderClick(ctx context.Context, c landerSource, cta int, d *linkDestination, bot, uncounted bool, now time.Time) error {
+// day is the brand's day the caps count it on (capDay).
+func (s *Server) saveLanderClick(ctx context.Context, c landerSource, cta int, d *linkDestination, bot, uncounted bool, now time.Time, day string) error {
 	var dest, offer string
 	if d != nil {
 		dest, offer = d.id, d.offerID
 	}
-	day := capDay(now)
 	var settles []destinationSettle
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tracker_lander_clicks (workspace_id, brand_id, lander_id, click_id, click_key, cta, destination_id, offer_id,
@@ -301,7 +302,8 @@ type trackerLanderView struct {
 	// Script is the tag the lander's page carries, which adds the click id
 	// to those links.
 	Script string `json:"script"`
-	// LanderClicksToday are clicks on its calls to action today (UTC),
+	// LanderClicksToday are clicks on its calls to action today (in the
+	// brand's time zone),
 	// without link scanners and previews.
 	LanderClicksToday int64 `json:"lander_clicks_today"`
 	// Destinations is how many link destinations send to it.
@@ -315,7 +317,7 @@ type trackerLanderView struct {
 
 const landerSelect = `
 	SELECT x.id::text, x.brand_id::text, x.name, x.url, x.ctas, x.status,
-	       (SELECT count(*) FROM tracker_lander_clicks c WHERE c.lander_id = x.id AND c.clicked_at >= $3::date AND NOT c.likely_bot),
+	       (SELECT count(*) FROM tracker_lander_clicks c WHERE c.lander_id = x.id AND c.clicked_at >= $3::timestamptz AND NOT c.likely_bot),
 	       (SELECT count(*) FROM tracking_link_destinations d WHERE d.lander_id = x.id AND d.removed_at IS NULL)::int, x.created_at, x.updated_at
 	FROM tracker_landers x WHERE x.workspace_id = $1 AND x.brand_id = $2`
 
@@ -353,7 +355,8 @@ func (s *Server) listLanders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	rows, err := s.pool.Query(ctx, landerSelect+` AND ($4 = 'all' OR x.status = $4) ORDER BY lower(x.name)`, a.WorkspaceID, a.Brand, capDay(time.Now()), status)
+	_, todayStart := s.brandToday(ctx)
+	rows, err := s.pool.Query(ctx, landerSelect+` AND ($4 = 'all' OR x.status = $4) ORDER BY lower(x.name)`, a.WorkspaceID, a.Brand, todayStart, status)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -383,7 +386,8 @@ func (s *Server) writeLander(w http.ResponseWriter, r *http.Request, status int,
 	var v trackerLanderView
 	err := errNotFound
 	if validUUID(id) {
-		v, err = scanLander(s.pool.QueryRow(ctx, landerSelect+` AND x.id = $4`, a.WorkspaceID, a.Brand, capDay(time.Now()), id))
+		_, todayStart := s.brandToday(ctx)
+		v, err = scanLander(s.pool.QueryRow(ctx, landerSelect+` AND x.id = $4`, a.WorkspaceID, a.Brand, todayStart, id))
 	}
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errNotFound) {
 		writeError(w, r, http.StatusNotFound, "not_found", "lander not found")

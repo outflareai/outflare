@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { api, errorMessage } from "../../api";
-import { Badge, Button, Card, Empty, ErrorText, field, toast } from "../../ui";
+import { Badge, Button, Card, Empty, ErrorText, toast } from "../../ui";
 import { dash, idemp, type PageData } from "./shared";
+import { emptyRequestTarget, RequestTarget, requestTargetBody, type RequestTargetValue } from "./RequestTarget";
+import { useTargets } from "./targets";
 
 const filters = [
   ["all", "All"],
@@ -20,7 +22,8 @@ export function Candidates({ data }: { data: PageData }) {
   const [filter, setFilter] = useState<(typeof filters)[number][0]>("all");
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
-  const [target, setTarget] = useState("/");
+  const [target, setTarget] = useState<RequestTargetValue>(emptyRequestTarget);
+  const { suggestions } = useTargets(data.brand, 0);
 
   const list = data.candidates.filter((c) => filter === "all" || c.status === filter);
 
@@ -44,9 +47,9 @@ export function Candidates({ data }: { data: PageData }) {
 
   const request = async (c: (typeof data.candidates)[number]) => {
     if (!data.canManage || !c.donor_profile_id) return;
-    const url = target.trim();
-    if (!url) {
-      setErr("Set a target URL for the request.");
+    const body = requestTargetBody(target);
+    if (!body.target_url && !body.target_id) {
+      setErr("Tick a link target or type a page for the request.");
       return;
     }
     setBusy(c.domain);
@@ -54,7 +57,7 @@ export function Candidates({ data }: { data: PageData }) {
     try {
       const { error } = await api.POST("/v1/brands/{brand}/link-orders", {
         params: { path: { brand: data.brand }, header: idemp() },
-        body: { donor_profile_id: c.donor_profile_id, target_url: url },
+        body: { ...body, donor_profile_id: c.donor_profile_id },
       });
       if (error) throw error;
       toast(`Opened a request for ${c.domain}.`);
@@ -73,10 +76,6 @@ export function Candidates({ data }: { data: PageData }) {
       description="Domains that link to tracked competitors and not to this brand, read from already-saved link gaps. This tab does not call Ahrefs or DataForSEO, and it does not POST /seo-competitors/gaps/links. SE Ranking has no referring-domain report, so it cannot fill this list."
       action={
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
-            Target URL
-            <input className={field} value={target} onChange={(e) => setTarget(e.target.value)} />
-          </label>
           <div className="flex rounded-md border p-0.5">
             {filters.map(([id, label]) => (
               <button
@@ -93,6 +92,7 @@ export function Candidates({ data }: { data: PageData }) {
       }
     >
       {err ? <ErrorText>{err}</ErrorText> : null}
+      {data.canManage ? <div className="mb-3"><RequestTarget brand={data.brand} suggestions={suggestions} value={target} onChange={setTarget} /></div> : null}
       {list.length ? (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-[13px]">

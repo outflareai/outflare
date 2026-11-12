@@ -460,6 +460,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_postback_sources`, `create_postback_source`, `update_postback_source`, `rotate_postback_source` | Where tracker conversions come from: a secret postback URL on the brand's tracking domain per network, with an IP allowlist, click expiry, duplicate policy and the network's template |
 | `list_tracker_conversions` | The click ledger: each conversion a network reported, with the click it credits, its payout and status |
 | `list_flows`, `get_flow`, `create_flow`, `update_flow`, `set_flow_destinations`, `set_flow_paths`, `set_tracking_link_flow` | Reusable paths and destinations that campaign links route by, so one edit changes every link that uses the flow |
+| `get_drilldown_report` | A brand's visits, credited conversions, revenue and ad spend grouped by up to five levels (channel, country, ad ids, day…), with subtotals, profit and ROI |
+| `list_report_views`, `save_report_view`, `update_report_view`, `delete_report_view` | Saved views of the drill-down report (grouping, filters, dates, custom columns), private until shared |
 | `get_tracking_link_weight_suggestions`, `set_tracking_link_weights`, `get_flow_weight_suggestions`, `set_flow_weights` | Suggested weights for a link's or flow's landers, offers and pages from how each did, without bots or suspect clicks, and setting only the weights to apply them |
 | `list_landers`, `get_lander`, `create_lander`, `update_lander`, `list_lander_clicks` | The pages the brand sends tracker clicks to before its offers, their click URLs and script, and every click on their calls to action |
 | `list_affiliate_network_templates` | The affiliate networks and platforms Outflare has templates for: where each takes the click id, and its postback macros |
@@ -607,6 +609,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `start_fix`, `get_fix_autonomy`, `update_fix_autonomy` | Take a fix before changing the site, held for a person unless fix autonomy lets it through, and read or change that setting |
 | `get_digest_settings`, `update_digest_settings`, `list_digests`, `preview_digest`, `send_digest` | A brand's daily or weekly digest: when it is made, who gets it by email through your own provider, and what it says |
 | `get_ai_visibility` | How often AI answers name and recommend each brand, its score against competitors with weekly real changes, the pages they cite, the daily benchmark, and the visits and revenue AI answers bring, by model and week |
+| `get_ai_answer_share` | Share of voice in stored AI answers, by topic, question set and question type, with a weekly trend and citations of compare pages |
 | `get_ai_visibility_questions` | Each tracked question: whether answers name and recommend the brand, by assistant and week by week, the competitors named, and the change since the period before |
 | `get_ai_visibility_placements` | The pages AI answers cite or read when answering the brand's questions, ranked by how much being on each is worth, with the competitors named there, and the brand's own cited pages |
 | `get_ai_visibility_page` | One page AI answers cite, in full: when they first cited it, the questions, the site's ratings, the links to it, and whether it links to or only names the brand and each competitor |
@@ -752,6 +755,7 @@ Paid link orders for a brand: the donor catalog, orders, and a summary of commit
 | `list_link_order_catalog`, `import_link_order_catalog` | The donor catalog. Import accepts a CSV string only; a Google Sheet is not imported. A repeated domain updates the existing profile, and a bad row does not abort the file. |
 | `list_link_orders`, `get_link_order`, `create_link_order` | List or request a paid link order against a catalog donor. |
 | `get_link_roi` | Cost per published link against stored Search Console, ranking and referring-domain changes on the target page, 30, 60 and 90 days around publication |
+| `list_link_order_targets`, `suggest_link_order_targets`, `get_link_order_target_anchors` | Article and product pages to link to: saved (ticked) targets, suggestions from stored competitor keyword gaps and competitor backlinks, and anchor options (primary from stored SE Ranking keywords; second anchor by type: brand, url, or keyword). No paid provider read. `create_link_order` takes `target_id`, the kind, and both anchors. |
 | `list_link_order_candidates`, `add_link_order_candidate_to_catalog` | Referring domains from the already-saved competitor link gap (no paid provider read; SE Ranking cannot feed this list). Add one to the catalog with source=competitor_gap. |
 | `get_link_order_equivalents` | Catalog donors in the same domain-rating band and niche, with the current donor first when it still qualifies. |
 | `get_link_order_summary` | Counts by status, and donor amounts by currency (committed, spent, lost). |

@@ -129,7 +129,7 @@ func (s *Server) attributionCohorts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	args := []any{a.WorkspaceID, f.from, f.to}
+	args := []any{a.WorkspaceID, f.start, f.end}
 	cohort := `WITH firsts AS (
 			SELECT DISTINCT ON (c.record_id) c.record_id, c.event_id, c.occurred_at, c.brand_id
 			FROM attribution_conversions c
@@ -138,7 +138,7 @@ func (s *Server) attributionCohorts(w http.ResponseWriter, r *http.Request) {
 		cohort AS (
 			SELECT f.record_id, cr.channel FROM firsts f
 			JOIN attribution_credits cr ON cr.event_id = f.event_id AND cr.model = 'first_touch' AND cr.position = 0
-			WHERE f.occurred_at >= $2::date AND f.occurred_at < $3::date + 1` + f.brand.sql(`f.brand_id`, &args) + `)`
+			WHERE f.occurred_at >= $2 AND f.occurred_at < $3` + f.brand.sql(`f.brand_id`, &args) + `)`
 	rows := map[string]*cohortRow{}
 	row := func(ch string) *cohortRow {
 		if rows[ch] == nil {

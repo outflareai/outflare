@@ -1652,7 +1652,12 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       description:
         "Visitors, visits, page views, bounce rate and visit length from the brand's own website tracking (site.js), day by day and live (today included), " +
         "with top pages (each with its website), sources, websites, countries and devices. Free, and works without any connected analytics tool.",
-      inputSchema: { brand: brandRef, ...storedRange, website: z.string().optional().describe("Only this website, a host from the websites list such as app.example.com.") },
+      inputSchema: {
+        brand: brandRef,
+        ...storedRange,
+        website: z.string().optional().describe("Only this website, a host from the websites list such as app.example.com."),
+        timezone: z.string().max(64).optional().describe("The time zone the days are in, such as Europe/Berlin. Default: the brand's reporting time zone."),
+      },
       annotations: read,
     },
     ({ brand, ...q }) => callCompact(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/analytics/tracking", { params: { path: { brand: b }, query: q } }))),
@@ -3420,9 +3425,15 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     })
     .describe("Start from a built-in model and change its windows, channels left out, position weights or half-life.");
   const attributionDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
+  const reportTimezone = z
+    .string()
+    .max(64)
+    .optional()
+    .describe("The time zone the days are in, such as Europe/Berlin. Default: the brand's reporting time zone.");
   const attributionRange = {
     from: attributionDay.describe("First day, such as 2026-09-27. Default: 27 days before to."),
-    to: attributionDay.describe("Last day. Default: today."),
+    to: attributionDay.describe("Last day. Default: today in the brand's time zone."),
+    timezone: reportTimezone,
     model: attributionModel,
     match: z
       .enum(["all", "identified", "signed_in"])
@@ -3432,6 +3443,96 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
   // The roll-ups (customers, cohorts, accounts, deals) are still workspace
   // routes, which take a brand filter.
   const attributionBrand = z.string().optional().describe("A brand's id or handle.");
+
+  server.registerTool(
+    "get_drilldown_report",
+    {
+      title: "The drill-down report",
+      description:
+        "A brand's visits, the conversions and revenue credited to them, and ad spend, grouped by up to five levels (such as channel,country or ad_campaign,day), with subtotals. Metrics: visits, visitors, conversions, revenue, cost, profit, roi, roas, cr, epv, cpa, in the brand's currency. Cost is only available grouped by day and one ad level (ad_campaign, ad_adset or ad_ad); cost_note says why when it isn't.",
+      inputSchema: {
+        brand: brandRef,
+        group_by: z.string().optional().describe("Up to five of: channel, source, campaign, utm_source, utm_medium, utm_campaign, utm_term, utm_content, landing_path, referrer_host, country, region, city, isp, asn, language, device, device_brand, os, browser, ad_campaign, ad_adset, ad_ad, ad_placement, tracking_campaign, day, hour, weekday; comma-separated. Default channel."),
+        from: attributionDay.describe("First day, such as 2026-09-27. Default: 27 days before to."),
+        to: attributionDay.describe("Last day. Default: today in the brand's time zone."),
+        timezone: reportTimezone,
+        model: attributionModel,
+        filter: z.array(z.string()).max(50).optional().describe("dimension:value, such as country:US."),
+        exclude: z.array(z.string()).max(50).optional().describe("dimension:value to leave out."),
+        sort: z.string().optional().describe("A metric, - for largest first, such as -revenue. Default -visits."),
+        limit: z.number().int().min(1).max(1000).optional().describe("Rows per parent at each level; 100 when left out."),
+        conversion_time: z.enum(["visit", "conversion"]).optional(),
+        column: z.array(z.string()).max(10).optional().describe("Custom columns as name:formula over the metrics, such as rpv:revenue/visits; each row gets them under metrics.custom."),
+        view: z.string().uuid().optional().describe("A saved view (list_report_views) whose settings fill in what you don't pass."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => callCompact(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/drilldown", { params: { path: { brand: b }, query } }))),
+  );
+
+  const reportViewSpec = z
+    .object({
+      group_by: z.array(z.string()).max(5).optional(),
+      filters: z.array(z.string()).optional().describe("dimension:value"),
+      excludes: z.array(z.string()).optional().describe("dimension:value"),
+      sort: z.string().optional(),
+      limit: z.number().int().min(1).max(1000).optional(),
+      conversion_time: z.enum(["visit", "conversion"]).optional(),
+      model: z.string().optional(),
+      timezone: z.string().optional(),
+      date_range: z.object({ preset: z.string().optional(), from: z.string().optional(), to: z.string().optional() }).optional(),
+      columns: z
+        .array(z.object({ name: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/), formula: z.string().max(200), format: z.enum(["number", "percent", "money"]).optional() }))
+        .max(10)
+        .optional(),
+      display: z.record(z.string(), z.any()).optional().describe("The app's own display settings; leave as read."),
+    })
+    .describe("The drill-down report's settings, named as its query parameters.");
+
+  server.registerTool(
+    "list_report_views",
+    {
+      title: "List saved report views",
+      description: "The brand's shared views of the drill-down report and your own.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/report-views", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "save_report_view",
+    {
+      title: "Save a report view",
+      description: "Save a view of the drill-down report: its grouping, filters, sort, dates and custom columns. Private to you until shared.",
+      inputSchema: { brand: brandRef, name: z.string().max(120), spec: reportViewSpec.optional(), shared: z.boolean().optional() },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/report-views", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_report_view",
+    {
+      title: "Change a report view",
+      description: "Rename a saved view, replace its settings, or share it with the brand's team.",
+      inputSchema: { brand: brandRef, view: z.string().uuid(), name: z.string().max(120).optional(), spec: reportViewSpec.optional(), shared: z.boolean().optional() },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, view, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/report-views/{id}", { params: { path: { brand: b, id: view } }, body }))),
+  );
+
+  server.registerTool(
+    "delete_report_view",
+    {
+      title: "Delete a report view",
+      description: "Delete a saved view of the drill-down report. A shared view can be deleted by its maker or an admin.",
+      inputSchema: { brand: brandRef, view: z.string().uuid() },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ brand, view }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/report-views/{id}", { params: { path: { brand: b, id: view } } }))),
+  );
 
   server.registerTool(
     "get_attribution_settings",
@@ -3647,7 +3748,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "Lifetime value by first channel",
       description:
         "People whose first conversion was between from and to, by the channel that first brought them (first touch), with how many have paid and everything they have paid since, in total and per person.",
-      inputSchema: { from: attributionRange.from, to: attributionRange.to, brand: brandRef },
+      inputSchema: { from: attributionRange.from, to: attributionRange.to, timezone: reportTimezone, brand: brandRef },
       annotations: read,
     },
     ({ brand, ...query }) => call(() => onBrand(withBrand({ brand }).brand ?? "", (b) => gtm.GET("/v1/brands/{brand}/attribution/cohorts", { params: { path: { brand: b }, query } }))),
@@ -5041,6 +5142,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         brand: brandRef,
         from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        timezone: reportTimezone,
         level: z.enum(["campaign", "ad_group", "ad"]).optional(),
         connector: z.string().optional().describe("One network, such as google_ads."),
         account_id: id.optional(),
@@ -5063,6 +5165,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         brand: brandRef,
         from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        timezone: reportTimezone,
         campaign_id: id.optional(),
         customers: z.enum(["all", "new", "returning"]).optional(),
         limit: limit(500),
@@ -5565,6 +5668,23 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       annotations: read,
     },
     ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ai-visibility", { params: { path: { brand: b }, query } }))),
+  );
+
+
+  server.registerTool(
+    "get_ai_answer_share",
+    {
+      title: "Read AI answer share of voice by topic",
+      description:
+        "Mention rate and share of voice from already-stored AI answer runs, rolled up by the question's topic (Untagged when it has none), by question set, and by question type, week by week. " +
+        "Also counts answers that cite a /compare page of the brand or a competitor, after stripping a locale prefix. " +
+        "This does not start a new run or call a paid provider. days defaults to 84 (1 to 365).",
+      inputSchema: { brand: brandRef,
+        days: z.number().int().min(1).max(365).optional().describe("Default 84."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ai-answer-share", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(

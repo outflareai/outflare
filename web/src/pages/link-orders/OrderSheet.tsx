@@ -3,6 +3,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { api, errorMessage } from "../../api";
 import { Badge, Button, ErrorText, field, confirmAction, toast } from "../../ui";
 import { ago } from "../../format";
+import { anchorSourceLabel, kindLabel, secondaryTypeLabel } from "./targets";
 import {
   amountOf,
   approverGate,
@@ -146,6 +147,24 @@ export function OrderSheet({ order, data, onClose }: { order?: LinkOrder; data: 
           <dd>{d?.domain ?? order.domain}</dd>
           <dt className="text-muted-foreground">Target</dt>
           <dd className="break-all font-mono text-[12px]">{order.target_url}</dd>
+          {order.target_kind ? (
+            <>
+              <dt className="text-muted-foreground">Page kind</dt>
+              <dd>{kindLabel[order.target_kind]} · {order.target_choice === "suggested" ? "suggested" : "picked by hand"}</dd>
+            </>
+          ) : null}
+          {order.anchor_primary ? (
+            <>
+              <dt className="text-muted-foreground">Anchor</dt>
+              <dd>{order.anchor_primary} <span className="text-muted-foreground">({anchorSourceLabel[order.anchor_primary_source] || "typed"})</span></dd>
+            </>
+          ) : null}
+          {order.anchor_secondary ? (
+            <>
+              <dt className="text-muted-foreground">Second anchor</dt>
+              <dd>{order.anchor_secondary} <span className="text-muted-foreground">({secondaryTypeLabel[order.anchor_secondary_type] || order.anchor_secondary_type})</span></dd>
+            </>
+          ) : null}
           <dt className="text-muted-foreground">Type</dt>
           <dd>{slotLabel(order.slot_type)}</dd>
           <dt className="text-muted-foreground">Rel</dt>

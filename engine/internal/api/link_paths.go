@@ -201,16 +201,20 @@ func (f clickFacts) matches(conds []compiledCondition) bool {
 }
 
 // factsFor gathers a click's facts for conditions. Strings are lowercased
-// as conditions' values are; the country is in capitals; times are UTC
-// until brands have a reporting time zone (B4a).
-func factsFor(r *http.Request, c bufferedClick, now time.Time) clickFacts {
+// as conditions' values are; the country is in capitals; the hour and
+// weekday are the brand's, in its reporting time zone (B4a).
+func factsFor(r *http.Request, c bufferedClick, now time.Time, loc *time.Location) clickFacts {
+	if loc == nil {
+		loc = time.UTC
+	}
+	local := now.In(loc)
 	d := c.detail
 	v := map[string]string{
 		"country": d.place.Country, "region": strings.ToLower(d.place.Region), "city": strings.ToLower(d.place.City),
 		"isp": strings.ToLower(d.place.Org), "device": strings.ToLower(d.device), "device_brand": strings.ToLower(d.detail.brand),
 		"os": strings.ToLower(d.os), "os_version": strings.ToLower(d.detail.osVersion), "browser": strings.ToLower(d.browser),
 		"browser_version": strings.ToLower(d.detail.browserVersion), "language": strings.ToLower(d.language),
-		"hour": strconv.Itoa(now.UTC().Hour()), "weekday": weekdays[now.UTC().Weekday()],
+		"hour": strconv.Itoa(local.Hour()), "weekday": weekdays[local.Weekday()],
 	}
 	if d.place.ASN != 0 {
 		v["asn"] = strconv.FormatUint(uint64(d.place.ASN), 10)
@@ -277,20 +281,20 @@ func (s *Server) choose(r *http.Request, t redirectTarget, c bufferedClick, now 
 		return nil, ""
 	}
 	if len(t.paths) > 0 {
-		f := factsFor(r, c, now)
+		f := factsFor(r, c, now, t.loc)
 		if slices.ContainsFunc(t.paths, func(p linkPath) bool { return p.visitor }) {
 			f.returning = s.visitors.returning(t.link.ID, c.ipHash, now)
 		}
 		for _, p := range t.paths {
 			if f.matches(p.conds) {
-				if d := s.route(entry(p.dests), now, c.uncounted()); d != nil {
+				if d := s.route(entry(p.dests), c.day, c.uncounted()); d != nil {
 					routeMetric("path")
 					return d, p.id
 				}
 			}
 		}
 	}
-	if d := s.route(entry(t.dests), now, c.uncounted()); d != nil {
+	if d := s.route(entry(t.dests), c.day, c.uncounted()); d != nil {
 		routeMetric("destination")
 		return d, ""
 	}
@@ -299,7 +303,7 @@ func (s *Server) choose(r *http.Request, t redirectTarget, c bufferedClick, now 
 }
 
 // loadPaths reads a link's or flow's active paths with their destinations.
-func (s *Server) loadPaths(ctx context.Context, o routeOwner, now time.Time) ([]linkPath, error) {
+func (s *Server) loadPaths(ctx context.Context, o routeOwner, day string) ([]linkPath, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id::text, conditions FROM tracking_link_paths
 		WHERE `+o.col+` = $1 AND removed_at IS NULL AND active ORDER BY position, created_at`, o.id)
 	if err != nil {
@@ -322,7 +326,7 @@ func (s *Server) loadPaths(ctx context.Context, o routeOwner, now time.Time) ([]
 		return nil, err
 	}
 	for i := range out {
-		if out[i].dests, err = s.loadDestinationsOf(ctx, o, &out[i].id, now); err != nil {
+		if out[i].dests, err = s.loadDestinationsOf(ctx, o, &out[i].id, day); err != nil {
 			return nil, err
 		}
 	}

@@ -57,9 +57,13 @@ func Defaults() Settings {
 }
 
 // Load reads a brand's settings (the first brand's when brand is empty),
-// or the defaults.
+// or the defaults, in the brand's reporting time zone (B4a).
 func Load(ctx context.Context, q Querier, ws, brand string) (Settings, error) {
 	s := Defaults()
+	if err := q.QueryRow(ctx, `SELECT timezone FROM brands WHERE workspace_id = $1 AND id = COALESCE(NULLIF($2, '')::uuid, outflare_first_brand($1))`,
+		ws, brand).Scan(&s.Timezone); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return s, err
+	}
 	var at time.Time
 	err := q.QueryRow(ctx, `SELECT frequency, weekday, hour, timezone, recipients, provider_id::text, from_address, updated_at
 		FROM digest_settings WHERE workspace_id = $1 AND brand_id = COALESCE(NULLIF($2, '')::uuid, outflare_first_brand($1))`, ws, brand).
@@ -165,7 +169,7 @@ func (s *Service) Run(ctx context.Context) {
 // server that was down for a day doesn't send a pile of stale digests.
 func (s *Service) Tick(ctx context.Context) error {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT b.workspace_id, b.id::text, COALESCE(d.frequency, 'weekly'), COALESCE(d.weekday, 1), COALESCE(d.hour, 8), COALESCE(d.timezone, 'UTC')
+		SELECT b.workspace_id, b.id::text, COALESCE(d.frequency, 'weekly'), COALESCE(d.weekday, 1), COALESCE(d.hour, 8), COALESCE(d.timezone, b.timezone, 'UTC')
 		FROM brands b JOIN workspaces w ON w.id = b.workspace_id LEFT JOIN digest_settings d ON d.workspace_id = b.workspace_id AND d.brand_id = b.id
 		WHERE b.status <> 'archived' AND COALESCE(d.frequency, 'weekly') <> 'off'`)
 	if err != nil {

@@ -62,6 +62,23 @@ Making the same link twice returns the one you already have. Pages must be
 
 ## Redirect links
 
+In the app, campaigns with a traffic source or redirect links are also on
+**Tracker → Campaigns** (`G` then `J`), with their visits, conversions,
+revenue, profit and ROI for the last 7 days. Opening one shows its editor:
+**General** (traffic source, name, redirect mode), **Destination** (the
+campaign's own rule-based paths, each with its landers and offers, their
+weights and share of the clicks, and the suggested weights to apply; or a
+shared flow instead) and **Tracking** (the traffic source's parameters and
+postback), with the campaign URL to paste into the ad network beside them.
+The editor works on the campaign's first redirect link, and makes one when
+it has none. **Tracker → Offers**, **Landers** and **Flows** list the
+brand's [offers](#offers), [landers](#landers) and [flows](#flows) with
+today's clicks and what uses each. An offer opens in a sheet with a token
+picker under its URL, a warning while it can't carry the click id, and
+**Preview** with test values; a lander shows each call to action's click URL
+and the script for its page; a flow opens with the campaign editor's paths,
+and asks before a save that changes more than one link.
+
 By default a link goes straight to the page, and the website tracking
 snippet reads the tags there. Where the snippet can't run, or a long tagged
 address doesn't fit (a bio link, a partner's page, a QR code, a podcast
@@ -294,8 +311,9 @@ Each destination has:
 
 - a **weight**: its share of the clicks against the others' weights (100
   when left out; 0 sends it none);
-- an optional **daily click cap**: how many clicks a day it takes, in UTC
-  until brands have a reporting time zone. A cap of 0 stops it.
+- an optional **daily click cap**: how many clicks a day it takes, counted
+  in the brand's reporting time zone, so it resets at the brand's midnight.
+  A cap of 0 stops it.
 
 When every destination is capped or stopped, clicks go to the link's own
 page, the fallback. Destinations get the campaign's tags and can carry
@@ -328,7 +346,7 @@ Conditions combine with AND, and the values in one condition with OR:
 | `device`, `device_brand`, `os`, `os_version`, `browser`, `browser_version`, `language` | What they're on |
 | `referrer` | The referring site's host, such as `news.example` |
 | `ip` | Addresses or ranges, such as `203.0.113.0/24` |
-| `weekday`, `hour` | `mon` to `sun` and `0` to `23`, UTC until brands have a reporting time zone |
+| `weekday`, `hour` | `mon` to `sun` and `0` to `23`, in the brand's reporting time zone |
 | `visitor` | `unique`, or `returning` within a day. Each server remembers the visitors it saw, by the keyed address hash, so one whose clicks reach different servers can count as new |
 | `field1` to `field20` | The click's custom fields |
 

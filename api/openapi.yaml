@@ -5975,7 +5975,7 @@ paths:
       description: |
         Scope: analytics.read. The pages the link's redirect clicks go to, each chosen in proportion to its weight while
         it has room in its daily click cap, with today's clicks. When every one is capped or stopped, clicks go to the
-        link's own page (fallback_url). Caps count clicks per day in UTC, without link scanners and previews.
+        link's own page (fallback_url). Caps count clicks per day in the brand's reporting time zone, without link scanners and previews.
       tags: [analytics]
       responses:
         "200":
@@ -6169,7 +6169,7 @@ paths:
         combine with AND, and a condition's values with OR. Fields: country (two-letter code), region, city, isp, asn,
         device (desktop, mobile, tablet), device_brand, os, os_version, browser, browser_version, language, referrer (the
         referring site's host), ip (addresses or ranges such as 203.0.113.0/24), weekday (mon to sun) and hour (0 to 23),
-        both UTC, visitor (unique, or returning within a day, as this server saw them), and field1 to field20. Text
+        in the brand's reporting time zone, visitor (unique, or returning within a day, as this server saw them), and field1 to field20. Text
         matches whole values, without regard to case.
       tags: [analytics]
       requestBody:
@@ -6476,6 +6476,142 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TrackerFlow" }
         "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/drilldown:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: getDrilldownReport
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: The drill-down report
+      description: |
+        Scope: analytics.read. The brand's visits, the conversions and revenue credited to them under the attribution
+        model, and ad spend, grouped by up to five levels (`group_by`, comma-separated, in order). Each row has its
+        children (`rows`) and the same metrics, so parents are their children's subtotals; `totals` is the whole range.
+        Dimensions: channel, source, campaign, utm_source, utm_medium, utm_campaign, utm_term, utm_content, landing_path, referrer_host, country, region, city, isp, asn, language, device, device_brand, os, browser, ad_campaign, ad_adset, ad_ad, ad_placement, tracking_campaign, day, hour, weekday. `day`, `hour` and `weekday` are in the report's time zone (the brand's, or `timezone`).
+        Revenue and cost are in the brand's currency, other currencies at the latest exchange rate.
+
+        Cost comes from the ad platforms and splits only by `day` (the ad account's day) and one ad level
+        (`ad_campaign`, `ad_adset` or `ad_ad`); grouped or filtered any other way, cost and the ratios on it are null and
+        `cost_note` says why. Conversions count at the visit's time unless `conversion_time=conversion`.
+        `format=csv` gives the deepest rows, one column per level.
+      tags: [analytics]
+      parameters:
+        - { $ref: "#/components/parameters/AttributionFrom" }
+        - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/ReportTimezone" }
+        - { $ref: "#/components/parameters/AttributionModel" }
+        - { $ref: "#/components/parameters/AttributionMatch" }
+        - { name: group_by, in: query, schema: { type: string, example: "channel,country" }, description: "Up to five dimensions, comma-separated. Default channel." }
+        - { name: filter, in: query, schema: { type: array, items: { type: string } }, style: form, explode: true, allowReserved: true, description: "dimension:value, such as country:US. Values of one dimension are either-or; dimensions all apply." }
+        - { name: exclude, in: query, schema: { type: array, items: { type: string } }, style: form, explode: true, allowReserved: true, description: "dimension:value to leave out." }
+        - { name: sort, in: query, schema: { type: string, example: -revenue }, description: "A metric (visits, visitors, conversions, revenue, cost, profit, roi, roas, cr, epv, cpa); - for largest first. Default -visits." }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }, description: "Rows per parent at each level." }
+        - { name: conversion_time, in: query, schema: { type: string, enum: [visit, conversion], default: visit } }
+        - { name: format, in: query, schema: { type: string, enum: [json, csv] } }
+        - { name: column, in: query, schema: { type: array, maxItems: 10, items: { type: string } }, style: form, explode: true, allowReserved: true, description: "A custom column, name:formula, such as rpv:revenue/visits: arithmetic (+ - * / and brackets) over the metrics and numbers. Each row gets it under metrics.custom." }
+        - { name: view, in: query, schema: { type: string, format: uuid }, description: "A saved view (GET .../report-views) whose settings fill in what the request doesn't say." }
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrilldownReport" }
+            text/csv:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/report-views:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listReportViews
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List the saved views of the drill-down report
+      description: "Scope: analytics.read. The brand's shared views and the caller's own, by name."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The views.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ReportView" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createReportView
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Save a view of the drill-down report
+      description: "Scope: analytics.manage. A view is its maker's until shared. Its spec is checked as the report would read it."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportViewInput" }
+      responses:
+        "201":
+          description: The view.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportView" }
+        "400": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/report-views/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getReportView
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: Get a saved view
+      description: "Scope: analytics.read. A shared view, or one of the caller's own."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The view.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportView" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateReportView
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a saved view
+      description: "Scope: analytics.manage. Rename it, replace its spec, or share it; only its maker can make a shared view private again."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportViewInput" }
+      responses:
+        "200":
+          description: The view now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportView" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteReportView
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      summary: Delete a saved view
+      description: "Scope: analytics.manage. A shared view can be deleted by its maker or an admin."
+      tags: [analytics]
+      responses:
+        "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
@@ -7734,6 +7870,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/AttributionFrom" }
         - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { $ref: "#/components/parameters/AttributionModel" }
         - { $ref: "#/components/parameters/AttributionMatch" }
       responses:
@@ -7760,6 +7897,7 @@ paths:
         - { name: split, in: query, description: "content: one row per utm_content too.", schema: { type: string, enum: [content] } }
         - { $ref: "#/components/parameters/AttributionFrom" }
         - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { $ref: "#/components/parameters/AttributionModel" }
         - { $ref: "#/components/parameters/AttributionMatch" }
       responses:
@@ -7795,6 +7933,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/AttributionFrom" }
         - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { $ref: "#/components/parameters/AttributionModel" }
         - { $ref: "#/components/parameters/AttributionMatch" }
       responses:
@@ -7840,6 +7979,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/AttributionFrom" }
         - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/ReportTimezone" }
       responses:
         "200":
           description: The cohorts.
@@ -7882,6 +8022,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/AttributionFrom" }
         - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { $ref: "#/components/parameters/AttributionModel" }
         - { $ref: "#/components/parameters/AttributionMatch" }
       responses:
@@ -7931,6 +8072,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/AttributionFrom" }
         - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { $ref: "#/components/parameters/AttributionModel" }
         - { $ref: "#/components/parameters/AttributionMatch" }
       responses:
@@ -7977,6 +8119,7 @@ paths:
         - { name: level, in: query, description: "campaign (the default), adset or ad.", schema: { type: string, enum: [campaign, adset, ad] } }
         - { $ref: "#/components/parameters/AttributionFrom" }
         - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { $ref: "#/components/parameters/AttributionModel" }
         - { $ref: "#/components/parameters/AttributionMatch" }
       responses:
@@ -8012,6 +8155,7 @@ paths:
         - { name: record_id, in: query, schema: { type: string, format: uuid } }
         - { $ref: "#/components/parameters/AttributionFrom" }
         - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { $ref: "#/components/parameters/AttributionModel" }
         - { $ref: "#/components/parameters/AttributionMatch" }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -8270,6 +8414,7 @@ paths:
       description: "Scope: analytics.read. Visitors, visits, page views, bounce rate and visit length from the brand's own website tracking (the site.js tag), day by day, with its top pages, sources, websites, countries and devices. Counted live from the visits, today included, so a brand needs no connected analytics tool. Dates default to the last 28 days; the range is at most a year."
       tags: [analytics]
       parameters:
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
         - { name: website, in: query, schema: { type: string }, description: "Only this website (a host from the websites list, such as app.example.com)." }
@@ -11882,6 +12027,7 @@ paths:
         all customers.
       tags: [ads]
       parameters:
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
         - { name: level, in: query, schema: { type: string, enum: [campaign, ad_group, ad], default: campaign } }
@@ -11926,6 +12072,7 @@ paths:
         customers keeps the list to new (people who paid) or returning (people who paid more than once).
       tags: [ads]
       parameters:
+        - { $ref: "#/components/parameters/ReportTimezone" }
         - { name: from, in: query, schema: { type: string, format: date }, description: Clicks on or after this day. }
         - { name: to, in: query, schema: { type: string, format: date }, description: Clicks on or before this day. }
         - { name: campaign_id, in: query, schema: { type: string, format: uuid } }
@@ -13969,6 +14116,174 @@ paths:
               schema: { $ref: "#/components/schemas/LinkOrderDonor" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/targets:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandLinkOrderTargets
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: List the brand's link targets
+      description: |
+        Scope: coverage.read. The brand's own article and product pages a
+        paid link can point at. selected is the checkbox: only ticked pages
+        are offered when a link is ordered. Ticked pages come first.
+      tags: [coverage]
+      parameters:
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/LinkOrderTargetKind" } }
+        - { name: selected, in: query, schema: { type: string, enum: ["true", "false"] } }
+      responses:
+        "200":
+          description: The saved targets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/LinkOrderTarget" } }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: saveBrandLinkOrderTarget
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Save a link target
+      description: |
+        Scope: coverage.manage. Adds a page of the brand's own site as an
+        article or product link target, or updates the saved row with the
+        same address (one row per page: lowercase host without www., no
+        query, fragment or trailing slash). The page must be on the brand's
+        website, domains or SEO sites. kind defaults to a guess from the
+        address (blog, guide and how-to pages are articles). selected
+        defaults to true. source is suggested when a person saves a
+        suggestion. Saving a target never creates an order.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, maxLength: 2048 }
+                kind: { $ref: "#/components/schemas/LinkOrderTargetKind" }
+                title: { type: string, maxLength: 500 }
+                selected: { type: boolean }
+                source: { type: string, enum: [manual, suggested] }
+      responses:
+        "200":
+          description: The saved target, updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderTarget" }
+        "201":
+          description: A new target.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderTarget" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/targets/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateBrandLinkOrderTarget
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Tick, untick or retype a link target
+      description: |
+        Scope: coverage.manage. Send only what changes. selected false
+        unticks the page: it keeps its kind and is no longer offered or
+        suggested. Orders already pointing at it keep their URL.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind: { $ref: "#/components/schemas/LinkOrderTargetKind" }
+                title: { type: string, maxLength: 500 }
+                selected: { type: boolean }
+      responses:
+        "200":
+          description: The target.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderTarget" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/targets/suggestions:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: suggestBrandLinkOrderTargets
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: Suggest pages to point a paid link at
+      description: |
+        Scope: coverage.read. The brand's pages ranked by the comparison with
+        tracked competitors, from already-stored data only: the weekly
+        keyword snapshots of the site and its competitors (any SEO
+        connection, SE Ranking included), keywords SE Ranking projects
+        track, the Keywords page's page targets, and competitor link reads
+        already kept. It never calls Ahrefs, DataForSEO or SE Ranking.
+
+        A page scores for each keyword a competitor ranks in the top 20 for
+        while the page is missing or 3 or more places behind
+        (keyword_gap), and for each competitor page that other sites link
+        to and that competes for the same keywords or has a matching
+        address (competitor_links, with its referring domains). Ticked
+        saved targets are always listed; unticked ones never are. Each row
+        has its anchor choices. Suggestions never create orders.
+      tags: [coverage]
+      parameters:
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/LinkOrderTargetKind" } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: Ranked suggestions and the stored data they used.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, sources]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/LinkOrderTargetSuggestion" } }
+                  sources: { $ref: "#/components/schemas/LinkOrderTargetSources" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/targets/anchors:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: getBrandLinkOrderTargetAnchors
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: Anchor choices for a page
+      description: |
+        Scope: coverage.read. The primary-anchor choices for any page of the
+        brand (stored SE Ranking keywords first, then the page's keyword
+        target, then other SEO connections' stored keywords, each with its
+        source), and the second-anchor choices by type: brand, url and
+        keyword. Stored data only; no provider call.
+      tags: [coverage]
+      parameters:
+        - { name: page, in: query, required: true, description: "The page's address (its full URL).", schema: { type: string } }
+      responses:
+        "200":
+          description: The page, normalised, and its anchor choices.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, anchors]
+                properties:
+                  url: { type: string }
+                  anchors: { $ref: "#/components/schemas/LinkOrderAnchorOptions" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/link-orders:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     get:
@@ -14004,6 +14319,10 @@ paths:
       description: |
         Scope: coverage.manage. Opens a requested order against a catalog donor.
         The guarantee window defaults to the catalog row, then to 30 days.
+        The target is a ticked saved link target (target_id) or a typed
+        target_url. An order may carry two anchors: anchor_primary (with
+        where it came from) and anchor_secondary, whose type is brand, url
+        or keyword.
       tags: [coverage]
       requestBody:
         required: true
@@ -14011,10 +14330,17 @@ paths:
           application/json:
             schema:
               type: object
-              required: [donor_profile_id, target_url]
+              required: [donor_profile_id]
               properties:
                 donor_profile_id: { type: string, format: uuid }
-                target_url: { type: string }
+                target_url: { type: string, description: "The page the link points at. Required unless target_id is sent; with target_id it must be the same page." }
+                target_id: { type: [string, "null"], format: uuid, description: "A ticked saved link target. Its URL and kind fill target_url and target_kind." }
+                target_kind: { type: string, enum: ["", article, product] }
+                target_choice: { type: string, enum: [manual, suggested], description: "suggested when the page is the one Outflare suggested, kept as is. Default manual." }
+                anchor_primary: { type: string, maxLength: 500 }
+                anchor_primary_source: { $ref: "#/components/schemas/LinkOrderAnchorSource" }
+                anchor_secondary: { type: string, maxLength: 500, description: "A second, separate anchor. Needs anchor_secondary_type and must differ from anchor_primary." }
+                anchor_secondary_type: { $ref: "#/components/schemas/LinkOrderSecondaryAnchorType" }
                 slot_type: { type: string }
                 rel_requested: { type: string }
                 guarantee_days: { type: [integer, "null"] }
@@ -14057,7 +14383,9 @@ paths:
       description: |
         Scope: coverage.manage. Fields that are still mutable before publication.
         After approval the donor amount cannot change. Paid, verified, and lost
-        orders cannot be edited.
+        orders cannot be edited. The target and the anchors are fixed once the
+        link is published. Anchor fields not sent keep their stored values,
+        and the four are checked together.
       tags: [coverage]
       requestBody:
         required: true
@@ -14068,6 +14396,13 @@ paths:
               properties:
                 donor_profile_id: { type: string, format: uuid }
                 target_url: { type: string }
+                target_id: { type: [string, "null"], format: uuid }
+                target_kind: { type: string, enum: ["", article, product] }
+                target_choice: { type: string, enum: [manual, suggested] }
+                anchor_primary: { type: [string, "null"], maxLength: 500 }
+                anchor_primary_source: { oneOf: [{ $ref: "#/components/schemas/LinkOrderAnchorSource" }, { type: "null" }] }
+                anchor_secondary: { type: [string, "null"], maxLength: 500 }
+                anchor_secondary_type: { oneOf: [{ $ref: "#/components/schemas/LinkOrderSecondaryAnchorType" }, { type: "null" }] }
                 slot_type: { type: [string, "null"] }
                 rel_requested: { type: [string, "null"] }
                 guarantee_days: { type: [integer, "null"] }
@@ -17844,6 +18179,32 @@ paths:
                   data: { type: array, items: { $ref: "#/components/schemas/AIVisibility" } }
                   days: { type: integer }
                   from: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/ai-answer-share:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: getBrandAIAnswerShare
+      x-outflare-access: { scope: seo.read, brand: true }
+      summary: Read AI answer share of voice by topic
+      description: |
+        Scope: seo.read. Mention rate and share of voice from already-stored AI
+        answer runs, rolled up by the question's topic (Untagged when it has
+        none), by question set, and by question type, week by week. Also counts
+        answers that cite a /compare page of the brand or a competitor, after
+        stripping a locale prefix. This does not start a new run or call a paid
+        provider. `days` defaults to 84 (1 to 365).
+      tags: [seo]
+      parameters:
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 84 } }
+      responses:
+        "200":
+          description: Totals, clusters, question sets, question types, /compare citations, and weekly points.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AIAnswerShare" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
@@ -25174,7 +25535,7 @@ paths:
         - { name: from, in: query, schema: { type: string }, description: "A date (2026-10-01) or RFC 3339 time." }
         - { name: to, in: query, schema: { type: string }, description: "A date (inclusive) or RFC 3339 time. Default now." }
         - { name: group_by, in: query, schema: { type: string, enum: [day, week, sequence, step, mailbox, domain, brand] } }
-        - { name: timezone, in: query, schema: { type: string }, description: "IANA zone for dates and day buckets. Default UTC." }
+        - { name: timezone, in: query, schema: { type: string }, description: "IANA zone for dates and day buckets. Default: the brand's reporting time zone (UTC across brands)." }
         - { name: sequence_id, in: query, schema: { type: string, format: uuid } }
         - { name: mailbox_id, in: query, schema: { type: string, format: uuid } }
         - { name: domain, in: query, schema: { type: string } }
@@ -31966,6 +32327,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     post:
       operationId: runFunnel
+      parameters: [{ $ref: "#/components/parameters/ReportTimezone" }]
       x-outflare-access: { scope: analytics.read, brand: true }
       summary: Run a funnel
       description: |
@@ -31994,6 +32356,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     post:
       operationId: listFunnelPeople
+      parameters: [{ $ref: "#/components/parameters/ReportTimezone" }]
       x-outflare-access: { scope: customers.read, brand: true }
       summary: List the people at a funnel step
       description: |
@@ -32033,6 +32396,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     post:
       operationId: saveFunnelPeople
+      parameters: [{ $ref: "#/components/parameters/ReportTimezone" }]
       x-outflare-access: { scope: customers.manage, brand: true }
       summary: Save a funnel step's people as a list
       description: |
@@ -32075,6 +32439,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     post:
       operationId: runFunnelCorrelation
+      parameters: [{ $ref: "#/components/parameters/ReportTimezone" }]
       x-outflare-access: { scope: analytics.read, brand: true }
       summary: What converters did differently
       description: |
@@ -32108,6 +32473,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     post:
       operationId: runPaths
+      parameters: [{ $ref: "#/components/parameters/ReportTimezone" }]
       x-outflare-access: { scope: analytics.read, brand: true }
       summary: Run a paths question
       description: |
@@ -32200,6 +32566,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     post:
       operationId: runTrend
+      parameters: [{ $ref: "#/components/parameters/ReportTimezone" }]
       x-outflare-access: { scope: analytics.read, brand: true }
       summary: Run a trend
       description: |
@@ -32226,6 +32593,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     post:
       operationId: runRetention
+      parameters: [{ $ref: "#/components/parameters/ReportTimezone" }]
       x-outflare-access: { scope: analytics.read, brand: true }
       summary: Run a retention question
       description: |
@@ -32251,6 +32619,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     post:
       operationId: runLifecycle
+      parameters: [{ $ref: "#/components/parameters/ReportTimezone" }]
       x-outflare-access: { scope: analytics.read, brand: true }
       summary: Run a lifecycle question
       description: |
@@ -44984,6 +45353,7 @@ paths:
           type: string
         description: An existing Outflare attribution model key; defaults to the workspace
           model.
+      - $ref: '#/components/parameters/ReportTimezone'
       description: Also requires analytics.read. Counts each publisher website once
         across placements; keeps recorded attribution separate from source-reported
         delivery.
@@ -50467,8 +50837,13 @@ components:
     AttributionTo:
       name: to
       in: query
-      description: "Last day, such as 2026-10-24. Default: today."
+      description: "Last day, such as 2026-10-24. Default: today in the report's time zone."
       schema: { type: string, format: date }
+    ReportTimezone:
+      name: timezone
+      in: query
+      description: "The time zone the report's days are in, an IANA name such as Europe/Berlin. Default: the brand's reporting time zone (UTC across brands). Days from ad platforms stay in their ad accounts' own time zones."
+      schema: { type: string, maxLength: 64 }
     AttributionMatch:
       name: match
       in: query
@@ -53866,6 +54241,121 @@ components:
         once and sends no referrer) or double_meta (two such pages, so even browsers that ignore the referrer policy send
         none). Modes other than 302, destinations and paths work only on the brand's own verified tracking domain; on the
         shared domain every click goes to the link's own page with a 302.
+    DrilldownMetrics:
+      type: object
+      required: [visits, visitors, conversions, revenue, cost, profit, roi, roas, cr, epv, cpa, custom]
+      properties:
+        custom: { type: object, additionalProperties: { type: [number, "null"] }, description: "The report's custom columns, by name; null where a value is missing or divides by zero." }
+        visits: { type: integer }
+        visitors: { type: integer, description: "Distinct browsers." }
+        conversions: { type: number, description: "Credited conversions: shares under the shared models." }
+        revenue: { type: number, description: "In the brand's currency." }
+        cost: { type: [number, "null"], description: "Ad spend in the brand's currency; null where the grouping can't split it." }
+        profit: { type: [number, "null"] }
+        roi: { type: [number, "null"], description: "(revenue - cost) / cost." }
+        roas: { type: [number, "null"], description: "revenue / cost." }
+        cr: { type: [number, "null"], description: "conversions / visits." }
+        epv: { type: [number, "null"], description: "revenue / visits." }
+        cpa: { type: [number, "null"], description: "cost / conversions." }
+    DrilldownRow:
+      type: object
+      required: [keys, metrics, rows]
+      properties:
+        keys: { type: array, items: { type: string }, description: "The row's value at each level so far; empty string for none." }
+        metrics: { $ref: "#/components/schemas/DrilldownMetrics" }
+        rows: { type: array, items: { $ref: "#/components/schemas/DrilldownRow2" } }
+    DrilldownRow2:
+      type: object
+      required: [keys, metrics, rows]
+      properties:
+        keys: { type: array, items: { type: string }, description: "The row's value at each level so far; empty string for none." }
+        metrics: { $ref: "#/components/schemas/DrilldownMetrics" }
+        rows: { type: array, items: { $ref: "#/components/schemas/DrilldownRow3" } }
+    DrilldownRow3:
+      type: object
+      required: [keys, metrics, rows]
+      properties:
+        keys: { type: array, items: { type: string }, description: "The row's value at each level so far; empty string for none." }
+        metrics: { $ref: "#/components/schemas/DrilldownMetrics" }
+        rows: { type: array, items: { $ref: "#/components/schemas/DrilldownRow4" } }
+    DrilldownRow4:
+      type: object
+      required: [keys, metrics, rows]
+      properties:
+        keys: { type: array, items: { type: string }, description: "The row's value at each level so far; empty string for none." }
+        metrics: { $ref: "#/components/schemas/DrilldownMetrics" }
+        rows: { type: array, items: { $ref: "#/components/schemas/DrilldownRow5" } }
+    DrilldownRow5:
+      type: object
+      required: [keys, metrics, rows]
+      properties:
+        keys: { type: array, items: { type: string }, description: "The row's value at each level so far; empty string for none." }
+        metrics: { $ref: "#/components/schemas/DrilldownMetrics" }
+        rows: { type: array, maxItems: 0, items: {}, description: "Empty: the fifth level has no children." }
+    DrilldownReport:
+      type: object
+      required: [from, to, timezone, model, conversion_time, currency, group_by, cost_available, cost_note, totals, rows, truncated]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        timezone: { type: string }
+        model: { type: string }
+        conversion_time: { type: string, enum: [visit, conversion] }
+        currency: { type: string }
+        group_by: { type: array, items: { type: string } }
+        cost_available: { type: boolean }
+        cost_note: { type: [string, "null"] }
+        totals: { $ref: "#/components/schemas/DrilldownMetrics" }
+        rows: { type: array, items: { $ref: "#/components/schemas/DrilldownRow" } }
+        truncated: { type: boolean, description: "Rows past the limit were left out; the totals still count them." }
+    ReportViewSpec:
+      type: object
+      description: "The drill-down report's settings, as its query parameters name them, and the app's display settings."
+      properties:
+        group_by: { type: array, maxItems: 5, items: { type: string } }
+        filters: { type: array, items: { type: string }, description: "dimension:value" }
+        excludes: { type: array, items: { type: string }, description: "dimension:value" }
+        sort: { type: string }
+        limit: { type: integer, minimum: 1, maximum: 1000 }
+        conversion_time: { type: string, enum: [visit, conversion] }
+        model: { type: string }
+        timezone: { type: string, description: "Empty for the brand's." }
+        date_range:
+          type: object
+          description: "A preset (today, yesterday, last_7_days … last_365_days, this_month, last_month, this_year) or fixed from and to."
+          properties:
+            preset: { type: string }
+            from: { type: string, format: date }
+            to: { type: string, format: date }
+        columns:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [name, formula]
+            properties:
+              name: { type: string, pattern: "^[a-z][a-z0-9_]{0,39}$" }
+              formula: { type: string, maxLength: 200, example: "revenue / visits" }
+              format: { type: string, enum: [number, percent, money] }
+        display: { type: object, additionalProperties: true, description: "The app's own: shown columns, their order, density, the chart. Stored as it is (at most 16 KB)." }
+    ReportView:
+      type: object
+      required: [id, brand_id, name, spec, shared, mine, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        name: { type: string }
+        spec: { $ref: "#/components/schemas/ReportViewSpec" }
+        shared: { type: boolean, description: "Seen by the brand's whole team; otherwise only by its maker." }
+        mine: { type: boolean, description: "The caller made it." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ReportViewInput:
+      type: object
+      properties:
+        name: { type: string, maxLength: 120, description: "Required when saving a new view." }
+        spec: { $ref: "#/components/schemas/ReportViewSpec" }
+        shared: { type: boolean }
     TrackerWeightsInput:
       type: object
       required: [weights]
@@ -53947,7 +54437,7 @@ components:
               lander_name: { type: [string, "null"] }
               weight: { type: integer }
               daily_click_cap: { type: [integer, "null"], description: "Clicks a day it takes; null for no cap, 0 stops it." }
-              clicks_today: { type: integer, description: "Its clicks today (UTC), without link scanners and previews." }
+              clicks_today: { type: integer, description: "Its clicks today in the brand's reporting time zone, without link scanners and previews." }
               open: { type: boolean, description: "It takes clicks now: a weight above 0 and room in its cap. For an offer, its own cap_reached (GET .../offers) says whether the offer still takes them." }
     PostbackSource:
       type: object
@@ -54058,7 +54548,7 @@ components:
         status: { type: string, enum: [active, archived] }
         missing_click_id: { type: boolean, description: "The URL carries no {click_id} and its network adds none, so a postback can't name the click." }
         tracking_url: { type: string, description: "The URL a click goes to: url with the click id its network takes added." }
-        clicks_today: { type: integer, description: "Its clicks today (UTC), without link scanners and previews." }
+        clicks_today: { type: integer, description: "Its clicks today in the brand's reporting time zone, without link scanners and previews." }
         conversions_today: { type: integer, description: "Its conversions today (UTC), without declined ones." }
         cap_reached: { type: boolean }
         destinations: { type: integer, description: "How many link destinations send to it." }
@@ -54131,7 +54621,7 @@ components:
         click_url: { type: string, description: "Where a call to action links to go on to an offer or page of the lander's list, by weight: https://<tracking domain>/click." }
         cta_urls: { type: array, items: { type: string }, description: "Where each call to action links to go to the Nth offer or page of the list: .../click/1 to .../click/N." }
         script: { type: string, description: "The script tag the lander's page carries: it adds the click id to its links to /click. It stores nothing in the browser." }
-        lander_clicks_today: { type: integer, description: "Clicks on its calls to action today (UTC), without link scanners and previews." }
+        lander_clicks_today: { type: integer, description: "Clicks on its calls to action today in the brand's reporting time zone, without link scanners and previews." }
         destinations: { type: integer, description: "How many link destinations it is." }
         needs_domain: { type: boolean, description: "The brand has no verified tracking domain, where /click answers." }
         created_at: { type: string, format: date-time }
@@ -59153,6 +59643,100 @@ components:
         web_search: { type: boolean }
         input_cents_per_million: { type: number }
         output_cents_per_million: { type: number }
+    AIAnswerShare:
+      type: object
+      required: [days, from, note, totals, clusters, question_sets, question_types, compare, weeks]
+      properties:
+        days: { type: integer }
+        from: { type: string, format: date-time }
+        note: { type: string }
+        totals: { $ref: "#/components/schemas/AIAnswerShareTotals" }
+        clusters: { type: array, items: { $ref: "#/components/schemas/AIAnswerShareGroup" }, description: "Rolled up by the question's topic." }
+        question_sets: { type: array, items: { $ref: "#/components/schemas/AIAnswerShareGroup" } }
+        question_types: { type: array, items: { $ref: "#/components/schemas/AIAnswerShareGroup" } }
+        compare: { $ref: "#/components/schemas/AIAnswerShareCompare" }
+        weeks: { type: array, items: { $ref: "#/components/schemas/AIAnswerShareWeek" } }
+    AIAnswerShareTotals:
+      type: object
+      required: [answers, questions, clusters, mention_rate, share_of_voice, recommend_rate, citation_rate, compare_citation_rate, competitors]
+      properties:
+        answers: { type: integer }
+        questions: { type: integer }
+        clusters: { type: integer, description: "Topics other than Untagged that have at least one stored answer." }
+        mention_rate: { type: [number, "null"] }
+        share_of_voice: { type: [number, "null"] }
+        recommend_rate: { type: [number, "null"] }
+        citation_rate: { type: [number, "null"] }
+        compare_citation_rate: { type: [number, "null"] }
+        competitors: { type: array, items: { $ref: "#/components/schemas/AIAnswerShareRival" } }
+    AIAnswerShareGroup:
+      type: object
+      required: [key, label, kind, questions, answers, named, recommended, cited, compare_cited, mention_rate, share_of_voice, recommend_rate, citation_rate, compare_citation_rate, competitors, weeks]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        kind: { type: string, enum: [topic, question_set, question_type] }
+        questions: { type: integer }
+        answers: { type: integer }
+        named: { type: integer }
+        recommended: { type: integer }
+        cited: { type: integer }
+        compare_cited: { type: integer }
+        mention_rate: { type: [number, "null"] }
+        share_of_voice: { type: [number, "null"] }
+        recommend_rate: { type: [number, "null"] }
+        citation_rate: { type: [number, "null"] }
+        compare_citation_rate: { type: [number, "null"] }
+        competitors: { type: array, items: { $ref: "#/components/schemas/AIAnswerShareRival" } }
+        weeks: { type: array, items: { $ref: "#/components/schemas/AIAnswerShareWeek" } }
+    AIAnswerShareRival:
+      type: object
+      required: [name, answers, mention_rate, share_of_voice, recommended]
+      properties:
+        name: { type: string }
+        answers: { type: integer }
+        mention_rate: { type: [number, "null"] }
+        share_of_voice: { type: [number, "null"] }
+        recommended: { type: integer }
+    AIAnswerShareWeek:
+      type: object
+      required: [week, answers, named, mention_rate, share_of_voice, compare_cited, compare_citation_rate]
+      properties:
+        week: { type: string, format: date }
+        answers: { type: integer }
+        named: { type: integer }
+        mention_rate: { type: [number, "null"] }
+        share_of_voice: { type: [number, "null"] }
+        compare_cited: { type: integer }
+        compare_citation_rate: { type: [number, "null"] }
+    AIAnswerShareCompare:
+      type: object
+      required: [answers, brand_cited, competitor_cited, brand_rate, competitor_rate, pages, weeks]
+      properties:
+        answers: { type: integer }
+        brand_cited: { type: integer }
+        competitor_cited: { type: integer }
+        brand_rate: { type: [number, "null"] }
+        competitor_rate: { type: [number, "null"] }
+        pages: { type: array, items: { $ref: "#/components/schemas/AIAnswerShareComparePage" } }
+        weeks: { type: array, items: { $ref: "#/components/schemas/AIAnswerShareCompareWeek" } }
+    AIAnswerShareComparePage:
+      type: object
+      required: [url, owner, answers]
+      properties:
+        url: { type: string }
+        owner: { type: string }
+        competitor: { type: string }
+        answers: { type: integer }
+    AIAnswerShareCompareWeek:
+      type: object
+      required: [week, answers, brand_cited, competitor_cited, brand_rate]
+      properties:
+        week: { type: string, format: date }
+        answers: { type: integer }
+        brand_cited: { type: integer }
+        competitor_cited: { type: integer }
+        brand_rate: { type: [number, "null"] }
     AIVisibilitySettings:
       type: object
       required: [models, screens, samples_per_prompt, monthly_limit_cents, spent_this_month_cents, max_models, updated_at]
@@ -59885,7 +60469,7 @@ components:
         frequency: { type: string, enum: [off, daily, weekly] }
         weekday: { type: integer, description: "For weekly digests: 0 is Sunday." }
         hour: { type: integer }
-        timezone: { type: string }
+        timezone: { type: string, description: "The IANA time zone the digest is sent and counted in; the brand's reporting time zone until set." }
         recipients: { type: string, enum: [none, admins, members] }
         provider_id: { type: [string, "null"], format: uuid }
         from_address: { type: string }
@@ -61056,7 +61640,7 @@ components:
               error: { type: string }
     LinkOrder:
       type: object
-      required: [id, publisher_id, donor_profile_id, domain, status, target_url, slot_type, rel_requested, quoted_amount_minor, quoted_currency, donor_amount_minor, currency, guarantee_days, guarantee_until, published_url, proof_url, published_at, placement_id, agreement_id, invoice_id, payment_id, credit_payment_id, replaces_order_id, owner_user_id, last_check_at, last_check_live, last_check_target_match, last_check_rel, last_check_anchor, approved_by, approved_at, paid_by, paid_at, lost_at, lost_reason, notes, created_at, updated_at]
+      required: [id, publisher_id, donor_profile_id, domain, status, target_url, target_id, target_kind, target_choice, anchor_primary, anchor_primary_source, anchor_secondary, anchor_secondary_type, slot_type, rel_requested, quoted_amount_minor, quoted_currency, donor_amount_minor, currency, guarantee_days, guarantee_until, published_url, proof_url, published_at, placement_id, agreement_id, invoice_id, payment_id, credit_payment_id, replaces_order_id, owner_user_id, last_check_at, last_check_live, last_check_target_match, last_check_rel, last_check_anchor, approved_by, approved_at, paid_by, paid_at, lost_at, lost_reason, notes, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         publisher_id: { type: string, format: uuid }
@@ -61064,6 +61648,13 @@ components:
         domain: { type: string }
         status: { $ref: "#/components/schemas/LinkOrderStatus" }
         target_url: { type: string }
+        target_id: { type: [string, "null"], format: uuid, description: "The saved link target, when the order was opened from one." }
+        target_kind: { type: string, enum: ["", article, product] }
+        target_choice: { type: string, enum: [manual, suggested] }
+        anchor_primary: { type: string }
+        anchor_primary_source: { $ref: "#/components/schemas/LinkOrderAnchorSource" }
+        anchor_secondary: { type: string }
+        anchor_secondary_type: { $ref: "#/components/schemas/LinkOrderSecondaryAnchorType" }
         slot_type: { type: string }
         rel_requested: { type: string }
         quoted_amount_minor: { type: [integer, "null"], format: int64 }
@@ -61096,6 +61687,85 @@ components:
         notes: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    LinkOrderTargetKind:
+      type: string
+      enum: [article, product]
+      description: "An article page or a product (or product section) page of the brand's own site."
+    LinkOrderAnchorSource:
+      type: string
+      enum: ["", manual, se_ranking, page_target, seo_keywords]
+      description: "Where a primary anchor came from: se_ranking is stored SE Ranking keyword data, page_target the page's keyword target, seo_keywords another SEO connection's stored keywords, manual typed. Empty when there is no primary anchor."
+    LinkOrderSecondaryAnchorType:
+      type: string
+      enum: ["", brand, url, keyword]
+      description: "The second anchor's type, picked by a person. Empty when there is no second anchor."
+    LinkOrderTarget:
+      type: object
+      required: [id, url, kind, title, selected, source, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string }
+        kind: { $ref: "#/components/schemas/LinkOrderTargetKind" }
+        title: { type: string }
+        selected: { type: boolean, description: "The checkbox: only ticked targets are offered when ordering a link." }
+        source: { type: string, enum: [manual, suggested] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LinkOrderAnchorOption:
+      type: object
+      required: [text, source, position, volume]
+      properties:
+        text: { type: string }
+        source: { type: string, enum: [se_ranking, page_target, seo_keywords, brand, url], description: "Where the text came from." }
+        position: { type: [number, "null"], description: "The page's stored position for the keyword, when known." }
+        volume: { type: [number, "null"], description: "Monthly searches, from the stored snapshot." }
+    LinkOrderAnchorOptions:
+      type: object
+      required: [primary, secondary]
+      properties:
+        primary: { type: array, items: { $ref: "#/components/schemas/LinkOrderAnchorOption" }, description: "SE Ranking keywords first, then the page target, then other stored keywords." }
+        secondary:
+          type: object
+          required: [brand, url, keyword]
+          properties:
+            brand: { type: array, items: { $ref: "#/components/schemas/LinkOrderAnchorOption" } }
+            url: { type: array, items: { $ref: "#/components/schemas/LinkOrderAnchorOption" } }
+            keyword: { type: array, items: { $ref: "#/components/schemas/LinkOrderAnchorOption" }, description: "The page's other keywords (the primary list without its first)." }
+    LinkOrderTargetReason:
+      type: object
+      required: [kind, competitor, keyword, position, your_position, volume, competitor_url, referring_domains]
+      properties:
+        kind: { type: string, enum: [keyword_gap, competitor_links] }
+        competitor: { type: string }
+        keyword: { type: string }
+        position: { type: [number, "null"], description: "The competitor's stored position." }
+        your_position: { type: [number, "null"], description: "The page's stored position; null when it is not ranking." }
+        volume: { type: [number, "null"] }
+        competitor_url: { type: string }
+        referring_domains: { type: integer, description: "Sites linking to the competitor's page, from stored link reads." }
+    LinkOrderTargetSuggestion:
+      type: object
+      required: [url, kind, kind_guessed, target_id, selected, score, competitors, reasons, anchors]
+      properties:
+        url: { type: string }
+        kind: { $ref: "#/components/schemas/LinkOrderTargetKind" }
+        kind_guessed: { type: boolean, description: "True when the kind comes from the address, not a saved target." }
+        target_id: { type: [string, "null"], format: uuid }
+        selected: { type: boolean }
+        score: { type: number, description: "Orders the list only." }
+        competitors: { type: array, items: { type: string } }
+        reasons: { type: array, items: { $ref: "#/components/schemas/LinkOrderTargetReason" } }
+        anchors: { $ref: "#/components/schemas/LinkOrderAnchorOptions" }
+    LinkOrderTargetSources:
+      type: object
+      required: [se_ranking_keywords, other_keywords, page_targets, competitors, competitor_keywords, competitor_link_pages]
+      properties:
+        se_ranking_keywords: { type: integer, description: "Stored SE Ranking keyword rows for the brand's pages." }
+        other_keywords: { type: integer }
+        page_targets: { type: integer }
+        competitors: { type: array, items: { type: string } }
+        competitor_keywords: { type: integer }
+        competitor_link_pages: { type: integer }
     LinkOrderEvent:
       type: object
       required: [id, order_id, action, from_status, to_status, actor_id, payload, created_at]
@@ -67404,7 +68074,7 @@ components:
         occurred_at: { type: string, format: date-time, description: Default now. }
     Brand:
       type: object
-      required: [id, name, handle, website, domains, platforms, links, status, business_model, revenue_models, logo_url, colors, manual_edit_days, currency, context_version, counts, created_at, updated_at]
+      required: [id, name, handle, website, domains, platforms, links, status, business_model, revenue_models, logo_url, colors, manual_edit_days, currency, timezone, context_version, counts, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string, example: Repocket }
@@ -67420,6 +68090,7 @@ components:
         colors: { $ref: "#/components/schemas/LookColors" }
         manual_edit_days: { type: integer, description: "How long a person's edit of a field wins over other sources, in days (0: forever). After it, the best other source's value takes over unless the edit is pinned." }
         currency: { type: string, example: USD, description: "The currency the brand reports money in (ISO 4217); transactions are converted to it. USD by default." }
+        timezone: { type: string, example: Europe/Berlin, description: "The time zone the brand reports in (IANA): reports bucket days and hours in it, and tracker caps reset at its midnight. Stored times stay in UTC. UTC by default." }
         context_version: { type: integer, description: The brand context's version. }
         counts:
           type: object
@@ -67487,6 +68158,7 @@ components:
         colors: { $ref: "#/components/schemas/LookColors" }
         manual_edit_days: { type: integer, minimum: 0, maximum: 3650, description: "How long a person's edit of a field wins over the brand's other sources (a CRM sync, enrichment), in days; 0: forever. 180 by default. A field can set its own." }
         currency: { type: string, pattern: "^[A-Za-z]{3}$", description: "The currency the brand reports money in, such as EUR. Transactions saved from now on are converted to it." }
+        timezone: { type: string, maxLength: 64, description: "The time zone the brand reports in, an IANA name such as Europe/Berlin or America/New_York. Changes how reports read stored times, so past days regroup; nothing stored changes." }
     SiteCookie:
       type: object
       required: [id, kind, name, host, vendor, vendor_name, category, purpose, retention, status, sources, before_consent, pages, reviewed_at, first_seen_at, last_seen_at]

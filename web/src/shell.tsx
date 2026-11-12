@@ -53,6 +53,11 @@ export const tabNames: Record<Tab, string> = {
   reports: "Sending reports",
   analytics: "Website analytics",
   links: "Campaign links",
+  tracker: "Report",
+  "tracker-campaigns": "Campaigns",
+  "tracker-offers": "Offers",
+  "tracker-landers": "Landers",
+  "tracker-flows": "Flows",
   partners: "Partners",
   funnels: "Funnels",
   trends: "Trends",
@@ -75,6 +80,7 @@ export const tabNames: Record<Tab, string> = {
   keywords: "Keywords",
   "organic-conversions": "Organic conversions",
   "ai-visibility": "Overview",
+  "ai-answer-share": "AI answer share",
   "ai-questions": "Questions",
   "ai-competitors": "Competitors",
   "ai-sources": "Sources",
@@ -213,6 +219,11 @@ export const tabBlurbs: Record<Tab, string> = {
   paths: "Where people go step by step: the pages they view and the things they do, from a start or on the way to an end.",
   channels: "Visits, sign-ups, revenue and cost for every channel, credited the same way in every report.",
   links: "Tag every link with one channel, source and campaign, so each visit, lead and sale is credited to the right place.",
+  tracker: "Visits, conversions, revenue, cost and profit, grouped by any level you choose and drilled into row by row.",
+  "tracker-offers": "The offers your campaigns send clicks to: their network, payout by country, daily caps with a fallback, and the tracking URL.",
+  "tracker-landers": "Pages before the offer: each call to action's click URL and the script for the page.",
+  "tracker-flows": "Paths, landers and offers several campaigns share, changed once for all of them.",
+  "tracker-campaigns": "Your tracker campaigns: the link each ad network sends clicks to, and the paths, landers, offers and weights behind it.",
   partners: "Referral, affiliate and influencer programs: paid or voluntary tasks, partner websites and channels, referral links, rewards and payouts.",
   content: "Posts and pages written for the brand's website: approve them, copy or download them, and see where each went live.",
   "seo-overview": "Is each brand growing in search: branded search, visitors, domain rating and links, with their trends.",
@@ -226,6 +237,7 @@ export const tabBlurbs: Record<Tab, string> = {
   "link-orders": "Paid placements from our own donor catalog: requests, live-link checks and donor prices, with Approve and Paid reserved for the brand approver.",
   "link-roi": "Cost per published link against stored Search Console, ranking and referring-domain changes on the target page, 30, 60 and 90 days around publication.",
   "ai-visibility": "How often AI assistants name and recommend your brand against its competitors, and what to do next.",
+  "ai-answer-share": "Share of voice in stored AI answers, by topic, with a weekly trend and citations of compare pages.",
   "ai-questions": "The questions your buyers ask AI, by topic, awareness and question type, and what each assistant answered.",
   "ai-competitors": "Who AI assistants name and recommend for your questions, and brands they name that you don't count yet.",
   "ai-sources": "The sites and pages AI answers cite, and the ones to get onto.",
@@ -305,6 +317,11 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   analytics: "/docs/integrations/analytics/",
   experiments: "/docs/guides/seo-experiments/",
   links: "/docs/guides/campaign-links/",
+  tracker: "/docs/guides/analytics/",
+  "tracker-campaigns": "/docs/guides/analytics/",
+  "tracker-offers": "/docs/guides/analytics/",
+  "tracker-landers": "/docs/guides/analytics/",
+  "tracker-flows": "/docs/guides/analytics/",
   partners: "/docs/guides/partners/",
   funnels: "/docs/guides/funnels/",
   trends: "/docs/guides/trends/",
@@ -326,6 +343,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   "organic-conversions": "/docs/search-intelligence/",
   reddit: "/docs/guides/reddit/",
   "ai-visibility": "/docs/guides/ai-visibility/",
+  "ai-answer-share": "/docs/guides/ai-visibility/",
   "ai-questions": "/docs/guides/ai-visibility/",
   "ai-competitors": "/docs/guides/ai-visibility/",
   "ai-sources": "/docs/guides/ai-visibility/",
@@ -353,7 +371,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
 };
 
 // "g" then this key opens the page.
-export const shortcuts: Partial<Record<Tab, string>> = { overview: "o", tools: "t", reports: "r", analytics: "w", inbox: "i", agents: "a", outcomes: "c", sequences: "s", people: "h", leads: "l", suppression: "x", mailboxes: "m", domains: "d", infrastructure: "f", warmup: "u", seo: "e", fixes: "k", connectors: "n" };
+export const shortcuts: Partial<Record<Tab, string>> = { overview: "o", tools: "t", reports: "r", analytics: "w", inbox: "i", agents: "a", outcomes: "c", sequences: "s", people: "h", leads: "l", suppression: "x", mailboxes: "m", domains: "d", infrastructure: "f", warmup: "u", seo: "e", fixes: "k", connectors: "n", tracker: "p", "tracker-campaigns": "j" };
 
 export type NavGroup = { label?: string; tabs: Tab[] };
 
@@ -376,13 +394,16 @@ export const modules: Module[] = [
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
   { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "seo", "backlinks", "link-orders", "link-roi"] },
   // AI visibility: how AI assistants answer the questions buyers ask, against competitors.
-  { id: "ai-visibility", label: "AI visibility", icon: "ai-visibility", tabs: ["ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings"] },
+  { id: "ai-visibility", label: "AI visibility", icon: "ai-visibility", tabs: ["ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings"] },
   // Competitors: how the brand stands against everyone it competes with,
   // across search, AI answers, Presence and, as they arrive, social and reviews.
   { id: "competitors", label: "Competitors", icon: "competitors", tabs: ["competition", "competitors"] },
   { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit", "reddit-campaigns"] },
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
+  // The tracker (plans/ad-tracker-ui.md B0): the report first; campaigns,
+  // offers, landers, flows and the rest join it.
+  { id: "tracker", label: "Tracker", icon: "reports", tabs: ["tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows"] },
   { id: "partners", label: "Partners", icon: "partners", tabs: ["partners"] },
   { id: "analytics", label: "Analytics", icon: "reports", tabs: ["dashboards", "funnels", "trends", "retention", "paths", "channels", "outcomes", "analytics", "live", "page-speed", "tracking", "flags", "ab-tests", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
@@ -401,7 +422,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "telegram"];
+const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "telegram"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -1184,6 +1205,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "organic-conversions":
       return { title: "Organic signups and payments by landing page and search group", path: "/v1/brands/{brand}/seo-sites/{site}/organic-conversions", params: { ...brandBase, site: item ?? "{site}" }, mcp: "get_organic_conversions", ask: "Which landing pages and search groups brought the most Organic Search signups and revenue, and how is that revenue counted?", scope: "seo.read" };
     case "ai-visibility":
+    case "ai-answer-share":
+      return { title: "Share of voice in stored AI answers, by topic", path: "/v1/brands/{brand}/ai-answer-share", params: brandBase, mcp: "get_ai_answer_share", ask: "In which topics are we named in AI answers, what is our share against competitors, and how often are compare pages cited?", scope: "seo.read" };
     case "ai-competitors":
     case "ai-sources":
     case "ai-traffic":
@@ -1260,6 +1283,20 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Visits, conversions, revenue and cost per channel", path: "/v1/brands/{brand}/attribution/channels", params: brandBase, mcp: "get_attribution_channels", ask: "Which channel brought the most revenue this month, and what did each sign-up cost us per channel?", scope: "analytics.read" };
     case "partners":
       return { title: "Partners and what they earned", path: "/v1/brands/{brand}/partners", params: brandBase, mcp: "list_partners", ask: "Which partners brought the most sales this month, and whose payouts are due?", scope: "partners.read" };
+    case "tracker":
+      return { title: "The drill-down report", path: "/v1/brands/{brand}/drilldown", params: brandBase, query: { group_by: "channel,country" }, mcp: "get_drilldown_report", ask: "Which campaigns made a profit last week, and in which countries?", scope: "analytics.read" };
+    case "tracker-campaigns":
+      return item
+        ? { title: "One tracker campaign", path: "/v1/brands/{brand}/tracking-campaigns/{id}", params: { brand, id: item }, mcp: "get_tracking_campaign", ask: "Which of this campaign's offers converts best, and should I move its weights?", scope: "analytics.read" }
+        : { title: "Tracker campaigns", path: "/v1/brands/{brand}/tracking-campaigns", params: brandBase, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Which tracker campaigns made a profit in the last 7 days?", scope: "analytics.read" };
+    case "tracker-offers":
+      return { title: "Offers", path: "/v1/brands/{brand}/offers", params: brandBase, mcp: "list_offers", ask: "Which offers hit their cap today, and where are their clicks going instead?", scope: "analytics.read" };
+    case "tracker-landers":
+      return { title: "Landers", path: "/v1/brands/{brand}/landers", params: brandBase, mcp: "list_landers", ask: "Give me the click URLs and script for our quiz lander.", scope: "analytics.read" };
+    case "tracker-flows":
+      return item
+        ? { title: "One flow", path: "/v1/brands/{brand}/flows/{id}", params: { brand, id: item }, mcp: "get_flow", ask: "Which links use this flow, and which of its offers converts best?", scope: "analytics.read" }
+        : { title: "Flows", path: "/v1/brands/{brand}/flows", params: brandBase, mcp: "list_flows", ask: "Which flows are used by the most campaigns?", scope: "analytics.read" };
     case "links":
       return { title: "Campaign links", path: "/v1/brands/{brand}/tracking-campaigns", params: brandBase, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Make a tagged link for our spring launch on LinkedIn ads, pointing at the pricing page.", scope: "analytics.read" };
     case "inbox":

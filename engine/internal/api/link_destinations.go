@@ -113,9 +113,15 @@ func (o *routeOffer) capKey() string {
 
 func conversionCapKey(offer string) string { return "conv:" + offer }
 
-// capDay is the day a cap counts clicks on: the brand's day once brands
-// have a reporting time zone (B4a), UTC until then.
-func capDay(t time.Time) string { return t.UTC().Format(time.DateOnly) }
+// capDay is the day a cap counts clicks on: the day in the brand's
+// reporting time zone (B4a), so caps reset at the brand's midnight; UTC
+// for a nil zone.
+func capDay(t time.Time, loc *time.Location) string {
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format(time.DateOnly)
+}
 
 // capCounts are this server's view of today's clicks on capped
 // destinations.
@@ -202,17 +208,17 @@ func (c *capCounts) offerFor(o *routeOffer, day string) *routeOffer {
 }
 
 // conversionCaps are the offers with a conversion cap this server has
-// counts for today, to refresh from every server's.
-func (c *capCounts) conversionCaps(day string) []string {
+// counts for, with the day each counts (its brand's today), to refresh
+// from every server's.
+func (c *capCounts) conversionCaps() (ids, days []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []string
 	for k, e := range c.m {
-		if id, ok := strings.CutPrefix(k, "conv:"); ok && e.day == day {
-			out = append(out, id)
+		if id, ok := strings.CutPrefix(k, "conv:"); ok {
+			ids, days = append(ids, id), append(days, e.day)
 		}
 	}
-	return out
+	return ids, days
 }
 
 // settle records a written batch: n of this server's clicks are now in the
@@ -230,11 +236,10 @@ func (c *capCounts) settle(id, day string, n, total int64) {
 // route picks a click's destination: one of the open ones, in proportion to
 // their weights, or nil for the link's own page. A likely bot goes where a
 // person would but isn't counted against a cap.
-func (s *Server) route(dests []linkDestination, now time.Time, bot bool) *linkDestination {
+func (s *Server) route(dests []linkDestination, day string, bot bool) *linkDestination {
 	if len(dests) == 0 {
 		return nil
 	}
-	day := capDay(now)
 	for range 3 {
 		var open []linkDestination
 		total := 0
@@ -292,16 +297,15 @@ func (s *Server) take(pick linkDestination, day string, bot bool) *linkDestinati
 func routeMetric(outcome string) { metrics.RedirectRoute(outcome) }
 
 // loadDestinations reads a link's default destinations for the redirect
-// cache and seeds today's counts of the capped ones.
-func (s *Server) loadDestinations(ctx context.Context, o routeOwner, now time.Time) ([]linkDestination, error) {
-	return s.loadDestinationsOf(ctx, o, nil, now)
+// cache and seeds the counts of the capped ones on day (capDay).
+func (s *Server) loadDestinations(ctx context.Context, o routeOwner, day string) ([]linkDestination, error) {
+	return s.loadDestinationsOf(ctx, o, nil, day)
 }
 
 // loadDestinationsOf reads the destinations of one of a link's paths (nil
 // for the default ones), with the offers they send to, and seeds today's
-// counts of the capped ones.
-func (s *Server) loadDestinationsOf(ctx context.Context, o routeOwner, path *string, now time.Time) ([]linkDestination, error) {
-	day := capDay(now)
+// counts of the capped ones on day.
+func (s *Server) loadDestinationsOf(ctx context.Context, o routeOwner, path *string, day string) ([]linkDestination, error) {
 	rows, err := s.pool.Query(ctx, `SELECT d.id::text, d.name, d.url, d.weight, d.daily_click_cap, COALESCE(c.clicks, 0), COALESCE(d.lander_id::text, ''),
 			o.id::text, COALESCE(o.url, ''), o.daily_cap, o.cap_kind = 'conversions', COALESCE(od.clicks, 0), COALESCE(od.conversions, 0), COALESCE(op.click_id_param, ''),
 			f.id::text, COALESCE(f.url, ''), f.daily_cap, f.cap_kind = 'conversions', COALESCE(fd.clicks, 0), COALESCE(fd.conversions, 0), COALESCE(fp.click_id_param, '')
@@ -390,7 +394,7 @@ func countDestinationClicks(ctx context.Context, tx pgx.Tx, batch []bufferedClic
 	counts := map[key]int64{}
 	for _, c := range batch {
 		if c.destinationID != "" && !c.uncounted() {
-			counts[key{c.destinationID, capDay(c.at)}]++
+			counts[key{c.destinationID, c.day}]++
 		}
 	}
 	if len(counts) == 0 {
@@ -430,7 +434,7 @@ func countOfferClicks(ctx context.Context, tx pgx.Tx, batch []bufferedClick) ([]
 	counts := map[key]int64{}
 	for _, c := range batch {
 		if c.offerID != "" && !c.uncounted() {
-			counts[key{c.offerID, capDay(c.at)}]++
+			counts[key{c.offerID, c.day}]++
 		}
 	}
 	if len(counts) == 0 {
@@ -467,12 +471,12 @@ func countOfferClicks(ctx context.Context, tx pgx.Tx, batch []bufferedClick) ([]
 // offers this server routes to, so a cap counts every server's
 // conversions within a minute.
 func (s *Server) refreshOfferCaps(ctx context.Context) {
-	day := capDay(time.Now())
-	ids := s.caps.conversionCaps(day)
+	ids, days := s.caps.conversionCaps()
 	if len(ids) == 0 {
 		return
 	}
-	rows, err := s.pool.Query(ctx, `SELECT offer_id::text, conversions FROM tracker_offer_days WHERE day = $1::date AND offer_id = ANY ($2::uuid[])`, day, ids)
+	rows, err := s.pool.Query(ctx, `SELECT d.offer_id::text, d.day::text, d.conversions
+		FROM unnest($1::uuid[], $2::date[]) AS k(offer_id, day) JOIN tracker_offer_days d ON d.offer_id = k.offer_id AND d.day = k.day`, ids, days)
 	if err != nil {
 		if ctx.Err() == nil {
 			track.Fail(ctx, s.log, track.Event{Name: "tracker_offer.caps_refresh_failed", Surface: "system"}, "internal", err)
@@ -481,9 +485,9 @@ func (s *Server) refreshOfferCaps(ctx context.Context) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id string
+		var id, day string
 		var n int64
-		if rows.Scan(&id, &n) == nil {
+		if rows.Scan(&id, &day, &n) == nil {
 			s.caps.seed(conversionCapKey(id), day, n)
 		}
 	}
@@ -569,7 +573,11 @@ func (s *Server) readLinkDestinations(ctx context.Context, ws, link, fallback st
 // destinationViews are the destinations of one of a link's paths (nil for
 // the default ones), with today's clicks.
 func (s *Server) destinationViews(ctx context.Context, ws string, o routeOwner, path *string) ([]linkDestinationView, error) {
-	day := capDay(time.Now())
+	loc, err := s.ownerZone(ctx, ws, o)
+	if err != nil {
+		return nil, err
+	}
+	day := capDay(time.Now(), loc)
 	rows, err := s.pool.Query(ctx, `SELECT d.id::text, d.name, d.url, d.weight, d.daily_click_cap, COALESCE(c.clicks, 0), o.id::text, o.name, ld.id::text, ld.name
 		FROM tracking_link_destinations d
 		LEFT JOIN tracking_destination_days c ON c.destination_id = d.id AND c.day = $3::date

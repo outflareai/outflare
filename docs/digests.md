@@ -6,7 +6,7 @@ Each digest is kept in the app (**Settings → Digests**), sent as the `digest.r
 
 ## The schedule
 
-Without changes, each brand gets a weekly digest on Mondays at 08:00 UTC, kept in the app and sent as a webhook, with no email. Owners and admins change it on the Digests page or with `PUT /v1/brands/{brand}/digest-settings`:
+Without changes, each brand gets a weekly digest on Mondays at 08:00 in its reporting time zone (`timezone` on the brand, UTC unless set), kept in the app and sent as a webhook, with no email. Owners and admins change it on the Digests page or with `PUT /v1/brands/{brand}/digest-settings`:
 
 | Field | Values |
 | --- | --- |

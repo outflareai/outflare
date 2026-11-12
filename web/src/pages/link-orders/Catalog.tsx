@@ -10,6 +10,8 @@ import {
   type LinkOrderDonor,
   type PageData,
 } from "./shared";
+import { emptyRequestTarget, RequestTarget, requestTargetBody, type RequestTargetValue } from "./RequestTarget";
+import { useTargets } from "./targets";
 
 type Filters = {
   q: string;
@@ -37,7 +39,8 @@ export function Catalog({ data, cart, setCart, onOpenDonor }: {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
-  const [target, setTarget] = useState("/");
+  const [target, setTarget] = useState<RequestTargetValue>(emptyRequestTarget);
+  const { suggestions } = useTargets(data.brand, 0);
   const [addOpen, setAddOpen] = useState(false);
   const [add, setAdd] = useState({ domain: "", name: "", pbn: false, country: "", niches: "", amount: "", currency: "USD" as "USD" | "EUR" });
 
@@ -75,9 +78,9 @@ export function Catalog({ data, cart, setCart, onOpenDonor }: {
 
   const requestQuotes = async () => {
     if (!cart.length || !data.canManage) return;
-    const url = target.trim();
-    if (!url) {
-      setErr("Set a target URL for the request.");
+    const body = requestTargetBody(target);
+    if (!body.target_url && !body.target_id) {
+      setErr("Tick a link target or type a page for the request.");
       return;
     }
     setBusy("request");
@@ -87,7 +90,7 @@ export function Catalog({ data, cart, setCart, onOpenDonor }: {
         const d = data.donors.find((x) => x.id === id);
         const { error } = await api.POST("/v1/brands/{brand}/link-orders", {
           params: { path: { brand: data.brand }, header: idemp() },
-          body: { donor_profile_id: id, target_url: url, slot_type: d?.slot_types[0] || "guest_post", rel_requested: d?.rel_offered[0] || "dofollow" },
+          body: { ...body, donor_profile_id: id, slot_type: d?.slot_types[0] || "guest_post", rel_requested: d?.rel_offered[0] || "dofollow" },
         });
         if (error) throw error;
       }
@@ -264,11 +267,8 @@ export function Catalog({ data, cart, setCart, onOpenDonor }: {
         </label>
       </div>
 
+      {data.canManage ? <RequestTarget brand={data.brand} suggestions={suggestions} value={target} onChange={setTarget} /> : null}
       <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-[12px] text-muted-foreground">
-          Target URL
-          <input className={field} value={target} onChange={(e) => setTarget(e.target.value)} placeholder="/blog" />
-        </label>
         {data.canManage ? (
           <>
             <Button variant="ghost" onClick={() => setAddOpen(true)}>Add donor</Button>

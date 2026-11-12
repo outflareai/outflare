@@ -192,6 +192,20 @@ groups:
         annotations:
           summary: "Suggested weights failed for 15 minutes, so people can't see or apply them: find the error by its request id in the engine log (GET .../weight-suggestions). See Time to suggest weights on the Redirect links row."
 
+      - alert: OutflareDrilldownReportSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_report_drilldown_seconds_bucket[30m]))) > 10
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "The drill-down report takes over 10 seconds for the slowest 5%: its visit or credit queries need optimising (a brand with very many visits, a long range, or a missing index). See the drill-down panel on the Redirect links row."
+
+      - alert: OutflareDrilldownReportFailing
+        expr: sum(increase(outflare_report_drilldown_seconds_count{outcome="error"}[15m])) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "The drill-down report failed for 15 minutes, so people can't read it: find the error by its request id in the engine log (GET .../drilldown). See the drill-down panel on the Redirect links row."
+
       - alert: OutflareRedirectClickBacklog
         expr: max(outflare_redirect_click_buffer) > 20000
         for: 5m

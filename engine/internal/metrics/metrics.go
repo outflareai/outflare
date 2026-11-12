@@ -116,6 +116,11 @@ var (
 		Namespace: namespace, Subsystem: "tracker", Name: "fraud_flags_total",
 		Help: "Tracker clicks and conversions a first-party fraud signal flagged, by subject (click or conversion) and reason: datacenter_network (a hosting network), repeat_click (one address and browser clicking a link more than ten times an hour) or fast_conversion (within 10 seconds of its click). A flagged click still goes on but counts against no cap.",
 	}, []string{"subject", "reason"})
+	reportDrilldown = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "report", Name: "drilldown_seconds",
+		Help:    "Time to answer one drill-down report (a brand's visits, credited conversions and spend, grouped by up to five levels), by outcome: success or error.",
+		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30},
+	}, []string{"outcome"})
 	trackerWeightSuggestions = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "weight_suggestions_seconds",
 		Help:    "Time to work out the suggested weights of a link or flow (its clicks and conversions over up to 90 days, then the chance each lander, offer or page is the best), by outcome: success or error.",
@@ -1117,7 +1122,7 @@ var (
 var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerSourcePostbacks, trackerFraudFlags, trackerWeightSuggestions, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
+	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerSourcePostbacks, trackerFraudFlags, trackerWeightSuggestions, reportDrilldown, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -1302,6 +1307,12 @@ func RedirectRoute(outcome string) { redirectRoutes.WithLabelValues(outcome).Inc
 
 // RedirectClickBuffer reports how many clicks wait to be written.
 func RedirectClickBuffer(n int) { redirectClickBuffer.Set(float64(n)) }
+
+// ReportDrilldown times one drill-down report, by outcome (success or
+// error).
+func ReportDrilldown(outcome string, d time.Duration) {
+	reportDrilldown.WithLabelValues(outcome).Observe(d.Seconds())
+}
 
 // TrackerWeightSuggestions times working out one link's or flow's
 // suggested weights, by outcome (success or error).

@@ -130,6 +130,9 @@ type brandRecord struct {
 	// The currency the brand reports money in (ISO 4217): transactions are
 	// converted to it.
 	Currency string `json:"currency"`
+	// The time zone the brand reports in (IANA): reports bucket days in it
+	// and tracker caps reset at its midnight. UTC by default.
+	Timezone string `json:"timezone"`
 	// The brand context's version; 1 until it is first saved.
 	ContextVersion int         `json:"context_version"`
 	Counts         brandCounts `json:"counts"`
@@ -142,7 +145,7 @@ type brandRecord struct {
 func (s *Server) loadBrands(ctx context.Context, ws string, id *string, status string) ([]brandRecord, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT b.id, b.name, b.handle, b.website, b.domains, b.platforms, b.links, b.status, NULLIF(b.business_model, ''), b.revenue_models,
-		       b.logo_url, b.colors, b.manual_edit_days, b.currency,
+		       b.logo_url, b.colors, b.manual_edit_days, b.currency, b.timezone,
 		       COALESCE((SELECT version FROM brand_context WHERE brand_id = b.id), 1),
 		       (SELECT count(*) FROM sending_domains WHERE brand_id = b.id)::int,
 		       (SELECT count(*) FROM mailboxes WHERE brand_id = b.id)::int,
@@ -159,7 +162,7 @@ func (s *Server) loadBrands(ctx context.Context, ws string, id *string, status s
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (brandRecord, error) {
 		var v brandRecord
-		err := row.Scan(&v.ID, &v.Name, &v.Handle, &v.Website, &v.Domains, &v.Platforms, &v.Links, &v.Status, &v.BusinessModel, &v.RevenueModels, &v.LogoURL, &v.Colors, &v.ManualEditDays, &v.Currency, &v.ContextVersion,
+		err := row.Scan(&v.ID, &v.Name, &v.Handle, &v.Website, &v.Domains, &v.Platforms, &v.Links, &v.Status, &v.BusinessModel, &v.RevenueModels, &v.LogoURL, &v.Colors, &v.ManualEditDays, &v.Currency, &v.Timezone, &v.ContextVersion,
 			&v.Counts.Domains, &v.Counts.Mailboxes, &v.Counts.LeadLists, &v.Counts.Sequences,
 			&v.Counts.ActiveSequences, &v.CreatedAt, &v.UpdatedAt)
 		return v, err
@@ -393,6 +396,8 @@ type brandInput struct {
 	ManualEditDays *int `json:"manual_edit_days"`
 	// The currency it reports money in, such as EUR.
 	Currency *string `json:"currency"`
+	// The time zone it reports in, such as Europe/Berlin.
+	Timezone *string `json:"timezone"`
 }
 
 // hostOf turns "https://www.Repocket.com/pricing" into "repocket.com".
@@ -428,7 +433,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "live", "page-speed", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-pages", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "workspace-brands", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail", "telegram"}
+var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "live", "page-speed", "tracking", "links", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-pages", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "workspace-brands", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail", "telegram"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".
@@ -451,6 +456,12 @@ func (in *brandInput) validate() error {
 		*in.Currency = strings.ToUpper(strings.TrimSpace(*in.Currency))
 		if !currencyCode.MatchString(*in.Currency) {
 			return errInvalid("currency is a three-letter ISO 4217 code, such as EUR")
+		}
+	}
+	if in.Timezone != nil {
+		*in.Timezone = strings.TrimSpace(*in.Timezone)
+		if !validTimezone(*in.Timezone) {
+			return errInvalid("timezone is an IANA time zone, such as Europe/Berlin or America/New_York")
 		}
 	}
 	if in.ManualEditDays != nil && (*in.ManualEditDays < 0 || *in.ManualEditDays > 3650) {
@@ -691,6 +702,18 @@ func (s *Server) updateBrand(w http.ResponseWriter, r *http.Request) {
 	if err := req.validate(); s.allocError(w, r, err) {
 		return
 	}
+	if req.Timezone != nil {
+		// Reports bucket in the database too, so it must know the zone.
+		var known bool
+		if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1)`, *req.Timezone).Scan(&known); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if !known {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "timezone "+*req.Timezone+" isn't known to the database; pick a nearby zone")
+			return
+		}
+	}
 	b, ok := s.brandFor(w, r, a)
 	if !ok {
 		return
@@ -714,11 +737,11 @@ func (s *Server) updateBrand(w http.ResponseWriter, r *http.Request) {
 				domains = COALESCE($6, domains), platforms = COALESCE($7, platforms), status = COALESCE($8, status),
 				links = COALESCE($9, links), business_model = COALESCE($10, business_model), revenue_models = COALESCE($11, revenue_models),
 				logo_url = COALESCE($12, logo_url), colors = COALESCE($13, colors), manual_edit_days = COALESCE($14, manual_edit_days),
-				currency = COALESCE($15, currency),
+				currency = COALESCE($15, currency), timezone = COALESCE($16, timezone),
 				updated_at = now()
 			WHERE id = $1 AND workspace_id = $2`,
 			b.ID, a.WorkspaceID, req.Name, req.Handle, req.Website, domains, req.Platforms, req.Status, req.Links, req.BusinessModel, req.RevenueModels,
-			req.LogoURL, req.Colors, req.ManualEditDays, req.Currency)
+			req.LogoURL, req.Colors, req.ManualEditDays, req.Currency, req.Timezone)
 		if err != nil {
 			return brandUnique(err)
 		}
@@ -760,7 +783,7 @@ func (s *Server) updateBrand(w http.ResponseWriter, r *http.Request) {
 		for name, set := range map[string]bool{"name": req.Name != nil, "handle": req.Handle != nil, "website": req.Website != nil,
 			"domains": req.Domains != nil, "platforms": req.Platforms != nil, "links": req.Links != nil,
 			"business_model": req.BusinessModel != nil, "revenue_models": req.RevenueModels != nil,
-			"logo_url": req.LogoURL != nil, "colors": req.Colors != nil, "manual_edit_days": req.ManualEditDays != nil, "currency": req.Currency != nil} {
+			"logo_url": req.LogoURL != nil, "colors": req.Colors != nil, "manual_edit_days": req.ManualEditDays != nil, "currency": req.Currency != nil, "timezone": req.Timezone != nil} {
 			if set {
 				fields = append(fields, name)
 			}
@@ -773,6 +796,10 @@ func (s *Server) updateBrand(w http.ResponseWriter, r *http.Request) {
 	})
 	if s.allocError(w, r, err) {
 		return
+	}
+	if req.Timezone != nil {
+		// Caps on its links count days in the new zone from now on.
+		s.redirects.clear()
 	}
 	list, err := s.loadBrands(ctx, a.WorkspaceID, &b.ID, "all")
 	if err != nil || len(list) != 1 {

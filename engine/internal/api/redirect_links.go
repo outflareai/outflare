@@ -99,7 +99,7 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 	_, own := s.ownDomain(r, t.ws)
 	bot := tracking.LikelyBot(r.UserAgent(), time.Time{}, now)
 	key := utm.NewShortCode(clickKeyLen)
-	c := bufferedClick{ws: t.ws, brand: t.brand, linkID: t.link.ID, key: key, bot: bot, at: now, detail: clickDetails(r)}
+	c := bufferedClick{ws: t.ws, brand: t.brand, linkID: t.link.ID, key: key, bot: bot, at: now, day: capDay(now, t.loc), detail: clickDetails(r)}
 	if ip, err := parseClientAddr(clientIP(r)); err == nil && s.box != nil {
 		// A keyed hash per workspace: the same visitor's clicks match, and
 		// the address can't be read back from it.

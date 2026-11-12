@@ -17,7 +17,8 @@ site has numbers before it connects any tool: Website analytics shows the
 visitors, visits, page views, bounce rate and average visit length the tag
 counted, one point per day, with the top pages, sources, websites, countries
 and devices. It is computed live from the brand's visits, so today counts
-too, and it sits next to any connected tool so the two can be compared. Bots
+too (days are the brand's, in its reporting time zone; `?timezone=` reads
+another), and it sits next to any connected tool so the two can be compared. Bots
 and crawlers are left out; a visitor who doesn't allow cookies counts once per
 visit.
 
@@ -321,3 +322,49 @@ privacy policy, a homepage on your domain and a short video of the consent
 flow, and usually takes a few days to a few weeks. Sensitive scopes do not
 need the paid security assessment that restricted scopes (such as full
 Gmail) need.
+
+## The drill-down report
+
+In the app it is **Tracker → Report** (`G` then `P`): pick up to five
+levels, filter, sort by a column header, expand a row or double-click it to
+drill in (the row becomes a filter), add custom columns, and save the view.
+The whole view is in the page's address, so a link opens the same report.
+
+`GET /v1/brands/{brand}/drilldown` (MCP `get_drilldown_report`) groups the
+brand's visits, the conversions and revenue
+[attribution](attribution.md) credits to them, and ad spend by up to five
+levels at once: `group_by=channel,country`, `group_by=ad_campaign,day`. Each
+row has its children and the same metrics, so a parent is its children's
+subtotal:
+
+- **Metrics:** `visits`, `visitors`, `conversions`, `revenue`, `cost`,
+  `profit`, `roi`, `roas`, `cr`, `epv` and `cpa`, with money in the brand's
+  currency.
+- **Dimensions:** every visit field (channel, source, campaign, the UTM tags,
+  landing path, referrer, country, region, city, ISP, ASN, language, device,
+  OS, browser), the ad ids the tracking template recorded (`ad_campaign`,
+  `ad_adset`, `ad_ad`, `ad_placement`), the tracker campaign, and `day`,
+  `hour` and `weekday` in the brand's time zone.
+- **Filters:** `filter=country:US` keeps, `exclude=channel:seo` leaves out;
+  several values of one dimension are either-or.
+- **Cost** comes from the ad platforms, so it splits only by `day` (the ad
+  account's day) and one ad level. Grouped any other way, cost and the ratios
+  on it are empty and `cost_note` says why.
+- `sort=-revenue`, `limit` (rows per parent), `conversion_time=conversion`
+  to count conversions when they happened rather than at their visit, the
+  attribution `model`, `timezone`, and `format=csv` for the deepest rows.
+
+### Custom columns and saved views
+
+- **Custom columns:** `column=rpv:revenue/visits` adds a column to every
+  row (`metrics.custom.rpv`): arithmetic (`+ - * /`, brackets, numbers) over
+  the metrics. Up to 10; a missing value or a division by zero is empty, and
+  the CSV carries them after the metrics. `sort=-rpv` sorts by one.
+- **Saved views** (`/v1/brands/{brand}/report-views`, MCP
+  `list_report_views`, `save_report_view`, `update_report_view`,
+  `delete_report_view`) keep a report's grouping, filters, sort, limit, date
+  range (a preset such as `last_7_days`, in the report's time zone, or fixed
+  dates), time zone, model and custom columns, plus the app's own display
+  settings. A view is its maker's until `shared`; then the brand's team sees
+  it, and only its maker can make it private again. `GET .../drilldown?view=`
+  reads a view, and anything the request says itself wins.

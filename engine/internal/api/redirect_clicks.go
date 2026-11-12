@@ -46,8 +46,10 @@ const (
 type redirectTarget struct {
 	found     bool
 	ws, brand string
-	link      trackingLinkView
-	campaign  trackingCampaignView
+	// loc is the brand's reporting time zone, whose days caps count.
+	loc      *time.Location
+	link     trackingLinkView
+	campaign trackingCampaignView
 	// source is the campaign's traffic source, nil without one.
 	source *campaignSource
 	// dests are the link's weighted destinations, none for the link's own
@@ -98,19 +100,20 @@ func (c *redirectCache) clear() {
 func (s *Server) lookupRedirect(ctx context.Context, code string) (redirectTarget, error) {
 	t := redirectTarget{found: true}
 	var brand, sourceID, flow *string
-	var clickParam, clickToken, costParam, costToken string
+	var clickParam, clickToken, costParam, costToken, tz string
 	var params []byte
 	err := s.pool.QueryRow(ctx, `SELECT l.workspace_id::text, l.brand_id::text, l.id::text, l.url, l.content, l.term,
 			c.id::text, c.code, c.channel, c.source, c.medium, c.slug, ts.id::text,
 			COALESCE(ts.click_id_param, ''), COALESCE(ts.click_id_token, ''), COALESCE(ts.cost_param, ''), COALESCE(ts.cost_token, ''),
-			COALESCE(ts.parameters, '[]'), c.redirect_mode, f.id::text
+			COALESCE(ts.parameters, '[]'), c.redirect_mode, f.id::text,
+			COALESCE((SELECT b.timezone FROM brands b WHERE b.id = COALESCE(l.brand_id, c.brand_id, outflare_first_brand(l.workspace_id))), 'UTC')
 		FROM tracking_links l JOIN tracking_campaigns c ON c.id = l.campaign_id
 		LEFT JOIN tracker_flows f ON f.id = l.flow_id AND f.workspace_id = l.workspace_id
 		LEFT JOIN tracker_traffic_sources ts ON ts.id = c.traffic_source_id AND ts.workspace_id = c.workspace_id
 		WHERE l.redirect_code = $1`, code).
 		Scan(&t.ws, &brand, &t.link.ID, &t.link.URL, &t.link.Content, &t.link.Term,
 			&t.campaign.ID, &t.campaign.Code, &t.campaign.Channel, &t.campaign.Source, &t.campaign.Medium, &t.campaign.Slug,
-			&sourceID, &clickParam, &clickToken, &costParam, &costToken, &params, &t.campaign.RedirectMode, &flow)
+			&sourceID, &clickParam, &clickToken, &costParam, &costToken, &params, &t.campaign.RedirectMode, &flow, &tz)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return redirectTarget{}, nil
 	}
@@ -120,11 +123,13 @@ func (s *Server) lookupRedirect(ctx context.Context, code string) (redirectTarge
 	if flow != nil {
 		owner = flowOwner(*flow)
 	}
+	t.loc = zone(tz)
+	day := capDay(time.Now(), t.loc)
 	if err == nil {
-		t.dests, err = s.loadDestinations(ctx, owner, time.Now())
+		t.dests, err = s.loadDestinations(ctx, owner, day)
 	}
 	if err == nil {
-		t.paths, err = s.loadPaths(ctx, owner, time.Now())
+		t.paths, err = s.loadPaths(ctx, owner, day)
 	}
 	if brand != nil {
 		t.brand = *brand
@@ -153,7 +158,9 @@ type bufferedClick struct {
 	offerID, landerID string
 	bot               bool
 	at                time.Time
-	detail            clickDetail
+	// day is the day its caps count it on: the brand's (capDay).
+	day    string
+	detail clickDetail
 }
 
 // uncounted says a click goes where a person's would but counts against
@@ -303,7 +310,7 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 		} else if !c.uncounted() {
 			for _, id := range []string{c.destinationID, c.offerID} {
 				if id != "" {
-					s.caps.settle(id, capDay(c.at), 1, 0)
+					s.caps.settle(id, c.day, 1, 0)
 				}
 			}
 		}

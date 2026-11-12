@@ -186,8 +186,9 @@ func (s *Server) listOffers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "source is a postback source's id")
 		return
 	}
+	today, _ := s.brandToday(r.Context())
 	rows, err := s.pool.Query(r.Context(), offerSelect+` AND ($4 = 'all' OR o.status = $4) AND ($5 = '' OR o.source_id = $5::uuid) ORDER BY lower(o.name)`,
-		a.WorkspaceID, a.Brand, capDay(time.Now()), status, source)
+		a.WorkspaceID, a.Brand, today, status, source)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -208,7 +209,8 @@ func (s *Server) writeOffer(w http.ResponseWriter, r *http.Request, status int, 
 	var v trackerOfferView
 	err := errNotFound
 	if validUUID(id) {
-		v, err = scanOffer(s.pool.QueryRow(r.Context(), offerSelect+` AND o.id = $4`, a.WorkspaceID, a.Brand, capDay(time.Now()), id))
+		today, _ := s.brandToday(r.Context())
+		v, err = scanOffer(s.pool.QueryRow(r.Context(), offerSelect+` AND o.id = $4`, a.WorkspaceID, a.Brand, today, id))
 	}
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errNotFound) {
 		writeError(w, r, http.StatusNotFound, "not_found", "offer not found")

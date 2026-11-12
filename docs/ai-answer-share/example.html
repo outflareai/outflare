@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>AI answer share — example data</title>
+<style>
+  :root {
+    --bg: #0c0c0e; --card: #161618; --border: #2a2a2e; --text: #f4f4f5;
+    --muted: #a1a1aa; --accent: #e4e4e7; --banner: #7c2d12; --banner-text: #ffedd5;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  }
+  html.light {
+    --bg: #fafafa; --card: #ffffff; --border: #e4e4e7; --text: #18181b;
+    --muted: #71717a; --accent: #27272a; --banner: #9a3412; --banner-text: #fff7ed;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); padding: 28px 36px 48px; max-width: 1180px; }
+  .banner { background: var(--banner); color: var(--banner-text); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 12px; padding: 8px 12px; border-radius: 8px; margin-bottom: 20px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .lede { color: var(--muted); font-size: 13px; max-width: 46rem; margin: 0 0 16px; }
+  .note { border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 10px 14px; color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+  .tabs { display: flex; gap: 8px; margin: 0 0 16px; }
+  .tab { border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
+  .tab.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .stats.three { grid-template-columns: repeat(3, 1fr); }
+  .stat { border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 14px 16px; }
+  .stat .k { font-size: 11px; color: var(--muted); }
+  .stat .v { font-size: 22px; font-weight: 600; margin-top: 4px; letter-spacing: -0.03em; }
+  .stat .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  h2 { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 28px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; }
+  td.n, th.n { text-align: right; font-family: var(--mono); font-size: 12px; }
+  td.path { font-family: var(--mono); font-size: 12px; }
+  tr:last-child td { border-bottom: 0; }
+</style>
+</head>
+<body>
+  <div class="banner">Example data — fictional Acme workspace on acme.example, not a customer’s numbers</div>
+  <h1>AI answer share</h1>
+  <p class="lede">How often stored AI answers name the brand, and its share of voice, by the question’s topic. Week-by-week trend and citations of compare pages are included. This does not start a new run.</p>
+  <p class="note">Share of voice and mention rates are counted from already-stored AI answer runs. This does not start a new run or call a paid provider. A cluster is the question’s topic, or Untagged when the question has none.</p>
+  <div class="tabs"><span class="tab">28 days</span><span class="tab on">84 days</span><span class="tab">365 days</span></div>
+  <div class="stats">
+    <div class="stat"><div class="k">Mention rate</div><div class="v">66.7%</div><div class="s">3 stored answers</div></div>
+    <div class="stat"><div class="k">Share of voice</div><div class="v">50.0%</div><div class="s">Northpeak 50.0%</div></div>
+    <div class="stat"><div class="k">Topics</div><div class="v">2</div><div class="s">3 questions</div></div>
+    <div class="stat"><div class="k">Compare pages cited</div><div class="v">33.3%</div><div class="s">1 answers cite a brand /compare page</div></div>
+  </div>
+  <h2>By topic</h2>
+  <p class="hint">A cluster is the topic on the question. Questions without a topic are Untagged and are not counted in the topic total above.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Topic</th>
+        <th class="n">Questions</th>
+        <th class="n">Answers</th>
+        <th class="n">Mention rate</th>
+        <th class="n">Share of voice</th>
+        <th class="n">Compare cited</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>residential</td>
+        <td class="n">1</td><td class="n">1</td>
+        <td class="n">100%</td><td class="n">50.0%</td><td class="n">0%</td>
+      </tr>
+      <tr>
+        <td>compare</td>
+        <td class="n">1</td><td class="n">1</td>
+        <td class="n">0%</td><td class="n">0%</td><td class="n">100%</td>
+      </tr>
+      <tr>
+        <td>Untagged</td>
+        <td class="n">1</td><td class="n">1</td>
+        <td class="n">100%</td><td class="n">100%</td><td class="n">0%</td>
+      </tr>
+    </tbody>
+  </table>
+  <h2>Compare page citations</h2>
+  <p class="hint">A cited URL counts when its path is /compare, including locale prefixes such as /zh/compare. Other paths that only contain the word compare are left out.</p>
+  <div class="stats three">
+    <div class="stat"><div class="k">Brand /compare</div><div class="v">33.3%</div><div class="s">1 of 3 answers</div></div>
+    <div class="stat"><div class="k">Competitor /compare</div><div class="v">0%</div><div class="s">0 of 3 answers</div></div>
+  </div>
+  <table>
+    <thead><tr><th>Page</th><th>Owner</th><th class="n">Answers</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="path">https://acme.example/compare/northpeak</td>
+        <td>brand</td>
+        <td class="n">1</td>
+      </tr>
+    </tbody>
+  </table>
+  <h2>Week by week</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Week</th>
+        <th class="n">Answers</th>
+        <th class="n">Mention rate</th>
+        <th class="n">Share of voice</th>
+        <th class="n">Compare cited</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>2026-10-26</td>
+        <td class="n">1</td>
+        <td class="n">100%</td>
+        <td class="n">100%</td>
+        <td class="n">0%</td>
+      </tr>
+      <tr>
+        <td>2026-11-02</td>
+        <td class="n">2</td>
+        <td class="n">50.0%</td>
+        <td class="n">33.3%</td>
+        <td class="n">50.0%</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

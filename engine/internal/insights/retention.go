@@ -28,6 +28,9 @@ type Retention struct {
 	From, To time.Time
 	Interval string `json:"interval"`
 	Periods  int    `json:"periods"`
+	// Location is the time zone periods are in: the brand's reporting
+	// time zone (B4a), UTC when nil.
+	Location *time.Location `json:"-"`
 }
 
 func validRetentionStep(s Step, at string) error {
@@ -131,12 +134,12 @@ func CompileRetention(ctx context.Context, q Querier, ws, brand string, r Retent
 	pWS, pBrand := a.add(ws), a.add(brand)
 	pFrom, pTo := a.add(r.From), a.add(r.To)
 	// Returns are followed Periods after the last cohort's start.
-	last := truncate(r.To.Add(-time.Nanosecond), r.Interval)
+	last := truncate(r.To.Add(-time.Nanosecond), r.Interval, r.Location)
 	for i := 0; i <= r.Periods; i++ {
 		last = next(last, r.Interval)
 	}
 	pEnd := a.add(last)
-	pInterval := a.add(r.Interval)
+	pInterval, pZone := a.add(r.Interval), a.add(zoneName(r.Location))
 
 	startConv, err := loadConversion(ctx, q, ws, brand, r.Start.Kind, r.Start.Conversion, "start")
 	if err != nil {
@@ -160,13 +163,14 @@ func CompileRetention(ctx context.Context, q Querier, ws, brand string, r Retent
 		return nil, err
 	}
 	period := func(ts string) string {
-		return `date_trunc(` + pInterval + `, ` + ts + ` AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`
+		return `date_trunc(` + pInterval + `, ` + ts + ` AT TIME ZONE ` + pZone + `) AT TIME ZONE ` + pZone
 	}
 	// n is how many periods after the cohort's start a return fell.
 	var n string
 	switch r.Interval {
 	case "month":
-		n = `((EXTRACT(year FROM r.p) - EXTRACT(year FROM s.p0)) * 12 + EXTRACT(month FROM r.p) - EXTRACT(month FROM s.p0))::int`
+		rp, sp := `(r.p AT TIME ZONE `+pZone+`)`, `(s.p0 AT TIME ZONE `+pZone+`)`
+		n = `((EXTRACT(year FROM ` + rp + `) - EXTRACT(year FROM ` + sp + `)) * 12 + EXTRACT(month FROM ` + rp + `) - EXTRACT(month FROM ` + sp + `))::int`
 	case "week":
 		n = `(EXTRACT(epoch FROM (r.p - s.p0)) / 604800)::int`
 	default:
@@ -189,7 +193,7 @@ func (c *CompiledRetention) Run(ctx context.Context, q Querier) (RetentionResult
 	r := c.r
 	res := RetentionResult{StartLabel: c.startLabel, ReturnLabel: c.returnLabel, Interval: r.Interval, Periods: r.Periods, From: r.From, To: r.To, Cohorts: []Cohort{}}
 	now := time.Now().UTC()
-	ps := periods(r.From, r.To, r.Interval)
+	ps := periods(r.From, r.To, r.Interval, r.Location)
 	// Every cohort is made first, so the pointers into the slice hold.
 	res.Cohorts = make([]Cohort, 0, len(ps))
 	byStart := map[int64]*Cohort{}

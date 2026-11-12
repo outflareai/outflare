@@ -40,7 +40,11 @@ func (s *Server) adsPerformance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "from must be on or before to, and at most a year before it")
 		return
 	}
-	p := paidads.PerformanceQuery{WorkspaceID: a.WorkspaceID, BrandID: a.Brand, Level: paidads.LevelCampaign, From: from, To: to, Customers: "all"}
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	p := paidads.PerformanceQuery{WorkspaceID: a.WorkspaceID, BrandID: a.Brand, Level: paidads.LevelCampaign, From: from, To: to, Location: loc, Customers: "all"}
 	if v := q.Get("level"); v != "" {
 		if !slices.Contains([]string{paidads.LevelCampaign, paidads.LevelAdGroup, paidads.LevelAd}, v) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "level is campaign, ad_group or ad")

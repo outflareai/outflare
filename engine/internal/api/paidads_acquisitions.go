@@ -15,7 +15,11 @@ import (
 func (s *Server) listAdAcquisitions(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
-	p := paidads.AcquisitionsQuery{WorkspaceID: a.WorkspaceID, BrandID: a.Brand, Customers: "all"}
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	p := paidads.AcquisitionsQuery{WorkspaceID: a.WorkspaceID, BrandID: a.Brand, Location: loc, Customers: "all"}
 	for _, f := range []struct {
 		name string
 		dst  *time.Time

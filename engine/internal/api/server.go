@@ -695,6 +695,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesTrackerLanders(mux)
 	s.routesTrackerFlows(mux)
 	s.routesTrackerWeights(mux)
+	s.routesDrilldown(mux)
+	s.routesReportViews(mux)
 	s.routesSourcePostbacks(mux)
 	s.routesPartners(mux)
 	s.routesAttribution(mux)

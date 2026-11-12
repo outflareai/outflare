@@ -22,6 +22,30 @@ pnpm --filter @outflare/web test:ads
 ```
 
 The Paid ads page (plans/paid-ads/plan.md, "Web experience") for a brand with a Google Ads account, against mocked API answers: the cost per new paying customer against the target and its sentence, the header's customers and attribution window switches changing the performance query, the decision inbox (a saving approved without a question, a raise confirmed first, Undo, Acknowledge and the shadow section), the set-up path with the offer sheet reviewed in place, and the results, customers and verdicts screens at phone width without sideways scrolling. Set `OUTFLARE_TEST_SHOTS` to a folder to save a screenshot of each screen. CI runs it in the web-and-sdk job.
+Tracker report page browser regression:
+
+```sh
+pnpm --filter @outflare/web test:tracker-report
+```
+
+The tracker's Report page (plans/ad-tracker-ui.md B1) against mocked drill-down answers: the default dates in the brand's time zone, the cost note, expanding a row of the tree, sorting largest first on the first click, drilling into a row (it becomes a filter and the grouping moves down), a custom column, saving a view with its settings, the CSV download, and one card per row at phone width. CI runs it in the web-and-sdk job.
+
+Tracker campaigns page browser regression:
+
+```sh
+pnpm --filter @outflare/web test:tracker-campaigns
+```
+
+The tracker's Campaigns page (plans/ad-tracker-ui.md B2) against mocked API answers: the list of tracker campaigns with the last 7 days from the report, a new campaign opening its editor, General (name and redirect mode), Destination (each offer's share of the clicks, suggested weights applied by a click, Equalise, a path with two rules written out as a sentence, a lander and an offer on it, and a flow instead), Tracking (the source's parameters and postback), and the read-only editor at phone width without sideways scrolling. CI runs it in the web-and-sdk job.
+
+Tracker offers, landers and flows browser regression:
+
+```sh
+pnpm --filter @outflare/web test:tracker-library
+```
+
+The tracker's Offers, Landers and Flows pages (plans/ad-tracker-ui.md B3) against mocked API answers: a capped offer in the list, a new offer's token picker inserting at the cursor, the missing click id warning, Preview with test values, a fixed payout with a payout by country, a cap and a fallback offer, archiving after a question; a new lander staying open with its click URLs and script; a new flow, and a flow's paths saved only after the "used by 3 links" question, then renamed; and the read-only Offers list at phone width without sideways scrolling. CI runs it in the web-and-sdk job.
+
 Partner program settings page:
 
 ```sh

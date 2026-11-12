@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,7 +53,12 @@ func (s *Server) siteAnalytics(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	// Today counts too: these are the tag's own visits, not a sync.
 	q := r.URL.Query()
-	to := time.Now().UTC()
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	to := civilDay(time.Now(), loc)
 	out := siteAnalyticsReport{To: to.Format(time.DateOnly), From: to.AddDate(0, 0, -27).Format(time.DateOnly), Notes: []string{}}
 	for name, dst := range map[string]*string{"from": &out.From, "to": &out.To} {
 		if v := q.Get(name); v != "" {
@@ -73,7 +79,7 @@ func (s *Server) siteAnalytics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "the range is at most a year")
 		return
 	}
-	end = end.AddDate(0, 0, 1)
+	from, end = dayStart(from, loc), dayStart(end.AddDate(0, 0, 1), loc)
 	ctx := r.Context()
 	// website narrows every number to one host, as the websites list names it.
 	website := strings.ToLower(strings.TrimSpace(q.Get("website")))
@@ -83,7 +89,7 @@ func (s *Server) siteAnalytics(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if out.Series, err = s.siteSeries(ctx, args); err != nil {
+	if out.Series, err = s.siteSeries(ctx, args, loc); err != nil {
 		s.internal(w, r, err)
 		return
 	}
@@ -150,16 +156,17 @@ func (s *Server) siteTotals(ctx context.Context, args []any) (connectors.Metrics
 }
 
 // siteSeries is one point per day of the range, zero on days with none.
-func (s *Server) siteSeries(ctx context.Context, args []any) ([]connectors.AnalyticsPoint, error) {
+// Its days are in loc.
+func (s *Server) siteSeries(ctx context.Context, args []any, loc *time.Location) ([]connectors.AnalyticsPoint, error) {
 	rows, err := s.pool.Query(ctx, `SELECT to_char(d, 'YYYY-MM-DD'), COALESCE(v.visitors, 0)::float8, COALESCE(v.visits, 0)::float8, COALESCE(v.pageviews, 0)::float8
-		FROM generate_series($3::timestamptz AT TIME ZONE 'UTC', $4::timestamptz AT TIME ZONE 'UTC' - interval '1 day', interval '1 day') d
+		FROM generate_series($3::timestamptz AT TIME ZONE $6, $4::timestamptz AT TIME ZONE $6 - interval '1 day', interval '1 day') d
 		LEFT JOIN (
-			SELECT (started_at AT TIME ZONE 'UTC')::date AS day, count(DISTINCT anonymous_id) AS visitors, count(*) AS visits, sum(pageviews) AS pageviews
+			SELECT (started_at AT TIME ZONE $6)::date AS day, count(DISTINCT anonymous_id) AS visitors, count(*) AS visits, sum(pageviews) AS pageviews
 			FROM site_sessions
 			WHERE workspace_id = $1 AND brand_id = $2 AND started_at >= $3 AND started_at < $4 AND ($5 = '' OR `+siteSessionHost+` = $5)
 			GROUP BY 1
 		) v ON v.day = d::date
-		ORDER BY d`, args...)
+		ORDER BY d`, append(slices.Clone(args), loc.String())...)
 	if err != nil {
 		return nil, err
 	}
