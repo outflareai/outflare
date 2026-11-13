@@ -34,6 +34,7 @@ const categories: { id: ConnectorCategory; label: string; help: string }[] = [
   { id: "sequencer", label: "Sequencers", help: "Warm up your mailboxes in their own warm-up, or switch over: import campaigns, leads and mailboxes from the tool you use now." },
   { id: "mailbox_provider", label: "Mailbox suppliers", help: "Buy and set up sending mailboxes without leaving Outflare." },
   { id: "data", label: "Lead data", help: "Find and enrich leads." },
+  { id: "fraud", label: "Fraud checks", help: "Score the addresses of tracker clicks on your own account, so proxies, VPNs and data centres are flagged as suspect." },
   { id: "analytics", label: "Analytics", help: "Read visitors, top pages, sources, search queries and conversions from the tools already on your website." },
   { id: "code", label: "Code and deploys", help: "Know when your website ships, from the repository on GitHub or the project on Vercel, so fixes are re-checked and experiments start on the real deploy. Read only." },
   { id: "seo", label: "SEO", help: "Domain rating, backlinks, keyword rankings, competitors and site audits from DataForSEO or Ahrefs, paid per call within a monthly budget." },

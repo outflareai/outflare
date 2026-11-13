@@ -19,6 +19,10 @@ func TestAddress(t *testing.T) {
 	if got := b.Footer("Northpeak"); got != "Northpeak Example Pty Ltd, Level 2, 10 Example Street, Sydney NSW 2000, Australia" {
 		t.Fatalf("footer = %q", got)
 	}
+	sg := Address{Line1: "1 Example Road", City: "Singapore", PostalCode: "000000", Country: "SG"}
+	if got := sg.String(); got != "1 Example Road, Singapore 000000" {
+		t.Fatalf("city-state = %q", got)
+	}
 	if (Business{LegalName: "X"}).Footer("Y") != "" || (Address{}).String() != "" || (Address{}).Check() != nil {
 		t.Fatal("an empty address shows nothing and clears")
 	}

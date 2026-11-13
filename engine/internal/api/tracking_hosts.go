@@ -20,8 +20,9 @@ import (
 // customer's domain.
 
 // trackingPaths are what a tracking domain serves; /t/ is tracker
-// conversion postbacks and /click landers' calls to action.
-var trackingPaths = []string{"/c/", "/o/", "/u/", "/r/", "/l/", "/t/", "/click"}
+// conversion postbacks, /click landers' calls to action and /hp the
+// landers' honeypot.
+var trackingPaths = []string{"/c/", "/o/", "/u/", "/r/", "/l/", "/t/", "/click", "/hp"}
 
 const (
 	trackingHostTTL = time.Minute

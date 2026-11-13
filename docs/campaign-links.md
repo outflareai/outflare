@@ -78,6 +78,19 @@ picker under its URL, a warning while it can't carry the click id, and
 **Preview** with test values; a lander shows each call to action's click URL
 and the script for its page; a flow opens with the campaign editor's paths,
 and asks before a save that changes more than one link.
+**Tracker → Traffic sources** and **Affiliate networks** start each new one
+from a gallery of the templates below, with Custom first. A traffic source's
+form previews the campaign URL as you edit its parameters and won't save
+while a value still reads `REPLACE`; an affiliate network's form shows its
+postback URL once, after it is made or when you make a new one.
+**Tracker → Setup** is a checklist that ticks itself from the brand's data
+(a verified domain, a traffic source, an offer carrying the click id, a
+campaign, a click, a conversion), a builder for a network's postback URL in
+its own tokens with the image pixel, script and server call it implies, and a
+**test conversion** on a click id you paste. The test is recorded as type
+`test`, with no payout and declined, so it isn't sent back to traffic sources
+(unless a source sends declined conversions) and adds no revenue; the answer
+says what happened and why, such as an expired click.
 
 By default a link goes straight to the page, and the website tracking
 snippet reads the tags there. Where the snippet can't run, or a long tagged
@@ -109,7 +122,11 @@ https://links.northpeak.example/l/k7m2pq9x
   ([where visitors are](website-tracking.md#where-visitors-are)). The
   address is kept only as a keyed hash (`ip_hash`, an HMAC with the
   server's key, per workspace), so one visitor's repeat clicks can be told
-  apart from many visitors' without the address being readable.
+  apart from many visitors' without the address being readable. The one
+  exception is a brand's own choice: while its **IP lookups** are on
+  (below), the exact address and user agent of the clicks it wants looked
+  up are kept apart from the click, for 30 days at most, for that lookup
+  only.
 - A redirect answers without waiting on the database: the link is kept in
   memory, and its clicks are written in batches a moment later (within a
   second). A landing page that reports its click first waits for it. A
@@ -219,6 +236,18 @@ its `X-Outflare-Outcome` header says what happened. A pixel's URL is in the
 page, so anyone can read it: prefer a postback for payouts that matter. A
 source with an IP allowlist takes no pixels.
 
+The **click logs** list the brand's redirect clicks
+(`GET /v1/brands/{brand}/tracker-clicks`) and its landers' call-to-action
+clicks (`.../tracker-lander-clicks`), newest first: the campaign, path,
+lander and offer a click went to, where it came from, its custom fields, the
+traffic source's click id and cost, and fraud flags. They filter by
+campaign, offer, lander, one click id and a start time, and leave likely
+bots out unless `bots=true`. Use them to find a click id for a test
+conversion, or to see what a campaign's clicks did. In the app, **Tracker →
+Logs** shows them beside the conversions, postbacks in and out, and the
+postbacks that weren't recorded, grouped by why with the fix; **Live**
+refreshes it every few seconds until paused.
+
 The **conversion log** (`GET /v1/brands/{brand}/tracker-conversion-log`) keeps
 every postback and pixel call of the last 30 days: what it sent, what Outflare
 answered and why (an unknown or expired click, a bad parameter, the wrong
@@ -273,8 +302,10 @@ weight, and the lander's calls to action to the list's other destinations:
 
 The lander gets the click id as `ofclk` (and in `{click_id}`), and its page
 carries `<script src="https://go.northpeak.example/click.js" async></script>`,
-which adds it to the page's links to `/click`. Nothing is stored in the
-browser. A call to action goes on only for a click Outflare sent to a lander
+which adds it to the page's links to `/click`, and a **honeypot**: a link to
+`/hp` no person can see, reach by keyboard or hear from a screen reader. A
+bot that follows every link follows it, and its click is flagged
+`honeypot` (below). Nothing is stored in the browser. A call to action goes on only for a click Outflare sent to a lander
 in the last day, on the brand's own tracking domain; anything else (a
 bookmarked button, a scraper) gets the domain's fallback page. Each lander
 click is kept (`GET /v1/brands/{brand}/lander-clicks`), with its call to
@@ -296,12 +327,62 @@ times), and never refuses them:
 - `repeat_click`: the same address and browser clicked the same link more
   than ten times in an hour (the browser too, since many people can share an
   address; counted by each server apart, so a few more can slip through);
-- `fast_conversion`: a conversion less than 10 seconds after its click.
+- `fast_conversion`: a conversion less than 10 seconds after its click;
+- `filter_list`: the click's address or user agent is on the brand's own
+  **click filter lists** (`/v1/brands/{brand}/click-filters`, MCP
+  `add_click_filter`, and Tracker → Setup): addresses, ranges (at most a /8)
+  and pieces of a user agent, up to 1,000 entries, matched from the next
+  click on. A redirect click on a list is flagged like the others, never
+  sent elsewhere. A direct click (from the site script) is checked against
+  the user agent pieces only, as site events keep no address;
+- `honeypot`: the lander the click went to then followed the lander
+  script's hidden link, which only bots do. The click had already gone on,
+  so it may have counted against a cap; its conversions inherit the flag;
+- `ip_reputation`: the brand's own IP reputation provider scored the
+  click's address at or over the brand's threshold (IP lookups, below).
+  The lookup comes a few seconds after the click, so like `honeypot` it
+  may have counted against a cap. A lookup that finds a data-centre
+  network adds `datacenter_network` too.
 
 A flagged click still goes where a person's would, but counts against no
 destination or offer cap, as a likely bot doesn't. Links show their
 `suspect_clicks`; a conversion inherits its click's reasons and shows them in
 `fraud_reasons`, and `?suspect=true` (or `false`) filters the ledger.
+
+### IP lookups
+
+A brand can have its tracker clicks scored by an IP reputation service on
+the workspace's own account: connect **IPQualityScore** under Fraud checks,
+then turn on lookups (`PUT /v1/brands/{brand}/ip-lookups`, MCP
+`set_ip_lookups`). The brand chooses which clicks are looked up:
+
+- `flagged`: clicks a first-party signal already flagged (on by default);
+- `converting`: clicks that convert (on by default);
+- `sample_percent`: a share of the other clicks (5% by default);
+- `monthly_cap`: lookups a month at most (5,000 by default), so a busy
+  month can't run up the provider's bill;
+- `threshold`: the provider's risk score, 0 to 100, at which a click is
+  flagged (75 by default, IPQualityScore's "suspicious").
+
+While lookups are on, the exact address and user agent of each click they
+want is kept in a fraud table of its own, never on the click, the visit or a
+person, for 30 days at most, and only ever sent to the brand's own provider:
+an exception the owner made for fraud prevention. Turning lookups off
+deletes the brand's kept addresses at once.
+
+A worker looks up each address that is due (flagged and sampled clicks
+within seconds, a converting click when its conversion comes), never in
+the redirect, so a click goes on at once. The address is deleted as soon as
+it is looked up or skipped; only the result stays: the score and the
+provider's flags (proxy, VPN, Tor, hosting, crawler), for 400 days. A score
+at or over the threshold adds `ip_reputation` to the click and its
+conversions, and a hosting network adds `datacenter_network`. A
+conversion's postback to its traffic source waits for its click's lookup,
+so a network is never told of a conversion the lookup flags. Once the month's
+cap is used up (`used_this_month`), due clicks are skipped until the UTC
+month turns. A lookup the provider can't answer is tried twice more within
+minutes, then skipped. A key it refuses marks the connection as broken under
+Connectors.
 
 ### Destinations and daily caps
 
@@ -364,6 +445,24 @@ flow's paths (`PUT .../flows/{id}/paths`) or destinations
 (`PUT .../flows/{id}/destinations`) changes every link that uses it; the flow
 says how many do (`links`). A cap on a flow's destination counts the clicks
 of all of them. A flow that links use can't be archived.
+
+### Cost models
+
+A tracker campaign's **cost model** (`cost` on the campaign, and Cost model
+on its General tab) says how the tracker report works out what its clicks
+cost:
+
+| Model | Cost |
+| --- | --- |
+| `token` (default) | What the traffic source reported on each click with the `{cost}` token |
+| `cpc` | A fixed `amount` a click (likely bots left out) |
+| `cpa` | A fixed `amount` a conversion (declined ones left out) |
+| `revshare` | A `share` (percent) of each conversion's payout |
+
+A fixed amount is in the campaign's `currency`, else its traffic source's,
+else the brand's; a revshare is in the payout's currency. The report shows
+it in the brand's currency at the latest rate. CPM waits for impressions,
+which come with ad syncing. Synced ad spend stays in the site report.
 
 ### Suggested weights
 
@@ -437,6 +536,10 @@ native). Its `postback_rules` say which ones and with what payout:
   sent;
 - `resend`: a conversion is sent again when its status or payout changes,
   such as an approval days later or a reversal.
+
+A **suspect** conversion (one a fraud signal flagged, see "Suspect clicks
+and conversions") is never sent back, so the network's bidding doesn't learn
+from bots; it stays in the ledger and the reports.
 
 Each state of a conversion is sent once, from a job, with the tokens of the
 postback URL filled in (`{source_click_id}`, `{payout}`, `{status}` and the

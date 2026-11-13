@@ -6496,8 +6496,18 @@ paths:
         (`ad_campaign`, `ad_adset` or `ad_ad`); grouped or filtered any other way, cost and the ratios on it are null and
         `cost_note` says why. Conversions count at the visit's time unless `conversion_time=conversion`.
         `format=csv` gives the deepest rows, one column per level.
+
+        `source=tracker` reports the tracker instead (B5d): `visits` are redirect clicks (likely bots left out),
+        `visitors` distinct addresses, `conversions` and `revenue` the click ledger's conversions and payouts (declined
+        ones left out, at the click's time unless `conversion_time=conversion`), and `cost` by each campaign's cost model
+        (`cost` on the campaign: what the traffic source reported on each click with the `{cost}` token, a fixed amount
+        a click or a conversion, or a share of each payout), which splits by every level. Its dimensions: tracking_campaign,
+        traffic_source, offer, lander, path, destination, country, region, city, isp, asn, language, device,
+        device_brand, os, browser, suspect (yes or no), field1 to field20, day, hour and weekday; the default is
+        tracking_campaign. The attribution model doesn't apply to it.
       tags: [analytics]
       parameters:
+        - { name: source, in: query, schema: { type: string, enum: [site, tracker], default: site }, description: "site: visits and the conversions credited to them; tracker: tracker clicks and the click ledger's conversions." }
         - { $ref: "#/components/parameters/AttributionFrom" }
         - { $ref: "#/components/parameters/AttributionTo" }
         - { $ref: "#/components/parameters/ReportTimezone" }
@@ -7072,6 +7082,192 @@ paths:
                 required: [data, next_cursor]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/TrackerConversionCall" } }
+                  next_cursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/click-filters:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listClickFilters
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List click filters
+      description: |
+        Scope: analytics.read. The brand's click filter lists: addresses, ranges and pieces of a user agent its team
+        knows to be bots or fraud. A redirect click that matches gets the fraud reason filter_list: it still goes on,
+        but counts against no cap and shows as suspect in the reports.
+      tags: [analytics]
+      responses:
+        "200":
+          description: Filters, by kind and value.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ClickFilter" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createClickFilter
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      summary: Add a click filter
+      description: "Scope: analytics.manage. Up to 1,000 entries a brand. An ip filter is an address or a range (at most a /8, or a /32 for IPv6); a user_agent filter is a piece of the user agent, matched without regard to case. Takes effect on the next click."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, value]
+              properties:
+                kind: { type: string, enum: [ip, user_agent] }
+                value: { type: string, maxLength: 200, example: "203.0.113.0/24" }
+                note: { type: string, maxLength: 200, description: "Why it is on the list." }
+      responses:
+        "201":
+          description: The filter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClickFilter" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/click-filters/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deleteClickFilter
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      summary: Remove a click filter
+      description: "Scope: analytics.manage. Clicks it flagged keep their flag."
+      tags: [analytics]
+      responses:
+        "204": { description: Removed. }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/ip-lookups:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: getIPLookups
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: Get the brand's IP lookup settings
+      description: |
+        Scope: analytics.read. Whether the brand's tracker clicks are looked up on the workspace's own IP reputation
+        connection (IPQualityScore, under Fraud checks), and which: clicks a fraud signal flagged, clicks that convert,
+        and a sample of the rest, up to a monthly cap. Off until the brand turns it on. While it is on, the exact
+        address of each such click is kept for 30 days, for this lookup only.
+      tags: [analytics]
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IPLookupSettings" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setIPLookups
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      summary: Change the brand's IP lookup settings
+      description: "Scope: analytics.manage. What the request leaves out stays. Turning lookups on needs a connection that can score addresses; turning them off deletes the brand's kept addresses at once."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                integration_id: { type: string, description: "The workspace's IP reputation connection; '' for none." }
+                enabled: { type: boolean }
+                flagged: { type: boolean, description: "Look up clicks a fraud signal flagged." }
+                converting: { type: boolean, description: "Look up clicks that convert (their addresses are kept until then, 30 days at most)." }
+                sample_percent: { type: number, minimum: 0, maximum: 100, description: "The share of the other clicks looked up." }
+                monthly_cap: { type: integer, minimum: 0, maximum: 10000000, description: "Lookups a month at most." }
+                threshold: { type: integer, minimum: 1, maximum: 100, description: "The provider's risk score at which a click is flagged." }
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IPLookupSettings" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/tracker-clicks:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listTrackerClicks
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List tracker clicks
+      description: |
+        Scope: analytics.read. The brand's redirect clicks, newest first: the campaign, path, lander and offer each went
+        to, where it came from (place, network, device), its custom fields, the network's click id and cost, and whether
+        it was a likely bot or a fraud signal flagged it. Likely bots are left out unless bots=true. Use it to find a
+        click id for a test conversion or to see what a campaign's clicks did.
+      tags: [analytics]
+      parameters:
+        - { name: campaign, in: query, schema: { type: string, format: uuid } }
+        - { name: offer, in: query, schema: { type: string, format: uuid } }
+        - { name: lander, in: query, schema: { type: string, format: uuid } }
+        - { name: click_id, in: query, schema: { type: string, maxLength: 32 }, description: "One click, by its key (ofclk)." }
+        - { name: bots, in: query, schema: { type: boolean, default: false }, description: "true to include likely bots." }
+        - { name: since, in: query, schema: { type: string, format: date-time }, description: "Clicks at or after this time." }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Clicks.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrackerClick" } }
+                  next_cursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/tracker-lander-clicks:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listTrackerLanderClicks
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List tracker lander clicks
+      description: |
+        Scope: analytics.read. Clicks on the calls to action of the brand's landers, newest first: the redirect click
+        they continue, which call to action, and the offer or page it went on to. Likely bots are left out unless
+        bots=true.
+      tags: [analytics]
+      parameters:
+        - { name: lander, in: query, schema: { type: string, format: uuid } }
+        - { name: offer, in: query, schema: { type: string, format: uuid } }
+        - { name: click_id, in: query, schema: { type: string, maxLength: 32 }, description: "The redirect click's key (ofclk)." }
+        - { name: bots, in: query, schema: { type: boolean, default: false }, description: "true to include likely bots." }
+        - { name: since, in: query, schema: { type: string, format: date-time }, description: "Clicks at or after this time." }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Lander clicks.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrackerLanderClick" } }
                   next_cursor: { type: [string, "null"] }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -13899,9 +14095,11 @@ paths:
         - { $ref: "#/components/parameters/Cursor" }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { $ref: "#/components/parameters/Fields" }
-        - { name: q, in: query, schema: { type: string }, description: "Filter by domain." }
+        - { name: q, in: query, schema: { type: string }, description: "Search the domain, the intermediary and the theme (contains, ignoring case)." }
         - { name: pbn, in: query, schema: { type: boolean } }
         - { name: niche, in: query, schema: { type: string } }
+        - { name: intermediary, in: query, schema: { type: string }, description: "Only sites bought through this intermediary (exact name, ignoring case)." }
+        - { name: direct_contact, in: query, schema: { type: boolean }, description: "true lists only sites recommended for direct contact (see direct_contact on each row); false lists the rest." }
         - { name: archived, in: query, schema: { type: string, enum: ["true", "false", "all"] }, description: "Default omits archived rows." }
       responses:
         "200":
@@ -13949,11 +14147,27 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Import catalog rows from CSV
       description: |
-        Scope: coverage.manage. The first row is the header and must include domain.
-        A repeated domain updates the existing profile. A bad row is listed in
-        errors and does not abort the rest of the file. Send text/csv, or JSON
-        with a csv field so agents can pass a string. Amounts are the donor price
-        only.
+        Scope: coverage.manage. The first row is the header and must include a
+        domain column (domain, website, site or url). A repeated domain updates
+        the existing profile. A bad row is listed in errors and does not abort
+        the rest of the file. Send text/csv (preferred, it is smaller), or JSON
+        with a csv field so agents can pass a string. A request may be up to
+        32 MB, and the rows are written in chunks of 500, one transaction each.
+        A larger file, or one that should not be one long request, is sent as
+        several requests that each repeat the header row; rows upsert by domain,
+        so the batches add up to the same catalog. Row numbers in errors count
+        from the header of the file that was sent.
+
+        Headers are matched ignoring case, spaces and punctuation ("Traffic /
+        Organic" is traffic). Besides the donor fields it reads the intermediary,
+        theme and site age (a year, a date or "12 years"), and an intermediary's
+        metrics: date added, geo top 1 and 2, main language, article type, main
+        category, subcategory, organic and total keywords, referring domains
+        (all, followed, not followed), referring IPs and subnets, backlinks (all,
+        followed, not followed, redirects, internal), and outgoing domains and
+        links (followed and all time). price, price_usd and price_eur are major
+        units (150 is 150.00); amount_minor is minor units. Columns it does not
+        read are listed in ignored_columns. Amounts are the donor price only.
       tags: [coverage]
       requestBody:
         required: true
@@ -13973,6 +14187,7 @@ paths:
               schema: { $ref: "#/components/schemas/LinkOrderCatalogImport" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         "400": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/link-orders/catalog/items/{id}:
     parameters:
@@ -14014,6 +14229,75 @@ paths:
               schema: { $ref: "#/components/schemas/LinkOrderDonor" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/catalog/items/{id}/contacts:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getBrandLinkOrderDonorContacts
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: Find a catalog row's stored email addresses
+      description: |
+        Scope: coverage.read. The email addresses already stored for the
+        donor's site: people at its company record, contacts a link-building
+        check found on its pages, the brand's Outreach leads at the domain,
+        and addresses in the donor's or publisher's notes (such as the
+        intermediary's). It reads only stored data and costs nothing: it
+        never looks an address up on the web or with a paid provider, so an
+        empty list means nothing is stored yet. `searched` names what was
+        looked through.
+      tags: [coverage]
+      responses:
+        "200":
+          description: The stored addresses, the site's own first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderDonorContacts" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/catalog/items/{id}/outreach:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: sendBrandLinkOrderDonorToSequence
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Send a catalog row to an Outreach sequence
+      description: |
+        Scope: coverage.manage and sequences.manage. Makes `email` a lead of
+        the brand (source `link_orders`, the donor's domain as its company
+        and website) and adds it to one of the brand's Outreach sequences
+        with the same rules as adding leads there: a suppressed or excluded
+        address is skipped, an address already in the sequence is left as
+        it is, and one active in another sequence is skipped. The sequence
+        sends on its own schedule from its own mailboxes; a draft or paused
+        sequence sends nothing until it is started. An address at the site
+        becomes one of its company's people, so the next lookup finds it.
+        Records sequence.leads_enrolled.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sequence_id, email]
+              properties:
+                sequence_id: { type: string, format: uuid }
+                email: { type: string, maxLength: 320, examples: ["editor@news.example"] }
+                name: { type: string, maxLength: 200, description: "The person's name, when known." }
+      responses:
+        "200":
+          description: What adding the address did.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderDonorOutreach" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/link-orders/summary:
@@ -14453,7 +14737,13 @@ paths:
       description: |
         Scope: coverage.manage. Sets the quoted donor price and moves the order
         to quoted. Allowed from requested, quoted, or negotiating. Amounts are
-        the donor price only, in minor units.
+        the donor price only, in minor units, as on the invoice (zero-decimal
+        currencies such as JPY and HUF have no minor unit). The US-dollar
+        equivalent is at the European Central Bank reference rate Outflare
+        stores for the invoice date, or the last working day within ten days
+        before it (fx_rate_source ecb); USD needs no rate. There is no way to
+        send a rate. Without an ECB rate the quote is not saved (400).
+        Accounting only: it never sends money.
       tags: [coverage]
       requestBody:
         required: true
@@ -14464,7 +14754,8 @@ paths:
               required: [amount_minor, currency]
               properties:
                 amount_minor: { type: integer, format: int64, minimum: 0 }
-                currency: { type: string, enum: [USD, EUR] }
+                currency: { type: string, enum: [USD, EUR, GBP, PLN, CZK, UAH, CHF, CAD, AUD, NZD, JPY, SEK, NOK, DKK, RON, HUF, BGN, TRY, INR, SGD, HKD, MXN, BRL, ZAR] }
+                invoice_date: { type: string, format: date, description: "The date on the invoice; the ECB reference rate is for this day. Today (UTC) when left out." }
       responses:
         "200":
           description: The order.
@@ -14608,8 +14899,19 @@ paths:
         only, and only the brand's designated approver. Allowed after publication
         and a passing live-link check (the link is on the page and the target
         matches). Records a coverage invoice and payment for the frozen donor
-        amount; it never sends money. Allowed from published or verified.
+        amount, in the invoice currency with its US-dollar equivalent; it
+        never sends money. Allowed from published or verified. The body is
+        optional: the final invoice's date works the US-dollar equivalent out
+        again at the ECB reference rate for it (400 when there is none).
       tags: [coverage]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invoice_date: { type: string, format: date }
       responses:
         "200":
           description: The order, now paid, with a payment row.
@@ -14617,6 +14919,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/LinkOrder" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
@@ -21404,13 +21707,15 @@ paths:
         Afterwards the browser lands on the Connectors page, or on the
         Reddit page with `return=reddit` or the Social page with
         `return=social`, and the connection can act as that account. An X
-        sign-in also starts reading the account's followers and posts. With
-        `format=json` it returns the link instead, for an agent to hand to a
-        person.
+        sign-in also starts reading the account's followers and posts. X Ads
+        signs in over OAuth 1.0a: the connection keeps the request token
+        until the person comes back, and lands on Paid ads with
+        `return=ads`. With `format=json` it returns the link instead, for an
+        agent to hand to a person.
       tags: [connectors]
       parameters:
         - { name: format, in: query, schema: { type: string, enum: [json] } }
-        - { name: return, in: query, description: "The app page to land on afterwards. Default: Connectors.", schema: { type: string, enum: [get-started, setup, reddit, social, providers, audits, domains] } }
+        - { name: return, in: query, description: "The app page to land on afterwards. Default: Connectors.", schema: { type: string, enum: [get-started, setup, reddit, social, providers, audits, domains, ads] } }
       responses:
         "200":
           description: The sign-in link (format=json).
@@ -37695,12 +38000,18 @@ paths:
       operationId: listBrandEmailBroadcastRecipients
       x-outflare-access: { scope: emails.read, brand: true }
       summary: Who a broadcast went to, or skipped and why
-      description: "Scope: emails.read. In record order; page with cursor=next_cursor."
+      description: |
+        Scope: emails.read. By name (by address without one); page with cursor=next_cursor. show lists one group, and each group is the
+        people behind the number of the same name in the broadcast's stats (skipped: the broadcast's skipped). q finds
+        people by part of their name or address. Each row carries when its email was sent, delivered, first opened,
+        first clicked, bounced and unsubscribed.
       tags: [emails]
       parameters:
         - { $ref: "#/components/parameters/Cursor" }
         - { $ref: "#/components/parameters/Fields" }
         - { name: skipped, in: query, schema: { type: string, enum: ["true", "false"] } }
+        - { name: show, in: query, schema: { type: string, enum: [sent, delivered, opened, clicked, bounced, complained, unsubscribed, not_sent, skipped] } }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
         "200":
@@ -54154,7 +54465,7 @@ components:
         created_at: { type: string, format: date-time }
     TrackingCampaign:
       type: object
-      required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, redirect_links, status, links, clicks, landed, created_at, updated_at, traffic_source_id, redirect_mode]
+      required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, redirect_links, status, links, clicks, landed, created_at, updated_at, traffic_source_id, redirect_mode, cost]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -54177,6 +54488,16 @@ components:
         updated_at: { type: string, format: date-time }
         traffic_source_id: { type: [string, "null"], format: uuid, description: "The brand's traffic source the campaign buys clicks from; null for none." }
         redirect_mode: { $ref: "#/components/schemas/RedirectMode" }
+        cost: { $ref: "#/components/schemas/TrackingCampaignCost" }
+    TrackingCampaignCost:
+      type: object
+      required: [model, amount, share, currency]
+      description: "How the tracker report works out what the campaign's clicks cost: token (what the traffic source reported on each click with {cost}, the default), cpc or cpa (a fixed amount a click or a conversion, declined ones left out), or revshare (a share of each payout)."
+      properties:
+        model: { type: string, enum: [token, cpc, cpa, revshare] }
+        amount: { type: string, description: "cpc and cpa: the amount, in the currency's main unit." }
+        share: { type: number, description: "revshare: the percentage of each payout." }
+        currency: { type: string, description: "The amount's currency; '' for the traffic source's, else the brand's." }
     TrackingCampaignInput:
       type: object
       properties:
@@ -54190,6 +54511,14 @@ components:
         redirect_links: { type: boolean, description: "Give new links a short redirect link unless a link says otherwise. Links made before keep what they have." }
         traffic_source: { type: string, description: "The id of one of the brand's active traffic sources; '' for none. Its redirect clicks then keep the source's parameters in their custom fields, and its links get a campaign_url." }
         redirect_mode: { $ref: "#/components/schemas/RedirectMode" }
+        cost:
+          type: object
+          description: "Changes the cost model; what it leaves out stays."
+          properties:
+            model: { type: string, enum: [token, cpc, cpa, revshare] }
+            amount: { type: [number, string], description: "What a click (cpc) or a conversion (cpa) costs, in the currency's main unit." }
+            share: { type: number, minimum: 0, maximum: 100, description: "The percentage of each payout revshare takes." }
+            currency: { type: string, description: "The amount's currency, such as USD; '' for the traffic source's." }
     TrackingLink:
       type: object
       required: [id, campaign_id, url, content, term, tagged_url, redirect_url, campaign_url, clicks, landed, suspect_clicks, created_at]
@@ -54294,13 +54623,14 @@ components:
         rows: { type: array, maxItems: 0, items: {}, description: "Empty: the fifth level has no children." }
     DrilldownReport:
       type: object
-      required: [from, to, timezone, model, conversion_time, currency, group_by, cost_available, cost_note, totals, rows, truncated]
+      required: [from, to, timezone, model, conversion_time, source, currency, group_by, cost_available, cost_note, totals, rows, truncated]
       properties:
         from: { type: string, format: date }
         to: { type: string, format: date }
         timezone: { type: string }
         model: { type: string }
         conversion_time: { type: string, enum: [visit, conversion] }
+        source: { type: string, enum: [site, tracker] }
         currency: { type: string }
         group_by: { type: array, items: { type: string } }
         cost_available: { type: boolean }
@@ -54318,6 +54648,7 @@ components:
         sort: { type: string }
         limit: { type: integer, minimum: 1, maximum: 1000 }
         conversion_time: { type: string, enum: [visit, conversion] }
+        source: { type: string, enum: [site, tracker] }
         model: { type: string }
         timezone: { type: string, description: "Empty for the brand's." }
         date_range:
@@ -54489,6 +54820,67 @@ components:
               outcome: { type: string, enum: [accepted, updated, duplicate, failed] }
               conversion_id: { type: string, format: uuid }
               error: { type: string, description: "Why a failed row wasn't recorded." }
+    ClickFilter:
+      type: object
+      required: [id, kind, value, note, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [ip, user_agent] }
+        value: { type: string, description: "An address, a range in its masked form, or a lowercase piece of a user agent." }
+        note: { type: string }
+        created_at: { type: string, format: date-time }
+    IPLookupSettings:
+      type: object
+      required: [integration_id, enabled, flagged, converting, sample_percent, monthly_cap, threshold, updated_at, used_this_month]
+      properties:
+        integration_id: { type: [string, "null"], format: uuid }
+        enabled: { type: boolean }
+        flagged: { type: boolean }
+        converting: { type: boolean }
+        sample_percent: { type: number }
+        monthly_cap: { type: integer }
+        threshold: { type: integer }
+        updated_at: { type: string, format: date-time, description: "When it last changed; the zero time before the brand first chose." }
+        used_this_month: { type: integer, description: "Lookups the brand's provider answered this UTC month, against monthly_cap. Once it reaches the cap, due clicks are skipped until the month turns." }
+    TrackerClick:
+      type: object
+      required: [click_key, campaign_id, link_id, path_id, destination_id, lander_id, offer_id, direct, country, region, city, isp, asn, device, os, browser, language, fields, source_click_id, cost, likely_bot, fraud_reasons, landed_at, clicked_at]
+      properties:
+        click_key: { type: string, description: "The click's key (ofclk), which a conversion names." }
+        campaign_id: { type: [string, "null"], format: uuid }
+        link_id: { type: string, format: uuid }
+        path_id: { type: [string, "null"], format: uuid, description: "The rule-based path it matched; null for the default path." }
+        destination_id: { type: [string, "null"], format: uuid }
+        lander_id: { type: [string, "null"], format: uuid }
+        offer_id: { type: [string, "null"], format: uuid }
+        direct: { type: boolean, description: "Recorded by the site script (direct mode) rather than a redirect." }
+        country: { type: string }
+        region: { type: string }
+        city: { type: string }
+        isp: { type: string }
+        asn: { type: integer }
+        device: { type: string }
+        os: { type: string }
+        browser: { type: string }
+        language: { type: string }
+        fields: { type: object, additionalProperties: { type: string }, description: "Its custom fields, by number (1 to 20)." }
+        source_click_id: { type: string, description: "The traffic source's own click id." }
+        cost: { type: string, description: "The cost the traffic source reported, in its currency." }
+        likely_bot: { type: boolean }
+        fraud_reasons: { type: array, items: { type: string, enum: [datacenter_network, repeat_click, fast_conversion, filter_list, honeypot, ip_reputation] } }
+        landed_at: { type: [string, "null"], format: date-time, description: "When it reached a page running the tracking snippet." }
+        clicked_at: { type: string, format: date-time }
+    TrackerLanderClick:
+      type: object
+      required: [click_key, lander_id, cta, destination_id, offer_id, likely_bot, clicked_at]
+      properties:
+        click_key: { type: string, description: "The redirect click it continues." }
+        lander_id: { type: [string, "null"], format: uuid }
+        cta: { type: integer, description: "The call to action: 0 for /click (by weight), 1 to 100 for /click/N." }
+        destination_id: { type: [string, "null"], format: uuid }
+        offer_id: { type: [string, "null"], format: uuid }
+        likely_bot: { type: boolean }
+        clicked_at: { type: string, format: date-time }
     TrackerConversionCall:
       type: object
       required: [id, source_id, conversion_id, via, method, request, click_key, status, outcome, reason, duration_ms, request_id, created_at]
@@ -54516,7 +54908,7 @@ components:
         campaign_id: { type: [string, "null"], format: uuid }
         link_id: { type: [string, "null"], format: uuid }
         offer_id: { type: [string, "null"], format: uuid, description: "The offer its click went to." }
-        fraud_reasons: { type: array, items: { type: string, enum: [datacenter_network, repeat_click, fast_conversion] }, description: "Why it is suspect: its click came from a hosting provider's network or an address that clicked over and over, or it came less than 10 seconds after its click. Empty when it isn't. Flagged, never refused." }
+        fraud_reasons: { type: array, items: { type: string, enum: [datacenter_network, repeat_click, fast_conversion, filter_list, honeypot, ip_reputation] }, description: "Why it is suspect: its click came from a hosting provider's network or an address that clicked over and over, or it came less than 10 seconds after its click. Empty when it isn't. Flagged, never refused." }
         clicked_at: { type: string, format: date-time }
         transaction_id: { type: string, description: "The network's transaction id, or the click key and type when it sent none." }
         type: { type: string, description: "Such as conversion, lead or sale." }
@@ -54882,14 +55274,24 @@ components:
         updated_at: { type: string, format: date-time }
     EmailBroadcastRecipient:
       type: object
-      required: [record_id, name, address, email_id, status, skipped, created_at]
+      required: [record_id, name, address, email_id, status, status_reason, bounce_type, skipped, sent_at, delivered_at, opened_at, clicked_at, bounced_at, unsubscribed_at, opens, clicks, created_at]
       properties:
         record_id: { type: string, format: uuid }
         name: { type: string }
         address: { type: [string, "null"] }
         email_id: { type: [string, "null"], format: uuid }
         status: { oneOf: [{ $ref: "#/components/schemas/EmailStatus" }, { type: "null" }] }
+        status_reason: { type: [string, "null"], description: "Why the email has its status, such as the receiving server's reply to a bounce." }
+        bounce_type: { type: [string, "null"], enum: [hard, soft, null] }
         skipped: { type: [string, "null"], description: Why this person did not get it. }
+        sent_at: { type: [string, "null"], format: date-time }
+        delivered_at: { type: [string, "null"], format: date-time }
+        opened_at: { type: [string, "null"], format: date-time, description: The first counted open. }
+        clicked_at: { type: [string, "null"], format: date-time, description: The first counted click. }
+        bounced_at: { type: [string, "null"], format: date-time }
+        unsubscribed_at: { type: [string, "null"], format: date-time }
+        opens: { type: integer }
+        clicks: { type: integer }
         created_at: { type: string, format: date-time }
     RuleStatus: { type: string, enum: [draft, active, paused, archived] }
     RuleCondition:
@@ -56181,7 +56583,7 @@ components:
         created_at: { type: string, format: date-time }
     ConnectorCategory:
       type: string
-      enum: [email_verification, email_sending, sequencer, mailbox_provider, dns, tags, crm, data, signals, analytics, seo, social, cms, code, ads, payments, partners, calendar, registrar, warehouse, notification, messaging, knowledge, model, custom]
+      enum: [email_verification, email_sending, sequencer, mailbox_provider, dns, tags, crm, data, signals, analytics, seo, social, cms, code, ads, payments, partners, calendar, registrar, warehouse, notification, messaging, knowledge, model, fraud, custom]
     ConnectorField:
       type: object
       required: [name, label, secret, optional]
@@ -61571,9 +61973,28 @@ components:
       properties:
         currency: { type: string, enum: [USD, EUR] }
         amount_minor: { type: integer, format: int64, description: "The donor price, in minor units. There is no commission or margin." }
+    LinkOrderDirectContact:
+      type: object
+      description: |
+        Whether the site is worth writing to directly, not only through its
+        intermediary. Computed on read from stored data: not flagged as a PBN;
+        DR or traffic stored and above zero (a missing value does not count);
+        and at least one address at the site's own domain (or a subdomain)
+        already stored where Find email looks (people at the site's company,
+        link-building check contacts, the brand's Outreach leads, the notes)
+        and not suppressed for the brand. An intermediary's address is not a
+        direct one. A recommendation only: nothing is sent or enrolled.
+      required: [recommended, emails, missing]
+      properties:
+        recommended: { type: boolean }
+        emails: { type: integer, description: "Stored, unsuppressed addresses at the site's domain." }
+        missing:
+          type: array
+          description: "The rules the site does not meet. Empty when recommended."
+          items: { type: string, enum: [pbn, no_metrics, no_email] }
     LinkOrderDonor:
       type: object
-      required: [id, publisher_id, domain, pbn, country, languages, niches, casino_allowed, rel_offered, slot_types, duration, duration_days, tat_days, guarantee_days, vendor_id, source, domain_rating, traffic, spam_score, metrics_at, metrics_source, notes, archived_at, prices, created_at, updated_at]
+      required: [id, publisher_id, domain, pbn, country, languages, niches, casino_allowed, rel_offered, slot_types, duration, duration_days, tat_days, guarantee_days, vendor_id, source, domain_rating, traffic, spam_score, metrics_at, metrics_source, notes, intermediary, theme, site_since, site_age_years, metrics, direct_contact, archived_at, prices, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         publisher_id: { type: string, format: uuid }
@@ -61597,10 +62018,43 @@ components:
         metrics_at: { type: [string, "null"], format: date-time }
         metrics_source: { type: string }
         notes: { type: string }
+        intermediary: { type: string, description: "The broker or contact the site is bought through. Empty when not set." }
+        theme: { type: string, description: "The site's own theme. Separate from niches." }
+        site_since: { type: [string, "null"], format: date, description: "The date the site has existed since. An age given as a year or in years is stored as 1 January of that year, or that many years before the import." }
+        site_age_years: { type: [integer, "null"], description: "Whole years from site_since to today." }
+        metrics: { $ref: "#/components/schemas/LinkOrderDonorMetrics" }
+        direct_contact: { $ref: "#/components/schemas/LinkOrderDirectContact" }
         archived_at: { type: [string, "null"], format: date-time }
         prices: { type: array, items: { $ref: "#/components/schemas/LinkOrderMoney" } }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    LinkOrderDonorMetrics:
+      type: object
+      description: The intermediary's metrics for the site, shown on the donor card. Null when not set. DR, traffic, country and languages are the donor's own fields.
+      required: [date_added, geo_top1, geo_top2, article_type, main_category, subcategory, organic_keywords, total_keywords, referring_domains, referring_domains_followed, referring_domains_not_followed, referring_ips, referring_subnets, backlinks, backlinks_followed, backlinks_not_followed, backlinks_redirects, backlinks_internal, outgoing_domains_followed, outgoing_domains_all_time, outgoing_links_followed, outgoing_links_all_time]
+      properties:
+        date_added: { type: [string, "null"], description: "When the intermediary added the site, as YYYY-MM-DD when the file's date could be read, else as written." }
+        geo_top1: { type: [string, "null"], description: "The site's top country by traffic (Ahrefs top 1)." }
+        geo_top2: { type: [string, "null"], description: "The second country (Ahrefs top 2)." }
+        article_type: { type: [string, "null"] }
+        main_category: { type: [string, "null"] }
+        subcategory: { type: [string, "null"] }
+        organic_keywords: { type: [integer, "null"], format: int64 }
+        total_keywords: { type: [integer, "null"], format: int64 }
+        referring_domains: { type: [integer, "null"], format: int64 }
+        referring_domains_followed: { type: [integer, "null"], format: int64 }
+        referring_domains_not_followed: { type: [integer, "null"], format: int64 }
+        referring_ips: { type: [integer, "null"], format: int64 }
+        referring_subnets: { type: [integer, "null"], format: int64 }
+        backlinks: { type: [integer, "null"], format: int64 }
+        backlinks_followed: { type: [integer, "null"], format: int64 }
+        backlinks_not_followed: { type: [integer, "null"], format: int64 }
+        backlinks_redirects: { type: [integer, "null"], format: int64 }
+        backlinks_internal: { type: [integer, "null"], format: int64 }
+        outgoing_domains_followed: { type: [integer, "null"], format: int64 }
+        outgoing_domains_all_time: { type: [integer, "null"], format: int64 }
+        outgoing_links_followed: { type: [integer, "null"], format: int64 }
+        outgoing_links_all_time: { type: [integer, "null"], format: int64 }
     LinkOrderDonorWrite:
       type: object
       properties:
@@ -61621,14 +62075,22 @@ components:
         notes: { type: [string, "null"] }
         domain_rating: { type: [integer, "null"] }
         traffic: { type: [integer, "null"], format: int64 }
+        intermediary: { type: [string, "null"], maxLength: 500, description: "The broker or contact the site is bought through." }
+        theme: { type: [string, "null"], maxLength: 200, description: "The site's own theme. Separate from niches." }
+        site_age: { type: [string, "null"], description: "How long the site has existed: a year (2012), a date (2012-05-01) or an age (12 years, 8 months). Empty or null clears it." }
+        metrics:
+          type: object
+          description: "Metrics to set, by key (see LinkOrderDonorMetrics). A key with a value sets it, a key with null clears it, and a key left out is kept."
+          additionalProperties: true
         archived: { type: boolean }
         prices: { type: array, items: { $ref: "#/components/schemas/LinkOrderMoney" } }
     LinkOrderCatalogImport:
       type: object
-      required: [created, updated, errors]
+      required: [created, updated, errors, ignored_columns]
       properties:
         created: { type: integer }
         updated: { type: integer }
+        ignored_columns: { type: array, items: { type: string }, description: "Header columns the import did not read: not a known field, or a second column for a field already read." }
         errors:
           type: array
           items:
@@ -61638,9 +62100,21 @@ components:
               row: { type: integer, description: "1-based line number, counting the header." }
               domain: { type: string }
               error: { type: string }
+    LinkOrderInvoice:
+      type: object
+      description: An amount as on the invoice and its US-dollar equivalent. Accounting only; nothing sends money.
+      required: [currency, amount_minor, invoice_date, usd_amount_minor, fx_rate, fx_rate_date, fx_rate_source]
+      properties:
+        currency: { type: string, enum: [USD, EUR, GBP, PLN, CZK, UAH, CHF, CAD, AUD, NZD, JPY, SEK, NOK, DKK, RON, HUF, BGN, TRY, INR, SGD, HKD, MXN, BRL, ZAR] }
+        amount_minor: { type: integer, format: int64, description: "As on the invoice, in the currency's minor unit." }
+        invoice_date: { type: [string, "null"], format: date }
+        usd_amount_minor: { type: [integer, "null"], format: int64, description: "US cents. Null only on an order quoted in euros before invoices had a rate of their own." }
+        fx_rate: { type: [number, "null"], description: "US dollars for one unit of currency." }
+        fx_rate_date: { type: [string, "null"], format: date }
+        fx_rate_source: { type: [string, "null"], enum: [usd, ecb, null], description: "usd: no conversion. ecb: the European Central Bank reference rate for the invoice date, or the last working day within ten days before it." }
     LinkOrder:
       type: object
-      required: [id, publisher_id, donor_profile_id, domain, status, target_url, target_id, target_kind, target_choice, anchor_primary, anchor_primary_source, anchor_secondary, anchor_secondary_type, slot_type, rel_requested, quoted_amount_minor, quoted_currency, donor_amount_minor, currency, guarantee_days, guarantee_until, published_url, proof_url, published_at, placement_id, agreement_id, invoice_id, payment_id, credit_payment_id, replaces_order_id, owner_user_id, last_check_at, last_check_live, last_check_target_match, last_check_rel, last_check_anchor, approved_by, approved_at, paid_by, paid_at, lost_at, lost_reason, notes, created_at, updated_at]
+      required: [id, publisher_id, donor_profile_id, domain, status, target_url, target_id, target_kind, target_choice, anchor_primary, anchor_primary_source, anchor_secondary, anchor_secondary_type, slot_type, rel_requested, quoted_amount_minor, quoted_currency, donor_amount_minor, currency, quoted_invoice, invoice, guarantee_days, guarantee_until, published_url, proof_url, published_at, placement_id, agreement_id, invoice_id, payment_id, credit_payment_id, replaces_order_id, owner_user_id, last_check_at, last_check_live, last_check_target_match, last_check_rel, last_check_anchor, approved_by, approved_at, paid_by, paid_at, lost_at, lost_reason, notes, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         publisher_id: { type: string, format: uuid }
@@ -61661,6 +62135,12 @@ components:
         quoted_currency: { type: [string, "null"], enum: [USD, EUR, null] }
         donor_amount_minor: { type: [integer, "null"], format: int64, description: "Frozen at approval. The donor price only." }
         currency: { type: [string, "null"], enum: [USD, EUR, null] }
+        quoted_invoice:
+          description: "The quote as on the invoice, with its US-dollar equivalent at the ECB reference rate. quoted_amount_minor / quoted_currency hold the US-dollar equivalent for a currency other than USD and EUR."
+          oneOf: [{ $ref: "#/components/schemas/LinkOrderInvoice" }, { type: "null" }]
+        invoice:
+          description: "The invoice amount frozen at approval (refreshed at Mark Paid), with its US-dollar equivalent. donor_amount_minor / currency hold the US-dollar equivalent for a currency other than USD and EUR."
+          oneOf: [{ $ref: "#/components/schemas/LinkOrderInvoice" }, { type: "null" }]
         guarantee_days: { type: [integer, "null"] }
         guarantee_until: { type: [string, "null"], format: date-time }
         published_url: { type: string }
@@ -61808,6 +62288,44 @@ components:
               committed: { type: integer, format: int64 }
               spent: { type: integer, format: int64 }
               remaining: { type: integer, format: int64 }
+    LinkOrderDonorContact:
+      type: object
+      required: [email, name, source, record_id, lead_id, at_domain, suppressed, contacted]
+      properties:
+        email: { type: string }
+        name: { type: string }
+        source:
+          type: string
+          enum: [person, link_check, lead, notes]
+          description: "Where it is stored: a person at the site's company, a contact a link-building check found, an Outreach lead, or the notes. The surest wins when an address is in several."
+        record_id: { type: [string, "null"], format: uuid }
+        lead_id: { type: [string, "null"], format: uuid }
+        at_domain: { type: boolean, description: "Whether the address is at the site's own domain." }
+        suppressed: { type: boolean, description: "On the brand's suppression list: Outreach won't email it." }
+        contacted: { type: boolean, description: "Ever added to one of the brand's sequences." }
+    LinkOrderDonorContacts:
+      type: object
+      required: [donor_id, domain, contacts, searched]
+      properties:
+        donor_id: { type: string, format: uuid }
+        domain: { type: string }
+        contacts: { type: array, items: { $ref: "#/components/schemas/LinkOrderDonorContact" } }
+        searched: { type: array, items: { type: string }, description: "The stored data looked through." }
+    LinkOrderDonorOutreach:
+      type: object
+      required: [donor_id, domain, email, lead_id, sequence_id, sequence_name, sequence_status, result]
+      properties:
+        donor_id: { type: string, format: uuid }
+        domain: { type: string }
+        email: { type: string }
+        lead_id: { type: string, format: uuid }
+        sequence_id: { type: string, format: uuid }
+        sequence_name: { type: string }
+        sequence_status: { type: string, enum: [draft, active, paused] }
+        result:
+          type: string
+          enum: [enrolled, already_enrolled, suppressed, excluded, active_elsewhere]
+          description: "enrolled: added. already_enrolled: in this sequence already. suppressed: on the suppression list. excluded: left out by the sequence's exclusion. active_elsewhere: active in another sequence."
     LinkOrderCandidate:
       type: object
       required: [domain, rating, traffic, competitors, status, donor_profile_id]

@@ -150,4 +150,26 @@ func TestTrackerFraudSignals(t *testing.T) {
 		len(reasons) != 1 || reasons[0] != fraud.DatacenterNetwork {
 		t.Fatalf("direct hosting click reasons = %v, %v", reasons, err)
 	}
+
+	// The brand's user agent filters (B7b) flag a direct click too; site
+	// events keep no address, so address filters can't.
+	owner.must(201, "POST", base+"/click-filters", map[string]any{"kind": "user_agent", "value": "Version/18.1 Safari"})
+	const filteredKey = "f1ltered0direct0"
+	ev["anonymousId"], ev["messageId"] = "frank", "fraud-direct-2"
+	ev["properties"].(map[string]any)["ofclk"] = filteredKey
+	b, _ = json.Marshal(map[string]any{"key": sk["key"], "batch": []any{ev}})
+	req = httptest.NewRequest("POST", "/v1/site/events", strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "text/plain;charset=UTF-8")
+	req.Header.Set("Origin", "https://northpeak.example")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15")
+	req.RemoteAddr = geoiptest.SpringfieldIP + ":51000"
+	rec = httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("site event: %d %s", rec.Code, rec.Body)
+	}
+	if err := e.pool.QueryRow(ctx, `SELECT fraud_reasons FROM tracking_link_clicks WHERE click_key = $1 AND direct`, filteredKey).Scan(&reasons); err != nil ||
+		len(reasons) != 1 || reasons[0] != fraud.FilterList {
+		t.Fatalf("direct filtered click reasons = %v, %v", reasons, err)
+	}
 }

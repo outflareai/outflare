@@ -39,7 +39,22 @@ export const dimensionGroups: { label: string; dims: [string, string][] }[] = [
   { label: "Time", dims: [["day", "Day"], ["hour", "Hour"], ["weekday", "Weekday"]] },
   { label: "Visit", dims: [["landing_path", "Landing page"], ["referrer_host", "Referrer"]] },
 ];
-const dimLabel: Record<string, string> = Object.fromEntries(dimensionGroups.flatMap((g) => g.dims));
+// The tracker source's dimensions (B5d): its clicks, where they went, and
+// the custom fields the traffic source filled.
+export const trackerDimensionGroups: { label: string; dims: [string, string][] }[] = [
+  { label: "Tracker", dims: [["tracking_campaign", "Tracker campaign"], ["traffic_source", "Traffic source"], ["offer", "Offer"], ["lander", "Lander"], ["path", "Path"], ["suspect", "Suspect"]] },
+  { label: "Geo", dims: [["country", "Country"], ["region", "Region"], ["city", "City"], ["language", "Language"]] },
+  { label: "Connection", dims: [["isp", "ISP"], ["asn", "ASN"]] },
+  { label: "Device", dims: [["device", "Device"], ["device_brand", "Device brand"], ["os", "OS"], ["browser", "Browser"]] },
+  { label: "Time", dims: [["day", "Day"], ["hour", "Hour"], ["weekday", "Weekday"]] },
+  { label: "Custom fields", dims: Array.from({ length: 20 }, (_, i) => [`field${i + 1}`, `Field ${i + 1}`] as [string, string]) },
+];
+type Source = "site" | "tracker";
+const groupsOf = (source: Source) => (source === "tracker" ? trackerDimensionGroups : dimensionGroups);
+const defaultGroup = (source: Source) => (source === "tracker" ? "tracking_campaign" : "channel");
+// The tracker dimensions whose values are ids, shown by name.
+const idDims = ["tracking_campaign", "traffic_source", "offer", "lander", "path"];
+const dimLabel: Record<string, string> = Object.fromEntries([...dimensionGroups, ...trackerDimensionGroups].flatMap((g) => g.dims));
 
 // The metric columns, bold ones on by default (B1's table).
 const metricCols: { key: keyof Omit<Metrics, "custom">; label: string; kind: "count" | "money" | "ratio" | "percent" }[] = [
@@ -57,8 +72,8 @@ const metricCols: { key: keyof Omit<Metrics, "custom">; label: string; kind: "co
 ];
 
 // State, as it lives in the URL.
-type State = { view: string; preset: Preset | ""; from: string; to: string; tz: string; conv: "visit" | "conversion"; groups: string[]; filters: Filter[]; sort: string; columns: Column[] };
-const defaults: State = { view: "", preset: "last_7_days", from: "", to: "", tz: "", conv: "visit", groups: ["channel"], filters: [], sort: "-visits", columns: [] };
+type State = { view: string; source: Source; preset: Preset | ""; from: string; to: string; tz: string; conv: "visit" | "conversion"; groups: string[]; filters: Filter[]; sort: string; columns: Column[] };
+const defaults: State = { view: "", source: "site", preset: "last_7_days", from: "", to: "", tz: "", conv: "visit", groups: ["channel"], filters: [], sort: "-visits", columns: [] };
 
 export function readState(search: string): State {
   const q = new URLSearchParams(search);
@@ -72,9 +87,14 @@ export function readState(search: string): State {
     s.preset = "";
   }
   s.tz = q.get("tz") ?? "";
+  if (q.get("source") === "tracker") {
+    s.source = "tracker";
+    s.groups = [defaultGroup("tracker")];
+  }
   if (q.get("conversion_time") === "conversion") s.conv = "conversion";
+  const known = Object.fromEntries(groupsOf(s.source).flatMap((x) => x.dims));
   const g = q.get("group_by");
-  if (g !== null) s.groups = g.split(",").filter((x) => x in dimLabel).slice(0, 5);
+  if (g !== null) s.groups = g.split(",").filter((x) => x in known).slice(0, 5);
   for (const [kind, not] of [["filter", false], ["exclude", true]] as const)
     for (const f of q.getAll(kind)) {
       const i = f.indexOf(":");
@@ -97,8 +117,9 @@ export function writeState(s: State): string {
     q.set("to", s.to);
   }
   if (s.tz) q.set("tz", s.tz);
+  if (s.source !== "site") q.set("source", s.source);
   if (s.conv !== "visit") q.set("conversion_time", s.conv);
-  if (s.groups.join(",") !== defaults.groups.join(",")) q.set("group_by", s.groups.join(","));
+  if (s.groups.join(",") !== defaultGroup(s.source)) q.set("group_by", s.groups.join(","));
   for (const f of s.filters) q.append(f.not ? "exclude" : "filter", `${f.dim}:${f.value}`);
   if (s.sort !== defaults.sort) q.set("sort", s.sort);
   for (const c of s.columns) q.append("column", `${c.name}:${c.formula}`);
@@ -193,7 +214,7 @@ function ReportPage({ canManage, brandTz }: Props & { brandTz: string }) {
   }, [s]);
 
   const query = useMemo(() => {
-    const q: Record<string, unknown> = { from, to, group_by: s.groups.join(","), sort: s.sort, conversion_time: s.conv };
+    const q: Record<string, unknown> = { from, to, source: s.source, group_by: s.groups.join(","), sort: s.sort, conversion_time: s.conv };
     if (s.tz) q.timezone = s.tz;
     const filters = s.filters.filter((f) => !f.not).map((f) => `${f.dim}:${f.value}`);
     const excludes = s.filters.filter((f) => f.not).map((f) => `${f.dim}:${f.value}`);
@@ -201,7 +222,7 @@ function ReportPage({ canManage, brandTz }: Props & { brandTz: string }) {
     if (excludes.length) q.exclude = excludes;
     if (s.columns.length) q.column = s.columns.map((c) => `${c.name}:${c.formula}`);
     return q;
-  }, [from, to, s.groups, s.sort, s.conv, s.tz, s.filters, s.columns]);
+  }, [from, to, s.source, s.groups, s.sort, s.conv, s.tz, s.filters, s.columns]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -217,6 +238,20 @@ function ReportPage({ canManage, brandTz }: Props & { brandTz: string }) {
       .finally(() => setLoading(false));
   }, [query]);
   useEffect(load, [load]);
+
+  // Names for the tracker's ids: campaigns, traffic sources, offers, landers.
+  const [names, setNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (s.source !== "tracker") return;
+    const path = { path: { brand: pickedBrandId() } };
+    void Promise.all([
+      api.GET("/v1/brands/{brand}/tracking-campaigns", { params: path }),
+      api.GET("/v1/brands/{brand}/traffic-sources", { params: path }),
+      api.GET("/v1/brands/{brand}/offers", { params: path }),
+      api.GET("/v1/brands/{brand}/landers", { params: path }),
+    ]).then((rs) => setNames(Object.fromEntries(rs.flatMap((r) => ((r.data as { data?: { id: string; name: string }[] } | undefined)?.data ?? []).map((x) => [x.id, x.name])))));
+  }, [s.source]);
+  const nameOf = (dim: string, key: string) => (idDims.includes(dim) && names[key]) || key;
 
   const loadViews = useCallback(() => {
     api.GET("/v1/brands/{brand}/report-views", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setViews((data?.data ?? []) as View[]));
@@ -234,12 +269,13 @@ function ReportPage({ canManage, brandTz }: Props & { brandTz: string }) {
     const preset = (sp.date_range?.preset as Preset | undefined) ?? (sp.date_range?.from ? "" : defaults.preset);
     setS({
       view: v.id,
+      source: sp.source === "tracker" ? "tracker" : "site",
       preset,
       from: sp.date_range?.from ?? "",
       to: sp.date_range?.to ?? "",
       tz: sp.timezone ?? "",
       conv: sp.conversion_time === "conversion" ? "conversion" : "visit",
-      groups: sp.group_by?.length ? sp.group_by : defaults.groups,
+      groups: sp.group_by?.length ? sp.group_by : [defaultGroup(sp.source === "tracker" ? "tracker" : "site")],
       filters,
       sort: sp.sort ?? defaults.sort,
       columns: (sp.columns ?? []).map((c) => ({ name: c.name, formula: c.formula })),
@@ -247,6 +283,7 @@ function ReportPage({ canManage, brandTz }: Props & { brandTz: string }) {
     track("ui.report_view_opened", { shared: v.shared, mine: v.mine });
   };
   const specOf = (): ViewSpec => ({
+    source: s.source,
     group_by: s.groups,
     filters: s.filters.filter((f) => !f.not).map((f) => `${f.dim}:${f.value}`),
     excludes: s.filters.filter((f) => f.not).map((f) => `${f.dim}:${f.value}`),
@@ -341,6 +378,19 @@ function ReportPage({ canManage, brandTz }: Props & { brandTz: string }) {
       />
 
       <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="Report on"
+          className={field}
+          value={s.source}
+          onChange={(e) => {
+            const source = e.target.value as Source;
+            set({ source, groups: [defaultGroup(source)], filters: [], view: "" });
+            setOpen({});
+          }}
+        >
+          <option value="site">Site visits</option>
+          <option value="tracker">Tracker clicks</option>
+        </select>
         <select aria-label="Dates" className={field} value={s.preset || "custom"} onChange={(e) => (e.target.value === "custom" ? set({ preset: "", from, to }) : set({ preset: e.target.value as Preset }))}>
           {Object.entries(presetLabels).map(([k, label]) => (
             <option key={k} value={k}>{label}</option>
@@ -360,13 +410,13 @@ function ReportPage({ canManage, brandTz }: Props & { brandTz: string }) {
           ))}
         </select>
         <select aria-label="Count conversions at" className={field} value={s.conv} onChange={(e) => set({ conv: e.target.value as State["conv"] })}>
-          <option value="visit">Conversions at visit time</option>
+          <option value="visit">Conversions at {s.source === "tracker" ? "click" : "visit"} time</option>
           <option value="conversion">Conversions at conversion time</option>
         </select>
       </div>
 
-      <GroupBy groups={s.groups} onChange={(groups) => { set({ groups }); setOpen({}); track("ui.report_grouped", { levels: groups.length }); }} />
-      <Filters filters={s.filters} onChange={(filters) => set({ filters })} />
+      <GroupBy source={s.source} groups={s.groups} onChange={(groups) => { set({ groups }); setOpen({}); track("ui.report_grouped", { levels: groups.length }); }} />
+      <Filters source={s.source} filters={s.filters} onChange={(filters) => set({ filters })} />
 
       {error && <ErrorText>{error}</ErrorText>}
       {loading && !report ? (
@@ -395,6 +445,7 @@ function ReportPage({ canManage, brandTz }: Props & { brandTz: string }) {
               }
             >
               <ReportTable
+                nameOf={nameOf}
                 report={report}
                 columns={s.columns}
                 sort={s.sort}
@@ -434,11 +485,11 @@ function split(f: string, not: boolean): Filter | null {
   return i > 0 ? { dim: f.slice(0, i), value: f.slice(i + 1), not } : null;
 }
 
-function DimSelect({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
+function DimSelect({ source, value, onChange, label }: { source: Source; value: string; onChange: (v: string) => void; label: string }) {
   return (
     <select aria-label={label} className={field} value={value} onChange={(e) => onChange(e.target.value)}>
       {!value && <option value="">Pick…</option>}
-      {dimensionGroups.map((g) => (
+      {groupsOf(source).map((g) => (
         <optgroup key={g.label} label={g.label}>
           {g.dims.map(([k, l]) => (
             <option key={k} value={k}>{l}</option>
@@ -451,7 +502,7 @@ function DimSelect({ value, onChange, label }: { value: string; onChange: (v: st
 
 // GroupBy: up to five level chips, each a searchable dimension list, moved
 // left or right and removed with ×.
-function GroupBy({ groups, onChange }: { groups: string[]; onChange: (g: string[]) => void }) {
+function GroupBy({ source, groups, onChange }: { source: Source; groups: string[]; onChange: (g: string[]) => void }) {
   const move = (i: number, d: number) => {
     const g = [...groups];
     [g[i], g[i + d]] = [g[i + d], g[i]];
@@ -463,13 +514,13 @@ function GroupBy({ groups, onChange }: { groups: string[]; onChange: (g: string[
       {groups.map((g, i) => (
         <span key={i} className="inline-flex items-center gap-1 rounded-md border px-1 py-0.5">
           {i > 0 && <button type="button" aria-label="Move left" className="px-1 text-muted-foreground" onClick={() => move(i, -1)}>‹</button>}
-          <DimSelect label={`Level ${i + 1}`} value={g} onChange={(v) => onChange(groups.map((x, j) => (j === i ? v : x)))} />
+          <DimSelect source={source} label={`Level ${i + 1}`} value={g} onChange={(v) => onChange(groups.map((x, j) => (j === i ? v : x)))} />
           {i < groups.length - 1 && <button type="button" aria-label="Move right" className="px-1 text-muted-foreground" onClick={() => move(i, 1)}>›</button>}
           {groups.length > 1 && <button type="button" aria-label={`Remove ${dimLabel[g] ?? g}`} className="px-1 text-muted-foreground" onClick={() => onChange(groups.filter((_, j) => j !== i))}>×</button>}
         </span>
       ))}
       {groups.length < 5 && (
-        <Button variant="ghost" onClick={() => onChange([...groups, dimensionGroups.flatMap((x) => x.dims).map(([k]) => k).find((k) => !groups.includes(k)) ?? "country"])}>
+        <Button variant="ghost" onClick={() => onChange([...groups, groupsOf(source).flatMap((x) => x.dims).map(([k]) => k).find((k) => !groups.includes(k)) ?? "country"])}>
           + Level
         </Button>
       )}
@@ -477,7 +528,7 @@ function GroupBy({ groups, onChange }: { groups: string[]; onChange: (g: string[
   );
 }
 
-function Filters({ filters, onChange }: { filters: Filter[]; onChange: (f: Filter[]) => void }) {
+function Filters({ source, filters, onChange }: { source: Source; filters: Filter[]; onChange: (f: Filter[]) => void }) {
   const [dim, setDim] = useState("country");
   const [not, setNot] = useState(false);
   const [value, setValue] = useState("");
@@ -498,7 +549,7 @@ function Filters({ filters, onChange }: { filters: Filter[]; onChange: (f: Filte
           track("ui.report_filtered", { not });
         }}
       >
-        <DimSelect label="Filter dimension" value={dim} onChange={setDim} />
+        <DimSelect source={source} label="Filter dimension" value={dim} onChange={setDim} />
         <select aria-label="Filter operator" className={field} value={not ? "not" : "is"} onChange={(e) => setNot(e.target.value === "not")}>
           <option value="is">is</option>
           <option value="not">is not</option>
@@ -546,7 +597,8 @@ function Columns({ columns, onChange }: { columns: Column[]; onChange: (c: Colum
 
 // ReportTable: a tree. Rows at deeper levels nest under a chevron; the name
 // column and header stay put; a double-click or Enter drills in.
-function ReportTable({ report, columns, sort, onSort, open, onToggle, onDrill }: {
+function ReportTable({ nameOf, report, columns, sort, onSort, open, onToggle, onDrill }: {
+  nameOf: (dim: string, key: string) => string;
   report: Report;
   columns: Column[];
   sort: string;
@@ -582,7 +634,7 @@ function ReportTable({ report, columns, sort, onSort, open, onToggle, onDrill }:
               ) : (
                 <span className="mr-1 inline-block w-4" />
               )}
-              {row.keys[row.keys.length - 1] || <span className="text-muted-foreground">(none)</span>}
+              {(row.keys[row.keys.length - 1] && nameOf(report.group_by[row.keys.length - 1], row.keys[row.keys.length - 1])) || <span className="text-muted-foreground">(none)</span>}
             </td>
             {heads.map((h) => {
               const v = value(row.metrics, h.key);
@@ -626,7 +678,7 @@ function ReportTable({ report, columns, sort, onSort, open, onToggle, onDrill }:
       <div className="space-y-2 md:hidden">
         {(report.rows as Row[]).map((row) => (
           <button type="button" key={row.keys.join("\u0000")} className="block w-full rounded-md border p-3 text-left" onClick={() => onDrill(row)}>
-            <div className="font-medium">{row.keys[row.keys.length - 1] || "(none)"}</div>
+            <div className="font-medium">{(row.keys[row.keys.length - 1] && nameOf(report.group_by[row.keys.length - 1], row.keys[row.keys.length - 1])) || "(none)"}</div>
             <div className="mt-1 grid grid-cols-2 gap-1 text-xs text-muted-foreground">
               <span>Profit <b className={tone("profit", row.metrics.profit)}>{format(row.metrics.profit, "money", currency)}</b></span>
               <span>Visits <b>{format(row.metrics.visits, "count", currency)}</b></span>

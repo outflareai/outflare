@@ -45,7 +45,7 @@ func TestTrackerWeights(t *testing.T) {
 	pd := paths[0].(map[string]any)["destinations"].([]any)
 	ld, x, y := pd[0].(map[string]any)["id"].(string), pd[1].(map[string]any)["id"].(string), pd[2].(map[string]any)["id"].(string)
 	src := owner.must(201, "POST", base+"/postback-sources", map[string]any{"name": "Acme Network"})
-	if _, err := e.pool.Exec(ctx, `INSERT INTO exchange_rates (currency, day, usd_per_unit) VALUES ('EUR', current_date, 1.1) ON CONFLICT DO NOTHING`); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO exchange_rates (currency, day, usd_per_unit) VALUES ('EUR', current_date, 1.1) ON CONFLICT (currency, day) DO UPDATE SET usd_per_unit = EXCLUDED.usd_per_unit`); err != nil {
 		t.Fatal(err)
 	}
 

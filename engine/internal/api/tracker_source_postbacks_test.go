@@ -80,10 +80,23 @@ func TestTrackerSourcePostbacks(t *testing.T) {
 		e.h.ServeHTTP(rec, req)
 		return rec
 	}
-	click := func(netID string) string {
+	clickNow := func(netID string) string {
 		t.Helper()
 		loc, _ := url.Parse(get("/l/" + code + "?clickid=" + netID).Header().Get("Location"))
 		return loc.Query().Get("ofclk")
+	}
+	// click is a click a minute ago, so its conversion isn't flagged as
+	// too fast (a suspect conversion is never sent back).
+	click := func(netID string) string {
+		t.Helper()
+		key := clickNow(netID)
+		if err := e.srv.FlushClicks(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE tracking_link_clicks SET clicked_at = clicked_at - interval '1 minute' WHERE click_key = $1`, key); err != nil {
+			t.Fatal(err)
+		}
+		return key
 	}
 	convert := func(query string) {
 		t.Helper()
@@ -98,6 +111,9 @@ func TestTrackerSourcePostbacks(t *testing.T) {
 	convert("cid=" + k1 + "&payout=10&type=sale&txid=S-1")
 	convert("cid=" + click("net-2") + "&payout=10&type=lead&txid=L-1")
 	convert("cid=" + click("net-3") + "&payout=1&type=sale&txid=S-2")
+	// A sale seconds after its click is suspect (fast_conversion): it stays
+	// in the ledger but isn't sent, so the network doesn't learn from it.
+	convert("cid=" + clickNow("net-4") + "&payout=10&type=sale&txid=S-3")
 	e.runCRMImports(t)
 	sendsPath := base + "/traffic-sources/" + ts["id"].(string) + "/postbacks"
 	sends := func(want int) []any {

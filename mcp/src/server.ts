@@ -2633,6 +2633,16 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     ({ brand, campaign }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/tracking-campaigns/{id}", { params: { path: { brand: b, id: campaign } } }))),
   );
 
+  // A tracker campaign's cost model, for the tracker report's cost.
+  const campaignCost = z
+    .object({
+      model: z.enum(["token", "cpc", "cpa", "revshare"]).optional().describe("token: what the traffic source reports per click with {cost} (default); cpc or cpa: a fixed amount a click or a conversion; revshare: a share of each payout."),
+      amount: z.union([z.number(), z.string()]).optional().describe("cpc and cpa: the amount, such as 0.05."),
+      share: z.number().min(0).max(100).optional().describe("revshare: the percentage of each payout."),
+      currency: z.string().optional().describe("The amount's currency, such as USD; '' for the traffic source's."),
+    })
+    .describe("How the tracker report works out what the campaign's clicks cost.");
+
   server.registerTool(
     "create_tracking_campaign",
     {
@@ -2653,6 +2663,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
           .enum(["302", "307", "meta", "double_meta"])
           .optional()
           .describe("How its redirect links send people on: 302 (default), 307, meta or double_meta (both send no referrer). Modes other than 302 work only on the brand's own tracking domain."),
+        cost: campaignCost.optional(),
       },
       annotations: write,
     },
@@ -2676,6 +2687,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
           .enum(["302", "307", "meta", "double_meta"])
           .optional()
           .describe("How its redirect links send people on: 302 (default), 307, meta or double_meta (both send no referrer). Modes other than 302 work only on the brand's own tracking domain."),
+        cost: campaignCost.optional(),
       },
       annotations: write,
     },
@@ -2928,6 +2940,118 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       annotations: read,
     },
     ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/tracker-conversion-log", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "get_ip_lookups",
+    {
+      title: "Get IP lookup settings",
+      description: "Whether the brand's tracker clicks are scored by its IP reputation connection (IPQualityScore), and which: flagged clicks, converting clicks, a sample of the rest, with a monthly cap and the score that flags a click.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ip-lookups", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "set_ip_lookups",
+    {
+      title: "Change IP lookup settings",
+      description: "Turn the brand's IP lookups on or off and choose which tracker clicks are scored on its own IPQualityScore account. Each lookup spends the workspace's credits with the provider. While on, the exact address of the clicks it wants is kept 30 days for the lookup; off deletes them.",
+      inputSchema: {
+        brand: brandRef,
+        integration_id: z.string().optional().describe("The workspace's IP reputation connection (list_integrations); '' for none."),
+        enabled: z.boolean().optional(),
+        flagged: z.boolean().optional().describe("Look up clicks a fraud signal flagged."),
+        converting: z.boolean().optional().describe("Look up clicks that convert."),
+        sample_percent: z.number().min(0).max(100).optional().describe("The share of the other clicks looked up."),
+        monthly_cap: z.number().int().min(0).max(10000000).optional().describe("Lookups a month at most."),
+        threshold: z.number().int().min(1).max(100).optional().describe("The risk score at which a click is flagged."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/ip-lookups", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "list_click_filters",
+    {
+      title: "List click filters",
+      description: "The brand's click filter lists: addresses, ranges and pieces of a user agent its team knows to be bots or fraud. A redirect click that matches is flagged as suspect (filter_list): it still goes on, but counts against no cap.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/click-filters", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "add_click_filter",
+    {
+      title: "Add a click filter",
+      description: "Put an address, a range or a piece of a user agent on the brand's click filter lists, so matching redirect clicks are flagged as suspect from the next click on.",
+      inputSchema: {
+        brand: brandRef,
+        kind: z.enum(["ip", "user_agent"]),
+        value: z.string().max(200).describe("An address (203.0.113.7), a range (203.0.113.0/24) or 3 to 200 characters of a user agent (headlesschrome)."),
+        note: z.string().max(200).optional().describe("Why it is on the list."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/click-filters", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "remove_click_filter",
+    {
+      title: "Remove a click filter",
+      description: "Take an entry off the brand's click filter lists. Clicks it flagged keep their flag.",
+      inputSchema: { brand: brandRef, id: z.string().uuid().describe("The filter's id (list_click_filters).") },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ brand, id }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/click-filters/{id}", { params: { path: { brand: b, id } } }))),
+  );
+
+  server.registerTool(
+    "list_tracker_clicks",
+    {
+      title: "List tracker clicks",
+      description:
+        "The brand's redirect clicks, newest first: the campaign, path, lander and offer each went to, place, network, device, custom fields, the traffic source's click id and cost, and fraud flags. Likely bots are left out unless bots is true. Use it to find a click id for a test conversion or to see what a campaign's clicks did.",
+      inputSchema: {
+        brand: brandRef,
+        campaign: z.string().uuid().optional(),
+        offer: z.string().uuid().optional(),
+        lander: z.string().uuid().optional(),
+        click_id: z.string().max(32).optional().describe("One click, by its key (ofclk)."),
+        bots: z.boolean().optional().describe("true to include likely bots."),
+        since: z.string().optional().describe("Clicks at or after this time, such as 2026-11-12T09:00:00Z."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/tracker-clicks", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "list_tracker_lander_clicks",
+    {
+      title: "List tracker lander clicks",
+      description:
+        "Clicks on the calls to action of the brand's landers, newest first: the redirect click each continues, which call to action, and the offer or page it went on to.",
+      inputSchema: {
+        brand: brandRef,
+        lander: z.string().uuid().optional(),
+        offer: z.string().uuid().optional(),
+        click_id: z.string().max(32).optional().describe("The redirect click's key (ofclk)."),
+        bots: z.boolean().optional().describe("true to include likely bots."),
+        since: z.string().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/tracker-lander-clicks", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -3449,9 +3573,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "The drill-down report",
       description:
-        "A brand's visits, the conversions and revenue credited to them, and ad spend, grouped by up to five levels (such as channel,country or ad_campaign,day), with subtotals. Metrics: visits, visitors, conversions, revenue, cost, profit, roi, roas, cr, epv, cpa, in the brand's currency. Cost is only available grouped by day and one ad level (ad_campaign, ad_adset or ad_ad); cost_note says why when it isn't.",
+        "A brand's visits, the conversions and revenue credited to them, and ad spend, grouped by up to five levels (such as channel,country or ad_campaign,day), with subtotals. Metrics: visits, visitors, conversions, revenue, cost, profit, roi, roas, cr, epv, cpa, in the brand's currency. Cost is only available grouped by day and one ad level (ad_campaign, ad_adset or ad_ad); cost_note says why when it isn't. With source tracker it reports tracker clicks instead: visits are clicks, conversions and revenue the click ledger's, cost by each campaign's cost model (the {cost} token, CPC, CPA or revshare), and it groups by tracking_campaign, traffic_source, offer, lander, path, destination, country, region, city, isp, asn, language, device, device_brand, os, browser, suspect, field1 to field20, day, hour or weekday (default tracking_campaign).",
       inputSchema: {
         brand: brandRef,
+        source: z.enum(["site", "tracker"]).optional().describe("site (visits, the default) or tracker (tracker clicks and their conversions)."),
         group_by: z.string().optional().describe("Up to five of: channel, source, campaign, utm_source, utm_medium, utm_campaign, utm_term, utm_content, landing_path, referrer_host, country, region, city, isp, asn, language, device, device_brand, os, browser, ad_campaign, ad_adset, ad_ad, ad_placement, tracking_campaign, day, hour, weekday; comma-separated. Default channel."),
         from: attributionDay.describe("First day, such as 2026-09-27. Default: 27 days before to."),
         to: attributionDay.describe("Last day. Default: today in the brand's time zone."),
@@ -3478,6 +3603,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       sort: z.string().optional(),
       limit: z.number().int().min(1).max(1000).optional(),
       conversion_time: z.enum(["visit", "conversion"]).optional(),
+      source: z.enum(["site", "tracker"]).optional(),
       model: z.string().optional(),
       timezone: z.string().optional(),
       date_range: z.object({ preset: z.string().optional(), from: z.string().optional(), to: z.string().optional() }).optional(),
@@ -11696,6 +11822,26 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/email-broadcasts/{id}/recipients", { params: { path: { brand: b, id: broadcast }, query: { skipped: "true", limit: 200 } } })),
       );
     },
+  );
+
+  server.registerTool(
+    "list_email_broadcast_recipients",
+    {
+      title: "List a broadcast's recipients",
+      description:
+        "Who a broadcast went to, one row per person: their email's status and reason, and when it was sent, delivered, first opened, first clicked, bounced and unsubscribed. show lists one group (the people behind that number in the broadcast's results), q finds people by name or address. Page with cursor.",
+      inputSchema: {
+        brand: brandRef,
+        broadcast: z.string().describe("The broadcast's id."),
+        show: z.enum(["sent", "delivered", "opened", "clicked", "bounced", "complained", "unsubscribed", "not_sent", "skipped"]).optional(),
+        q: z.string().max(200).optional().describe("Part of a name or address."),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, broadcast, ...query }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/email-broadcasts/{id}/recipients", { params: { path: { brand: b, id: broadcast }, query } }))),
   );
 
   server.registerTool(

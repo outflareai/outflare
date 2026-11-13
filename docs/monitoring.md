@@ -56,8 +56,11 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_redirect_click_writes_total` | `outcome` (`written`, `refused_quota`, `link_gone`, `failed`, `dropped_full`) | What happened to redirect clicks when their batch was written: written, over the workspace's click quota, their link gone, the batch failed and waits for the next flush, or dropped with too many waiting. |
 | `outflare_redirect_click_buffer` | | Redirect clicks waiting in a process to be written. |
 | `outflare_tracker_postbacks_total` | `outcome` (`accepted`, `duplicate`, `updated`, `unknown_source`, `wrong_domain`, `ip_refused`, `invalid`, `unknown_click`, `expired_click`, `rate_limited`, `error`) | Tracker conversion postbacks from brands' networks, by what happened. |
-| `outflare_tracker_source_postbacks_total` | `outcome` (`queued`, `filtered`, `sent`, `retried`, `rejected`, `unreachable`, `invalid`) | Tracker conversions sent back to traffic sources' postback URLs, by what happened. |
-| `outflare_tracker_fraud_flags_total` | `subject` (`click`, `conversion`), `reason` (`datacenter_network`, `repeat_click`, `fast_conversion`) | Tracker clicks and conversions a first-party fraud signal flagged. |
+| `outflare_tracker_source_postbacks_total` | `outcome` (`queued`, `filtered`, `suspect`, `awaiting_lookup`, `sent`, `retried`, `rejected`, `unreachable`, `invalid`) | Tracker conversions sent back to traffic sources' postback URLs, by what happened. |
+| `outflare_tracker_fraud_flags_total` | `subject` (`click`, `conversion`), `reason` (`datacenter_network`, `repeat_click`, `fast_conversion`, `filter_list`, `honeypot`, `ip_reputation`) | Tracker clicks and conversions a fraud signal flagged. |
+| `outflare_tracker_ip_lookups_total` | `outcome` (`scored`, `flagged`, `capped`, `off`, `retried`, `failed_auth`, `failed_quota`, `failed_unavailable`, `failed_invalid`) | Tracker click addresses looked up on brands' own IP reputation connections, by what happened. |
+| `outflare_tracker_ip_lookup_seconds` | | Time one IP lookup took at the brand's provider. |
+| `outflare_tracker_ip_lookups_due`, `outflare_tracker_ip_lookup_oldest_seconds` | | Click addresses waiting for an IP lookup, and how long the oldest has waited. |
 | `outflare_tracker_weight_suggestions_seconds` | `outcome` (`success`, `error`) | Time to work out a link's or flow's suggested weights. |
 | `outflare_report_drilldown_seconds` | `outcome` (`success`, `error`) | Time to answer one drill-down report. |
 | `outflare_tracker_lander_clicks_total` | `outcome` (`routed`, `fallback`, `unknown_click`, `wrong_domain`, `error`) | Clicks on landers' calls to action (`/click`), by where they went. |
@@ -259,6 +262,9 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareTrackerWeightSuggestionsFailing` (warning): suggested weights failed for 15 minutes.
 - `OutflareDrilldownReportSlow` (warning): the drill-down report takes over 10 seconds for the slowest 5%.
 - `OutflareDrilldownReportFailing` (warning): the drill-down report failed for 15 minutes.
+- `OutflareTrackerIPLookupBacklog` (warning): a tracker click address has waited over 15 minutes for its IP lookup, so converting clicks' postbacks are held up.
+- `OutflareTrackerIPLookupsUnreachable` (info): every IP lookup for 30 minutes was given up because the provider couldn't be reached.
+- `OutflareTrackerHoneypotFailing` (info): hits on the landers' hidden link (`/hp`) have failed to flag their clicks for 15 minutes, so bots crawling landers aren't being flagged.
 - `OutflareTrackerLanderClicksFailing` (warning): lander clicks (`/click`) have failed for 10 minutes, so visitors on landers reach the fallback page instead of an offer.
 - `OutflareGeoFilesStale` (warning): a server's DB-IP city or network file is over 40 days old, so new visits and clicks get older city and network data.
 - `OutflareGeoDownloadsFailing` (info): DB-IP file downloads failed at every check for a day; the files in use stay until they're stale.

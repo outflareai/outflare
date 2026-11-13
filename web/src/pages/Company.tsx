@@ -418,15 +418,15 @@ function BusinessCard({ ws, context: c, canManage, onSaved }: { ws: string; cont
       <form onSubmit={save} className="space-y-3">
         <fieldset disabled={ro} className="space-y-3">
           <div className="grid gap-3 md:grid-cols-2">
-            <Input label="Legal name" value={form.legal_name} onChange={(e) => setForm({ ...form, legal_name: e.target.value })} maxLength={200} placeholder="Northpeak Pty Ltd" hint={`Leave empty to use ${c.name}.`} />
-            <Input label="Tax or company number" value={form.tax_id} onChange={(e) => setForm({ ...form, tax_id: e.target.value })} maxLength={60} placeholder="ABN 00 000 000 000" />
+            <Input label="Legal name" value={form.legal_name} onChange={(e) => setForm({ ...form, legal_name: e.target.value })} maxLength={200} hint={`Leave empty to use ${c.name}.`} />
+            <Input label="Tax or company number" value={form.tax_id} onChange={(e) => setForm({ ...form, tax_id: e.target.value })} maxLength={60} />
           </div>
-          <Input label="Street address" value={form.address.line1} onChange={setAddr("line1")} maxLength={200} placeholder="Level 2, 10 Example Street" />
+          <Input label="Street address" value={form.address.line1} onChange={setAddr("line1")} maxLength={200} />
           <Input label="Address line 2" value={form.address.line2} onChange={setAddr("line2")} maxLength={200} placeholder="Optional" />
           <div className="grid gap-3 sm:grid-cols-3">
-            <Input label="City" value={form.address.city} onChange={setAddr("city")} maxLength={200} placeholder="Sydney" />
-            <Input label="State or region" value={form.address.region} onChange={setAddr("region")} maxLength={200} placeholder="NSW" />
-            <Input label="Postcode" value={form.address.postal_code} onChange={setAddr("postal_code")} maxLength={200} placeholder="2000" />
+            <Input label="City" value={form.address.city} onChange={setAddr("city")} maxLength={200} />
+            <Input label="State or region" value={form.address.region} onChange={setAddr("region")} maxLength={200} />
+            <Input label="Postcode" value={form.address.postal_code} onChange={setAddr("postal_code")} maxLength={200} />
           </div>
           {countries.length > 0 ? (
             <label className="block text-sm">
@@ -437,7 +437,7 @@ function BusinessCard({ ws, context: c, canManage, onSaved }: { ws: string; cont
               </select>
             </label>
           ) : (
-            <Input label="Country" value={form.address.country} onChange={setAddr("country")} maxLength={2} placeholder="AU" hint="A two-letter code, such as AU or US." />
+            <Input label="Country" value={form.address.country} onChange={setAddr("country")} maxLength={2} hint="A two-letter country code." />
           )}
         </fieldset>
         {c.address_text && !dirty && <p className="text-xs text-muted-foreground">Footers show: {c.legal_name || c.name}, {c.address_text}</p>}

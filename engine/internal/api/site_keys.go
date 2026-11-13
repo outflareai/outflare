@@ -855,6 +855,7 @@ func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua
 		region: k.region, city: k.city, isp: k.isp, asn: k.asn}
 	v.device, v.browser, v.os = parseUA(ua)
 	v.detail = parseDevice(ua, v.os, v.browser)
+	v.userAgent = ua
 	c, err := loadCatalog(ctx, tx, k.workspaceID, deref(k.brandID), false)
 	if err != nil {
 		return 0, 0, "", err

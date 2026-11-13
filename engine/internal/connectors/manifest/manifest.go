@@ -137,7 +137,50 @@ type AccountMap struct {
 // Capabilities are what the connector can do. Each one implements the
 // engine's interface for it, so engine features use it like any other.
 type Capabilities struct {
-	Verify *Verify `yaml:"verify"`
+	Verify  *Verify  `yaml:"verify"`
+	IPScore *IPScore `yaml:"ip_score"`
+}
+
+// IPScore looks up one address's reputation: the connectors.IPScorer
+// capability. Variables: {{ip}}, {{user_agent}} and the auth fields.
+type IPScore struct {
+	Request Request       `yaml:"request"`
+	Errors  []ErrorRule   `yaml:"errors"`
+	Result  IPScoreResult `yaml:"result"`
+}
+
+// IPScoreResult maps the answer onto connectors.IPScore. Score is the path
+// of a 0–100 number; each flag is a path to a true/false value, or a path
+// and the value that means true ({path: connection_type, equals: Data
+// Center}).
+type IPScoreResult struct {
+	Score   string `yaml:"score"`
+	Proxy   Flag   `yaml:"proxy"`
+	VPN     Flag   `yaml:"vpn"`
+	Tor     Flag   `yaml:"tor"`
+	Hosting Flag   `yaml:"hosting"`
+	Crawler Flag   `yaml:"crawler"`
+}
+
+// Flag is a true/false value in an answer: a path, or a path and the word
+// that means true.
+type Flag struct {
+	Path   string `yaml:"path"`
+	Equals string `yaml:"equals"`
+}
+
+func (f *Flag) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		f.Path = n.Value
+		return nil
+	}
+	type plain Flag
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	*f = Flag(p)
+	return nil
 }
 
 // Verify checks one address: the connectors.Verifier capability.
@@ -306,7 +349,7 @@ var (
 	idRe       = regexp.MustCompile(`^[a-z][a-z0-9_]{1,39}$`)
 	varRe      = regexp.MustCompile(`\{\{\s*([a-z][a-z0-9_]*)\s*\}\}`)
 	headerRe   = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
-	categories = map[string]bool{c.CategoryVerification: true}
+	categories = map[string]bool{c.CategoryVerification: true, c.CategoryFraud: true}
 )
 
 // Validate checks a manifest on its own: everything that does not need
@@ -384,8 +427,18 @@ func (m *Manifest) Validate() error {
 	if m.Test.Request.Method != "GET" {
 		bad("test.request: the test must be a GET, so it cannot change anything")
 	}
-	if m.Caps.Verify == nil {
-		bad("capabilities: at least one (verify)")
+	if m.Caps.Verify == nil && m.Caps.IPScore == nil {
+		bad("capabilities: at least one (verify or ip_score)")
+	}
+	if v := m.Caps.IPScore; v != nil {
+		if m.Category != c.CategoryFraud {
+			bad("capabilities.ip_score needs category fraud")
+		}
+		checkRequest("capabilities.ip_score", v.Request, "ip", "user_agent")
+		checkErrors("capabilities.ip_score", v.Errors)
+		if v.Result.Score == "" {
+			bad("capabilities.ip_score.result.score is required: the path of the 0–100 risk score")
+		}
 	}
 	if v := m.Caps.Verify; v != nil {
 		if m.Category != c.CategoryVerification {

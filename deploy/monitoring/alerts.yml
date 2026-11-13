@@ -164,6 +164,27 @@ groups:
         annotations:
           summary: "Lander clicks (/click) have failed for 10 minutes, so visitors on landers reach the domain's fallback page instead of an offer: look for /click errors in the logs, usually the database. See the Lander clicks panel on the Redirect links row."
 
+      - alert: OutflareTrackerHoneypotFailing
+        expr: sum(rate(outflare_tracker_honeypot_hits_total{outcome="error"}[5m])) > 0
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Honeypot hits (/hp) have failed to flag their clicks for 15 minutes, so bots crawling landers aren't being flagged: look for tracker.honeypot_failed in the logs, usually the database. See the Honeypot hits panel on the Redirect links row."
+
+      - alert: OutflareTrackerIPLookupBacklog
+        expr: max(outflare_tracker_ip_lookup_oldest_seconds) > 900
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A tracker click address has waited over 15 minutes for its IP lookup, so converting clicks' postbacks to traffic sources are held up: check that a worker process is running and look for tracker.ip_lookups_failed in the logs. See the IP lookups waiting panel on the Redirect links row."
+
+      - alert: OutflareTrackerIPLookupsUnreachable
+        expr: sum(rate(outflare_tracker_ip_lookups_total{outcome="failed_unavailable"}[15m])) > 0 and sum(rate(outflare_tracker_ip_lookups_total{outcome=~"scored|flagged"}[15m])) == 0
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Every IP lookup for 30 minutes has been given up because the provider couldn't be reached, so no click is being scored: check that this server can reach IPQualityScore (outbound network) and its status page. A wrong key or no credits is the workspace's own (failed_auth, failed_quota) and shows on its Connectors page. See the IP lookups panel on the Redirect links row."
+
       - alert: OutflareTrackerSourcePostbacksFailing
         expr: sum(rate(outflare_tracker_source_postbacks_total{outcome=~"unreachable|invalid"}[15m])) > 0
         for: 30m

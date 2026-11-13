@@ -6,6 +6,39 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.95.0] - 2026-11-13
+
+### Added
+
+- Tracker clicks can now be looked up on your own IPQualityScore account (Tracker → Setup): a high risk score or a data-centre network flags the click and its conversions, and their postbacks to traffic sources wait for the lookup.
+- The Tracker has a Logs tab: clicks, lander clicks, conversions, and postbacks in and out, newest first with Live refresh, plus the postbacks that weren't recorded, grouped by why with the fix. The API and MCP list clicks and lander clicks too.
+- The Tracker has a Setup tab: a checklist that ticks itself as you set up conversion tracking, a postback URL builder in each affiliate network's own tokens with its pixel, script and server call, and a test conversion that says what happened and why.
+- The Tracker has Traffic sources and Affiliate networks tabs: start from a gallery of network templates, preview the campaign URL as you edit its parameters, and send conversions back with a postback that can't be saved half filled in; each affiliate network shows its postback URL to paste into the network.
+
+### Changed
+
+- A sent broadcast now shows its recipients: one row per person with what happened to their email (delivered, bounced and why, marked as spam, skipped and why) and when it was sent, delivered, opened and clicked. Filter by status with one click, search for a person, or download a group as a CSV. The API and MCP list the same with `show` and `q`.
+- Direct-mode tracker clicks, recorded by the site script, are now checked against the brand's user agent click filters too, so they are flagged as suspect like redirect clicks.
+- Brands can choose which tracker clicks get an IP reputation lookup on their own IPQualityScore account: flagged clicks, converting clicks and a sample of the rest, up to a monthly cap. The lookups themselves arrive next.
+- IPQualityScore joins the connector catalog under Fraud checks: connect your own account to score the addresses of tracker clicks for proxies, VPNs, Tor, data centres and crawlers.
+- Link orders: right-click any catalog cell for site actions. Find email shows the addresses already stored for the site (people, link-building contacts, Outreach leads, notes). Send to a sequence adds a stored or typed address to one of the brand's Outreach sequences with the usual suppression and exclusion rules.
+- Link orders: import an intermediary's full database (up to 32 MB, sent in batches with progress). Headers like "Traffic / Organic" now map, and the donor card shows the full metrics: referring domains, backlinks, keywords, outgoing links, geo and more. Donors get their own Intermediary (searchable), Theme and Site age fields.
+- Link orders: the catalog marks sites worth writing to directly, not only through the intermediary (not a PBN, DR or traffic stored, an email at the site already stored), and you can filter to them and Find email or Send to a sequence from the row. The mark itself sends nothing.
+- Link orders: enter a quote or payment in the invoice's own currency — GBP, PLN, CHF, JPY and 20 other common ones, not only USD and EUR. Outflare keeps the amount as invoiced and shows it beside the US-dollar equivalent at the ECB reference rate for the invoice date. Recording a payment still never sends money.
+- On Link orders Targets, the sources line still shows how many stored keywords, targets and competitor pages the suggestions come from, but no longer lists every tracked competitor by name.
+- The sidebar groups its modules under seven headings (Customers, Email and outreach, Search, Social, Ads, Measure, Company). Home puts the outreach email numbers under their own heading. The Agent page uses plainer names: All changes, Playbook runs and Rules, where a grant is now called a rule.
+- Conversions flagged as suspect (a hosting network, a repeat clicker, a filter list, the honeypot or a conversion seconds after its click) are no longer sent back to traffic sources, so the networks' bidding doesn't learn from bots. They stay in the ledger and the reports.
+- Brands can keep click filter lists of addresses, ranges and user agents they know are bots or fraud: matching tracker clicks still go on but are flagged as suspect, so they count against no cap and the report can leave them out.
+- Tracker campaigns take a cost model: what the traffic source reports per click, a fixed cost per click or per conversion, or a revenue share, so the Tracker's Report shows cost and profit for every campaign.
+- The lander script now carries a honeypot: a link no person can see or reach, so a bot that follows every link on a lander flags its own click as suspect, keeping it out of caps and reports.
+- The Tracker's Report can show tracker clicks instead of site visits: clicks, conversions from your affiliate networks, payouts and the cost traffic sources reported, by campaign, traffic source, offer, lander, path, custom field or any click detail.
+- X Ads connects with a **Sign in to X** button on Paid ads, Accounts, through your own X developer app, instead of pasting an access token and secret.
+- X Ads and Reddit Ads can now be managed from Outflare: pause, resume and set campaign budgets (with your approval), get the same budget and pause suggestions as Google and Meta, read each network's own conversions, and send sign-ups and purchases back through X's and Reddit's Conversions APIs (Reddit's newer v3 API once you add your pixel ID).
+
+### Fixed
+
+- Business details on About your company no longer show example values in empty fields, and an address in a city-state such as Singapore no longer names the country twice.
+
 ## [0.94.0] - 2026-11-12
 
 ### Added

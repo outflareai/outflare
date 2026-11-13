@@ -24,7 +24,7 @@ import type { Tab } from "../App";
 type Status = Action["status"];
 const statusLabel: Record<Status, string> = { held: "Waiting", running: "Running", executed: "Done", failed: "Failed", refused: "Refused", rejected: "Rejected", expired: "Expired", cancelled: "Cancelled" };
 const statusTone: Record<Status, "amber" | "blue" | "green" | "red" | "grey"> = { held: "amber", running: "blue", executed: "green", failed: "red", refused: "red", rejected: "grey", expired: "grey", cancelled: "grey" };
-const ruleLabel: Record<string, string> = { no_grant: "No grant covers it", grant: "By a grant", daily_limit: "Daily limit reached", always_person: "Always needs a person" };
+const ruleLabel: Record<string, string> = { no_grant: "No rule covers it", grant: "By a rule", daily_limit: "Daily limit reached", always_person: "Always needs a person" };
 // Why a change waits, in words, when it is more than "nobody has allowed
 // this kind of change yet" (the usual case, which needs no badge).
 const waitLabel: Record<string, string> = { daily_limit: "Over today's limit", always_person: "Always needs a person" };
@@ -73,8 +73,8 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
     // History and Settings each gather several views; a row of pills under
     // the tabs picks one.
     const groups: Record<"history" | "settings", { value: string; label: string }[]> = {
-      history: [...extra.filter((t) => t.group === "history"), { value: "all", label: "Every agent's changes" }, { value: "runs", label: "Outflare agent runs" }],
-      settings: [...extra.filter((t) => t.group === "settings"), { value: "grants", label: "What agents may do" }],
+      history: [...extra.filter((t) => t.group === "history"), { value: "all", label: "All changes" }, { value: "runs", label: "Playbook runs" }],
+      settings: [...extra.filter((t) => t.group === "settings"), { value: "grants", label: "Rules" }],
     };
     const groupOf = (v: string) => (groups.history.some((t) => t.value === v) ? "history" : groups.settings.some((t) => t.value === v) ? "settings" : v);
     const top = groupOf(view);
@@ -119,21 +119,21 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
     <div className="space-y-6">
       <PageHeader
         title="Agents"
-        description="What your agents changed, what waits for you, the runs of Outflare's own agent, and what each agent may do on its own. An agent is an API token whose changes go through the action layer."
+        description="What your agents changed, what waits for you, the playbooks Outflare's own agent ran, and the rules for what each agent may do on its own. An agent is an API token whose changes wait for your approval."
         action={canTokens ? <Button variant="ghost" onClick={() => go("tokens")}>API tokens</Button> : undefined}
       />
       {agents && agents.length === 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-[13px]">
-          <span className="min-w-0 flex-1">No token is an agent yet. Turn on <span className="font-medium">send its changes through the action layer</span> on a token, and its changes show up here, waiting for you until you grant it room.</span>
+          <span className="min-w-0 flex-1">No token is an agent yet. Turn on <span className="font-medium">It's an agent</span> on a token, and its changes show up here, waiting for you until a rule lets them through.</span>
           <Button variant="ghost" onClick={() => go("tokens")}>Open API tokens</Button>
         </div>
       )}
       <Tabs value={view} onValueChange={pick}>
         <TabsList>
           <TabsTrigger value="waiting">Waiting for you{waiting ? ` (${waiting})` : ""}</TabsTrigger>
-          <TabsTrigger value="runs">Runs</TabsTrigger>
-          <TabsTrigger value="all">Everything</TabsTrigger>
-          <TabsTrigger value="grants">What agents may do</TabsTrigger>
+          <TabsTrigger value="runs">Playbook runs</TabsTrigger>
+          <TabsTrigger value="all">All changes</TabsTrigger>
+          <TabsTrigger value="grants">Rules</TabsTrigger>
         </TabsList>
         <TabsContent value="waiting"><Waiting ws={ws} canApprove={canApprove} canManage={canManage} onCount={setWaiting} /></TabsContent>
         <TabsContent value="runs"><AgentRuns ws={ws} onOpen={setOpen} /></TabsContent>
@@ -381,7 +381,7 @@ export function Everything({ ws, tokens, team }: { ws: string; tokens: APIToken[
       </div>
       {error && <ErrorText>{error}</ErrorText>}
       {list === null && !error && <Loading />}
-      {list && list.length === 0 && <Empty title="No changes yet">Every change an agent makes through the action layer shows up here: run, held, refused, and what people decided.</Empty>}
+      {list && list.length === 0 && <Empty title="No changes yet">Every change an agent makes shows up here: run, held, refused, and what people decided.</Empty>}
       {list && list.length > 0 && (
         <DataTable
           data={list}
@@ -398,7 +398,7 @@ export function Everything({ ws, tokens, team }: { ws: string; tokens: APIToken[
             { id: "change", header: "Change", accessorFn: (a) => a.summary, cell: ({ row: { original: a } }) => <span className="block min-w-0"><span className="font-medium">{a.summary}</span><span className="block font-mono text-[11px] text-muted-foreground">{a.method} {shortPath(a.path)}</span></span> },
             { id: "agent", header: "Agent", accessorFn: (a) => a.actor_name ?? "", cell: ({ row: { original: a } }) => <span className="whitespace-nowrap">{a.actor_name ?? <span className="text-muted-foreground">—</span>}</span> },
             { id: "status", header: "Status", accessorFn: (a) => a.status, cell: ({ row: { original: a } }) => <span className="flex flex-wrap items-center gap-1"><Badge tone={statusTone[a.status]}>{statusLabel[a.status]}</Badge>{a.decided_by_rule && a.status !== "executed" && <span className="text-[12px] text-muted-foreground">{ruleLabel[a.decided_by_rule]}</span>}</span> },
-            { id: "decided", header: "Decided by", accessorFn: (a) => a.decided_by_name ?? "", cell: ({ row: { original: a } }) => <span className="whitespace-nowrap text-muted-foreground">{a.decided_by_name ? `${a.decided_by_name}${a.decided_at ? `, ${ago(a.decided_at)}` : ""}` : a.decided_by_rule === "grant" && (a.status === "executed" || a.status === "failed" || a.status === "refused") ? "A grant" : "—"}</span> },
+            { id: "decided", header: "Decided by", accessorFn: (a) => a.decided_by_name ?? "", cell: ({ row: { original: a } }) => <span className="whitespace-nowrap text-muted-foreground">{a.decided_by_name ? `${a.decided_by_name}${a.decided_at ? `, ${ago(a.decided_at)}` : ""}` : a.decided_by_rule === "grant" && (a.status === "executed" || a.status === "failed" || a.status === "refused") ? "A rule" : "—"}</span> },
             { id: "when", header: "When", accessorFn: (a) => a.created_at, cell: ({ row: { original: a } }) => <span className="whitespace-nowrap text-muted-foreground" title={stamp(a.created_at)}>{ago(a.created_at)}</span> },
           ]}
         />
@@ -445,7 +445,7 @@ function ActionDialog({ a, onClose }: { a: Action; onClose: () => void }) {
   );
 }
 
-// ---- What agents may do ----
+// ---- Rules (grants in the API): what agents may do ----
 
 function Grants({ ws, canManage, tokens }: { ws: string; canManage: boolean; tokens: APIToken[] | null }) {
   const [list, setList] = useState<ActionGrant[] | null>(null);
@@ -464,11 +464,11 @@ function Grants({ ws, canManage, tokens }: { ws: string; canManage: boolean; tok
   }, [load]);
 
   async function revoke(g: ActionGrant) {
-    if (!(await confirmAction("Revoke this grant?", <p>From its next change, {g.token_name ?? "the agent"} waits for a person again where this grant let it through.</p>, "Revoke"))) return;
+    if (!(await confirmAction("Remove this rule?", <p>From its next change, {g.token_name ?? "the agent"} waits for a person again where this rule let it through.</p>, "Remove"))) return;
     const { error } = await api.DELETE("/v1/workspaces/{ws}/action-grants/{id}", { params: { path: { ws, id: g.id } } });
     if (error) return toast(errorMessage(error), "error");
     track("ui.action_grant_revoked", { mode: g.mode });
-    toast("Revoked.");
+    toast("Rule removed.");
     load();
   }
 
@@ -479,13 +479,13 @@ function Grants({ ws, canManage, tokens }: { ws: string; canManage: boolean; tok
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted-foreground">
-        <p className="min-w-0 flex-1">A grant says what happens to an agent's changes that match it: run on their own, wait for a person, or be refused. The most specific grant decides; with none, the change waits. Some changes always wait for a person, whatever the grants say.</p>
-        {canManage && <Button onClick={() => setAdding(true)}>New grant</Button>}
+        <p className="min-w-0 flex-1">A rule says what happens to an agent's changes that match it: run on their own, wait for a person, or be refused. The most specific rule decides; with none, the change waits. Some changes always wait for a person, whatever the rules say.</p>
+        {canManage && <Button onClick={() => setAdding(true)}>New rule</Button>}
       </div>
-      {list.length === 0 && <Empty title="No grants yet">Every change your agents make waits for a person. Approve one with “approve changes like this from now on”, or add a grant here.</Empty>}
+      {list.length === 0 && <Empty title="No rules yet">Every change your agents make waits for a person. Approve one with “approve changes like this from now on”, or add a rule here.</Empty>}
       {[...byToken.entries()].map(([tokenId, grants]) => (
         <section key={tokenId} className="space-y-2">
-          <h3 className="font-medium">{grants[0].token_name ?? "An agent"} <span className="text-[12px] font-normal text-muted-foreground">· {plural(grants.length, "grant")}</span></h3>
+          <h3 className="font-medium">{grants[0].token_name ?? "An agent"} <span className="text-[12px] font-normal text-muted-foreground">· {plural(grants.length, "rule")}</span></h3>
           <div className="divide-y rounded-lg border">
             {grants.map((g) => (
               <div key={g.id} className="flex flex-wrap items-center gap-3 px-3 py-2 text-[13px]">
@@ -500,7 +500,7 @@ function Grants({ ws, canManage, tokens }: { ws: string; canManage: boolean; tok
                   )}
                 </span>
                 <span className="whitespace-nowrap text-[12px] text-muted-foreground" title={stamp(g.created_at)}>{ago(g.created_at)}</span>
-                {canManage && <Button variant="ghost" onClick={() => revoke(g)}>Revoke</Button>}
+                {canManage && <Button variant="ghost" onClick={() => revoke(g)}>Remove</Button>}
               </div>
             ))}
           </div>
@@ -531,7 +531,7 @@ function GrantDialog({ ws, tokens, onClose, onDone }: { ws: string; tokens: APIT
     setBusy(false);
     if (error) return setError(errorMessage(error));
     track("ui.action_grant_created", { mode, has_daily_limit: !!limit, template: false });
-    toast("Grant added. It applies to the agent's next change.");
+    toast("Rule added. It applies to the agent's next change.");
     onDone();
   }
 
@@ -539,7 +539,7 @@ function GrantDialog({ ws, tokens, onClose, onDone }: { ws: string; tokens: APIT
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>New grant</DialogTitle>
+          <DialogTitle>New rule</DialogTitle>
           <DialogDescription>What happens to this agent's changes that match the path. The path is the part after <span className="font-mono">/v1/workspaces/…/</span>, with <span className="font-mono">*</span> for one segment and a trailing <span className="font-mono">**</span> for the rest.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
@@ -551,7 +551,7 @@ function GrantDialog({ ws, tokens, onClose, onDone }: { ws: string; tokens: APIT
               </select>
             </label>
           ) : (
-            <Input label="Agent token id" value={token} onChange={(e) => setToken(e.target.value)} hint="The id of a token whose changes go through the action layer." required />
+            <Input label="Agent token id" value={token} onChange={(e) => setToken(e.target.value)} hint="The id of a token that is marked as an agent." required />
           )}
           <div className="grid gap-4 sm:grid-cols-[8rem_1fr]">
             <label className="block">
@@ -578,7 +578,7 @@ function GrantDialog({ ws, tokens, onClose, onDone }: { ws: string; tokens: APIT
           <Input label="Note" placeholder="Why, for whoever reads this later" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />
           <ErrorText>{error}</ErrorText>
           <div className="flex gap-2">
-            <Button disabled={busy || !token || !path.trim()}>{busy ? "Saving…" : "Add grant"}</Button>
+            <Button disabled={busy || !token || !path.trim()}>{busy ? "Saving…" : "Add rule"}</Button>
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           </div>
         </form>

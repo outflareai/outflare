@@ -69,8 +69,7 @@ export function Targets({ data }: { data: PageData }) {
         {sources ? (
           <p className="mb-2 text-[12px] text-muted-foreground" data-testid="target-sources">
             Based on {se} stored SE Ranking keyword{se === 1 ? "" : "s"}, {sources.other_keywords} from other SEO connections, {sources.page_targets} keyword target{sources.page_targets === 1 ? "" : "s"},
-            {" "}{sources.competitor_keywords} competitor keywords and {sources.competitor_link_pages} competitor pages with stored links
-            {sources.competitors.length ? ` (${sources.competitors.join(", ")})` : " (no tracked competitors yet)"}.
+            {" "}{sources.competitor_keywords} competitor keywords and {sources.competitor_link_pages} competitor pages with stored links.
             {se === 0 ? " No SE Ranking data is stored for this brand's pages yet, so primary anchors come from keyword targets or other stored keywords." : ""}
           </p>
         ) : null}

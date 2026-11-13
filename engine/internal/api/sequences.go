@@ -975,14 +975,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	skip := req.SkipActiveElsewhere == nil || *req.SkipActiveElsewhere
 	ctx := r.Context()
-	var res struct {
-		Enrolled        int `json:"enrolled"`
-		AlreadyEnrolled int `json:"already_enrolled"`
-		Suppressed      int `json:"suppressed"`
-		// Left out by the sequence's exclusion.
-		Excluded        int `json:"excluded"`
-		ActiveElsewhere int `json:"active_elsewhere"`
-	}
+	var res enrollCounts
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var ok bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE id = $1 AND workspace_id = $2 AND status <> 'archived')`, id, a.WorkspaceID).Scan(&ok); err != nil {
@@ -1006,40 +999,10 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		// Candidates: workspace leads from the ids or the list, classified in
-		// one pass; only the eligible ones are inserted.
-		err := tx.QueryRow(ctx, `
-			WITH cand AS (
-				SELECT l.id, l.email,
-					EXISTS (SELECT 1 FROM enrollments e WHERE e.sequence_id = $1 AND e.lead_id = l.id) AS here,
-					EXISTS (`+leads.SuppressedInSQL("l.workspace_id", "(SELECT q.brand_id FROM sequences q WHERE q.id = $1)", "l.email")+`) AS suppressed,
-					`+customers.ExcludedByColumnSQL("l.record_id", "(SELECT q.exclude FROM sequences q WHERE q.id = $1)")+` AS excluded,
-					EXISTS (SELECT 1 FROM enrollments e JOIN sequences q ON q.id = e.sequence_id
-						WHERE e.lead_id = l.id AND e.status = 'active' AND e.sequence_id <> $1 AND q.status IN ('active', 'paused')) AS elsewhere
-				FROM leads l
-				-- Only the sequence's brand's leads.
-				WHERE l.workspace_id = $2 AND l.brand_id IS NOT DISTINCT FROM COALESCE((SELECT q.brand_id FROM sequences q WHERE q.id = $1), l.brand_id) AND (
-					l.id = ANY($3::uuid[]) OR
-					($4::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists ll ON ll.id = m.list_id
-						WHERE m.lead_id = l.id AND m.list_id = $4 AND ll.workspace_id = $2)))
-			), ins AS (
-				INSERT INTO enrollments (workspace_id, sequence_id, lead_id, next_send_at)
-				SELECT $2, $1, id, now() FROM cand
-				WHERE NOT here AND NOT suppressed AND NOT excluded AND NOT (elsewhere AND $5)
-				ON CONFLICT DO NOTHING
-				RETURNING 1
-			)
-			SELECT (SELECT count(*) FROM ins),
-			       count(*) FILTER (WHERE here),
-			       count(*) FILTER (WHERE NOT here AND suppressed),
-			       count(*) FILTER (WHERE NOT here AND NOT suppressed AND excluded),
-			       count(*) FILTER (WHERE NOT here AND NOT suppressed AND NOT excluded AND elsewhere AND $5)
-			FROM cand`, id, a.WorkspaceID, req.LeadIDs, req.ListID, skip,
-		).Scan(&res.Enrolled, &res.AlreadyEnrolled, &res.Suppressed, &res.Excluded, &res.ActiveElsewhere)
-		if err != nil {
+		var err error
+		if res, err = enrollLeads(ctx, tx, a.WorkspaceID, id, req.LeadIDs, req.ListID, skip); err != nil {
 			return err
 		}
-		metrics.ExcludedN("sequence", res.Excluded)
 		if res.Enrolled == 0 {
 			return nil
 		}
@@ -1051,6 +1014,62 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// enrollCounts is what adding leads to a sequence did.
+type enrollCounts struct {
+	Enrolled        int `json:"enrolled"`
+	AlreadyEnrolled int `json:"already_enrolled"`
+	Suppressed      int `json:"suppressed"`
+	// Left out by the sequence's exclusion.
+	Excluded        int `json:"excluded"`
+	ActiveElsewhere int `json:"active_elsewhere"`
+}
+
+// enrollLeads adds workspace leads, by id or from a list, to a sequence the
+// caller has already checked: only the sequence's brand's leads, never a
+// suppressed or excluded one, never one twice, and not one active in another
+// sequence when skip is set. It records nothing; the caller does.
+func enrollLeads(ctx context.Context, tx pgx.Tx, ws, seq string, leadIDs []string, listID *string, skip bool) (enrollCounts, error) {
+	var res enrollCounts
+	if leadIDs == nil {
+		leadIDs = []string{}
+	}
+	// Candidates: workspace leads from the ids or the list, classified in
+	// one pass; only the eligible ones are inserted.
+	err := tx.QueryRow(ctx, `
+		WITH cand AS (
+			SELECT l.id, l.email,
+				EXISTS (SELECT 1 FROM enrollments e WHERE e.sequence_id = $1 AND e.lead_id = l.id) AS here,
+				EXISTS (`+leads.SuppressedInSQL("l.workspace_id", "(SELECT q.brand_id FROM sequences q WHERE q.id = $1)", "l.email")+`) AS suppressed,
+				`+customers.ExcludedByColumnSQL("l.record_id", "(SELECT q.exclude FROM sequences q WHERE q.id = $1)")+` AS excluded,
+				EXISTS (SELECT 1 FROM enrollments e JOIN sequences q ON q.id = e.sequence_id
+					WHERE e.lead_id = l.id AND e.status = 'active' AND e.sequence_id <> $1 AND q.status IN ('active', 'paused')) AS elsewhere
+			FROM leads l
+			-- Only the sequence's brand's leads.
+			WHERE l.workspace_id = $2 AND l.brand_id IS NOT DISTINCT FROM COALESCE((SELECT q.brand_id FROM sequences q WHERE q.id = $1), l.brand_id) AND (
+				l.id = ANY($3::uuid[]) OR
+				($4::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists ll ON ll.id = m.list_id
+					WHERE m.lead_id = l.id AND m.list_id = $4 AND ll.workspace_id = $2)))
+		), ins AS (
+			INSERT INTO enrollments (workspace_id, sequence_id, lead_id, next_send_at)
+			SELECT $2, $1, id, now() FROM cand
+			WHERE NOT here AND NOT suppressed AND NOT excluded AND NOT (elsewhere AND $5)
+			ON CONFLICT DO NOTHING
+			RETURNING 1
+		)
+		SELECT (SELECT count(*) FROM ins),
+		       count(*) FILTER (WHERE here),
+		       count(*) FILTER (WHERE NOT here AND suppressed),
+		       count(*) FILTER (WHERE NOT here AND NOT suppressed AND excluded),
+		       count(*) FILTER (WHERE NOT here AND NOT suppressed AND NOT excluded AND elsewhere AND $5)
+		FROM cand`, seq, ws, leadIDs, listID, skip,
+	).Scan(&res.Enrolled, &res.AlreadyEnrolled, &res.Suppressed, &res.Excluded, &res.ActiveElsewhere)
+	if err != nil {
+		return res, err
+	}
+	metrics.ExcludedN("sequence", res.Excluded)
+	return res, nil
 }
 
 type enrollmentView struct {

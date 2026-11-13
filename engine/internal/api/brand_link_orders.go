@@ -18,6 +18,7 @@ import (
 
 func (s *Server) routesLinkOrders(mux *http.ServeMux) {
 	s.routesLinkOrderTargets(mux)
+	s.routesLinkOrderOutreach(mux)
 	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/settings", s.onBrand(auth.ScopeCoverageRead, s.getLinkOrderSettings))
 	mux.HandleFunc("PATCH /v1/brands/{brand}/link-orders/settings", s.onBrand(auth.ScopeCoverageApprove, s.updateLinkOrderSettings))
 

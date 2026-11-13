@@ -3,6 +3,7 @@ package linkorders
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -162,7 +163,11 @@ func listOrdersQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 			o.credit_payment_id, o.replaces_order_id, o.owner_user_id, o.last_check_at, o.last_check_live,
 			o.last_check_target_match, o.last_check_rel, o.last_check_anchor,
 			o.approved_by, o.approved_at, o.paid_by, o.paid_at,
-			o.lost_at, o.lost_reason, o.notes, o.created_at, o.updated_at
+			o.lost_at, o.lost_reason, o.notes, o.created_at, o.updated_at,
+			o.quoted_invoice_currency, o.quoted_invoice_amount_minor, o.quoted_invoice_date, o.quoted_usd_minor,
+			o.quoted_fx_rate::float8, o.quoted_fx_rate_date, o.quoted_fx_rate_source,
+			o.invoice_currency, o.invoice_amount_minor, o.invoice_date, o.usd_amount_minor,
+			o.fx_rate::float8, o.fx_rate_date, o.fx_rate_source
 		FROM coverage_link_orders o
 		JOIN coverage_donor_profiles p ON p.id = o.donor_profile_id
 		JOIN coverage_publishers pub ON pub.id = p.publisher_id
@@ -177,7 +182,8 @@ func listOrdersQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 	var out []Order
 	for rows.Next() {
 		var o Order
-		if err := rows.Scan(
+		var qi, fi invoiceScan
+		dests := []any{
 			&o.ID, &o.PublisherID, &o.DonorProfileID, &o.Domain, &o.Status, &o.TargetURL,
 			&o.TargetID, &o.TargetKind, &o.TargetChoice,
 			&o.AnchorPrimary, &o.AnchorPrimarySource, &o.AnchorSecondary, &o.AnchorSecondaryType,
@@ -188,9 +194,13 @@ func listOrdersQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 			&o.LastCheckTargetMatch, &o.LastCheckRel, &o.LastCheckAnchor,
 			&o.ApprovedBy, &o.ApprovedAt, &o.PaidBy, &o.PaidAt,
 			&o.LostAt, &o.LostReason, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
-		); err != nil {
+		}
+		dests = append(append(dests, qi.dests()...), fi.dests()...)
+		if err := rows.Scan(dests...); err != nil {
 			return nil, err
 		}
+		o.QuotedInvoice = qi.view(o.QuotedAmountMinor, o.QuotedCurrency)
+		o.Invoice = fi.view(o.DonorAmountMinor, o.Currency)
 		out = append(out, o)
 	}
 	return out, rows.Err()
@@ -340,24 +350,52 @@ func PatchOrder(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id uuid.UU
 }
 
 // Quote sets or updates the quoted donor price and moves the order to
-// quoted. Allowed from requested, quoted, or negotiating.
-func Quote(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID uuid.UUID, amountMinor int64, currency string) (*Order, error) {
+// quoted. Allowed from requested, quoted, or negotiating. The amount is as
+// it is on the invoice, in any of InvoiceCurrencies; its US-dollar
+// equivalent is at the rate on the invoice date (see Convert).
+func Quote(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID uuid.UUID, amountMinor int64, currency string, in InvoiceInput) (*Order, error) {
 	if amountMinor < 0 {
 		return nil, fmt.Errorf("%w: amount_minor must be >= 0", ErrInvalid)
 	}
-	if err := validCurrency(currency); err != nil {
+	inv, err := Convert(ctx, tx, currency, amountMinor, in)
+	if err != nil {
 		return nil, err
 	}
+	legacyMinor, legacyCurrency := legacyAmount(inv)
 	return transition(ctx, tx, workspaceID, brandID, id, actorID, "quoted",
 		[]string{StatusRequested, StatusQuoted, StatusNegotiating}, StatusQuoted,
 		func(o *Order, sets *[]string, args *[]any) error {
 			if o.Status == StatusApproved || o.Status == StatusPublished || o.Status == StatusPaid || o.Status == StatusVerified {
 				return ErrAmountFrozen
 			}
-			addSet(sets, args, "quoted_amount_minor", amountMinor)
-			addSet(sets, args, "quoted_currency", currency)
+			addSet(sets, args, "quoted_amount_minor", legacyMinor)
+			addSet(sets, args, "quoted_currency", legacyCurrency)
+			for _, c := range invoiceColumns("quoted_", inv) {
+				addSet(sets, args, c[0].(string), c[1])
+			}
 			return nil
-		}, map[string]any{"amount_minor": amountMinor, "currency": currency})
+		}, invoiceEvent(inv))
+}
+
+// invoiceEvent is the history payload for an invoice amount.
+func invoiceEvent(inv *Invoice) map[string]any {
+	m := map[string]any{"amount_minor": inv.AmountMinor, "currency": inv.Currency}
+	if inv.InvoiceDate != nil {
+		m["invoice_date"] = *inv.InvoiceDate
+	}
+	if inv.USDAmountMinor != nil {
+		m["usd_amount_minor"] = *inv.USDAmountMinor
+	}
+	if inv.Rate != nil {
+		m["fx_rate"] = *inv.Rate
+	}
+	if inv.RateDate != nil {
+		m["fx_rate_date"] = *inv.RateDate
+	}
+	if inv.RateSource != nil {
+		m["fx_rate_source"] = *inv.RateSource
+	}
+	return m
 }
 
 // Negotiate moves a quoted order to negotiating.
@@ -391,6 +429,11 @@ func Approve(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID u
 			}
 			addSet(sets, args, "donor_amount_minor", *o.QuotedAmountMinor)
 			addSet(sets, args, "currency", *o.QuotedCurrency)
+			if o.QuotedInvoice != nil {
+				for _, c := range invoiceColumns("", o.QuotedInvoice) {
+					addSet(sets, args, c[0].(string), c[1])
+				}
+			}
 			addSet(sets, args, "approved_by", actorID)
 			addSet(sets, args, "approved_at", time.Now().UTC())
 			return nil
@@ -448,7 +491,11 @@ func Publish(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID u
 // last live-link check must have passed. Recording a payment never sends
 // money. The caller must already have confirmed the person is the brand
 // approver and holds coverage.finance.manage.
-func Pay(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID uuid.UUID) (*Order, error) {
+//
+// in may give the final invoice's date; the US-dollar equivalent of the
+// frozen invoice amount is then worked out again at the ECB reference rate
+// for it. Otherwise the equivalent from the quote is kept.
+func Pay(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID uuid.UUID, in InvoiceInput) (*Order, error) {
 	o, err := GetOrder(ctx, tx, workspaceID, brandID, id)
 	if err != nil {
 		return nil, err
@@ -468,36 +515,57 @@ func Pay(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID uuid.
 	if o.PaymentID != nil {
 		return nil, fmt.Errorf("%w: this order already has a payment", ErrConflict)
 	}
+	inv := o.Invoice
+	if in.Set() {
+		if inv, err = Convert(ctx, tx, o.Invoice.Currency, o.Invoice.AmountMinor, in); err != nil {
+			return nil, err
+		}
+	} else if inv.USDAmountMinor == nil {
+		// An order quoted in euros before invoices had a rate of their
+		// own: take the ECB rate for its invoice date now if there is one;
+		// without one it is paid in euros as it always was.
+		day := ""
+		if inv.InvoiceDate != nil {
+			day = *inv.InvoiceDate
+		}
+		conv, err := Convert(ctx, tx, o.Invoice.Currency, o.Invoice.AmountMinor, InvoiceInput{Date: day})
+		switch {
+		case err == nil:
+			inv = conv
+		case !errors.Is(err, ErrNoRate):
+			return nil, err
+		}
+	}
 
 	agreementID := o.AgreementID
 	if agreementID == nil {
-		aid, err := ensureAgreement(ctx, tx, workspaceID, brandID, o)
+		aid, err := ensureAgreement(ctx, tx, workspaceID, brandID, o, inv)
 		if err != nil {
 			return nil, err
 		}
 		agreementID = &aid
 	}
-	invoiceID, err := insertInvoice(ctx, tx, workspaceID, brandID, *agreementID, o)
+	invoiceID, err := insertInvoice(ctx, tx, workspaceID, brandID, *agreementID, o, inv, "invoice")
 	if err != nil {
 		return nil, err
 	}
-	paymentID, err := insertPayment(ctx, tx, workspaceID, brandID, invoiceID, *o.Currency, *o.DonorAmountMinor, "payment", "LO-"+shortID(o.ID))
+	paymentID, err := insertPayment(ctx, tx, workspaceID, brandID, invoiceID, inv, "payment", "LO-"+shortID(o.ID))
 	if err != nil {
 		return nil, err
 	}
 
 	now := time.Now().UTC()
-	if _, err := tx.Exec(ctx, `
-		UPDATE coverage_link_orders
-		SET status = $2, agreement_id = $3, invoice_id = $4, payment_id = $5,
-		    paid_by = $6, paid_at = $7, updated_at = now()
-		WHERE id = $1
-	`, id, StatusPaid, *agreementID, invoiceID, paymentID, actorID, now); err != nil {
+	legacyMinor, legacyCurrency := legacyAmount(inv)
+	sets := []string{"status = $2", "agreement_id = $3", "invoice_id = $4", "payment_id = $5",
+		"paid_by = $6", "paid_at = $7", "updated_at = now()", "donor_amount_minor = $8", "currency = $9"}
+	args := []any{id, StatusPaid, *agreementID, invoiceID, paymentID, actorID, now, legacyMinor, legacyCurrency}
+	for _, c := range invoiceColumns("", inv) {
+		addSet(&sets, &args, c[0].(string), c[1])
+	}
+	if _, err := tx.Exec(ctx, `UPDATE coverage_link_orders SET `+strings.Join(sets, ", ")+` WHERE id = $1`, args...); err != nil {
 		return nil, err
 	}
-	if err := AppendEvent(ctx, tx, workspaceID, brandID, id, actorID, "paid", &o.Status, StatusPaid, map[string]any{
-		"amount_minor": *o.DonorAmountMinor, "currency": *o.Currency,
-	}); err != nil {
+	if err := AppendEvent(ctx, tx, workspaceID, brandID, id, actorID, "paid", &o.Status, StatusPaid, invoiceEvent(inv)); err != nil {
 		return nil, err
 	}
 	return GetOrder(ctx, tx, workspaceID, brandID, id)
@@ -599,19 +667,19 @@ func Credit(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID uu
 
 	agreementID := o.AgreementID
 	if agreementID == nil {
-		aid, err := ensureAgreement(ctx, tx, workspaceID, brandID, o)
+		aid, err := ensureAgreement(ctx, tx, workspaceID, brandID, o, o.Invoice)
 		if err != nil {
 			return nil, err
 		}
 		agreementID = &aid
 	}
-	creditInv, err := insertCreditInvoice(ctx, tx, workspaceID, brandID, *agreementID, o)
+	creditInv, err := insertInvoice(ctx, tx, workspaceID, brandID, *agreementID, o, o.Invoice, "credit")
 	if err != nil {
 		return nil, err
 	}
 	var creditPay uuid.UUID
 	if o.PaymentID != nil {
-		creditPay, err = insertPayment(ctx, tx, workspaceID, brandID, creditInv, *o.Currency, *o.DonorAmountMinor, "reversal", "LO-"+shortID(o.ID)+"-CR")
+		creditPay, err = insertPayment(ctx, tx, workspaceID, brandID, creditInv, o.Invoice, "reversal", "LO-"+shortID(o.ID)+"-CR")
 		if err != nil {
 			return nil, err
 		}
@@ -619,7 +687,7 @@ func Credit(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID uu
 		// No cash movement yet: still store a credit invoice and a
 		// zero-movement marker by writing a reversal against the credit
 		// invoice for the frozen amount so finance can see it.
-		creditPay, err = insertPayment(ctx, tx, workspaceID, brandID, creditInv, *o.Currency, *o.DonorAmountMinor, "reversal", "LO-"+shortID(o.ID)+"-CR")
+		creditPay, err = insertPayment(ctx, tx, workspaceID, brandID, creditInv, o.Invoice, "reversal", "LO-"+shortID(o.ID)+"-CR")
 		if err != nil {
 			return nil, err
 		}
@@ -631,7 +699,7 @@ func Credit(ctx context.Context, tx pgx.Tx, workspaceID, brandID, id, actorID uu
 	`, id, *agreementID, creditPay); err != nil {
 		return nil, err
 	}
-	data := map[string]any{"amount_minor": *o.DonorAmountMinor, "currency": *o.Currency}
+	data := invoiceEvent(o.Invoice)
 	if reason != nil {
 		data["reason_set"] = true
 	}
@@ -940,7 +1008,7 @@ func usedInCurrency(ctx context.Context, q Querier, workspaceID, brandID uuid.UU
 	return
 }
 
-func ensureAgreement(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID, o *Order) (uuid.UUID, error) {
+func ensureAgreement(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID, o *Order, inv *Invoice) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := tx.QueryRow(ctx, `
 		INSERT INTO coverage_agreements (
@@ -950,43 +1018,34 @@ func ensureAgreement(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.U
 		FROM coverage_donor_profiles p
 		WHERE p.id = $5
 		RETURNING id
-	`, workspaceID, brandID, "Link order "+shortID(o.ID), *o.Currency, o.DonorProfileID).Scan(&id)
+	`, workspaceID, brandID, "Link order "+shortID(o.ID), inv.Currency, o.DonorProfileID).Scan(&id)
 	return id, err
 }
 
-func insertInvoice(ctx context.Context, tx pgx.Tx, workspaceID, brandID, agreementID uuid.UUID, o *Order) (uuid.UUID, error) {
-	ref := "LO-" + shortID(o.ID)
+// insertInvoice records the donor's invoice (kind invoice) or a credit
+// (kind credit) in the invoice currency, issued on the invoice date.
+func insertInvoice(ctx context.Context, tx pgx.Tx, workspaceID, brandID, agreementID uuid.UUID, o *Order, inv *Invoice, kind string) (uuid.UUID, error) {
+	ref, title := "LO-"+shortID(o.ID), "Link order "+shortID(o.ID)
+	if kind == "credit" {
+		ref, title = ref+"-CR", "Link order credit "+shortID(o.ID)
+	}
 	var id uuid.UUID
 	err := tx.QueryRow(ctx, `
 		INSERT INTO coverage_invoices (
 			workspace_id, brand_id, agreement_id, title, status, kind,
 			currency, amount_minor, issued_on, due_on, reference
 		) VALUES (
-			$1, $2, $3, $4, 'received', 'invoice',
-			$5, $6, CURRENT_DATE, CURRENT_DATE, $7
+			$1, $2, $3, $4, 'received', $5,
+			$6, $7, coalesce($8::date, CURRENT_DATE), CURRENT_DATE, $9
 		)
 		RETURNING id
-	`, workspaceID, brandID, agreementID, "Link order "+shortID(o.ID), *o.Currency, *o.DonorAmountMinor, ref).Scan(&id)
+	`, workspaceID, brandID, agreementID, title, kind, inv.Currency, inv.AmountMinor, inv.InvoiceDate, ref).Scan(&id)
 	return id, err
 }
 
-func insertCreditInvoice(ctx context.Context, tx pgx.Tx, workspaceID, brandID, agreementID uuid.UUID, o *Order) (uuid.UUID, error) {
-	ref := "LO-" + shortID(o.ID) + "-CR"
-	var id uuid.UUID
-	err := tx.QueryRow(ctx, `
-		INSERT INTO coverage_invoices (
-			workspace_id, brand_id, agreement_id, title, status, kind,
-			currency, amount_minor, issued_on, due_on, reference
-		) VALUES (
-			$1, $2, $3, $4, 'received', 'credit',
-			$5, $6, CURRENT_DATE, CURRENT_DATE, $7
-		)
-		RETURNING id
-	`, workspaceID, brandID, agreementID, "Link order credit "+shortID(o.ID), *o.Currency, *o.DonorAmountMinor, ref).Scan(&id)
-	return id, err
-}
-
-func insertPayment(ctx context.Context, tx pgx.Tx, workspaceID, brandID, invoiceID uuid.UUID, currency string, amountMinor int64, kind, reference string) (uuid.UUID, error) {
+// insertPayment records a payment row in the invoice currency with its
+// US-dollar equivalent. It records; it never sends money.
+func insertPayment(ctx context.Context, tx pgx.Tx, workspaceID, brandID, invoiceID uuid.UUID, inv *Invoice, kind, reference string) (uuid.UUID, error) {
 	title := "Link order payment"
 	if kind == "reversal" {
 		title = "Link order credit"
@@ -994,10 +1053,12 @@ func insertPayment(ctx context.Context, tx pgx.Tx, workspaceID, brandID, invoice
 	var id uuid.UUID
 	err := tx.QueryRow(ctx, `
 		INSERT INTO coverage_payments (
-			workspace_id, brand_id, invoice_id, title, kind, currency, amount_minor, paid_on, reference
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8)
+			workspace_id, brand_id, invoice_id, title, kind, currency, amount_minor, paid_on, reference,
+			usd_amount_minor, fx_rate, fx_rate_date, fx_rate_source
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, $9, $10, $11, $12)
 		RETURNING id
-	`, workspaceID, brandID, invoiceID, title, kind, currency, amountMinor, reference).Scan(&id)
+	`, workspaceID, brandID, invoiceID, title, kind, inv.Currency, inv.AmountMinor, reference,
+		inv.USDAmountMinor, inv.Rate, inv.RateDate, inv.RateSource).Scan(&id)
 	return id, err
 }
 

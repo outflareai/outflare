@@ -31,7 +31,8 @@ const source = { id: src, brand_id: brand, name: 'PropellerAds', template: 'prop
   parameters: [{ name: 'Zone', param: 'zone', token: '${zoneid}', field: 1 }], postback: { url: 'https://ad.propellerads.example/conversion.php?visitor_id={external_id}&payout={payout}' },
   postback_rules: {}, status: 'active', campaigns: 1, created_at: now, updated_at: now };
 let campaign = { id: camp, brand_id: brand, name: 'Propeller - US - Sweepstakes', slug: 'propeller-us', code: 'ofc_abc', channel: 'paid_ads', source: 'propellerads', landing_url: 'https://acme.example/',
-  redirect_links: true, traffic_source_id: src, redirect_mode: '302', status: 'active', links: 1, clicks: 40, created_at: now, updated_at: now };
+  redirect_links: true, traffic_source_id: src, redirect_mode: '302', status: 'active', links: 1, clicks: 40, created_at: now, updated_at: now,
+  cost: { model: 'token', amount: '0', share: 0, currency: '' } };
 const dest = (id, name, url, extra = {}) => ({ id, name, url, weight: 100, daily_click_cap: null, clicks_today: 0, open: true, offer_id: null, offer_name: null, lander_id: null, lander_name: null, ...extra });
 let destinations = [dest('d1', 'Offer A', 'https://offers.example/a', { offer_id: offerA, offer_name: 'Offer A' }), dest('d2', 'Offer B', 'https://offers.example/b', { offer_id: offerB, offer_name: 'Offer B', weight: 50 })];
 let paths = [];
@@ -53,7 +54,7 @@ try {
     if (p === '/v1/workspaces/workspace-a/brands') body = { data: [{ id: brand, name: 'Acme', handle: 'acme', status: 'active', timezone: 'Europe/Berlin' }] };
     else if (p === `/v1/brands/${brand}/tracking-campaigns` && method === 'POST') { status = 201; body = { ...campaign, id: '20000000-0000-0000-0000-000000000002', name: b.name }; }
     else if (p === `/v1/brands/${brand}/tracking-campaigns`) body = { data: [campaign, { ...campaign, id: 'x', name: 'A plain UTM campaign', traffic_source_id: null, redirect_links: false }] };
-    else if (p === `/v1/brands/${brand}/tracking-campaigns/${camp}` && method === 'PATCH') { campaign = { ...campaign, name: b.name, redirect_mode: b.redirect_mode, traffic_source_id: b.traffic_source || null }; body = campaign; }
+    else if (p === `/v1/brands/${brand}/tracking-campaigns/${camp}` && method === 'PATCH') { campaign = { ...campaign, name: b.name, redirect_mode: b.redirect_mode, traffic_source_id: b.traffic_source || null, cost: b.cost ? { ...campaign.cost, ...b.cost } : campaign.cost }; body = campaign; }
     else if (p === `/v1/brands/${brand}/tracking-campaigns/${camp}`) body = campaign;
     else if (p === `/v1/brands/${brand}/tracking-campaigns/${camp}/links`) body = { data: [{ id: link, campaign_id: camp, url: 'https://acme.example/', content: '', term: '', tagged_url: 'https://acme.example/?utm_source=propellerads',
       redirect_url: 'https://go.acme.example/l/abc', campaign_url: 'https://go.acme.example/l/abc?clickid=${SUBID}&cost=${cost}&zone=${zoneid}', clicks: 40, landed: 30, suspect_clicks: 0, created_at: now }] };
@@ -123,6 +124,12 @@ try {
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByRole('button', { name: 'Saved' }).waitFor();
     assert.deepEqual(bodies[`PATCH /v1/brands/${brand}/tracking-campaigns/${camp}`], { name: 'Propeller - US - Sweeps v2', traffic_source: src, redirect_mode: 'double_meta' });
+    // The cost model: CPC at 0.05 a click.
+    await page.getByLabel('Cost model').selectOption('cpc');
+    await page.getByLabel('Cost amount').fill('0.05');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('button', { name: 'Saved' }).waitFor();
+    assert.deepEqual(bodies[`PATCH /v1/brands/${brand}/tracking-campaigns/${camp}`].cost, { model: 'cpc', currency: '', amount: '0.05' });
 
     // Destination: the default path's offers with their share of clicks.
     await page.getByRole('tab', { name: 'Destination' }).click();

@@ -46,6 +46,30 @@ pnpm --filter @outflare/web test:tracker-library
 
 The tracker's Offers, Landers and Flows pages (plans/ad-tracker-ui.md B3) against mocked API answers: a capped offer in the list, a new offer's token picker inserting at the cursor, the missing click id warning, Preview with test values, a fixed payout with a payout by country, a cap and a fallback offer, archiving after a question; a new lander staying open with its click URLs and script; a new flow, and a flow's paths saved only after the "used by 3 links" question, then renamed; and the read-only Offers list at phone width without sideways scrolling. CI runs it in the web-and-sdk job.
 
+Tracker traffic sources and affiliate networks browser regression:
+
+```sh
+pnpm --filter @outflare/web test:tracker-sources
+```
+
+The tracker's Traffic sources and Affiliate networks pages (plans/ad-tracker-ui.md B4) against mocked API answers: the template gallery with Custom first, Connected on a network Outflare syncs, category chips and search; a source made from a template whose postback holds REPLACE (the save waits until it is filled), a parameter added in the next free field with the campaign URL preview following, and the send rules posted; an existing source's recent postbacks with a failure's reason; an affiliate network made from a platform template, its postback URL shown after it is made and again after a rotation; and the read-only list at phone width without sideways scrolling. CI runs it in the web-and-sdk job.
+
+Tracker setup browser regression:
+
+```sh
+pnpm --filter @outflare/web test:tracker-setup
+```
+
+The tracker's Setup page (plans/ad-tracker-ui.md B5) against mocked API answers: the checklist ticked from the brand's data (4 of 6), Skip remembered after a reload, the postback URL built in Everflow's own tokens with a parameter added and p1 set, its secret from a rotation in a masked field, the image pixel and the server call built from it, a test conversion refused with its reason and then accepted on the latest click (Use my latest click) with its campaign shown, and the read-only page at phone width without sideways scrolling. CI runs it in the web-and-sdk job.
+
+Tracker logs browser regression:
+
+```sh
+pnpm --filter @outflare/web test:tracker-logs
+```
+
+The tracker's Logs page (plans/ad-tracker-ui.md B6) against mocked API answers: clicks with their campaign and offer by name and the suspect badge, the time window, campaign and likely-bots filters in the request, Load more following the cursor, a click's detail with its id; lander clicks, conversions (one outside the window left out), postbacks in and out; errors grouped by why, most first, with Fix it opening the right tab; Live refreshing until paused; and the page at phone width without sideways scrolling. CI runs it in the web-and-sdk job.
+
 Partner program settings page:
 
 ```sh

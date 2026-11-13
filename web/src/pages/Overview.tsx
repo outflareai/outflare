@@ -151,7 +151,7 @@ export function Overview({ ws, name, isAdmin, go, limited = false, agent }: { ws
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Home" description={`What needs you in ${name}, and how outreach is going. Updates every 30 seconds.`} />
+      <PageHeader title="Home" description={`What needs you in ${name}, and how the brand is doing. Updates every 30 seconds.`} />
 
       {agent}
 
@@ -214,14 +214,18 @@ export function Overview({ ws, name, isAdmin, go, limited = false, agent }: { ws
       {brand && <ChannelTiles brand={brand.id} go={go} />}
       <PRTiles ws={ws} brand={handle} go={go} />
 
-      <CommunityLinks />
-
+      <section aria-labelledby="home-outreach" className="space-y-2">
+        <div className="flex items-center">
+          <h2 id="home-outreach" className="flex-1 text-[13px] font-medium text-muted-foreground">Outreach email</h2>
+          <button onClick={() => go("sequences")} className="font-mono text-[12px] text-muted-foreground hover:text-foreground">Sequences →</button>
+        </div>
       <Stats>
         <Stat label="Sent · 24h" value={s.sent_24h.toLocaleString()} sub={m.daily_capacity > 0 ? `of ${m.daily_capacity.toLocaleString()} daily capacity` : "no active mailboxes yet"} />
         <Stat label="Sent · 7d" value={s.sent_7d.toLocaleString()} />
         <Stat label="Replies · 7d" value={s.replies_7d.toLocaleString()} sub={rate === null ? undefined : `${rate} reply rate`} />
         <Stat label="Bounces · 7d" value={s.bounces_7d.toLocaleString()} tone={bounceRate > 0.02 ? "red" : undefined} sub={s.sent_7d > 0 ? `${pct(bounceRate)} bounce rate, keep under 2%` : undefined} />
       </Stats>
+      </section>
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Mailboxes" action={<button onClick={() => go("mailboxes")} className="font-mono text-[12px] text-muted-foreground hover:text-foreground">View all →</button>}>
@@ -236,6 +240,8 @@ export function Overview({ ws, name, isAdmin, go, limited = false, agent }: { ws
           <Rows rows={[["Active sequences", s.active_sequences], ["Leads being emailed", s.active_enrollments], ["Leads in total", s.leads]]} />
         </Card>
       </div>
+
+      <CommunityLinks />
     </div>
   );
 }

@@ -41,7 +41,7 @@ type Capabilities struct {
 
 // manageable are the networks Outflare can pause, resume and set budgets
 // on (the same list adsuggest and the campaign calls use).
-var manageable = map[string]bool{"google_ads": true, "meta_ads": true, "microsoft_ads": true, "linkedin_ads": true, "tiktok_ads": true}
+var manageable = map[string]bool{"google_ads": true, "meta_ads": true, "microsoft_ads": true, "linkedin_ads": true, "tiktok_ads": true, "reddit_ads": true, "x_ads": true}
 
 // google is what the Google Ads adapter can do and how Google behaves,
 // from the research tables (plans/paid-ads/README.md and research/).
@@ -105,6 +105,8 @@ func Caps(connector string) Capabilities {
 		c.SupportsConversionValue = true
 	case "reddit_ads":
 		c.ClickIDFields = []string{"rdt_cid"}
+		c.SupportsOfflineConversions = true // Conversions API, with value
+		c.SupportsConversionValue = true
 	case "snapchat_ads":
 		c.ClickIDFields = []string{"ScCid"}
 	case "pinterest_ads":
@@ -115,6 +117,8 @@ func Caps(connector string) Capabilities {
 		c.ClickIDFields = []string{"ob_click_id"}
 	case "x_ads":
 		c.ClickIDFields = []string{"twclid"}
+		c.SupportsOfflineConversions = true // Conversions API, with value
+		c.SupportsConversionValue = true
 	}
 	return c
 }

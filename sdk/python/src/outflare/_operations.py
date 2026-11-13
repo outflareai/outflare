@@ -4946,6 +4946,32 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_click_filter(
+        self,
+        *,
+        brand: str | None = None,
+        kind: Literal["ip", "user_agent"],
+        note: str | None = None,
+        value: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a click filter.
+
+        Scope: analytics.manage. Up to 1,000 entries a brand. An ip filter is an address or a range (at most a /8, or a /32 for IPv6); a user_agent filter is a piece of the user agent, matched without regard to case. Takes effect on the next click.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/click-filters
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/click-filters",
+            path={"brand": brand},
+            body={"kind": kind, "note": note, "value": value},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_connect_request(
         self,
         *,
@@ -7167,15 +7193,19 @@ class Operations(_Mixin):
         duration: str | None = None,
         duration_days: int | None = None,
         guarantee_days: int | None = None,
+        intermediary: str | None = None,
         languages: list[str] | None = None,
+        metrics: dict[str, Any] | None = None,
         name: str | None = None,
         niches: list[str] | None = None,
         notes: str | None = None,
         pbn: bool | None = None,
         prices: list[dict[str, Any]] | None = None,
         rel_offered: list[str] | None = None,
+        site_age: str | None = None,
         slot_types: list[str] | None = None,
         tat_days: int | None = None,
+        theme: str | None = None,
         traffic: int | None = None,
         vendor_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -7205,15 +7235,19 @@ class Operations(_Mixin):
                 "duration": duration,
                 "duration_days": duration_days,
                 "guarantee_days": guarantee_days,
+                "intermediary": intermediary,
                 "languages": languages,
+                "metrics": metrics,
                 "name": name,
                 "niches": niches,
                 "notes": notes,
                 "pbn": pbn,
                 "prices": prices,
                 "rel_offered": rel_offered,
+                "site_age": site_age,
                 "slot_types": slot_types,
                 "tat_days": tat_days,
+                "theme": theme,
                 "traffic": traffic,
                 "vendor_id": vendor_id,
             },
@@ -9354,6 +9388,7 @@ class Operations(_Mixin):
         *,
         brand: str | None = None,
         channel: str | None = None,
+        cost: dict[str, Any] | None = None,
         landing_url: str | None = None,
         name: str | None = None,
         redirect_links: bool | None = None,
@@ -9380,6 +9415,7 @@ class Operations(_Mixin):
             path={"brand": brand},
             body={
                 "channel": channel,
+                "cost": cost,
                 "landing_url": landing_url,
                 "name": name,
                 "redirect_links": redirect_links,
@@ -9887,6 +9923,27 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/brands/{brand}",
             path={"ws": ws, "brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_click_filter(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove a click filter.
+
+        Scope: analytics.manage. Clicks it flagged keep their flag.
+
+        Needs: the analytics.manage scope.
+        DELETE /v1/brands/{brand}/click-filters/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/click-filters/{id}",
+            path={"id": id, "brand": brand},
             idempotency_key=idempotency_key,
         )
 
@@ -15631,6 +15688,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        source: Literal["site", "tracker"] | None = None,
         from_: str | None = None,
         to: str | None = None,
         timezone: str | None = None,
@@ -15659,6 +15717,15 @@ class Operations(_Mixin):
         `cost_note` says why. Conversions count at the visit's time unless `conversion_time=conversion`.
         `format=csv` gives the deepest rows, one column per level.
 
+        `source=tracker` reports the tracker instead (B5d): `visits` are redirect clicks (likely bots left out),
+        `visitors` distinct addresses, `conversions` and `revenue` the click ledger's conversions and payouts (declined
+        ones left out, at the click's time unless `conversion_time=conversion`), and `cost` by each campaign's cost model
+        (`cost` on the campaign: what the traffic source reported on each click with the `{cost}` token, a fixed amount
+        a click or a conversion, or a share of each payout), which splits by every level. Its dimensions: tracking_campaign,
+        traffic_source, offer, lander, path, destination, country, region, city, isp, asn, language, device,
+        device_brand, os, browser, suspect (yes or no), field1 to field20, day, hour and weekday; the default is
+        tracking_campaign. The attribution model doesn't apply to it.
+
         Needs: the analytics.read scope.
         GET /v1/brands/{brand}/drilldown
         """
@@ -15667,6 +15734,7 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/drilldown",
             path={"brand": brand},
             query={
+                "source": source,
                 "from": from_,
                 "to": to,
                 "timezone": timezone,
@@ -16432,6 +16500,27 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_ip_lookups(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get the brand's IP lookup settings.
+
+        Scope: analytics.read. Whether the brand's tracker clicks are looked up on the workspace's own IP reputation
+        connection (IPQualityScore, under Fraud checks), and which: clicks a fraud signal flagged, clicks that convert,
+        and a sample of the rest, up to a monthly cap. Off until the brand turns it on. While it is on, the exact
+        address of each such click is kept for 30 days, for this lookup only.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ip-lookups
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ip-lookups",
+            path={"brand": brand},
+        )
+
     def get_item_link(
         self,
         kind: str,
@@ -16856,6 +16945,32 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/brands/{brand}/link-orders/catalog/items/{id}",
+            path={"id": id, "brand": brand},
+        )
+
+    def get_link_order_donor_contacts(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Find a catalog row's stored email addresses.
+
+        Scope: coverage.read. The email addresses already stored for the
+        donor's site: people at its company record, contacts a link-building
+        check found on its pages, the brand's Outreach leads at the domain,
+        and addresses in the donor's or publisher's notes (such as the
+        intermediary's). It reads only stored data and costs nothing: it
+        never looks an address up on the web or with a paid provider, so an
+        empty list means nothing is stored yet. `searched` names what was
+        looked through.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/catalog/items/{id}/contacts
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/catalog/items/{id}/contacts",
             path={"id": id, "brand": brand},
         )
 
@@ -20213,11 +20328,27 @@ class Operations(_Mixin):
     ) -> Any:
         """Import catalog rows from CSV.
 
-        Scope: coverage.manage. The first row is the header and must include domain.
-        A repeated domain updates the existing profile. A bad row is listed in
-        errors and does not abort the rest of the file. Send text/csv, or JSON
-        with a csv field so agents can pass a string. Amounts are the donor price
-        only.
+        Scope: coverage.manage. The first row is the header and must include a
+        domain column (domain, website, site or url). A repeated domain updates
+        the existing profile. A bad row is listed in errors and does not abort
+        the rest of the file. Send text/csv (preferred, it is smaller), or JSON
+        with a csv field so agents can pass a string. A request may be up to
+        32 MB, and the rows are written in chunks of 500, one transaction each.
+        A larger file, or one that should not be one long request, is sent as
+        several requests that each repeat the header row; rows upsert by domain,
+        so the batches add up to the same catalog. Row numbers in errors count
+        from the header of the file that was sent.
+
+        Headers are matched ignoring case, spaces and punctuation ("Traffic /
+        Organic" is traffic). Besides the donor fields it reads the intermediary,
+        theme and site age (a year, a date or "12 years"), and an intermediary's
+        metrics: date added, geo top 1 and 2, main language, article type, main
+        category, subcategory, organic and total keywords, referring domains
+        (all, followed, not followed), referring IPs and subnets, backlinks (all,
+        followed, not followed, redirects, internal), and outgoing domains and
+        links (followed and all time). price, price_usd and price_eur are major
+        units (150 is 150.00); amount_minor is minor units. Columns it does not
+        read are listed in ignored_columns. Amounts are the donor price only.
 
         Needs: the coverage.manage scope.
         POST /v1/brands/{brand}/link-orders/catalog/import
@@ -22731,6 +22862,26 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def list_click_filters(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List click filters.
+
+        Scope: analytics.read. The brand's click filter lists: addresses, ranges and pieces of a user agent its team
+        knows to be bots or fraud. A redirect click that matches gets the fraud reason filter_list: it still goes on,
+        but counts against no cap and shows as suspect in the reports.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/click-filters
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/click-filters",
+            path={"brand": brand},
+        )
+
     def list_competitor_profiles(
         self,
         competitor: str,
@@ -24371,11 +24522,16 @@ class Operations(_Mixin):
         cursor: str | None = None,
         fields: list[str] | None = None,
         skipped: Literal["true", "false"] | None = None,
+        show: str | None = None,
+        q: str | None = None,
         limit: int | None = None,
     ) -> Any:
         """Who a broadcast went to, or skipped and why.
 
-        Scope: emails.read. In record order; page with cursor=next_cursor.
+        Scope: emails.read. By name (by address without one); page with cursor=next_cursor. show lists one group, and each group is the
+        people behind the number of the same name in the broadcast's stats (skipped: the broadcast's skipped). q finds
+        people by part of their name or address. Each row carries when its email was sent, delivered, first opened,
+        first clicked, bounced and unsubscribed.
 
         Needs: the emails.read scope.
         GET /v1/brands/{brand}/email-broadcasts/{id}/recipients
@@ -24384,7 +24540,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/email-broadcasts/{id}/recipients",
             path={"id": id, "brand": brand},
-            query={"cursor": cursor, "fields": fields, "skipped": skipped, "limit": limit},
+            query={"cursor": cursor, "fields": fields, "skipped": skipped, "show": show, "q": q, "limit": limit},
         )
 
     def list_email_broadcasts(
@@ -25873,6 +26029,8 @@ class Operations(_Mixin):
         q: str | None = None,
         pbn: bool | None = None,
         niche: str | None = None,
+        intermediary: str | None = None,
+        direct_contact: bool | None = None,
         archived: Literal["true", "false", "all"] | None = None,
     ) -> Any:
         """List the link-order catalog.
@@ -25895,6 +26053,8 @@ class Operations(_Mixin):
                 "q": q,
                 "pbn": pbn,
                 "niche": niche,
+                "intermediary": intermediary,
+                "direct_contact": direct_contact,
                 "archived": archived,
             },
         )
@@ -29130,6 +29290,47 @@ class Operations(_Mixin):
             query={"target": target, "limit": limit, "fields": fields, "cursor": cursor},
         )
 
+    def list_tracker_clicks(
+        self,
+        *,
+        brand: str | None = None,
+        campaign: str | None = None,
+        offer: str | None = None,
+        lander: str | None = None,
+        click_id: str | None = None,
+        bots: bool | None = None,
+        since: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List tracker clicks.
+
+        Scope: analytics.read. The brand's redirect clicks, newest first: the campaign, path, lander and offer each went
+        to, where it came from (place, network, device), its custom fields, the network's click id and cost, and whether
+        it was a likely bot or a fraud signal flagged it. Likely bots are left out unless bots=true. Use it to find a
+        click id for a test conversion or to see what a campaign's clicks did.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracker-clicks
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracker-clicks",
+            path={"brand": brand},
+            query={
+                "campaign": campaign,
+                "offer": offer,
+                "lander": lander,
+                "click_id": click_id,
+                "bots": bots,
+                "since": since,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_tracker_conversion_log(
         self,
         *,
@@ -29195,6 +29396,44 @@ class Operations(_Mixin):
                 "offer": offer,
                 "suspect": suspect,
                 "before": before,
+            },
+        )
+
+    def list_tracker_lander_clicks(
+        self,
+        *,
+        brand: str | None = None,
+        lander: str | None = None,
+        offer: str | None = None,
+        click_id: str | None = None,
+        bots: bool | None = None,
+        since: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List tracker lander clicks.
+
+        Scope: analytics.read. Clicks on the calls to action of the brand's landers, newest first: the redirect click
+        they continue, which call to action, and the offer or page it went on to. Likely bots are left out unless
+        bots=true.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracker-lander-clicks
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracker-lander-clicks",
+            path={"brand": brand},
+            query={
+                "lander": lander,
+                "offer": offer,
+                "click_id": click_id,
+                "bots": bots,
+                "since": since,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
             },
         )
 
@@ -30377,6 +30616,8 @@ class Operations(_Mixin):
         id: str,
         *,
         brand: str | None = None,
+        invoice_date: str | None = None,
+        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
         """Mark a link order paid.
@@ -30385,7 +30626,10 @@ class Operations(_Mixin):
         only, and only the brand's designated approver. Allowed after publication
         and a passing live-link check (the link is on the page and the target
         matches). Records a coverage invoice and payment for the frozen donor
-        amount; it never sends money. Allowed from published or verified.
+        amount, in the invoice currency with its US-dollar equivalent; it
+        never sends money. Allowed from published or verified. The body is
+        optional: the final invoice's date works the US-dollar equivalent out
+        again at the ECB reference rate for it (400 when there is none).
 
         Needs: the coverage.approve scope.
         POST /v1/brands/{brand}/link-orders/{id}/pay
@@ -30394,6 +30638,8 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/link-orders/{id}/pay",
             path={"id": id, "brand": brand},
+            body={"invoice_date": invoice_date},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -31403,7 +31649,8 @@ class Operations(_Mixin):
         *,
         brand: str | None = None,
         amount_minor: int,
-        currency: Literal["USD", "EUR"],
+        currency: str,
+        invoice_date: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -31411,7 +31658,13 @@ class Operations(_Mixin):
 
         Scope: coverage.manage. Sets the quoted donor price and moves the order
         to quoted. Allowed from requested, quoted, or negotiating. Amounts are
-        the donor price only, in minor units.
+        the donor price only, in minor units, as on the invoice (zero-decimal
+        currencies such as JPY and HUF have no minor unit). The US-dollar
+        equivalent is at the European Central Bank reference rate Outflare
+        stores for the invoice date, or the last working day within ten days
+        before it (fx_rate_source ecb); USD needs no rate. There is no way to
+        send a rate. Without an ECB rate the quote is not saved (400).
+        Accounting only: it never sends money.
 
         Needs: the coverage.manage scope.
         POST /v1/brands/{brand}/link-orders/{id}/quote
@@ -31420,7 +31673,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/link-orders/{id}/quote",
             path={"id": id, "brand": brand},
-            body={"amount_minor": amount_minor, "currency": currency},
+            body={"amount_minor": amount_minor, "currency": currency, "invoice_date": invoice_date},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -35076,6 +35329,42 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def send_link_order_donor_to_sequence(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        email: str,
+        name: str | None = None,
+        sequence_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Send a catalog row to an Outreach sequence.
+
+        Scope: coverage.manage and sequences.manage. Makes `email` a lead of
+        the brand (source `link_orders`, the donor's domain as its company
+        and website) and adds it to one of the brand's Outreach sequences
+        with the same rules as adding leads there: a suppressed or excluded
+        address is skipped, an address already in the sequence is left as
+        it is, and one active in another sequence is skipped. The sequence
+        sends on its own schedule from its own mailboxes; a draft or paused
+        sequence sends nothing until it is started. An address at the site
+        becomes one of its company's people, so the next lookup finds it.
+        Records sequence.leads_enrolled.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/catalog/items/{id}/outreach
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/catalog/items/{id}/outreach",
+            path={"id": id, "brand": brand},
+            body={"email": email, "name": name, "sequence_id": sequence_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def send_now(
         self,
         *,
@@ -35832,6 +36121,44 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def set_ip_lookups(
+        self,
+        *,
+        brand: str | None = None,
+        converting: bool | None = None,
+        enabled: bool | None = None,
+        flagged: bool | None = None,
+        integration_id: str | None = None,
+        monthly_cap: int | None = None,
+        sample_percent: float | None = None,
+        threshold: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change the brand's IP lookup settings.
+
+        Scope: analytics.manage. What the request leaves out stays. Turning lookups on needs a connection that can score addresses; turning them off deletes the brand's kept addresses at once.
+
+        Needs: the analytics.manage scope.
+        PUT /v1/brands/{brand}/ip-lookups
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/ip-lookups",
+            path={"brand": brand},
+            body={
+                "converting": converting,
+                "enabled": enabled,
+                "flagged": flagged,
+                "integration_id": integration_id,
+                "monthly_cap": monthly_cap,
+                "sample_percent": sample_percent,
+                "threshold": threshold,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def set_journey_step_secret(
         self,
         id: str,
@@ -36407,7 +36734,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         format: Literal["json"] | None = None,
-        return_: Literal["get-started", "setup", "reddit", "social", "providers", "audits", "domains"] | None = None,
+        return_: str | None = None,
     ) -> Any:
         """Sign a connection in to an account through the workspace's own app.
 
@@ -36419,9 +36746,11 @@ class Operations(_Mixin):
         Afterwards the browser lands on the Connectors page, or on the
         Reddit page with `return=reddit` or the Social page with
         `return=social`, and the connection can act as that account. An X
-        sign-in also starts reading the account's followers and posts. With
-        `format=json` it returns the link instead, for an agent to hand to a
-        person.
+        sign-in also starts reading the account's followers and posts. X Ads
+        signs in over OAuth 1.0a: the connection keeps the request token
+        until the person comes back, and lands on Paid ads with
+        `return=ads`. With `format=json` it returns the link instead, for an
+        agent to hand to a person.
 
         Needs: the integrations.manage scope.
         GET /v1/workspaces/{ws}/integrations/{id}/sign-in
@@ -42219,15 +42548,19 @@ class Operations(_Mixin):
         duration: str | None = None,
         duration_days: int | None = None,
         guarantee_days: int | None = None,
+        intermediary: str | None = None,
         languages: list[str] | None = None,
+        metrics: dict[str, Any] | None = None,
         name: str | None = None,
         niches: list[str] | None = None,
         notes: str | None = None,
         pbn: bool | None = None,
         prices: list[dict[str, Any]] | None = None,
         rel_offered: list[str] | None = None,
+        site_age: str | None = None,
         slot_types: list[str] | None = None,
         tat_days: int | None = None,
+        theme: str | None = None,
         traffic: int | None = None,
         vendor_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -42254,15 +42587,19 @@ class Operations(_Mixin):
                 "duration": duration,
                 "duration_days": duration_days,
                 "guarantee_days": guarantee_days,
+                "intermediary": intermediary,
                 "languages": languages,
+                "metrics": metrics,
                 "name": name,
                 "niches": niches,
                 "notes": notes,
                 "pbn": pbn,
                 "prices": prices,
                 "rel_offered": rel_offered,
+                "site_age": site_age,
                 "slot_types": slot_types,
                 "tat_days": tat_days,
+                "theme": theme,
                 "traffic": traffic,
                 "vendor_id": vendor_id,
             },
@@ -44921,6 +45258,7 @@ class Operations(_Mixin):
         *,
         brand: str | None = None,
         channel: str | None = None,
+        cost: dict[str, Any] | None = None,
         landing_url: str | None = None,
         name: str | None = None,
         redirect_links: bool | None = None,
@@ -44945,6 +45283,7 @@ class Operations(_Mixin):
             path={"id": id, "brand": brand},
             body={
                 "channel": channel,
+                "cost": cost,
                 "landing_url": landing_url,
                 "name": name,
                 "redirect_links": redirect_links,

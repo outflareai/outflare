@@ -101,7 +101,7 @@ const (
 
 // Manageable are the platforms whose campaigns Outflare can change
 // (connectors.AdsManager); only they get findings.
-var Manageable = map[string]bool{"google_ads": true, "meta_ads": true, "microsoft_ads": true, "linkedin_ads": true, "tiktok_ads": true}
+var Manageable = map[string]bool{"google_ads": true, "meta_ads": true, "microsoft_ads": true, "linkedin_ads": true, "tiktok_ads": true, "reddit_ads": true, "x_ads": true}
 
 // Runner runs the jobs. Store opens the networks for the exclusion rules'
 // reads and for the changes this package applies itself; without one,

@@ -362,12 +362,14 @@ func (s *Server) quoteLinkOrder(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		AmountMinor int64  `json:"amount_minor"`
 		Currency    string `json:"currency"`
+		InvoiceDate string `json:"invoice_date"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	s.mutateLinkOrder(w, r, "link_orders.quoted", false, false, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
-		return linkorders.Quote(r.Context(), tx, ws, brand, id, actor, in.AmountMinor, strings.ToUpper(in.Currency))
+		return linkorders.Quote(r.Context(), tx, ws, brand, id, actor, in.AmountMinor, strings.ToUpper(strings.TrimSpace(in.Currency)),
+			linkorders.InvoiceInput{Date: in.InvoiceDate})
 	})
 }
 
@@ -453,9 +455,19 @@ func (s *Server) checkLinkOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true, "placement_id": o.PlacementID.String()})
 }
 
+// payLinkOrder records the payment (it never sends money). The body is
+// optional: the final invoice's date, for the ECB reference rate on it.
 func (s *Server) payLinkOrder(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		InvoiceDate string `json:"invoice_date"`
+	}
+	if r.ContentLength != 0 && r.Header.Get("Content-Type") != "" {
+		if !decode(w, r, &in) {
+			return
+		}
+	}
 	s.mutateLinkOrder(w, r, "link_order.paid", true, true, func(tx pgx.Tx, ws, brand, id, actor uuid.UUID) (*linkorders.Order, error) {
-		return linkorders.Pay(r.Context(), tx, ws, brand, id, actor)
+		return linkorders.Pay(r.Context(), tx, ws, brand, id, actor, linkorders.InvoiceInput{Date: in.InvoiceDate})
 	})
 }
 

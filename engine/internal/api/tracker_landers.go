@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/fraud"
 	"github.com/outflareai/outflare/engine/internal/geoip"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/tokens"
@@ -48,6 +50,7 @@ func (s *Server) routesTrackerLanders(mux *http.ServeMux) {
 	mux.HandleFunc("GET /click", s.landerClick)
 	mux.HandleFunc("GET /click/{n}", s.landerClick)
 	mux.HandleFunc("GET /click.js", s.landerScript)
+	mux.HandleFunc("GET /hp", s.honeypot)
 	mux.HandleFunc("GET /v1/brands/{brand}/landers", s.onBrand(read, s.listLanders))
 	mux.HandleFunc("POST /v1/brands/{brand}/landers", s.onBrand(manage, s.createLander))
 	mux.HandleFunc("GET /v1/brands/{brand}/landers/{id}", s.onBrand(read, s.getLander))
@@ -282,7 +285,57 @@ func (s *Server) landerScript(w http.ResponseWriter, r *http.Request) {
 		`var k=new URLSearchParams(location.search).get("ofclk");if(!k)return;`+
 		`function f(){var a=document.querySelectorAll('a[href^="'+o+'/click"]');for(var i=0;i<a.length;i++){var u=new URL(a[i].href);`+
 		`if(!u.searchParams.get("ofclk")){u.searchParams.set("ofclk",k);a[i].href=u.toString();}}}`+
-		`if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",f);else f();})();`)
+		// The honeypot (B7b): a link no person can see, reach by keyboard or
+		// hear from a screen reader. A bot that follows every link on the
+		// page follows it, and flags its own click.
+		`function h(){var a=document.createElement("a");a.href=o+"/hp?ofclk="+encodeURIComponent(k);a.rel="nofollow";a.tabIndex=-1;`+
+		`a.setAttribute("aria-hidden","true");a.style.cssText="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden";`+
+		`a.textContent="\u00a0";document.body.appendChild(a);}`+
+		`function g(){f();h();}`+
+		`if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",g);else g();})();`)
+}
+
+// honeypot flags the click a lander page was opened with when the page's
+// hidden link is followed (B7b): only a bot follows it. It answers an
+// empty 204 whatever happened, so it tells a bot nothing.
+func (s *Server) honeypot(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+	defer w.WriteHeader(http.StatusNoContent)
+	key := strings.ToLower(strings.TrimSpace(r.URL.Query().Get(clickKeyParam)))
+	if !clickKeyRe.MatchString(key) {
+		metrics.TrackerHoneypot("unknown_click")
+		return
+	}
+	c, err := s.findLanderSource(ctx, key)
+	switch {
+	case errors.Is(err, errUnknownClick):
+		metrics.TrackerHoneypot("unknown_click")
+		return
+	case err != nil:
+		metrics.TrackerHoneypot("error")
+		track.Fail(ctx, s.log, track.Event{Name: "tracker.honeypot_failed", Surface: "system"}, "internal", err)
+		return
+	case time.Since(c.at) > landerClickMaxAge:
+		metrics.TrackerHoneypot("unknown_click")
+		return
+	case slices.Contains(c.fraud, fraud.Honeypot):
+		metrics.TrackerHoneypot("already")
+		return
+	}
+	if _, own := s.ownDomain(r, c.ws); !own {
+		metrics.TrackerHoneypot("wrong_domain")
+		return
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE tracking_link_clicks SET fraud_reasons = array_append(fraud_reasons, $3)
+		WHERE id = $1 AND workspace_id = $2 AND NOT ($3 = ANY(fraud_reasons))`, c.id, c.ws, fraud.Honeypot); err != nil {
+		metrics.TrackerHoneypot("error")
+		track.Fail(ctx, s.log, track.Event{Name: "tracker.honeypot_failed", Surface: "system"}, "internal", err)
+		return
+	}
+	metrics.TrackerHoneypot("flagged")
+	metrics.TrackerFraudFlag("click", fraud.Honeypot)
 }
 
 // Landers.

@@ -4,7 +4,7 @@ The action layer decides what an agent may change in your workspace on its own, 
 
 ## Turning it on for a token
 
-Tick **It's an agent: send its changes through the action layer** when you create a token under API tokens, or later when editing it, or with the API:
+Tick **It's an agent: its changes follow your rules** when you create a token under API tokens, or later when editing it, or with the API:
 
 ```sh
 curl -X POST "localhost:8080/v1/workspaces/$WS/api-tokens" \
@@ -33,7 +33,7 @@ Each action carries the brand it is about: the agent's brand when its token is k
 
 ## Grants
 
-A grant says what happens to one token's changes that match it. Only a signed-in person with `actions.manage` sets them, on **Agents** in the app (What agents may do) or with the API:
+A grant says what happens to one token's changes that match it. Only a signed-in person with `actions.manage` sets them, on **Agents** in the app (Rules, where a grant is called a rule) or with the API:
 
 ```sh
 # Let the agent create sequences on its own, at most 5 a day.

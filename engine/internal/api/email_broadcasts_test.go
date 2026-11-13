@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -124,6 +125,41 @@ func TestEmailBroadcasts(t *testing.T) {
 	if len(sent) != 2 {
 		t.Fatalf("sent = %v", sent)
 	}
+	// Each group is the people behind its number, with when it happened.
+	if got := owner.must(200, "GET", base+"/email-broadcasts/"+id+"/recipients?show=skipped", nil)["data"].([]any); len(got) != 2 {
+		t.Fatalf("show=skipped = %v", got)
+	}
+	inSent := owner.must(200, "GET", base+"/email-broadcasts/"+id+"/recipients?show=sent", nil)["data"].([]any)
+	if len(inSent) != int(b["stats"].(map[string]any)["sent"].(float64)) {
+		t.Fatalf("show=sent = %v, stats = %v", inSent, b["stats"])
+	}
+	for _, r := range inSent {
+		if r := r.(map[string]any); r["sent_at"] == nil || r["opened_at"] != nil || r["opens"] != 0.0 {
+			t.Fatalf("sent row = %v", r)
+		}
+	}
+	if got := owner.must(200, "GET", base+"/email-broadcasts/"+id+"/recipients?show=bounced", nil)["data"].([]any); len(got) != 0 {
+		t.Fatalf("show=bounced = %v", got)
+	}
+	if got := owner.must(200, "GET", base+"/email-broadcasts/"+id+"/recipients?q=ANA", nil)["data"].([]any); len(got) != 1 || got[0].(map[string]any)["record_id"] != ana {
+		t.Fatalf("q=ANA = %v", got)
+	}
+	// Pages go by name and never repeat or drop anyone.
+	var paged []string
+	for cursor := ""; ; {
+		page := owner.must(200, "GET", base+"/email-broadcasts/"+id+"/recipients?limit=1"+cursor, nil)
+		for _, r := range page["data"].([]any) {
+			paged = append(paged, r.(map[string]any)["name"].(string))
+		}
+		if page["next_cursor"] == nil {
+			break
+		}
+		cursor = "&cursor=" + page["next_cursor"].(string)
+	}
+	if len(paged) != 4 || !sort.SliceIsSorted(paged, func(i, j int) bool { return strings.ToLower(paged[i]) < strings.ToLower(paged[j]) }) {
+		t.Fatalf("pages = %v", paged)
+	}
+	owner.must(400, "GET", base+"/email-broadcasts/"+id+"/recipients?show=nope", nil)
 	for _, r := range sent {
 		r := r.(map[string]any)
 		em := owner.must(200, "GET", base+"/emails/"+r["email_id"].(string), nil)

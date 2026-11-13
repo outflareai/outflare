@@ -111,7 +111,7 @@ const pct = (v: number | null | undefined) => (v === null || v === undefined ? "
 const roas = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v.toFixed(2)}×`);
 
 // The platforms whose campaigns Outflare can change (connectors.AdsManager).
-const manageable = new Set(["google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads"]);
+const manageable = new Set(["google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads", "reddit_ads", "x_ads"]);
 
 // The page's screens, as the item in its URL (the overview has none): the
 // six of plans/paid-ads first, then the older tabs in a second row.
@@ -400,6 +400,13 @@ function AdsPage({ ws, canManage, go, item }: Props) {
       }
     />
   );
+  // X Ads signs in through the workspace's own X app (OAuth 1.0a).
+  async function signInX(c: AdConnection) {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/integrations/{id}/sign-in", { params: { path: { ws, id: c.id }, query: { format: "json", return: "ads" } } });
+    if (error || !data) return toast(errorMessage(error), "error");
+    location.assign((data as { url: string }).url);
+  }
+
   if (error && !conns) return <div className="space-y-6">{header}<ErrorText>{error}</ErrorText></div>;
   if (!conns) return <div className="space-y-6">{header}<Loading /></div>;
 
@@ -631,6 +638,12 @@ function AdsPage({ ws, canManage, go, item }: Props) {
                   </div>
                 </div>
                 {c.last_error && <p className="text-[12px] text-red-600 dark:text-red-400">{c.last_error}</p>}
+                {canManage && c.connector === "x_ads" && (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[12px] text-muted-foreground">{c.accounts === 0 ? "Sign in with the X account that runs your ads, so Outflare can read and manage them." : "Signed in to X."}</span>
+                    <Button variant={c.accounts === 0 ? "primary" : "ghost"} onClick={() => signInX(c)}>{c.accounts === 0 ? "Sign in to X" : "Sign in again"}</Button>
+                  </div>
+                )}
                 {seen.map((a) => (
                   <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 border-t pt-1.5">
                     <AccountName a={a} />

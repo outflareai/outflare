@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/fraud"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/quota"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -57,7 +58,11 @@ type redirectTarget struct {
 	dests []linkDestination
 	// paths are its rule-based paths, in order.
 	paths []linkPath
-	until time.Time
+	// filters are the brand's click filter lists (B7b), and lookups its IP
+	// lookup settings (B7c).
+	filters fraud.ClickFilters
+	lookups lookupPolicy
+	until   time.Time
 }
 
 type redirectCache struct {
@@ -133,6 +138,14 @@ func (s *Server) lookupRedirect(ctx context.Context, code string) (redirectTarge
 	}
 	if brand != nil {
 		t.brand = *brand
+		if err == nil {
+			t.filters, err = loadClickFilters(ctx, s.pool, t.ws, t.brand)
+		}
+		if err == nil {
+			var v ipLookupSettings
+			v, err = s.loadIPLookups(ctx, s.pool, t.ws, t.brand)
+			t.lookups = lookupPolicy{}.from(v)
+		}
 	}
 	return t, err
 }
@@ -156,8 +169,13 @@ type bufferedClick struct {
 	fraud []string
 	// offerID is the offer it went to, and landerID the lander.
 	offerID, landerID string
-	bot               bool
-	at                time.Time
+	// addr and userAgent are kept (tracker_click_addresses) only when the
+	// brand's IP lookups want the click (B7c); lookUp says now rather
+	// than only if it converts.
+	addr, userAgent string
+	lookUp          bool
+	bot             bool
+	at              time.Time
 	// day is the day its caps count it on: the brand's (capDay).
 	day    string
 	detail clickDetail
@@ -382,6 +400,9 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 			return err
 		}
 		written = tag.RowsAffected()
+		if err := keepClickAddresses(ctx, tx, kept); err != nil {
+			return err
+		}
 		if settles, err = countDestinationClicks(ctx, tx, kept); err != nil {
 			return err
 		}
@@ -451,4 +472,26 @@ func (s *Server) sweepClickClaims(ctx context.Context) {
 	for range dropped {
 		metrics.RedirectLanding("unmatched")
 	}
+}
+
+// keepClickAddresses keeps the exact address of the clicks the brand's IP
+// lookups want (B7c), for 30 days at most, beside the clicks just written.
+func keepClickAddresses(ctx context.Context, tx pgx.Tx, batch []bufferedClick) error {
+	var keys, addrs, agents []string
+	var now []bool
+	for _, c := range batch {
+		if c.addr != "" {
+			keys, addrs, agents, now = append(keys, c.key), append(addrs, c.addr), append(agents, cutUTF8(c.userAgent, 1000)), append(now, c.lookUp)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO tracker_click_addresses (click_key, workspace_id, brand_id, ip, user_agent, look_up)
+		SELECT k.click_key, k.workspace_id, k.brand_id, t.addr::inet, t.ua, t.now
+		FROM unnest($1::text[], $2::text[], $3::text[], $4::bool[]) AS t(key, addr, ua, now)
+		JOIN tracking_link_clicks k ON k.click_key = t.key
+		WHERE k.brand_id IS NOT NULL
+		ON CONFLICT (click_key) DO NOTHING`, keys, addrs, agents, now)
+	return err
 }

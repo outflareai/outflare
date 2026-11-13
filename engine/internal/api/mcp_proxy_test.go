@@ -41,7 +41,13 @@ func mcpPost(ctx context.Context, h http.Handler, token string) *httptest.Respon
 // listens on its port yet. A request waits for it instead of failing.
 func TestMCPProxyWaitsForTheServerToListen(t *testing.T) {
 	got := track.Capture(t)
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	// The port is free while the request waits, so another test's server
+	// could take it. Other tests listen on 127.0.0.1, so this one uses
+	// another loopback address where Linux has one (all of 127/8).
+	l, err := net.Listen("tcp", "127.0.83.17:0")
+	if err != nil {
+		l, err = net.Listen("tcp", "127.0.0.1:0")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +59,7 @@ func TestMCPProxyWaitsForTheServerToListen(t *testing.T) {
 		time.Sleep(400 * time.Millisecond)
 		l, err := net.Listen("tcp", addr)
 		if err != nil {
+			t.Errorf("listening again on %s: %v", addr, err)
 			return
 		}
 		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

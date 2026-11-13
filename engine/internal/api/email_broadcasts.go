@@ -609,17 +609,47 @@ func (s *Server) cancelEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 }
 
 type broadcastRecipientView struct {
-	RecordID  string    `json:"record_id"`
-	Name      string    `json:"name"`
-	Address   *string   `json:"address"`
-	EmailID   *string   `json:"email_id"`
-	Status    *string   `json:"status"`
-	Skipped   *string   `json:"skipped"`
-	CreatedAt time.Time `json:"created_at"`
+	RecordID string  `json:"record_id"`
+	Name     string  `json:"name"`
+	Address  *string `json:"address"`
+	EmailID  *string `json:"email_id"`
+	Status   *string `json:"status"`
+	// Why the email has its status, such as the receiving server's reply
+	// to a bounce, and whether the bounce is hard or soft.
+	StatusReason *string `json:"status_reason"`
+	BounceType   *string `json:"bounce_type"`
+	Skipped      *string `json:"skipped"`
+	// When each thing first happened to this person's email; null when it
+	// has not.
+	SentAt         *time.Time `json:"sent_at"`
+	DeliveredAt    *time.Time `json:"delivered_at"`
+	OpenedAt       *time.Time `json:"opened_at"`
+	ClickedAt      *time.Time `json:"clicked_at"`
+	BouncedAt      *time.Time `json:"bounced_at"`
+	UnsubscribedAt *time.Time `json:"unsubscribed_at"`
+	Opens          int        `json:"opens"`
+	Clicks         int        `json:"clicks"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+// broadcastRecipientShow is the groups a broadcast's recipients can be
+// listed by. Each matches the number of the same name in the broadcast's
+// stats, so a count and its list never disagree.
+var broadcastRecipientShow = map[string]string{
+	"":             "true",
+	"sent":         "e.status IN ('sent', 'delivered', 'delayed', 'bounced', 'complained')",
+	"delivered":    "e.status IN ('delivered', 'complained')",
+	"opened":       "e.opened_at IS NOT NULL",
+	"clicked":      "e.clicked_at IS NOT NULL",
+	"bounced":      "e.status = 'bounced'",
+	"complained":   "e.status = 'complained'",
+	"unsubscribed": "EXISTS (SELECT 1 FROM email_events ev WHERE ev.email_id = e.id AND ev.type = 'unsubscribed')",
+	"not_sent":     "e.status IN ('suppressed', 'failed', 'cancelled')",
+	"skipped":      "br.skipped IS NOT NULL",
 }
 
 // listEmailBroadcastRecipients is who a broadcast went to, or skipped and
-// why, in record order.
+// why, by name (by address for someone with no name).
 func (s *Server) listEmailBroadcastRecipients(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	cur, ok := s.findEmailBroadcast(w, r, a.WorkspaceID, r.PathValue("id"))
@@ -640,6 +670,16 @@ func (s *Server) listEmailBroadcastRecipients(w http.ResponseWriter, r *http.Req
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "skipped is true or false")
 		return
 	}
+	show, ok := broadcastRecipientShow[q.Get("show")]
+	if !ok {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "show is sent, delivered, opened, clicked, bounced, complained, unsubscribed, not_sent or skipped")
+		return
+	}
+	search := strings.TrimSpace(q.Get("q"))
+	if len(search) > 200 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "q is at most 200 characters")
+		return
+	}
 	limit := 50
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -650,20 +690,31 @@ func (s *Server) listEmailBroadcastRecipients(w http.ResponseWriter, r *http.Req
 		limit = n
 	}
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT br.record_id, COALESCE(rc.name, ''), br.address, br.email_id, e.status, br.skipped, br.created_at
+		SELECT br.record_id, COALESCE(rc.name, ''), br.address, br.email_id, e.status, e.status_reason, e.bounce_type, br.skipped,
+		       e.sent_at, e.delivered_at, e.opened_at, e.clicked_at,
+		       (SELECT min(ev.occurred_at) FROM email_events ev WHERE ev.email_id = e.id AND ev.type = 'bounced'),
+		       (SELECT min(ev.occurred_at) FROM email_events ev WHERE ev.email_id = e.id AND ev.type = 'unsubscribed'),
+		       COALESCE(e.opens, 0), COALESCE(e.clicks, 0), br.created_at
 		FROM email_broadcast_recipients br
 		LEFT JOIN records rc ON rc.id = br.record_id
 		LEFT JOIN emails e ON e.id = br.email_id
-		WHERE br.workspace_id = $1 AND br.broadcast_id = $2 AND ($3 = '' OR br.record_id > $3::uuid)
+		WHERE br.workspace_id = $1 AND br.broadcast_id = $2
+		  AND ($3 = '' OR (lower(COALESCE(NULLIF(rc.name, ''), br.address, '')), br.record_id) > (
+		        SELECT lower(COALESCE(NULLIF(r2.name, ''), b2.address, '')), b2.record_id
+		        FROM email_broadcast_recipients b2 LEFT JOIN records r2 ON r2.id = b2.record_id
+		        WHERE b2.workspace_id = $1 AND b2.broadcast_id = $2 AND b2.record_id = $3::uuid))
 		  AND ($4 = '' OR (br.skipped IS NOT NULL) = ($4 = 'true'))
-		ORDER BY br.record_id LIMIT $5`, a.WorkspaceID, cur.ID, after, skipped, limit+1)
+		  AND ($6 = '' OR rc.name ILIKE '%' || $6 || '%' OR br.address ILIKE '%' || $6 || '%')
+		  AND `+show+`
+		ORDER BY lower(COALESCE(NULLIF(rc.name, ''), br.address, '')), br.record_id LIMIT $5`, a.WorkspaceID, cur.ID, after, skipped, limit+1, likeEscape(search))
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (broadcastRecipientView, error) {
 		var v broadcastRecipientView
-		err := row.Scan(&v.RecordID, &v.Name, &v.Address, &v.EmailID, &v.Status, &v.Skipped, &v.CreatedAt)
+		err := row.Scan(&v.RecordID, &v.Name, &v.Address, &v.EmailID, &v.Status, &v.StatusReason, &v.BounceType, &v.Skipped,
+			&v.SentAt, &v.DeliveredAt, &v.OpenedAt, &v.ClickedAt, &v.BouncedAt, &v.UnsubscribedAt, &v.Opens, &v.Clicks, &v.CreatedAt)
 		return v, err
 	})
 	if err != nil {

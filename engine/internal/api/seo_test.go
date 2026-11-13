@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,6 +12,37 @@ import (
 )
 
 var dataForSEOCalls atomic.Int64
+
+// dfsLog keeps each request's path and body. The fake serves every test in
+// the package, and a job or check left over from another test can call it,
+// so a test that counts calls counts only those about its own hosts.
+var dfsLog struct {
+	sync.Mutex
+	calls []string
+}
+
+// dfsMark is where the log ends now, to count from.
+func dfsMark() int {
+	dfsLog.Lock()
+	defer dfsLog.Unlock()
+	return len(dfsLog.calls)
+}
+
+// dfsCallsAbout counts the calls since mark that name any of hosts.
+func dfsCallsAbout(mark int, hosts ...string) int {
+	dfsLog.Lock()
+	defer dfsLog.Unlock()
+	n := 0
+	for _, c := range dfsLog.calls[mark:] {
+		for _, h := range hosts {
+			if strings.Contains(c, h) {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
 
 // dfsLinks is what the fake DataForSEO's links report answers.
 var dfsLinks struct {
@@ -80,6 +112,11 @@ type fakeDataForSEO struct{}
 
 func (fakeDataForSEO) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	dataForSEOCalls.Add(1)
+	body, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	dfsLog.Lock()
+	dfsLog.calls = append(dfsLog.calls, r.URL.Path+" "+string(body))
+	dfsLog.Unlock()
 	if u, p, _ := r.BasicAuth(); u != "jo" || p != "pw" {
 		json.NewEncoder(w).Encode(map[string]any{"status_code": 40100, "status_message": "You are not authorized"})
 		return

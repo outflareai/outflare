@@ -20,7 +20,10 @@ const (
 	StatusLost        = "lost"
 )
 
-// Currencies a quoted or donor amount may use. USD and EUR are never summed.
+// Currencies the quoted_currency / currency columns hold. USD and EUR are
+// never summed. An invoice in another currency (InvoiceCurrencies) keeps
+// its own amount in QuotedInvoice / Invoice, and these columns hold its
+// US-dollar equivalent in USD.
 const (
 	CurrencyUSD = "USD"
 	CurrencyEUR = "EUR"
@@ -86,34 +89,51 @@ type Donor struct {
 	MetricsAt     *time.Time `json:"metrics_at"`
 	MetricsSource string     `json:"metrics_source"`
 	Notes         string     `json:"notes"`
-	ArchivedAt    *time.Time `json:"archived_at"`
-	Prices        []Price    `json:"prices"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	// Intermediary is the broker or contact the site is bought through.
+	Intermediary string `json:"intermediary"`
+	// Theme is the site's own theme, separate from Niches.
+	Theme string `json:"theme"`
+	// SiteSince is the date (YYYY-MM-DD) the site has existed since, and
+	// SiteAgeYears the whole years from then to now.
+	SiteSince    *string      `json:"site_since"`
+	SiteAgeYears *int         `json:"site_age_years"`
+	Metrics      DonorMetrics `json:"metrics"`
+	// DirectContact is whether the site is worth writing to directly,
+	// computed on read (see DirectContact).
+	DirectContact DirectContact `json:"direct_contact"`
+	ArchivedAt    *time.Time    `json:"archived_at"`
+	Prices        []Price       `json:"prices"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 // Order is one link order, including its current status and frozen donor
 // price once approved.
 type Order struct {
-	ID                   uuid.UUID  `json:"id"`
-	PublisherID          uuid.UUID  `json:"publisher_id"`
-	DonorProfileID       uuid.UUID  `json:"donor_profile_id"`
-	Domain               string     `json:"domain"`
-	Status               string     `json:"status"`
-	TargetURL            string     `json:"target_url"`
-	TargetID             *uuid.UUID `json:"target_id"`
-	TargetKind           string     `json:"target_kind"`
-	TargetChoice         string     `json:"target_choice"`
-	AnchorPrimary        string     `json:"anchor_primary"`
-	AnchorPrimarySource  string     `json:"anchor_primary_source"`
-	AnchorSecondary      string     `json:"anchor_secondary"`
-	AnchorSecondaryType  string     `json:"anchor_secondary_type"`
-	SlotType             string     `json:"slot_type"`
-	RelRequested         string     `json:"rel_requested"`
-	QuotedAmountMinor    *int64     `json:"quoted_amount_minor"`
-	QuotedCurrency       *string    `json:"quoted_currency"`
-	DonorAmountMinor     *int64     `json:"donor_amount_minor"`
-	Currency             *string    `json:"currency"`
+	ID                  uuid.UUID  `json:"id"`
+	PublisherID         uuid.UUID  `json:"publisher_id"`
+	DonorProfileID      uuid.UUID  `json:"donor_profile_id"`
+	Domain              string     `json:"domain"`
+	Status              string     `json:"status"`
+	TargetURL           string     `json:"target_url"`
+	TargetID            *uuid.UUID `json:"target_id"`
+	TargetKind          string     `json:"target_kind"`
+	TargetChoice        string     `json:"target_choice"`
+	AnchorPrimary       string     `json:"anchor_primary"`
+	AnchorPrimarySource string     `json:"anchor_primary_source"`
+	AnchorSecondary     string     `json:"anchor_secondary"`
+	AnchorSecondaryType string     `json:"anchor_secondary_type"`
+	SlotType            string     `json:"slot_type"`
+	RelRequested        string     `json:"rel_requested"`
+	QuotedAmountMinor   *int64     `json:"quoted_amount_minor"`
+	QuotedCurrency      *string    `json:"quoted_currency"`
+	DonorAmountMinor    *int64     `json:"donor_amount_minor"`
+	Currency            *string    `json:"currency"`
+	// QuotedInvoice is the quote as it is on the invoice, with its
+	// US-dollar equivalent; Invoice is the same, frozen at Approve and
+	// refreshed at Mark Paid. Accounting only: nothing sends money.
+	QuotedInvoice        *Invoice   `json:"quoted_invoice"`
+	Invoice              *Invoice   `json:"invoice"`
 	GuaranteeDays        *int       `json:"guarantee_days"`
 	GuaranteeUntil       *time.Time `json:"guarantee_until"`
 	PublishedURL         string     `json:"published_url"`
@@ -194,6 +214,9 @@ type ImportResult struct {
 	Created int           `json:"created"`
 	Updated int           `json:"updated"`
 	Errors  []ImportError `json:"errors"`
+	// IgnoredColumns are header columns the import does not read, so a
+	// person can see what in their file did not map to a field.
+	IgnoredColumns []string `json:"ignored_columns"`
 }
 
 // ImportError is one CSV row that was not applied.

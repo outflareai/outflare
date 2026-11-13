@@ -54,7 +54,14 @@ try {
     let status = 200, body = {}, contentType = 'application/json';
     if (p === '/v1/workspaces/workspace-a/brands') body = { data: [{ id: brand, name: 'Acme', handle: 'acme', status: 'active', timezone: 'Europe/Berlin' }] };
     else if (p === `/v1/brands/${brand}/drilldown` && q.get('format') === 'csv') { contentType = 'text/csv'; body = 'channel,visits\npaid_ads,300\n'; }
+    else if (p === `/v1/brands/${brand}/drilldown` && q.get('source') === 'tracker') {
+      const r = report(q);
+      body = { ...r, source: 'tracker', group_by: (q.get('group_by') || 'tracking_campaign').split(','), cost_available: true, cost_note: null,
+        rows: [{ keys: ['30000000-0000-0000-0000-000000000001'], metrics: { ...m(900, 30, 75, 40), custom: {} }, rows: [] }] };
+    }
     else if (p === `/v1/brands/${brand}/drilldown`) body = report(q);
+    else if (p === `/v1/brands/${brand}/tracking-campaigns`) body = { data: [{ id: '30000000-0000-0000-0000-000000000001', name: 'Push US' }] };
+    else if (p === `/v1/brands/${brand}/traffic-sources` || p === `/v1/brands/${brand}/offers` || p === `/v1/brands/${brand}/landers`) body = { data: [] };
     else if (p === `/v1/brands/${brand}/report-views` && req.method() === 'POST') {
       const b = JSON.parse(req.postData()); posted.push(b);
       const v = { id: '50000000-0000-0000-0000-000000000001', brand_id: brand, name: b.name, spec: b.spec, shared: false, mine: true, created_at: '2026-11-12T00:00:00Z', updated_at: '2026-11-12T00:00:00Z' };
@@ -112,6 +119,17 @@ try {
     await page.getByRole('button', { name: 'Download CSV' }).click();
     await download;
     assert.match(last(/format=csv/), /format=csv/);
+    // The tracker as the source: its own levels, campaigns by name, and
+    // the source in the link.
+    await page.getByLabel('Report on').selectOption('tracker');
+    await page.getByRole('cell', { name: 'Push US' }).waitFor();
+    assert.match(last(/drilldown\?/), /source=tracker/);
+    assert.match(last(/drilldown\?/), /group_by=tracking_campaign/);
+    assert.doesNotMatch(last(/drilldown\?/), /filter=/, 'switching source clears the filters');
+    assert.equal(await page.getByLabel('Level 1').inputValue(), 'tracking_campaign');
+    assert.ok(await page.getByLabel('Level 1').locator('option[value="offer"]').count() === 1, 'tracker levels offered');
+    assert.equal(await page.getByLabel('Level 1').locator('option[value="utm_source"]').count(), 0, 'site levels not offered');
+    assert.match(await page.evaluate(() => location.search), /source=tracker/);
     assert.deepEqual(errors, []);
     await page.close();
   }

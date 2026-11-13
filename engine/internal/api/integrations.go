@@ -874,7 +874,17 @@ func (s *Server) integrationCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	raw, err := base64.RawURLEncoding.DecodeString(q.Get("state"))
+	state := q.Get("state")
+	if state == "" && (q.Get("oauth_token") != "" || q.Get("denied") != "") {
+		// An OAuth 1.0a sign-in (integrationSignInOAuth1) keeps its state
+		// in a cookie, since X matches the callback URL exactly.
+		if ck, err := r.Cookie(oauth1StateCookie); err == nil {
+			state = ck.Value
+		}
+		http.SetCookie(w, &http.Cookie{Name: oauth1StateCookie, Value: "", Path: "/v1/integrations/oauth/callback", MaxAge: -1,
+			HttpOnly: true, Secure: s.secureCookies, SameSite: http.SameSiteLaxMode})
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(state)
 	var st integrationState
 	if err == nil {
 		var plain []byte

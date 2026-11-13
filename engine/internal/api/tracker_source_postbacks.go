@@ -135,27 +135,40 @@ func sentPayout(micros int64, share, decimals int) int64 {
 // enqueueSourcePostback queues a conversion's postback to its click's
 // traffic source, inside tx, when the source's rules send its present
 // state: a status and type it sends, a payout at least its minimum, and,
-// once one was sent, a source that sends changes.
+// once one was sent, a source that sends changes. A suspect conversion
+// (one a fraud signal flagged) is never sent, so a network's bidding
+// doesn't learn from bots; it stays in the ledger and the reports. One
+// whose click's IP lookup is still due waits for it: the lookup worker
+// queues it once the lookup is done (tracker_ip_lookup_run.go).
 func enqueueSourcePostback(ctx context.Context, tx pgx.Tx, ws, conv string) error {
 	var source, url, status, typ string
 	var share, decimals int
 	var minMicros, micros int64
-	var types, statuses []string
-	var resend, sent bool
+	var types, statuses, fraud []string
+	var resend, sent, awaiting bool
 	err := tx.QueryRow(ctx, `SELECT ts.id::text, ts.postback_url, ts.postback_share, ts.postback_decimals, ts.postback_min_micros, ts.postback_types,
 			ts.postback_statuses, ts.postback_resend, c.status, c.type, c.payout_micros,
-			EXISTS (SELECT 1 FROM tracker_source_postbacks p WHERE p.conversion_id = c.id)
+			-- The click's reasons now too: a lookup may have flagged it since.
+			c.fraud_reasons || COALESCE((SELECT x.fraud_reasons FROM tracking_link_clicks x WHERE x.id = c.click_id), '{}'),
+			EXISTS (SELECT 1 FROM tracker_source_postbacks p WHERE p.conversion_id = c.id),
+			EXISTS (SELECT 1 FROM tracker_click_addresses a WHERE a.click_key = c.click_key AND a.workspace_id = c.workspace_id AND a.look_up)
 		FROM tracker_conversions c
 		JOIN tracking_campaigns k ON k.id = c.campaign_id
 		JOIN tracker_traffic_sources ts ON ts.id = k.traffic_source_id AND ts.workspace_id = c.workspace_id AND ts.status = 'active'
 		WHERE c.workspace_id = $1 AND c.id = $2`, ws, conv).
-		Scan(&source, &url, &share, &decimals, &minMicros, &types, &statuses, &resend, &status, &typ, &micros, &sent)
+		Scan(&source, &url, &share, &decimals, &minMicros, &types, &statuses, &resend, &status, &typ, &micros, &fraud, &sent, &awaiting)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return nil // no campaign, or its campaign has no active traffic source
 	case err != nil:
 		return err
 	case url == "" || strings.Contains(url, tokens.Placeholder):
+		return nil
+	case len(fraud) > 0:
+		metrics.TrackerSourcePostback("suspect")
+		return nil
+	case awaiting:
+		metrics.TrackerSourcePostback("awaiting_lookup")
 		return nil
 	case !slices.Contains(statuses, status), len(types) > 0 && !slices.Contains(types, typ):
 		metrics.TrackerSourcePostback("filtered")

@@ -457,6 +457,12 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 				return err
 			}
 		}
+		// A converting click whose address its brand's IP lookups kept is
+		// looked up now (B7c); the postback below waits for it.
+		if _, err := tx.Exec(ctx, `UPDATE tracker_click_addresses SET look_up = true, next_at = now()
+			WHERE workspace_id = $1 AND click_key = $2 AND NOT look_up`, src.ws, click.key); err != nil {
+			return err
+		}
 		if err := enqueueSourcePostback(ctx, tx, src.ws, res.ConversionID); err != nil {
 			return err
 		}

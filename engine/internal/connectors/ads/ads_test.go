@@ -51,7 +51,7 @@ func fake(t *testing.T, routes map[string]any) (*c.Client, *[]seen, string) {
 	t.Cleanup(srv.Close)
 	cl := &c.Client{BaseURLs: map[string]string{}}
 	for _, id := range []string{"google_ads", "google_ads.datamanager", "meta_ads", "microsoft_ads.customer", "microsoft_ads.campaign", "microsoft_ads.reporting",
-		"reddit_ads", "reddit_ads.conversions", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "snapchat_ads.conversions",
+		"reddit_ads", "reddit_ads.conversions", "x_ads", "x_ads.auth", "linkedin_ads", "tiktok_ads", "snapchat_ads", "snapchat_ads.conversions",
 		"taboola_ads", "taboola_ads.conversions", "outbrain_ads", "apple_ads", "apple_ads.token", "amazon_ads.na", "amazon_ads.token", "pinterest_ads"} {
 		cl.BaseURLs[id] = srv.URL
 	}
@@ -1129,5 +1129,281 @@ func TestGoogleAdsConversionsCookieAndGmail(t *testing.T) {
 	}
 	if c.HashGoogleEmail("ana.lee@acme.example") != c.HashID("ana.lee@acme.example") {
 		t.Fatal("only Gmail addresses lose their dots")
+	}
+}
+
+func TestXAdsManage(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /12/accounts/18ce5/campaigns/k1": map[string]any{"data": map[string]any{"id": "k1", "name": "Launch", "entity_status": "ACTIVE", "daily_budget_amount_local_micro": 50_000_000}},
+		"PUT /12/accounts/18ce5/campaigns/k1": map[string]any{"data": map[string]any{"id": "k1"}},
+	})
+	creds := c.Creds{"consumer_key": "ck", "consumer_secret": "cs", "access_token": "at", "access_token_secret": "ats"}
+	x, acct := XAds{}, c.AdAccount{ID: "18ce5"}
+	var _ c.AdsManager = x
+	camp, err := x.AdCampaign(ctx, cl, creds, acct, "k1")
+	if err != nil || camp.Status != c.AdActive || camp.DailyBudgetMicros == nil || *camp.DailyBudgetMicros != 50_000_000 {
+		t.Fatalf("campaign %+v %v", camp, err)
+	}
+	if err := x.SetCampaignStatus(ctx, cl, creds, acct, "k1", false); err != nil {
+		t.Fatal(err)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	if last.method != "PUT" || last.query != "entity_status=PAUSED" || !strings.HasPrefix(last.header.Get("Authorization"), "OAuth ") {
+		t.Fatalf("pause %+v", last)
+	}
+	if err := x.SetCampaignDailyBudget(ctx, cl, creds, acct, "k1", 12_345_678); err != nil {
+		t.Fatal(err)
+	}
+	if last = (*reqs)[len(*reqs)-1]; last.query != "daily_budget_amount_local_micro=12350000" {
+		t.Fatalf("budget %s", last.query)
+	}
+	for _, bad := range []string{"", "K1", "k1/../x", strings.Repeat("a", 40)} {
+		if err := x.SetCampaignStatus(ctx, cl, creds, acct, bad, true); c.KindOf(err) != c.ErrInvalid {
+			t.Fatalf("id %q: %v", bad, err)
+		}
+	}
+	if err := x.SetCampaignDailyBudget(ctx, cl, creds, acct, "k1", 0); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("zero budget: %v", err)
+	}
+	if _, err := x.AdCampaign(ctx, cl, creds, acct, "k2"); err == nil {
+		t.Fatal("a missing campaign must fail")
+	}
+}
+
+func TestXAdsConversions(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{"POST /12/measurement/conversions/o8z6j": map[string]any{"data": map[string]any{"conversions_processed": 1}}})
+	x, acct := XAds{}, c.AdAccount{ID: "18ce5"}
+	var _ c.ConversionSender = x
+	creds := c.Creds{"consumer_key": "ck", "consumer_secret": "cs", "access_token": "at", "access_token_secret": "ats"}
+	if got := c.MissingSetup(x, creds); len(got) != 0 {
+		t.Fatalf("pixel and events are optional: %+v", got)
+	}
+	if _, err := x.ConversionTargets(ctx, cl, creds, acct); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("without a pixel: %v", err)
+	}
+	creds["pixel_id"] = "o8z6j"
+	creds["conversion_events"] = "Sign-up = tw-o8z6j-o8z2x\nPurchase=o8z2y, o8z2y\nnot an event"
+	ts, err := x.ConversionTargets(ctx, cl, creds, acct)
+	if err != nil || len(ts) != 2 || ts[0].Name != "Sign-up" || ts[0].ID != "o8z2x" || ts[1].ID != "o8z2y" {
+		t.Fatalf("targets %+v %v", ts, err)
+	}
+	none := conv(1, nil)
+	none.Emails, none.Phones = nil, nil
+	res, err := x.SendConversions(ctx, cl, creds, acct, ts[1], []c.AdConversion{conv(0, map[string]string{"twclid": "tw1"}), none})
+	if err != nil || !res[0].OK || !res[1].Skipped {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	for _, want := range []string{`"event_id":"o8z2y"`, `"twclid":"tw1"`, `"hashed_email":"` + c.HashID("ana@acme.example") + `"`,
+		`"conversion_id":"msg-1"`, `"conversion_time":"2026-10-01T09:30:00.000Z"`, `"value":"12.50"`, `"price_currency":"USD"`} {
+		if !strings.Contains(last.body, want) {
+			t.Fatalf("body %s lacks %s", last.body, want)
+		}
+	}
+	if !strings.HasPrefix(last.header.Get("Authorization"), "OAuth ") || last.header.Get("Content-Type") != "application/json" {
+		t.Fatalf("headers %v", last.header)
+	}
+	// With Events Manager's token, the call carries it instead of a signature.
+	creds["conversions_token"] = "test-pixel-token-not-real"
+	if _, err := x.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{conv(0, map[string]string{"twclid": "tw1"})}); err != nil {
+		t.Fatal(err)
+	}
+	last = (*reqs)[len(*reqs)-1]
+	if last.header.Get("X-Pixel-Token") != "test-pixel-token-not-real" || last.header.Get("Authorization") != "" {
+		t.Fatalf("pixel token headers %v", last.header)
+	}
+}
+
+func TestXAdsPlatformConversions(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /12/accounts/18ce5/campaigns": map[string]any{"data": []any{map[string]any{"id": "k1", "name": "Launch", "entity_status": "ACTIVE"}}},
+		"GET /12/stats/accounts/18ce5": map[string]any{"data": []any{map[string]any{"id": "k1", "id_data": []any{map[string]any{"metrics": map[string]any{
+			"billed_charge_local_micro": []any{1_000_000}, "impressions": []any{100}, "clicks": []any{3},
+			"conversion_sign_ups":  map[string]any{"post_engagement": []any{2}, "post_view": []any{1}},
+			"conversion_purchases": map[string]any{"metric": []any{1}, "post_engagement": []any{9}, "sale_amount": []any{40_000_000}}}}}},
+			map[string]any{"id": "k2", "id_data": []any{map[string]any{"metrics": map[string]any{
+				"billed_charge_local_micro": []any{500_000}, "conversion_purchases": []any{2}}}}}}},
+	})
+	creds := c.Creds{"consumer_key": "ck", "consumer_secret": "cs", "access_token": "at", "access_token_secret": "ats"}
+	days, err := XAds{}.AdDays(ctx, cl, creds, c.AdAccount{ID: "18ce5"}, "2026-10-01", "2026-10-01")
+	if err != nil || len(days) != 2 || days[0].Conversions == nil || *days[0].Conversions != 4 || len(days[0].Actions) != 2 ||
+		days[0].ConversionValueMicros == nil || *days[0].ConversionValueMicros != 40_000_000 || *days[1].Conversions != 2 {
+		t.Fatalf("days %+v %v", days, err)
+	}
+	if last := (*reqs)[len(*reqs)-1]; !strings.Contains(last.query, "WEB_CONVERSION") {
+		t.Fatalf("stats query %s", last.query)
+	}
+}
+
+func TestRedditAdsManage(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /campaigns/c1":   map[string]any{"data": map[string]any{"id": "c1", "ad_account_id": "a1", "name": "CBO", "configured_status": "ACTIVE", "effective_status": "ACTIVE", "goal_type": "DAILY_SPEND", "goal_value": 20_000_000}},
+		"GET /campaigns/c2":   map[string]any{"data": map[string]any{"id": "c2", "ad_account_id": "a1", "name": "Ad group budgets", "configured_status": "ACTIVE"}},
+		"GET /campaigns/c3":   map[string]any{"data": map[string]any{"id": "c3", "ad_account_id": "a9", "name": "Someone else's"}},
+		"GET /campaigns/c4":   map[string]any{"data": map[string]any{"id": "c4", "ad_account_id": "a1", "name": "Lifetime budgets", "configured_status": "ACTIVE"}},
+		"PATCH /campaigns/c1": map[string]any{"data": map[string]any{"id": "c1"}},
+		"GET /ad_accounts/a1/ad_groups": map[string]any{"data": []any{
+			map[string]any{"id": "g1", "campaign_id": "c2", "configured_status": "ACTIVE", "goal_type": "DAILY_SPEND", "goal_value": 10_000_000},
+			map[string]any{"id": "g2", "campaign_id": "c2", "configured_status": "PAUSED", "goal_type": "DAILY_SPEND", "goal_value": 30_000_000},
+			map[string]any{"id": "g3", "campaign_id": "c2", "configured_status": "ARCHIVED", "goal_type": "DAILY_SPEND", "goal_value": 99_000_000},
+			map[string]any{"id": "g4", "campaign_id": "c4", "configured_status": "ACTIVE", "goal_type": "LIFETIME_SPEND", "goal_value": 500_000_000},
+		}},
+		"PATCH /ad_groups/g1": map[string]any{"data": map[string]any{"id": "g1"}},
+		"PATCH /ad_groups/g2": map[string]any{"data": map[string]any{"id": "g2"}},
+	})
+	r, acct, creds := RedditAds{}, c.AdAccount{ID: "a1"}, c.Creds{"access_token": "tok"}
+	var _ c.AdsManager = r
+	camp, err := r.AdCampaign(ctx, cl, creds, acct, "c1")
+	if err != nil || camp.DailyBudgetMicros == nil || *camp.DailyBudgetMicros != 20_000_000 {
+		t.Fatalf("campaign %+v %v", camp, err)
+	}
+	if err := r.SetCampaignStatus(ctx, cl, creds, acct, "c1", false); err != nil {
+		t.Fatal(err)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	if last.method != "PATCH" || last.body != `{"data":{"configured_status":"PAUSED"}}` {
+		t.Fatalf("pause %s %s", last.method, last.body)
+	}
+	if err := r.SetCampaignDailyBudget(ctx, cl, creds, acct, "c1", 25_004_999); err != nil {
+		t.Fatal(err)
+	}
+	if last = (*reqs)[len(*reqs)-1]; last.body != `{"data":{"goal_type":"DAILY_SPEND","goal_value":25000000}}` {
+		t.Fatalf("budget %s", last.body)
+	}
+	// Budgets on ad groups: the campaign shows their sum, and a new
+	// budget is shared in the same proportions; archived ones are left.
+	camp2, err := r.AdCampaign(ctx, cl, creds, acct, "c2")
+	if err != nil || camp2.DailyBudgetMicros == nil || *camp2.DailyBudgetMicros != 40_000_000 {
+		t.Fatalf("ad group budgets sum %+v %v", camp2, err)
+	}
+	n := len(*reqs)
+	if err := r.SetCampaignDailyBudget(ctx, cl, creds, acct, "c2", 5_000_000); err != nil {
+		t.Fatal(err)
+	}
+	var patches []string
+	for _, q := range (*reqs)[n:] {
+		if q.method == "PATCH" {
+			patches = append(patches, q.path+" "+q.body)
+		}
+	}
+	if strings.Join(patches, "|") != `/ad_groups/g1 {"data":{"goal_value":1250000}}|/ad_groups/g2 {"data":{"goal_value":3750000}}` {
+		t.Fatalf("ad group patches %v", patches)
+	}
+	n = len(*reqs)
+	if err := r.SetCampaignDailyBudget(ctx, cl, creds, acct, "c4", 5_000_000); c.KindOf(err) != c.ErrInvalid || !strings.Contains(err.Error(), "lifetime") {
+		t.Fatalf("lifetime budgets: %v", err)
+	}
+	if err := r.SetCampaignStatus(ctx, cl, creds, acct, "c3", false); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("another account's campaign: %v", err)
+	}
+	for _, q := range (*reqs)[n:] {
+		if q.method == "PATCH" {
+			t.Fatalf("refused changes must not write: %+v", q)
+		}
+	}
+	if err := r.SetCampaignStatus(ctx, cl, creds, acct, "c1/../x", true); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("bad id: %v", err)
+	}
+	if !slicesContain(r.Definition().OAuth.Scopes, "adsedit") {
+		t.Fatal("managing needs the adsedit scope")
+	}
+}
+
+func slicesContain(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRedditAdsConversionsV3(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"POST /pixels/a2_px1/conversion_events": map[string]any{"data": map[string]any{}},
+		"POST /ad_accounts/a1/reports":          map[string]any{"data": map[string]any{"metrics": []any{map[string]any{"campaign_id": "c1", "date": "2026-10-01T00:00:00Z", "spend": 1_000_000, "key_conversion_total_count": 4}}}},
+	})
+	r, acct := RedditAds{}, c.AdAccount{ID: "a1"}
+	creds := c.Creds{"access_token": "tok", "conversions_token": "ct", "pixel_id": "a2_px1"}
+	ts, err := r.ConversionTargets(ctx, cl, creds, acct)
+	if err != nil || len(ts) != 1 || ts[0].ID != "a2_px1" {
+		t.Fatalf("targets %+v %v", ts, err)
+	}
+	cv := conv(0, map[string]string{"rdt_cid": "r1"})
+	cv.EventType = "Purchase"
+	res, err := r.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv})
+	if err != nil || !res[0].OK {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	for _, want := range []string{`{"data":{"events":[`, `"click_id":"r1"`, `"tracking_type":"PURCHASE"`, `"action_source":"WEBSITE"`,
+		`"event_at":1790847000000`, `"conversion_id":"msg-1"`, `"value":12.5`} {
+		if !strings.Contains(last.body, want) {
+			t.Fatalf("body %s lacks %s", last.body, want)
+		}
+	}
+	if last.header.Get("Authorization") != "Bearer ct" || strings.Contains(last.body, "test_mode") {
+		t.Fatalf("v3 %s %v", last.body, last.header)
+	}
+	days, err := r.AdDays(ctx, cl, creds, acct, "2026-10-01", "2026-10-01")
+	if err != nil || len(days) != 1 || days[0].Conversions == nil || *days[0].Conversions != 4 {
+		t.Fatalf("days %+v %v", days, err)
+	}
+}
+
+func TestXAdsSignIn(t *testing.T) {
+	cl, reqs, base := fake(t, map[string]any{
+		"POST /oauth/request_token": []byte("oauth_token=rt1&oauth_token_secret=rs1&oauth_callback_confirmed=true"),
+		"POST /oauth/access_token":  []byte("oauth_token=at1&oauth_token_secret=as1&user_id=42&screen_name=northpeak"),
+		"GET /12/accounts":          map[string]any{"data": []map[string]any{{"id": "18ce5", "name": "Northpeak", "currency": "USD", "timezone": "UTC"}}},
+	})
+	x := XAds{}
+	var _ c.AccountSignInOAuth1 = x
+	app := c.Creds{"consumer_key": "ck", "consumer_secret": "cs"}
+	if acct, err := x.Test(ctx, cl, app); err != nil || acct.Details["sign_in"] != "needed" {
+		t.Fatalf("app keys alone: %+v %v", acct, err)
+	}
+	if _, err := x.AdAccounts(ctx, cl, app); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("no sign-in must ask for one: %v", err)
+	}
+	if _, _, _, err := x.SignInRequest(ctx, cl, c.Creds{}, "https://app.example/cb"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("no app keys: %v", err)
+	}
+	link, tok, sec, err := x.SignInRequest(ctx, cl, app, "https://app.example/cb?state=s1")
+	if err != nil || tok != "rt1" || sec != "rs1" || link != base+"/oauth/authorize?oauth_token=rt1" {
+		t.Fatalf("request %q %q %q %v", link, tok, sec, err)
+	}
+	h := (*reqs)[len(*reqs)-1].header.Get("Authorization")
+	if !strings.Contains(h, `oauth_callback="https%3A%2F%2Fapp.example%2Fcb%3Fstate%3Ds1"`) || strings.Contains(h, "oauth_token=") {
+		t.Fatalf("request header %s", h)
+	}
+	pending := c.Creds{"consumer_key": "ck", "consumer_secret": "cs", c.OAuth1RequestToken: "rt1", c.OAuth1RequestSecret: "rs1"}
+	creds, acct, err := x.SignInAccess(ctx, cl, pending, "rt1", "rs1", "v1")
+	if err != nil || acct.ID != "42" || acct.Name != "@northpeak" {
+		t.Fatalf("access %+v %v", acct, err)
+	}
+	if creds["access_token"] != "at1" || creds["access_token_secret"] != "as1" || creds["consumer_key"] != "ck" || creds[c.OAuth1RequestToken] != "" || creds[c.OAuth1RequestSecret] != "" {
+		t.Fatalf("creds %v", creds)
+	}
+	var access seen
+	for _, r := range *reqs {
+		if r.path == "/oauth/access_token" {
+			access = r
+		}
+	}
+	if h := access.header.Get("Authorization"); !strings.Contains(h, `oauth_verifier="v1"`) || !strings.Contains(h, `oauth_token="rt1"`) {
+		t.Fatalf("access header %s", h)
+	}
+	if _, _, err := x.SignInAccess(ctx, cl, pending, "rt1", "rs1", ""); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("no verifier: %v", err)
+	}
+}
+
+func TestXAdsSignInRefused(t *testing.T) {
+	cl, _, _ := fake(t, map[string]any{
+		"POST /oauth/request_token": []byte("oauth_token=rt1&oauth_token_secret=rs1&oauth_callback_confirmed=false"),
+	})
+	if _, _, _, err := (XAds{}).SignInRequest(ctx, cl, c.Creds{"consumer_key": "ck", "consumer_secret": "cs"}, "https://app.example/cb"); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("unconfirmed callback: %v", err)
 	}
 }

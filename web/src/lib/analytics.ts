@@ -96,6 +96,7 @@ export type UiEvent =
   | "ui.ads_setup_step_opened" // Paid ads: a set-up step's fix page opened (step, done)
   | "ui.ads_shadow_viewed" // Paid ads: the "What the rules would have done" section opened (rows)
   | "ui.ads_screen_opened" // Paid ads: a screen of the page opened (screen)
+  | "ui.broadcast_recipients_downloaded" // a broadcast's recipients saved as CSV (group, rows)
   | "ui.ads_report_downloaded" // Paid ads: a report table saved as CSV (report, rows)
   | "ui.report_grouped" // Tracker report: the group-by levels changed (levels)
   | "ui.report_filtered" // Tracker report: a filter added (not)

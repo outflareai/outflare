@@ -113,6 +113,8 @@ func runCase(ctx context.Context, x *Connector, tc Case) []string {
 		result, err = x.Test(ctx, cl, creds)
 	case c.CapVerify:
 		result, err = x.Verify(ctx, cl, creds, tc.Input["email"])
+	case c.CapIPScore:
+		result, err = x.ScoreIP(ctx, cl, creds, tc.Input["ip"], tc.Input["user_agent"])
 	default:
 		return append(problems, fmt.Sprintf("run %q: want test or one of the capabilities", tc.Run))
 	}

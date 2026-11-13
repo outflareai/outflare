@@ -2,9 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -27,7 +30,11 @@ func (s *Server) listLinkOrderCatalog(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f := linkorders.DonorListFilter{Q: strings.TrimSpace(r.URL.Query().Get("q")), Niche: strings.TrimSpace(r.URL.Query().Get("niche"))}
+	f := linkorders.DonorListFilter{
+		Q:            strings.TrimSpace(r.URL.Query().Get("q")),
+		Niche:        strings.TrimSpace(r.URL.Query().Get("niche")),
+		Intermediary: strings.TrimSpace(r.URL.Query().Get("intermediary")),
+	}
 	switch r.URL.Query().Get("archived") {
 	case "1", "true":
 		f.OnlyArchived = true
@@ -43,6 +50,17 @@ func (s *Server) listLinkOrderCatalog(w http.ResponseWriter, r *http.Request) {
 			}
 			f.PBN = &b
 		}
+	}
+	// direct_contact=true lists only the sites worth writing to directly
+	// (not a PBN, DR or traffic stored, a stored address at the site).
+	switch v := r.URL.Query().Get("direct_contact"); v {
+	case "":
+	case "1", "true", "0", "false":
+		b := v == "1" || v == "true"
+		f.DirectContact = &b
+	default:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "direct_contact must be true or false")
+		return
 	}
 	list, err := linkorders.ListDonors(r.Context(), s.pool, ws, brand, f, limit+1, cur)
 	if err != nil {
@@ -158,35 +176,60 @@ func (s *Server) importLinkOrderCatalog(w http.ResponseWriter, r *http.Request) 
 		s.internal(w, r, err)
 		return
 	}
-	body, err := readCatalogCSV(r)
+	body, err := readCatalogCSV(w, r)
 	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeError(w, r, http.StatusRequestEntityTooLarge, "invalid_request",
+				fmt.Sprintf("the file is larger than %d MB; split it into smaller files (the Catalog page sends a large file in batches on its own)", maxCatalogImportBytes>>20))
+			return
+		}
 		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	var out *linkorders.ImportResult
-	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		res, err := linkorders.ImportCSV(r.Context(), tx, ws, brand, strings.NewReader(body))
-		if err != nil {
-			return err
-		}
-		if err := recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "link_orders.catalog_imported", "brand", a.Brand, map[string]any{
-			"brand_id": a.Brand, "created": res.Created, "updated": res.Updated, "errors": len(res.Errors),
-		}, map[string]any{"brand_id": a.Brand, "created": res.Created, "updated": res.Updated, "errors": len(res.Errors)}); err != nil {
-			return err
-		}
-		out = res
-		return nil
-	})
+	file, err := linkorders.ParseCatalogCSV(strings.NewReader(body))
 	if err != nil {
 		s.writeLinkOrderError(w, r, err)
 		return
 	}
+	out := file.NewResult()
+	// A large file is written in chunks, one transaction each, so a full
+	// intermediary database never holds one long transaction. The audit
+	// event is written with the last chunk, with the totals.
+	n := len(file.Rows)
+	for from := 0; from == 0 || from < n; from += linkorders.ImportChunkRows {
+		to := min(from+linkorders.ImportChunkRows, n)
+		last := to >= n
+		err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+			if err := file.ImportRows(r.Context(), tx, ws, brand, from, to, out); err != nil {
+				return err
+			}
+			if !last {
+				return nil
+			}
+			props := map[string]any{"brand_id": a.Brand, "created": out.Created, "updated": out.Updated, "errors": len(out.Errors), "rows": n}
+			return recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "link_orders.catalog_imported", "brand", a.Brand, props, props)
+		})
+		if err != nil {
+			s.writeLinkOrderError(w, r, err)
+			return
+		}
+		if last {
+			break
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-func readCatalogCSV(r *http.Request) (string, error) {
+// maxCatalogImportBytes bounds one catalog import request. A full
+// intermediary database (11,000+ sites with every metric column) fits;
+// the Catalog page still sends a large file in batches of about 1 MB so
+// no single request is slow. It matches the Idempotency-Key body limit.
+const maxCatalogImportBytes = 32 << 20
+
+func readCatalogCSV(w http.ResponseWriter, r *http.Request) (string, error) {
 	ct := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
-	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, 4<<20))
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxCatalogImportBytes))
 	if err != nil {
 		return "", err
 	}
@@ -393,6 +436,49 @@ func decodeDonorWrite(w http.ResponseWriter, r *http.Request, create bool) (link
 		return in, false
 	} else if v != nil {
 		in.Traffic = v
+	}
+	if v, ok := str("intermediary"); !ok {
+		return in, false
+	} else if v != nil {
+		in.Intermediary = ptrTo(v)
+	}
+	if v, ok := str("theme"); !ok {
+		return in, false
+	} else if v != nil {
+		in.Theme = ptrTo(v)
+	}
+	if v, ok := str("site_age"); !ok {
+		return in, false
+	} else if v != nil {
+		if strings.TrimSpace(*v) == "" {
+			var none *time.Time
+			in.SiteSince = &none
+		} else {
+			t, set, err := linkorders.ParseSiteAge(*v, time.Now())
+			if err != nil {
+				writeError(w, r, http.StatusBadRequest, "invalid_request", "site_age: "+err.Error())
+				return in, false
+			}
+			if set {
+				in.SiteSince = ptrTo(&t)
+			} else {
+				var none *time.Time
+				in.SiteSince = &none
+			}
+		}
+	}
+	if b, ok := raw["metrics"]; ok && string(b) != "null" {
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(b, &m); err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "metrics must be an object")
+			return in, false
+		}
+		patch, err := linkorders.ValidateMetrics(m)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", strings.TrimPrefix(err.Error(), linkorders.ErrInvalid.Error()+": "))
+			return in, false
+		}
+		in.Metrics = patch
 	}
 	if v, ok := boolVal("archived"); !ok {
 		return in, false

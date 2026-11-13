@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -109,8 +110,22 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 	// address and browser clicking the link again and again. The click is
 	// kept and goes on, but counts against no cap.
 	c.fraud = fraud.ClickReasons(c.detail.place.ASN, s.repeats.Count(t.link.ID, c.ipHash, r.UserAgent(), now))
+	// The brand's own filter lists (B7b) flag a click the same way.
+	if !t.filters.Empty() {
+		addr, _ := parseClientAddr(clientIP(r))
+		if t.filters.Match(addr, r.UserAgent()) {
+			c.fraud = append(c.fraud, fraud.FilterList)
+		}
+	}
 	for _, reason := range c.fraud {
 		metrics.TrackerFraudFlag("click", reason)
+	}
+	// The brand's IP lookups (B7c) keep this click's exact address for a
+	// lookup: now when it is flagged or sampled, later if it converts.
+	if keep, lookNow := t.lookups.keep(len(c.fraud) > 0, rand.IntN(10000)); keep {
+		if addr, err := parseClientAddr(clientIP(r)); err == nil {
+			c.addr, c.userAgent, c.lookUp = addr.Unmap().String(), r.UserAgent(), lookNow
+		}
 	}
 	// The traffic source's parameters fill the click's custom fields; a
 	// destination with tokens ({click_id}, {field1}) gets this click's

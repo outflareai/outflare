@@ -244,10 +244,14 @@ func TestKnowledgeByMeaning(t *testing.T) {
 	if _, err := e.srv.QueueSemanticEmbeds(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// Wait for the job to finish too, not only its vectors: a job still
+	// running when the next run is asked for makes that run queue nothing.
 	waitUntil(t, func() bool {
 		var n int
-		e.pool.QueryRow(ctx, `SELECT count(*) FROM search_embeddings WHERE workspace_id = $1 AND kind = 'knowledge'`, ws).Scan(&n)
-		return n == 2
+		var busy bool
+		e.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM search_embeddings WHERE workspace_id = $1 AND kind = 'knowledge'),
+			EXISTS (SELECT 1 FROM jobs WHERE workspace_id = $1 AND kind = $2 AND status IN ('queued', 'running'))`, ws, "search.embed").Scan(&n, &busy)
+		return n == 2 && !busy
 	})
 	p := owner.must(200, "GET", kb+"/passages?q=is+it+expensive&audience=customers", nil)
 	l := p["data"].([]any)

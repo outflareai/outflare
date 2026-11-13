@@ -114,7 +114,7 @@ var (
 	}, []string{"outcome"})
 	trackerFraudFlags = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "fraud_flags_total",
-		Help: "Tracker clicks and conversions a first-party fraud signal flagged, by subject (click or conversion) and reason: datacenter_network (a hosting network), repeat_click (one address and browser clicking a link more than ten times an hour) or fast_conversion (within 10 seconds of its click). A flagged click still goes on but counts against no cap.",
+		Help: "Tracker clicks and conversions a first-party fraud signal flagged, by subject (click or conversion) and reason: datacenter_network (a hosting network), repeat_click (one address and browser clicking a link more than ten times an hour), fast_conversion (within 10 seconds of its click), filter_list (on the brand's own click filter lists), honeypot (its lander page followed the hidden link) or ip_reputation (the brand's IP lookup provider scored its address at or over the brand's threshold). A flagged click still goes on but counts against no cap.",
 	}, []string{"subject", "reason"})
 	reportDrilldown = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "report", Name: "drilldown_seconds",
@@ -128,11 +128,32 @@ var (
 	}, []string{"outcome"})
 	trackerSourcePostbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "source_postbacks_total",
-		Help: "Conversions sent back to traffic sources' postback URLs, by outcome: queued, filtered (the source's rules don't send it), sent, retried, or why one failed: rejected (the network refused it), unreachable, or invalid (the URL).",
+		Help: "Conversions sent back to traffic sources' postback URLs, by outcome: queued, filtered (the source's rules don't send it), suspect (a fraud signal flagged the conversion, so it is held back), awaiting_lookup (its click's IP lookup is due, so it is sent once that is done), sent, retried, or why one failed: rejected (the network refused it), unreachable, or invalid (the URL).",
 	}, []string{"outcome"})
 	trackerLanderClicks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "lander_clicks_total",
 		Help: "Clicks on landers' calls to action (/click) by outcome: routed (to an offer or page of the lander's list), fallback (none open, so the link's own page), or why one went to the domain's fallback page: unknown_click, wrong_domain, or error.",
+	}, []string{"outcome"})
+	trackerIPLookups = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "ip_lookups_total",
+		Help: "Tracker click addresses looked up on a brand's own IP reputation connection (IPQualityScore), by outcome: scored, flagged (scored, and at least one fraud reason added), capped (the brand's monthly cap was reached, so it was skipped), off (the brand turned lookups off or lost its connection), retried (it failed and is tried again soon), or failed_auth, failed_quota, failed_unavailable or failed_invalid (given up, by the connector's error kind).",
+	}, []string{"outcome"})
+	trackerIPLookupSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "ip_lookup_seconds",
+		Help:    "Time one IP reputation lookup took at the brand's provider, whatever its outcome.",
+		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+	})
+	trackerIPLookupsDue = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "ip_lookups_due",
+		Help: "Kept click addresses waiting for an IP lookup right now (flagged, sampled or converting clicks whose time has come), across every brand, as last counted by a worker.",
+	})
+	trackerIPLookupOldest = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "ip_lookup_oldest_seconds",
+		Help: "Age of the oldest click address waiting for its IP lookup, as last counted by a worker; 0 when none waits.",
+	})
+	trackerHoneypot = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "honeypot_hits_total",
+		Help: "Hits on the lander script's hidden link (/hp), which only bots follow, by outcome: flagged (its click now carries the honeypot fraud reason), already (flagged before), unknown_click, wrong_domain or error.",
 	}, []string{"outcome"})
 	trackerPostbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "postbacks_total",
@@ -1122,7 +1143,7 @@ var (
 var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerSourcePostbacks, trackerFraudFlags, trackerWeightSuggestions, reportDrilldown, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
+	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerHoneypot, trackerIPLookups, trackerIPLookupSeconds, trackerIPLookupsDue, trackerIPLookupOldest, trackerSourcePostbacks, trackerFraudFlags, trackerWeightSuggestions, reportDrilldown, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -1297,6 +1318,23 @@ func TrackerSourcePostback(outcome string) { trackerSourcePostbacks.WithLabelVal
 // TrackerLanderClick counts a click on a lander's call to action by
 // outcome.
 func TrackerLanderClick(outcome string) { trackerLanderClicks.WithLabelValues(outcome).Inc() }
+
+// TrackerHoneypot counts a hit on the lander script's hidden link by
+// outcome.
+func TrackerHoneypot(outcome string) { trackerHoneypot.WithLabelValues(outcome).Inc() }
+
+// TrackerIPLookup counts one click address's IP lookup by outcome.
+func TrackerIPLookup(outcome string) { trackerIPLookups.WithLabelValues(outcome).Inc() }
+
+// TrackerIPLookupSeconds times one call to a brand's IP lookup provider.
+func TrackerIPLookupSeconds(d time.Duration) { trackerIPLookupSeconds.Observe(d.Seconds()) }
+
+// TrackerIPLookupBacklog sets how many click addresses wait for a lookup
+// and how long the oldest has waited.
+func TrackerIPLookupBacklog(due int, oldest time.Duration) {
+	trackerIPLookupsDue.Set(float64(due))
+	trackerIPLookupOldest.Set(oldest.Seconds())
+}
 
 // TrackerPostback counts a tracker conversion postback by outcome.
 func TrackerPostback(outcome string) { trackerPostbacks.WithLabelValues(outcome).Inc() }

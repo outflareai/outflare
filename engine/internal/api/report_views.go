@@ -48,6 +48,7 @@ type reportViewSpec struct {
 	Sort           string             `json:"sort,omitempty"`
 	Limit          int                `json:"limit,omitempty"`
 	ConversionTime string             `json:"conversion_time,omitempty"`
+	Source         string             `json:"source,omitempty"`
 	Model          string             `json:"model,omitempty"`
 	Timezone       string             `json:"timezone,omitempty"`
 	DateRange      *dateRange         `json:"date_range,omitempty"`
@@ -63,7 +64,7 @@ func (v reportViewSpec) query(loc *time.Location) (url.Values, error) {
 		q.Set("group_by", strings.Join(v.GroupBy, ","))
 	}
 	q["filter"], q["exclude"] = v.Filters, v.Excludes
-	for k, x := range map[string]string{"sort": v.Sort, "conversion_time": v.ConversionTime, "model": v.Model, "timezone": v.Timezone} {
+	for k, x := range map[string]string{"sort": v.Sort, "conversion_time": v.ConversionTime, "source": v.Source, "model": v.Model, "timezone": v.Timezone} {
 		if x != "" {
 			q.Set(k, x)
 		}

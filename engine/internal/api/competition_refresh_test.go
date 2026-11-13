@@ -150,10 +150,12 @@ func TestCompetitionRefresh(t *testing.T) {
 	}
 
 	// Again the same day: nothing is read twice.
-	calls := dataForSEOCalls.Load()
+	// Calls are counted by the hosts they name: the fake serves every test.
+	hosts := []string{"northpeak.example", "rival.example", "small.example", "refused.example"}
+	mark := dfsMark()
 	refresh()
-	if dataForSEOCalls.Load() != calls {
-		t.Fatalf("read again the same day: %d calls", dataForSEOCalls.Load()-calls)
+	if n := dfsCallsAbout(mark, hosts...); n != 0 {
+		t.Fatalf("read again the same day: %d calls", n)
 	}
 	// Read 10 days ago: still fresh, since a competitor is read at most
 	// once a month unless the connection says otherwise.
@@ -161,8 +163,8 @@ func TestCompetitionRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	refresh()
-	if dataForSEOCalls.Load() != calls {
-		t.Fatalf("read again within the month: %d calls", dataForSEOCalls.Load()-calls)
+	if n := dfsCallsAbout(mark, hosts...); n != 0 {
+		t.Fatalf("read again within the month: %d calls", n)
 	}
 	if got := owner.must(400, "PUT", base+"/seo/"+seo+"/settings", map[string]any{"competitor_read_days": 0}); got["error"] == nil {
 		t.Fatalf("0 days: %v", got)
@@ -172,7 +174,7 @@ func TestCompetitionRefresh(t *testing.T) {
 		t.Fatalf("settings: %v", set)
 	}
 	refresh()
-	if dataForSEOCalls.Load() == calls {
+	if dfsCallsAbout(mark, hosts...) == 0 {
 		t.Fatal("not read again after 7 days were set")
 	}
 

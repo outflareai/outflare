@@ -12,6 +12,8 @@ import { useBrand } from "@/lib/brand";
 import { ExclusionPicker, noExclusion, type Exclusion } from "@/components/exclusion-picker";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural, stamp } from "../format";
+import { csvName, downloadCsv, toCsv } from "@/lib/csv";
+import { track } from "@/lib/analytics";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Facts } from "./Emails";
@@ -119,7 +121,6 @@ function BroadcastsPage({ ws, canManage, open, onOpen, go }: { ws: string; canMa
 function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: string; canManage: boolean; back: () => void; go: Go }) {
   const brandId = useBrand(ws).brand?.id ?? "";
   const [b, setB] = useState<EmailBroadcast | null>(null);
-  const [skipped, setSkipped] = useState<EmailBroadcastRecipient[]>([]);
   const [editing, setEditing] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -139,10 +140,6 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
     const { data, error } = await api.GET("/v1/brands/{brand}/email-broadcasts/{id}", { params: { path: { brand: brandId, id } } });
     if (error) return setError(errorMessage(error));
     setB(data!);
-    if (data!.skipped > 0) {
-      const r = await api.GET("/v1/brands/{brand}/email-broadcasts/{id}/recipients", { params: { path: { brand: brandId, id }, query: { skipped: "true", limit: 200 } } });
-      setSkipped(r.data?.data ?? []);
-    }
   }, [ws, id]);
   useEffect(() => {
     load();
@@ -241,20 +238,205 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
         </Card>
       </div>
       {b.held_out > 0 && <SendLift brand={brandId} kind="email-broadcasts" id={b.id} />}
-      {skipped.length > 0 && (
-        <Card title={`Skipped (${b.skipped})`}>
-          <ul className="divide-y text-[13px]">
-            {skipped.map((r) => (
-              <li key={r.record_id} className="flex flex-wrap items-baseline justify-between gap-2 py-2">
-                <span className="min-w-0 truncate">{r.name || r.address}</span>
-                <span className="text-muted-foreground">{r.skipped}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+      {(s.emails > 0 || b.skipped > 0) && <Recipients brand={brandId} b={b} openEmail={(email) => go("emails", email)} />}
       {scheduling && <ScheduleDialog onClose={() => setScheduling(false)} onPick={(at) => send(at)} />}
     </div>
+  );
+}
+
+// A time in a table cell: "Nov 11, 4:19 PM". The exact time is on hover.
+const shortTime = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+type Show = "" | "delivered" | "opened" | "clicked" | "bounced" | "complained" | "unsubscribed" | "not_sent" | "skipped";
+
+// What one person's row says happened, in plain words.
+function recipientStatus(r: EmailBroadcastRecipient): { text: string; tone: "green" | "grey" | "amber" | "red" | "blue"; why?: string | null; tip?: string } {
+  if (r.skipped) return { text: "Skipped", tone: "grey", why: r.skipped[0].toUpperCase() + r.skipped.slice(1) };
+  switch (r.status) {
+    case "delivered": return { text: "Delivered", tone: "green", tip: "The receiving mail server accepted it." };
+    case "sent": return { text: "Sent", tone: "blue", tip: "Handed to the email provider; waiting to hear it arrived." };
+    case "delayed": return { text: "Delayed", tone: "amber", why: r.status_reason };
+    case "bounced": return { text: r.bounce_type === "soft" ? "Bounced (temporary)" : "Bounced", tone: "red", why: r.status_reason };
+    case "complained": return { text: "Marked as spam", tone: "red", why: r.status_reason };
+    case "suppressed": return { text: "Not sent", tone: "grey", why: r.status_reason };
+    case "failed": return { text: "Failed", tone: "red", why: r.status_reason };
+    case "cancelled": return { text: "Cancelled", tone: "grey", why: r.status_reason };
+    default: return { text: "Sending", tone: "amber" };
+  }
+}
+
+// How a recipient's row reads in a download: the same words as the table.
+const recipientColumns: ColumnDef<EmailBroadcastRecipient>[] = [
+  {
+    id: "person", header: "Person", accessorFn: (r) => r.name || r.address || "", meta: { csvHeader: "Name", csv: (r: EmailBroadcastRecipient) => r.name },
+    cell: ({ row: { original: r } }) => (
+      <span className="block max-w-64 min-w-0">
+        <span className="block truncate font-medium">{r.name || r.address || "No name"}</span>
+        {r.name && r.address && <span className="block truncate text-[12px] text-muted-foreground">{r.address}</span>}
+      </span>
+    ),
+  },
+  {
+    id: "status", header: "Status", accessorFn: (r) => recipientStatus(r).text,
+    cell: ({ row: { original: r } }) => {
+      const st = recipientStatus(r);
+      return (
+        <span className="block max-w-80 min-w-52">
+          <span className="flex flex-wrap gap-1">
+            <Badge tone={st.tone} title={st.tip}>{st.text}</Badge>
+            {r.unsubscribed_at && <Badge tone="amber">Unsubscribed</Badge>}
+          </span>
+          {st.why && <span className="mt-1 line-clamp-3 text-[12px] text-muted-foreground" title={st.why}>{st.why}</span>}
+          {r.bounced_at && <span className="mt-1 block text-[12px] text-muted-foreground" title={stamp(r.bounced_at)}>Bounced {shortTime(r.bounced_at)}</span>}
+          {r.unsubscribed_at && <span className="mt-1 block text-[12px] text-muted-foreground" title={stamp(r.unsubscribed_at)}>Unsubscribed {shortTime(r.unsubscribed_at)}</span>}
+        </span>
+      );
+    },
+  },
+  { id: "sent", header: "Sent", accessorFn: (r) => r.sent_at, cell: ({ row: { original: r } }) => <At at={r.sent_at} /> },
+  { id: "delivered", header: "Delivered", accessorFn: (r) => r.delivered_at, cell: ({ row: { original: r } }) => <At at={r.delivered_at} /> },
+  { id: "opened", header: "Opened", accessorFn: (r) => r.opened_at, cell: ({ row: { original: r } }) => <At at={r.opened_at} times={r.opens} /> },
+  { id: "clicked", header: "Clicked", accessorFn: (r) => r.clicked_at, cell: ({ row: { original: r } }) => <At at={r.clicked_at} times={r.clicks} /> },
+  { id: "open", header: "", accessorFn: () => "", meta: { csv: false, align: "right" }, cell: ({ row: { original: r } }) => r.email_id && <span className="whitespace-nowrap text-[12px] text-muted-foreground group-hover:text-foreground">See email →</span> },
+];
+
+// A time something happened, short, with the exact time on hover.
+function At({ at, times }: { at: string | null; times?: number }) {
+  if (!at) return <span className="text-muted-foreground">–</span>;
+  return (
+    <span className="whitespace-nowrap" title={stamp(at)}>
+      {shortTime(at)}
+      {!!times && times > 1 && <span className="block text-[12px] text-muted-foreground">{times} times</span>}
+    </span>
+  );
+}
+
+const recipientCsv = ["Name", "Email", "Status", "Reason", "Sent", "Delivered", "First opened", "Opens", "First clicked", "Clicks", "Bounced", "Unsubscribed"];
+
+// Recipients is everyone a broadcast reached for, one row each: what
+// happened to their email and when. The groups are the people behind the
+// numbers at the top of the page.
+function Recipients({ brand, b, openEmail }: { brand: string; b: EmailBroadcast; openEmail: (id: string) => void }) {
+  const s = b.stats;
+  const [show, setShow] = useState<Show>("");
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState<EmailBroadcastRecipient[] | null>(null);
+  const [next, setNext] = useState<string | null>(null);
+  const [more, setMore] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const groups: { id: Show; label: string; n: number; hint: string }[] = [
+    { id: "", label: "Everyone", n: s.emails + b.skipped, hint: "Everyone in the audience when it was sent" },
+    { id: "delivered", label: "Delivered", n: s.delivered, hint: "The receiving mail server accepted the email" },
+    { id: "opened", label: "Opened", n: s.opened, hint: "Opened at least once; mail scanners are not counted" },
+    { id: "clicked", label: "Clicked", n: s.clicked, hint: "Clicked a link at least once" },
+    { id: "bounced", label: "Bounced", n: s.bounced, hint: "The receiving mail server refused the email" },
+    { id: "complained", label: "Marked as spam", n: s.complained, hint: "The person reported the email as spam" },
+    { id: "unsubscribed", label: "Unsubscribed", n: s.unsubscribed, hint: "Unsubscribed from this email" },
+    { id: "not_sent", label: "Not sent", n: s.not_sent, hint: "An email was made but never left: suppressed, failed or cancelled" },
+    { id: "skipped", label: "Skipped", n: b.skipped, hint: "Left out before sending, with why" },
+  ];
+  const group = groups.find((g) => g.id === show)!;
+  const query = (extra: { limit: number; cursor?: string }) => ({ params: { path: { brand, id: b.id }, query: { ...(show ? { show } : {}), ...(q.trim() ? { q: q.trim() } : {}), ...extra } } });
+  // The first page follows the group, the search and the numbers, so it
+  // fills in while the broadcast sends.
+  const moving = `${s.emails}.${s.delivered}.${s.opened}.${s.clicked}.${s.bounced}.${s.complained}.${s.unsubscribed}.${s.not_sent}.${b.skipped}`;
+  useEffect(() => {
+    let stale = false;
+    const t = setTimeout(async () => {
+      const { data, error } = await api.GET("/v1/brands/{brand}/email-broadcasts/{id}/recipients", query({ limit: 50 }));
+      if (stale) return;
+      if (error || !data) return setError(errorMessage(error));
+      setError("");
+      setRows(data.data);
+      setNext(data.next_cursor);
+    }, 200);
+    return () => { stale = true; clearTimeout(t); };
+  }, [brand, b.id, show, q, moving]);
+  async function loadMore() {
+    if (!next) return;
+    setMore(true);
+    const { data, error } = await api.GET("/v1/brands/{brand}/email-broadcasts/{id}/recipients", query({ limit: 50, cursor: next }));
+    setMore(false);
+    if (error || !data) return setError(errorMessage(error));
+    setRows((cur) => [...(cur ?? []), ...data.data]);
+    setNext(data.next_cursor);
+  }
+  // The download is the whole group, not only the rows loaded so far.
+  async function save() {
+    setSaving(true);
+    const all: EmailBroadcastRecipient[] = [];
+    for (let cursor: string | undefined; ; ) {
+      const { data, error } = await api.GET("/v1/brands/{brand}/email-broadcasts/{id}/recipients", query({ limit: 200, cursor }));
+      if (error || !data) {
+        setSaving(false);
+        return toast(errorMessage(error), "error");
+      }
+      all.push(...data.data);
+      if (!data.next_cursor) break;
+      cursor = data.next_cursor;
+    }
+    setSaving(false);
+    downloadCsv(csvName(b.name, group.label), toCsv(recipientCsv, all.map((r) => {
+      const st = recipientStatus(r);
+      return [r.name, r.address, r.unsubscribed_at ? `${st.text}, unsubscribed` : st.text, r.skipped ?? r.status_reason, r.sent_at, r.delivered_at, r.opened_at, r.opens, r.clicked_at, r.clicks, r.bounced_at, r.unsubscribed_at];
+    })));
+    track("ui.broadcast_recipients_downloaded", { group: show || "everyone", rows: all.length });
+  }
+  const total = q.trim() ? null : group.n;
+  return (
+    <Card title="Recipients" description="One row per person: what happened to their email, and when. Click a row to see the email.">
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Show">
+          {groups.filter((g) => g.id === "" || g.n > 0 || g.id === show).map((g) => (
+            <button key={g.id} type="button" title={g.hint} aria-pressed={show === g.id} onClick={() => setShow(g.id)}
+              className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[12px] ${show === g.id ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted/50"}`}>
+              {g.label} <span className={`font-mono tabular-nums ${show === g.id ? "" : "text-muted-foreground"}`}>{g.n.toLocaleString()}</span>
+            </button>
+          ))}
+        </div>
+        <ErrorText>{error}</ErrorText>
+        {rows === null ? <Loading /> : (
+          <DataTable
+            columns={recipientColumns}
+            data={rows}
+            rowId={(r) => r.record_id}
+            onRowClick={(r) => r.email_id && openEmail(r.email_id)}
+            searchPlaceholder="Find a name or address"
+            search={{ value: q, onChange: setQ }}
+            columnsMenu={false}
+            empty={show ? `Nobody is in ${group.label} yet.` : "Nobody yet."}
+            toolbar={
+              <Button variant="ghost" className="ml-auto" onClick={save} disabled={saving || rows.length === 0} title={`Save ${show ? group.label.toLowerCase() : "everyone"}${q.trim() ? " matching the search" : ""} as a CSV file`}>
+                {saving ? "Preparing…" : "Download CSV"}
+              </Button>
+            }
+            mobile={(r) => {
+              const st = recipientStatus(r);
+              return (
+                <span className="block space-y-1">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate font-medium">{r.name || r.address || "No name"}</span>
+                    <Badge tone={st.tone}>{st.text}</Badge>
+                  </span>
+                  {r.name && r.address && <span className="block truncate text-[12px] text-muted-foreground">{r.address}</span>}
+                  {st.why && <span className="block text-[12px] text-muted-foreground">{st.why}</span>}
+                  <span className="block text-[12px] text-muted-foreground">
+                    {[r.sent_at && `Sent ${shortTime(r.sent_at)}`, r.opened_at && `opened ${shortTime(r.opened_at)}`, r.clicked_at && `clicked ${shortTime(r.clicked_at)}`, r.unsubscribed_at && `unsubscribed ${shortTime(r.unsubscribed_at)}`].filter(Boolean).join(" · ")}
+                  </span>
+                </span>
+              );
+            }}
+          />
+        )}
+        {rows !== null && rows.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
+            <span>Showing {rows.length.toLocaleString()}{total !== null && total >= rows.length ? ` of ${total.toLocaleString()}` : ""}, by name. Times are in your time zone.</span>
+            {next && <Button variant="ghost" onClick={loadMore} disabled={more}>{more ? "Loading…" : "Show more"}</Button>}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

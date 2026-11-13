@@ -329,6 +329,20 @@ In the app it is **Tracker → Report** (`G` then `P`): pick up to five
 levels, filter, sort by a column header, expand a row or double-click it to
 drill in (the row becomes a filter), add custom columns, and save the view.
 The whole view is in the page's address, so a link opens the same report.
+**Report on** switches between site visits and **tracker clicks**.
+
+With `source=tracker` the same report reads the tracker instead of the site:
+`visits` are redirect clicks (likely bots left out), `visitors` distinct
+addresses, `conversions` and `revenue` the click ledger's conversions and
+payouts (declined ones left out; at the click's time unless
+`conversion_time=conversion`), and `cost` by each campaign's cost model,
+which splits by every level (see [campaign links](campaign-links.md), "Cost
+models"). It
+groups by `tracking_campaign` (the default), `traffic_source`, `offer`,
+`lander`, `path`, `destination`, place, network and device, `suspect`
+(whether a fraud signal flagged the click), `field1` to `field20`, and day,
+hour and weekday. A saved view keeps its source. The attribution model
+doesn't apply to it: each conversion credits the click its postback named.
 
 `GET /v1/brands/{brand}/drilldown` (MCP `get_drilldown_report`) groups the
 brand's visits, the conversions and revenue

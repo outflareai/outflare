@@ -1,0 +1,56 @@
+# Recorded answers with fake data. Run them with the engine's tests
+# (go test ./engine/internal/connectors/manifest/).
+- name: the key works and shows its credits
+  run: test
+  creds: { api_key: test-not-a-real-key }
+  request:
+    method: GET
+    path: /api/json/account/test-not-a-real-key
+  answer:
+    body: { success: true, message: Success, credits: 5000, usage: 120, request_id: req-1 }
+  expect: { credits: 5000, details: { usage: "120" } }
+
+- name: a refused key is an auth error
+  run: test
+  creds: { api_key: test-not-a-real-key }
+  answer:
+    body: { success: false, message: Invalid or unauthorized key, request_id: req-2 }
+  expect_error: auth
+
+- name: a data-centre proxy scores high and is flagged
+  run: ip.score
+  creds: { api_key: test-not-a-real-key }
+  input: { ip: 198.51.100.7, user_agent: "Mozilla/5.0 (X11; Linux x86_64)" }
+  request:
+    method: GET
+    path: /api/json/ip
+    headers: { IPQS-KEY: test-not-a-real-key }
+    query: { ip: 198.51.100.7, user_agent: "Mozilla/5.0 (X11; Linux x86_64)", strictness: "1" }
+  answer:
+    body:
+      success: true
+      message: Success
+      fraud_score: 88
+      proxy: true
+      vpn: false
+      tor: false
+      is_crawler: false
+      connection_type: Data Center
+      request_id: req-3
+  expect: { score: 88, proxy: true, vpn: false, tor: false, hosting: true, crawler: false }
+
+- name: a person's home network is clean
+  run: ip.score
+  creds: { api_key: test-not-a-real-key }
+  input: { ip: 203.0.113.20, user_agent: "Mozilla/5.0 (Macintosh)" }
+  answer:
+    body: { success: true, message: Success, fraud_score: 0, proxy: false, vpn: false, tor: false, is_crawler: false, connection_type: Residential }
+  expect: { score: 0, proxy: false, hosting: false }
+
+- name: no credits left is a quota error
+  run: ip.score
+  creds: { api_key: test-not-a-real-key }
+  input: { ip: 203.0.113.20, user_agent: "Mozilla/5.0" }
+  answer:
+    body: { success: false, message: You have insufficient credits to make this query, request_id: req-4 }
+  expect_error: quota

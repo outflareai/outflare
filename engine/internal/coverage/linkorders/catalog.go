@@ -36,8 +36,15 @@ type DonorWrite struct {
 	MetricsAt     **time.Time
 	MetricsSource **string
 	Notes         **string
-	Archived      *bool
-	Prices        *[]Price
+	Intermediary  **string
+	Theme         **string
+	// SiteSince sets site_since; a nil inner pointer clears it.
+	SiteSince **time.Time
+	// Metrics merges into the stored metrics: a key with a value sets
+	// it, a key with nil clears it, a missing key is kept.
+	Metrics  map[string]any
+	Archived *bool
+	Prices   *[]Price
 }
 
 // EnsurePublisher finds or creates the coverage publisher for domain on
@@ -110,6 +117,10 @@ func UpsertDonor(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID,
 		if in.PBN != nil {
 			pbn = *in.PBN
 		}
+		metrics, err := metricsJSON(in.Metrics)
+		if err != nil {
+			return nil, false, err
+		}
 		err = tx.QueryRow(ctx, `
 			INSERT INTO coverage_donor_profiles (
 				workspace_id, brand_id, publisher_id, pbn,
@@ -117,14 +128,16 @@ func UpsertDonor(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID,
 				rel_offered, slot_types, duration, duration_days,
 				tat_days, guarantee_days, vendor_id, source,
 				domain_rating, traffic, spam_score, metrics_at,
-				metrics_source, notes
+				metrics_source, notes, intermediary, theme,
+				site_since, metrics
 			) VALUES (
 				$1, $2, $3, $4,
 				$5, $6, $7, $8,
 				$9, $10, $11, $12,
 				$13, $14, $15, $16,
 				$17, $18, $19, $20,
-				$21, $22
+				$21, $22, $23, $24,
+				$25, jsonb_strip_nulls($26::jsonb)
 			)
 			RETURNING id
 		`,
@@ -133,7 +146,8 @@ func UpsertDonor(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID,
 			strsOrEmpty(in.RelOffered), strsOrEmpty(in.SlotTypes), strOrEmpty(in.Duration), derefInt(in.DurationDays),
 			derefInt(in.TATDays), derefInt(in.GuaranteeDays), strOrEmpty(in.VendorID), source,
 			derefInt(in.DomainRating), derefInt64(in.Traffic), derefFloat(in.SpamScore), derefTime(in.MetricsAt),
-			strOrEmpty(in.MetricsSource), strOrEmpty(in.Notes),
+			strOrEmpty(in.MetricsSource), strOrEmpty(in.Notes), strOrEmpty(in.Intermediary), strOrEmpty(in.Theme),
+			derefTime(in.SiteSince), metrics,
 		).Scan(&existingID)
 		if err != nil {
 			return nil, false, err
@@ -219,6 +233,23 @@ func patchDonor(ctx context.Context, tx pgx.Tx, id uuid.UUID, source string, in 
 	if in.Notes != nil {
 		add("notes", strOrEmpty(in.Notes))
 	}
+	if in.Intermediary != nil {
+		add("intermediary", strOrEmpty(in.Intermediary))
+	}
+	if in.Theme != nil {
+		add("theme", strOrEmpty(in.Theme))
+	}
+	if in.SiteSince != nil {
+		add("site_since", *in.SiteSince)
+	}
+	if len(in.Metrics) > 0 {
+		m, err := metricsJSON(in.Metrics)
+		if err != nil {
+			return err
+		}
+		args = append(args, m)
+		sets = append(sets, fmt.Sprintf("metrics = jsonb_strip_nulls(metrics || $%d::jsonb)", len(args)))
+	}
 	if in.Archived != nil {
 		if *in.Archived {
 			add("archived_at", time.Now().UTC())
@@ -228,6 +259,21 @@ func patchDonor(ctx context.Context, tx pgx.Tx, id uuid.UUID, source string, in 
 	}
 	_, err := tx.Exec(ctx, `UPDATE coverage_donor_profiles SET `+strings.Join(sets, ", ")+` WHERE id = $1`, args...)
 	return err
+}
+
+// metricsJSON encodes a metrics patch; nil values stay as JSON null so a
+// merge clears them before the nulls are stripped.
+func metricsJSON(m map[string]any) (string, error) {
+	if len(m) == 0 {
+		return "{}", nil
+	}
+	for k := range m {
+		if !IsMetric(k) {
+			return "", fmt.Errorf("%w: %s is not a known metric", ErrInvalid, k)
+		}
+	}
+	b, err := json.Marshal(m)
+	return string(b), err
 }
 
 func replacePrices(ctx context.Context, tx pgx.Tx, workspaceID, brandID, publisherID uuid.UUID, prices []Price) error {
@@ -276,10 +322,15 @@ func GetDonor(ctx context.Context, q Querier, workspaceID, brandID, id uuid.UUID
 }
 
 type DonorListFilter struct {
-	ID              *uuid.UUID
-	Q               string
-	PBN             *bool
-	Niche           string
+	ID    *uuid.UUID
+	Q     string
+	PBN   *bool
+	Niche string
+	// Intermediary matches the broker or contact name, ignoring case.
+	Intermediary string
+	// DirectContact keeps only direct-contact recommendations (true) or
+	// only the rest (false).
+	DirectContact   *bool
 	IncludeArchived bool
 	OnlyArchived    bool
 }
@@ -307,13 +358,23 @@ func listDonorsQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 		add("p.id = ?", *f.ID)
 	}
 	if f.Q != "" {
-		add("pub.domain ILIKE ?", "%"+f.Q+"%")
+		// Search covers the site, its intermediary and its theme, so a
+		// broker's name finds every site bought through them.
+		args = append(args, "%"+likeEscape(f.Q)+"%")
+		n := len(args)
+		where = append(where, fmt.Sprintf("(pub.domain ILIKE $%d OR p.intermediary ILIKE $%d OR p.theme ILIKE $%d)", n, n, n))
 	}
 	if f.PBN != nil {
 		add("p.pbn = ?", *f.PBN)
 	}
 	if f.Niche != "" {
 		add("? = ANY (p.niches)", f.Niche)
+	}
+	if f.Intermediary != "" {
+		add("lower(p.intermediary) = lower(?)", f.Intermediary)
+	}
+	if f.DirectContact != nil {
+		where = append(where, directContactCond(*f.DirectContact))
 	}
 	switch {
 	case f.OnlyArchived:
@@ -331,7 +392,7 @@ func listDonorsQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 			p.casino_allowed, p.rel_offered, p.slot_types, p.duration, p.duration_days,
 			p.tat_days, p.guarantee_days, p.vendor_id, p.source, p.domain_rating,
 			p.traffic, p.spam_score, p.metrics_at, p.metrics_source, p.notes, p.archived_at,
-			p.created_at, p.updated_at,
+			p.created_at, p.updated_at, p.intermediary, p.theme, p.site_since, p.metrics,
 			COALESCE((
 				SELECT jsonb_agg(jsonb_build_object('currency', r.currency, 'amount_minor', r.amount_minor) ORDER BY r.currency)
 				FROM coverage_rates r
@@ -353,15 +414,26 @@ func listDonorsQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 	var out []Donor
 	for rows.Next() {
 		var d Donor
-		var prices []byte
+		var prices, metrics []byte
+		var since *time.Time
 		if err := rows.Scan(
 			&d.ID, &d.PublisherID, &d.Domain, &d.PBN, &d.Country, &d.Languages, &d.Niches,
 			&d.CasinoAllowed, &d.RelOffered, &d.SlotTypes, &d.Duration, &d.DurationDays,
 			&d.TATDays, &d.GuaranteeDays, &d.VendorID, &d.Source, &d.DomainRating,
 			&d.Traffic, &d.SpamScore, &d.MetricsAt, &d.MetricsSource, &d.Notes, &d.ArchivedAt,
-			&d.CreatedAt, &d.UpdatedAt, &prices,
+			&d.CreatedAt, &d.UpdatedAt, &d.Intermediary, &d.Theme, &since, &metrics, &prices,
 		); err != nil {
 			return nil, err
+		}
+		if since != nil {
+			s := since.Format("2006-01-02")
+			y := SiteAgeYears(*since, time.Now())
+			d.SiteSince, d.SiteAgeYears = &s, &y
+		}
+		if len(metrics) > 0 {
+			if err := json.Unmarshal(metrics, &d.Metrics); err != nil {
+				return nil, err
+			}
 		}
 		if d.Languages == nil {
 			d.Languages = []string{}
@@ -386,7 +458,19 @@ func listDonorsQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 		}
 		out = append(out, d)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := fillDirectContact(ctx, q, workspaceID, brandID, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// likeEscape escapes the LIKE wildcards in a search term.
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 func strOrEmpty(p **string) string {

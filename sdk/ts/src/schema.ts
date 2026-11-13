@@ -4762,6 +4762,15 @@ export interface paths {
          *     (`ad_campaign`, `ad_adset` or `ad_ad`); grouped or filtered any other way, cost and the ratios on it are null and
          *     `cost_note` says why. Conversions count at the visit's time unless `conversion_time=conversion`.
          *     `format=csv` gives the deepest rows, one column per level.
+         *
+         *     `source=tracker` reports the tracker instead (B5d): `visits` are redirect clicks (likely bots left out),
+         *     `visitors` distinct addresses, `conversions` and `revenue` the click ledger's conversions and payouts (declined
+         *     ones left out, at the click's time unless `conversion_time=conversion`), and `cost` by each campaign's cost model
+         *     (`cost` on the campaign: what the traffic source reported on each click with the `{cost}` token, a fixed amount
+         *     a click or a conversion, or a share of each payout), which splits by every level. Its dimensions: tracking_campaign,
+         *     traffic_source, offer, lander, path, destination, country, region, city, isp, asn, language, device,
+         *     device_brand, os, browser, suspect (yes or no), field1 to field20, day, hour and weekday; the default is
+         *     tracking_campaign. The attribution model doesn't apply to it.
          */
         get: operations["getDrilldownReport"];
         put?: never;
@@ -5132,6 +5141,140 @@ export interface paths {
          *     network's conversion wasn't recorded. Calls with an unknown secret have no brand and aren't kept.
          */
         get: operations["listTrackerConversionLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/click-filters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List click filters
+         * @description Scope: analytics.read. The brand's click filter lists: addresses, ranges and pieces of a user agent its team
+         *     knows to be bots or fraud. A redirect click that matches gets the fraud reason filter_list: it still goes on,
+         *     but counts against no cap and shows as suspect in the reports.
+         */
+        get: operations["listClickFilters"];
+        put?: never;
+        /**
+         * Add a click filter
+         * @description Scope: analytics.manage. Up to 1,000 entries a brand. An ip filter is an address or a range (at most a /8, or a /32 for IPv6); a user_agent filter is a piece of the user agent, matched without regard to case. Takes effect on the next click.
+         */
+        post: operations["createClickFilter"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/click-filters/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a click filter
+         * @description Scope: analytics.manage. Clicks it flagged keep their flag.
+         */
+        delete: operations["deleteClickFilter"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ip-lookups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get the brand's IP lookup settings
+         * @description Scope: analytics.read. Whether the brand's tracker clicks are looked up on the workspace's own IP reputation
+         *     connection (IPQualityScore, under Fraud checks), and which: clicks a fraud signal flagged, clicks that convert,
+         *     and a sample of the rest, up to a monthly cap. Off until the brand turns it on. While it is on, the exact
+         *     address of each such click is kept for 30 days, for this lookup only.
+         */
+        get: operations["getIPLookups"];
+        /**
+         * Change the brand's IP lookup settings
+         * @description Scope: analytics.manage. What the request leaves out stays. Turning lookups on needs a connection that can score addresses; turning them off deletes the brand's kept addresses at once.
+         */
+        put: operations["setIPLookups"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/tracker-clicks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List tracker clicks
+         * @description Scope: analytics.read. The brand's redirect clicks, newest first: the campaign, path, lander and offer each went
+         *     to, where it came from (place, network, device), its custom fields, the network's click id and cost, and whether
+         *     it was a likely bot or a fraud signal flagged it. Likely bots are left out unless bots=true. Use it to find a
+         *     click id for a test conversion or to see what a campaign's clicks did.
+         */
+        get: operations["listTrackerClicks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/tracker-lander-clicks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List tracker lander clicks
+         * @description Scope: analytics.read. Clicks on the calls to action of the brand's landers, newest first: the redirect click
+         *     they continue, which call to action, and the offer or page it went on to. Likely bots are left out unless
+         *     bots=true.
+         */
+        get: operations["listTrackerLanderClicks"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10369,11 +10512,27 @@ export interface paths {
         put?: never;
         /**
          * Import catalog rows from CSV
-         * @description Scope: coverage.manage. The first row is the header and must include domain.
-         *     A repeated domain updates the existing profile. A bad row is listed in
-         *     errors and does not abort the rest of the file. Send text/csv, or JSON
-         *     with a csv field so agents can pass a string. Amounts are the donor price
-         *     only.
+         * @description Scope: coverage.manage. The first row is the header and must include a
+         *     domain column (domain, website, site or url). A repeated domain updates
+         *     the existing profile. A bad row is listed in errors and does not abort
+         *     the rest of the file. Send text/csv (preferred, it is smaller), or JSON
+         *     with a csv field so agents can pass a string. A request may be up to
+         *     32 MB, and the rows are written in chunks of 500, one transaction each.
+         *     A larger file, or one that should not be one long request, is sent as
+         *     several requests that each repeat the header row; rows upsert by domain,
+         *     so the batches add up to the same catalog. Row numbers in errors count
+         *     from the header of the file that was sent.
+         *
+         *     Headers are matched ignoring case, spaces and punctuation ("Traffic /
+         *     Organic" is traffic). Besides the donor fields it reads the intermediary,
+         *     theme and site age (a year, a date or "12 years"), and an intermediary's
+         *     metrics: date added, geo top 1 and 2, main language, article type, main
+         *     category, subcategory, organic and total keywords, referring domains
+         *     (all, followed, not followed), referring IPs and subnets, backlinks (all,
+         *     followed, not followed, redirects, internal), and outgoing domains and
+         *     links (followed and all time). price, price_usd and price_eur are major
+         *     units (150 is 150.00); amount_minor is minor units. Columns it does not
+         *     read are listed in ignored_columns. Amounts are the donor price only.
          */
         post: operations["importBrandLinkOrderCatalog"];
         delete?: never;
@@ -10409,6 +10568,70 @@ export interface paths {
          *     Prices, when sent, replace the current published rate for those currencies.
          */
         patch: operations["updateBrandLinkOrderCatalogItem"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/catalog/items/{id}/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Find a catalog row's stored email addresses
+         * @description Scope: coverage.read. The email addresses already stored for the
+         *     donor's site: people at its company record, contacts a link-building
+         *     check found on its pages, the brand's Outreach leads at the domain,
+         *     and addresses in the donor's or publisher's notes (such as the
+         *     intermediary's). It reads only stored data and costs nothing: it
+         *     never looks an address up on the web or with a paid provider, so an
+         *     empty list means nothing is stored yet. `searched` names what was
+         *     looked through.
+         */
+        get: operations["getBrandLinkOrderDonorContacts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/catalog/items/{id}/outreach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a catalog row to an Outreach sequence
+         * @description Scope: coverage.manage and sequences.manage. Makes `email` a lead of
+         *     the brand (source `link_orders`, the donor's domain as its company
+         *     and website) and adds it to one of the brand's Outreach sequences
+         *     with the same rules as adding leads there: a suppressed or excluded
+         *     address is skipped, an address already in the sequence is left as
+         *     it is, and one active in another sequence is skipped. The sequence
+         *     sends on its own schedule from its own mailboxes; a draft or paused
+         *     sequence sends nothing until it is started. An address at the site
+         *     becomes one of its company's people, so the next lookup finds it.
+         *     Records sequence.leads_enrolled.
+         */
+        post: operations["sendBrandLinkOrderDonorToSequence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/brands/{brand}/link-orders/summary": {
@@ -10747,7 +10970,13 @@ export interface paths {
          * Quote a link order
          * @description Scope: coverage.manage. Sets the quoted donor price and moves the order
          *     to quoted. Allowed from requested, quoted, or negotiating. Amounts are
-         *     the donor price only, in minor units.
+         *     the donor price only, in minor units, as on the invoice (zero-decimal
+         *     currencies such as JPY and HUF have no minor unit). The US-dollar
+         *     equivalent is at the European Central Bank reference rate Outflare
+         *     stores for the invoice date, or the last working day within ten days
+         *     before it (fx_rate_source ecb); USD needs no rate. There is no way to
+         *     send a rate. Without an ECB rate the quote is not saved (400).
+         *     Accounting only: it never sends money.
          */
         post: operations["quoteBrandLinkOrder"];
         delete?: never;
@@ -10879,7 +11108,10 @@ export interface paths {
          *     only, and only the brand's designated approver. Allowed after publication
          *     and a passing live-link check (the link is on the page and the target
          *     matches). Records a coverage invoice and payment for the frozen donor
-         *     amount; it never sends money. Allowed from published or verified.
+         *     amount, in the invoice currency with its US-dollar equivalent; it
+         *     never sends money. Allowed from published or verified. The body is
+         *     optional: the final invoice's date works the US-dollar equivalent out
+         *     again at the ECB reference rate for it (400 when there is none).
          */
         post: operations["payBrandLinkOrder"];
         delete?: never;
@@ -15675,9 +15907,11 @@ export interface paths {
          *     Afterwards the browser lands on the Connectors page, or on the
          *     Reddit page with `return=reddit` or the Social page with
          *     `return=social`, and the connection can act as that account. An X
-         *     sign-in also starts reading the account's followers and posts. With
-         *     `format=json` it returns the link instead, for an agent to hand to a
-         *     person.
+         *     sign-in also starts reading the account's followers and posts. X Ads
+         *     signs in over OAuth 1.0a: the connection keeps the request token
+         *     until the person comes back, and lands on Paid ads with
+         *     `return=ads`. With `format=json` it returns the link instead, for an
+         *     agent to hand to a person.
          */
         get: operations["signInIntegration"];
         put?: never;
@@ -28918,7 +29152,10 @@ export interface paths {
         };
         /**
          * Who a broadcast went to, or skipped and why
-         * @description Scope: emails.read. In record order; page with cursor=next_cursor.
+         * @description Scope: emails.read. By name (by address without one); page with cursor=next_cursor. show lists one group, and each group is the
+         *     people behind the number of the same name in the broadcast's stats (skipped: the broadcast's skipped). q finds
+         *     people by part of their name or address. Each row carries when its email was sent, delivered, first opened,
+         *     first clicked, bounced and unsubscribed.
          */
         get: operations["listBrandEmailBroadcastRecipients"];
         put?: never;
@@ -41521,6 +41758,18 @@ export interface components {
              */
             traffic_source_id: string | null;
             redirect_mode: components["schemas"]["RedirectMode"];
+            cost: components["schemas"]["TrackingCampaignCost"];
+        };
+        /** @description How the tracker report works out what the campaign's clicks cost: token (what the traffic source reported on each click with {cost}, the default), cpc or cpa (a fixed amount a click or a conversion, declined ones left out), or revshare (a share of each payout). */
+        TrackingCampaignCost: {
+            /** @enum {string} */
+            model: "token" | "cpc" | "cpa" | "revshare";
+            /** @description cpc and cpa: the amount, in the currency's main unit. */
+            amount: string;
+            /** @description revshare: the percentage of each payout. */
+            share: number;
+            /** @description The amount's currency; '' for the traffic source's, else the brand's. */
+            currency: string;
         };
         TrackingCampaignInput: {
             name?: string;
@@ -41543,6 +41792,17 @@ export interface components {
             /** @description The id of one of the brand's active traffic sources; '' for none. Its redirect clicks then keep the source's parameters in their custom fields, and its links get a campaign_url. */
             traffic_source?: string;
             redirect_mode?: components["schemas"]["RedirectMode"];
+            /** @description Changes the cost model; what it leaves out stays. */
+            cost?: {
+                /** @enum {string} */
+                model?: "token" | "cpc" | "cpa" | "revshare";
+                /** @description What a click (cpc) or a conversion (cpa) costs, in the currency's main unit. */
+                amount?: number | string;
+                /** @description The percentage of each payout revshare takes. */
+                share?: number;
+                /** @description The amount's currency, such as USD; '' for the traffic source's. */
+                currency?: string;
+            };
         };
         TrackingLink: {
             /** Format: uuid */
@@ -41666,6 +41926,8 @@ export interface components {
             model: string;
             /** @enum {string} */
             conversion_time: "visit" | "conversion";
+            /** @enum {string} */
+            source: "site" | "tracker";
             currency: string;
             group_by: string[];
             cost_available: boolean;
@@ -41686,6 +41948,8 @@ export interface components {
             limit?: number;
             /** @enum {string} */
             conversion_time?: "visit" | "conversion";
+            /** @enum {string} */
+            source?: "site" | "tracker";
             model?: string;
             /** @description Empty for the brand's. */
             timezone?: string;
@@ -41916,6 +42180,96 @@ export interface components {
                 error?: string;
             }[];
         };
+        ClickFilter: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "ip" | "user_agent";
+            /** @description An address, a range in its masked form, or a lowercase piece of a user agent. */
+            value: string;
+            note: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        IPLookupSettings: {
+            /** Format: uuid */
+            integration_id: string | null;
+            enabled: boolean;
+            flagged: boolean;
+            converting: boolean;
+            sample_percent: number;
+            monthly_cap: number;
+            threshold: number;
+            /**
+             * Format: date-time
+             * @description When it last changed; the zero time before the brand first chose.
+             */
+            updated_at: string;
+            /** @description Lookups the brand's provider answered this UTC month, against monthly_cap. Once it reaches the cap, due clicks are skipped until the month turns. */
+            used_this_month: number;
+        };
+        TrackerClick: {
+            /** @description The click's key (ofclk), which a conversion names. */
+            click_key: string;
+            /** Format: uuid */
+            campaign_id: string | null;
+            /** Format: uuid */
+            link_id: string;
+            /**
+             * Format: uuid
+             * @description The rule-based path it matched; null for the default path.
+             */
+            path_id: string | null;
+            /** Format: uuid */
+            destination_id: string | null;
+            /** Format: uuid */
+            lander_id: string | null;
+            /** Format: uuid */
+            offer_id: string | null;
+            /** @description Recorded by the site script (direct mode) rather than a redirect. */
+            direct: boolean;
+            country: string;
+            region: string;
+            city: string;
+            isp: string;
+            asn: number;
+            device: string;
+            os: string;
+            browser: string;
+            language: string;
+            /** @description Its custom fields, by number (1 to 20). */
+            fields: {
+                [key: string]: string;
+            };
+            /** @description The traffic source's own click id. */
+            source_click_id: string;
+            /** @description The cost the traffic source reported, in its currency. */
+            cost: string;
+            likely_bot: boolean;
+            fraud_reasons: ("datacenter_network" | "repeat_click" | "fast_conversion" | "filter_list" | "honeypot" | "ip_reputation")[];
+            /**
+             * Format: date-time
+             * @description When it reached a page running the tracking snippet.
+             */
+            landed_at: string | null;
+            /** Format: date-time */
+            clicked_at: string;
+        };
+        TrackerLanderClick: {
+            /** @description The redirect click it continues. */
+            click_key: string;
+            /** Format: uuid */
+            lander_id: string | null;
+            /** @description The call to action: 0 for /click (by weight), 1 to 100 for /click/N. */
+            cta: number;
+            /** Format: uuid */
+            destination_id: string | null;
+            /** Format: uuid */
+            offer_id: string | null;
+            likely_bot: boolean;
+            /** Format: date-time */
+            clicked_at: string;
+        };
         TrackerConversionCall: {
             /** Format: uuid */
             id: string;
@@ -41962,7 +42316,7 @@ export interface components {
              */
             offer_id: string | null;
             /** @description Why it is suspect: its click came from a hosting provider's network or an address that clicked over and over, or it came less than 10 seconds after its click. Empty when it isn't. Flagged, never refused. */
-            fraud_reasons: ("datacenter_network" | "repeat_click" | "fast_conversion")[];
+            fraud_reasons: ("datacenter_network" | "repeat_click" | "fast_conversion" | "filter_list" | "honeypot" | "ip_reputation")[];
             /** Format: date-time */
             clicked_at: string;
             /** @description The network's transaction id, or the click key and type when it sent none. */
@@ -42498,8 +42852,32 @@ export interface components {
             /** Format: uuid */
             email_id: string | null;
             status: components["schemas"]["EmailStatus"] | null;
+            /** @description Why the email has its status, such as the receiving server's reply to a bounce. */
+            status_reason: string | null;
+            /** @enum {string|null} */
+            bounce_type: "hard" | "soft" | null;
             /** @description Why this person did not get it. */
             skipped: string | null;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            delivered_at: string | null;
+            /**
+             * Format: date-time
+             * @description The first counted open.
+             */
+            opened_at: string | null;
+            /**
+             * Format: date-time
+             * @description The first counted click.
+             */
+            clicked_at: string | null;
+            /** Format: date-time */
+            bounced_at: string | null;
+            /** Format: date-time */
+            unsubscribed_at: string | null;
+            opens: number;
+            clicks: number;
             /** Format: date-time */
             created_at: string;
         };
@@ -43982,7 +44360,7 @@ export interface components {
             created_at: string;
         };
         /** @enum {string} */
-        ConnectorCategory: "email_verification" | "email_sending" | "sequencer" | "mailbox_provider" | "dns" | "tags" | "crm" | "data" | "signals" | "analytics" | "seo" | "social" | "cms" | "code" | "ads" | "payments" | "partners" | "calendar" | "registrar" | "warehouse" | "notification" | "messaging" | "knowledge" | "model" | "custom";
+        ConnectorCategory: "email_verification" | "email_sending" | "sequencer" | "mailbox_provider" | "dns" | "tags" | "crm" | "data" | "signals" | "analytics" | "seo" | "social" | "cms" | "code" | "ads" | "payments" | "partners" | "calendar" | "registrar" | "warehouse" | "notification" | "messaging" | "knowledge" | "model" | "fraud" | "custom";
         ConnectorField: {
             name: string;
             label: string;
@@ -50635,6 +51013,23 @@ export interface components {
              */
             amount_minor: number;
         };
+        /**
+         * @description Whether the site is worth writing to directly, not only through its
+         *     intermediary. Computed on read from stored data: not flagged as a PBN;
+         *     DR or traffic stored and above zero (a missing value does not count);
+         *     and at least one address at the site's own domain (or a subdomain)
+         *     already stored where Find email looks (people at the site's company,
+         *     link-building check contacts, the brand's Outreach leads, the notes)
+         *     and not suppressed for the brand. An intermediary's address is not a
+         *     direct one. A recommendation only: nothing is sent or enrolled.
+         */
+        LinkOrderDirectContact: {
+            recommended: boolean;
+            /** @description Stored, unsuppressed addresses at the site's domain. */
+            emails: number;
+            /** @description The rules the site does not meet. Empty when recommended. */
+            missing: ("pbn" | "no_metrics" | "no_email")[];
+        };
         LinkOrderDonor: {
             /** Format: uuid */
             id: string;
@@ -50664,6 +51059,19 @@ export interface components {
             metrics_at: string | null;
             metrics_source: string;
             notes: string;
+            /** @description The broker or contact the site is bought through. Empty when not set. */
+            intermediary: string;
+            /** @description The site's own theme. Separate from niches. */
+            theme: string;
+            /**
+             * Format: date
+             * @description The date the site has existed since. An age given as a year or in years is stored as 1 January of that year, or that many years before the import.
+             */
+            site_since: string | null;
+            /** @description Whole years from site_since to today. */
+            site_age_years: number | null;
+            metrics: components["schemas"]["LinkOrderDonorMetrics"];
+            direct_contact: components["schemas"]["LinkOrderDirectContact"];
             /** Format: date-time */
             archived_at: string | null;
             prices: components["schemas"]["LinkOrderMoney"][];
@@ -50671,6 +51079,50 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description The intermediary's metrics for the site, shown on the donor card. Null when not set. DR, traffic, country and languages are the donor's own fields. */
+        LinkOrderDonorMetrics: {
+            /** @description When the intermediary added the site, as YYYY-MM-DD when the file's date could be read, else as written. */
+            date_added: string | null;
+            /** @description The site's top country by traffic (Ahrefs top 1). */
+            geo_top1: string | null;
+            /** @description The second country (Ahrefs top 2). */
+            geo_top2: string | null;
+            article_type: string | null;
+            main_category: string | null;
+            subcategory: string | null;
+            /** Format: int64 */
+            organic_keywords: number | null;
+            /** Format: int64 */
+            total_keywords: number | null;
+            /** Format: int64 */
+            referring_domains: number | null;
+            /** Format: int64 */
+            referring_domains_followed: number | null;
+            /** Format: int64 */
+            referring_domains_not_followed: number | null;
+            /** Format: int64 */
+            referring_ips: number | null;
+            /** Format: int64 */
+            referring_subnets: number | null;
+            /** Format: int64 */
+            backlinks: number | null;
+            /** Format: int64 */
+            backlinks_followed: number | null;
+            /** Format: int64 */
+            backlinks_not_followed: number | null;
+            /** Format: int64 */
+            backlinks_redirects: number | null;
+            /** Format: int64 */
+            backlinks_internal: number | null;
+            /** Format: int64 */
+            outgoing_domains_followed: number | null;
+            /** Format: int64 */
+            outgoing_domains_all_time: number | null;
+            /** Format: int64 */
+            outgoing_links_followed: number | null;
+            /** Format: int64 */
+            outgoing_links_all_time: number | null;
         };
         LinkOrderDonorWrite: {
             /** @description Required on create. Cannot change later. */
@@ -50693,18 +51145,56 @@ export interface components {
             domain_rating?: number | null;
             /** Format: int64 */
             traffic?: number | null;
+            /** @description The broker or contact the site is bought through. */
+            intermediary?: string | null;
+            /** @description The site's own theme. Separate from niches. */
+            theme?: string | null;
+            /** @description How long the site has existed: a year (2012), a date (2012-05-01) or an age (12 years, 8 months). Empty or null clears it. */
+            site_age?: string | null;
+            /** @description Metrics to set, by key (see LinkOrderDonorMetrics). A key with a value sets it, a key with null clears it, and a key left out is kept. */
+            metrics?: {
+                [key: string]: unknown;
+            };
             archived?: boolean;
             prices?: components["schemas"]["LinkOrderMoney"][];
         };
         LinkOrderCatalogImport: {
             created: number;
             updated: number;
+            /** @description Header columns the import did not read: not a known field, or a second column for a field already read. */
+            ignored_columns: string[];
             errors: {
                 /** @description 1-based line number, counting the header. */
                 row: number;
                 domain: string;
                 error: string;
             }[];
+        };
+        /** @description An amount as on the invoice and its US-dollar equivalent. Accounting only; nothing sends money. */
+        LinkOrderInvoice: {
+            /** @enum {string} */
+            currency: "USD" | "EUR" | "GBP" | "PLN" | "CZK" | "UAH" | "CHF" | "CAD" | "AUD" | "NZD" | "JPY" | "SEK" | "NOK" | "DKK" | "RON" | "HUF" | "BGN" | "TRY" | "INR" | "SGD" | "HKD" | "MXN" | "BRL" | "ZAR";
+            /**
+             * Format: int64
+             * @description As on the invoice, in the currency's minor unit.
+             */
+            amount_minor: number;
+            /** Format: date */
+            invoice_date: string | null;
+            /**
+             * Format: int64
+             * @description US cents. Null only on an order quoted in euros before invoices had a rate of their own.
+             */
+            usd_amount_minor: number | null;
+            /** @description US dollars for one unit of currency. */
+            fx_rate: number | null;
+            /** Format: date */
+            fx_rate_date: string | null;
+            /**
+             * @description usd: no conversion. ecb: the European Central Bank reference rate for the invoice date, or the last working day within ten days before it.
+             * @enum {string|null}
+             */
+            fx_rate_source: "usd" | "ecb" | null;
         };
         LinkOrder: {
             /** Format: uuid */
@@ -50742,6 +51232,10 @@ export interface components {
             donor_amount_minor: number | null;
             /** @enum {string|null} */
             currency: "USD" | "EUR" | null;
+            /** @description The quote as on the invoice, with its US-dollar equivalent at the ECB reference rate. quoted_amount_minor / quoted_currency hold the US-dollar equivalent for a currency other than USD and EUR. */
+            quoted_invoice: components["schemas"]["LinkOrderInvoice"] | null;
+            /** @description The invoice amount frozen at approval (refreshed at Mark Paid), with its US-dollar equivalent. donor_amount_minor / currency hold the US-dollar equivalent for a currency other than USD and EUR. */
+            invoice: components["schemas"]["LinkOrderInvoice"] | null;
             guarantee_days: number | null;
             /** Format: date-time */
             guarantee_until: string | null;
@@ -50923,6 +51417,51 @@ export interface components {
                 /** Format: int64 */
                 remaining: number;
             }[];
+        };
+        LinkOrderDonorContact: {
+            email: string;
+            name: string;
+            /**
+             * @description Where it is stored: a person at the site's company, a contact a link-building check found, an Outreach lead, or the notes. The surest wins when an address is in several.
+             * @enum {string}
+             */
+            source: "person" | "link_check" | "lead" | "notes";
+            /** Format: uuid */
+            record_id: string | null;
+            /** Format: uuid */
+            lead_id: string | null;
+            /** @description Whether the address is at the site's own domain. */
+            at_domain: boolean;
+            /** @description On the brand's suppression list: Outreach won't email it. */
+            suppressed: boolean;
+            /** @description Ever added to one of the brand's sequences. */
+            contacted: boolean;
+        };
+        LinkOrderDonorContacts: {
+            /** Format: uuid */
+            donor_id: string;
+            domain: string;
+            contacts: components["schemas"]["LinkOrderDonorContact"][];
+            /** @description The stored data looked through. */
+            searched: string[];
+        };
+        LinkOrderDonorOutreach: {
+            /** Format: uuid */
+            donor_id: string;
+            domain: string;
+            email: string;
+            /** Format: uuid */
+            lead_id: string;
+            /** Format: uuid */
+            sequence_id: string;
+            sequence_name: string;
+            /** @enum {string} */
+            sequence_status: "draft" | "active" | "paused";
+            /**
+             * @description enrolled: added. already_enrolled: in this sequence already. suppressed: on the suppression list. excluded: left out by the sequence's exclusion. active_elsewhere: active in another sequence.
+             * @enum {string}
+             */
+            result: "enrolled" | "already_enrolled" | "suppressed" | "excluded" | "active_elsewhere";
         };
         LinkOrderCandidate: {
             domain: string;
@@ -72110,6 +72649,8 @@ export interface operations {
     getDrilldownReport: {
         parameters: {
             query?: {
+                /** @description site: visits and the conversions credited to them; tracker: tracker clicks and the click ledger's conversions. */
+                source?: "site" | "tracker";
                 /** @description First day, such as 2026-09-27. Default: 27 days before to. */
                 from?: components["parameters"]["AttributionFrom"];
                 /** @description Last day, such as 2026-10-24. Default: today in the report's time zone. */
@@ -72984,6 +73525,266 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["TrackerConversionCall"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listClickFilters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Filters, by kind and value. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ClickFilter"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createClickFilter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "ip" | "user_agent";
+                    /** @example 203.0.113.0/24 */
+                    value: string;
+                    /** @description Why it is on the list. */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The filter. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClickFilter"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteClickFilter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getIPLookups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IPLookupSettings"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setIPLookups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace's IP reputation connection; '' for none. */
+                    integration_id?: string;
+                    enabled?: boolean;
+                    /** @description Look up clicks a fraud signal flagged. */
+                    flagged?: boolean;
+                    /** @description Look up clicks that convert (their addresses are kept until then, 30 days at most). */
+                    converting?: boolean;
+                    /** @description The share of the other clicks looked up. */
+                    sample_percent?: number;
+                    /** @description Lookups a month at most. */
+                    monthly_cap?: number;
+                    /** @description The provider's risk score at which a click is flagged. */
+                    threshold?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IPLookupSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrackerClicks: {
+        parameters: {
+            query?: {
+                campaign?: string;
+                offer?: string;
+                lander?: string;
+                /** @description One click, by its key (ofclk). */
+                click_id?: string;
+                /** @description true to include likely bots. */
+                bots?: boolean;
+                /** @description Clicks at or after this time. */
+                since?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Clicks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrackerClick"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrackerLanderClicks: {
+        parameters: {
+            query?: {
+                lander?: string;
+                offer?: string;
+                /** @description The redirect click's key (ofclk). */
+                click_id?: string;
+                /** @description true to include likely bots. */
+                bots?: boolean;
+                /** @description Clicks at or after this time. */
+                since?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lander clicks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrackerLanderClick"][];
                         next_cursor: string | null;
                     };
                 };
@@ -81628,10 +82429,14 @@ export interface operations {
                  *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
                  */
                 fields?: components["parameters"]["Fields"];
-                /** @description Filter by domain. */
+                /** @description Search the domain, the intermediary and the theme (contains, ignoring case). */
                 q?: string;
                 pbn?: boolean;
                 niche?: string;
+                /** @description Only sites bought through this intermediary (exact name, ignoring case). */
+                intermediary?: string;
+                /** @description true lists only sites recommended for direct contact (see direct_contact on each row); false lists the rest. */
+                direct_contact?: boolean;
                 /** @description Default omits archived rows. */
                 archived?: "true" | "false" | "all";
             };
@@ -81736,6 +82541,7 @@ export interface operations {
             };
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
+            413: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -81801,6 +82607,80 @@ export interface operations {
             };
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandLinkOrderDonorContacts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored addresses, the site's own first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderDonorContacts"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    sendBrandLinkOrderDonorToSequence: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    sequence_id: string;
+                    /** @example editor@news.example */
+                    email: string;
+                    /** @description The person's name, when known. */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description What adding the address did. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderDonorOutreach"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
@@ -82385,7 +83265,12 @@ export interface operations {
                     /** Format: int64 */
                     amount_minor: number;
                     /** @enum {string} */
-                    currency: "USD" | "EUR";
+                    currency: "USD" | "EUR" | "GBP" | "PLN" | "CZK" | "UAH" | "CHF" | "CAD" | "AUD" | "NZD" | "JPY" | "SEK" | "NOK" | "DKK" | "RON" | "HUF" | "BGN" | "TRY" | "INR" | "SGD" | "HKD" | "MXN" | "BRL" | "ZAR";
+                    /**
+                     * Format: date
+                     * @description The date on the invoice; the ECB reference rate is for this day. Today (UTC) when left out.
+                     */
+                    invoice_date?: string;
                 };
             };
         };
@@ -82587,7 +83472,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** Format: date */
+                    invoice_date?: string;
+                };
+            };
+        };
         responses: {
             /** @description The order, now paid, with a payment row. */
             200: {
@@ -82599,6 +83491,7 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
@@ -91284,7 +92177,7 @@ export interface operations {
             query?: {
                 format?: "json";
                 /** @description The app page to land on afterwards. Default: Connectors. */
-                return?: "get-started" | "setup" | "reddit" | "social" | "providers" | "audits" | "domains";
+                return?: "get-started" | "setup" | "reddit" | "social" | "providers" | "audits" | "domains" | "ads";
             };
             header?: never;
             path: {
@@ -113094,6 +113987,8 @@ export interface operations {
                  */
                 fields?: components["parameters"]["Fields"];
                 skipped?: "true" | "false";
+                show?: "sent" | "delivered" | "opened" | "clicked" | "bounced" | "complained" | "unsubscribed" | "not_sent" | "skipped";
+                q?: string;
                 limit?: number;
             };
             header?: never;

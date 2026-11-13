@@ -38,11 +38,12 @@ const donor = (id, domain, extra = {}) => ({
   vendor_id: '', source: 'manual', domain_rating: 50, traffic: 12000, spam_score: null,
   metrics_at: '2026-11-03T00:00:00Z', metrics_source: 'ahrefs', notes: '',
   archived_at: null, prices: [{ currency: 'USD', amount_minor: 85000 }],
+  direct_contact: { recommended: false, emails: 0, missing: ['no_email'] },
   created_at: t0, updated_at: t0, ...extra,
 });
 
 const donors = [
-  donor('50000000-0000-4000-8000-000000000001', 'infrachronicle.example', { domain_rating: 62, prices: [{ currency: 'USD', amount_minor: 85000 }] }),
+  donor('50000000-0000-4000-8000-000000000001', 'infrachronicle.example', { domain_rating: 62, direct_contact: { recommended: true, emails: 1, missing: [] }, prices: [{ currency: 'USD', amount_minor: 85000 }] }),
   donor('50000000-0000-4000-8000-000000000002', 'securityledger.example', { domain_rating: 58, country: 'DE', languages: ['EN', 'DE'], prices: [{ currency: 'EUR', amount_minor: 35000 }] }),
   donor('50000000-0000-4000-8000-000000000003', 'saasstack.example', { domain_rating: 41, niches: ['saas'], prices: [{ currency: 'EUR', amount_minor: 8000 }] }),
   donor('50000000-0000-4000-8000-000000000004', 'growthopsblog.example', { domain_rating: 36, pbn: true, prices: [{ currency: 'USD', amount_minor: 12000 }] }),
@@ -71,7 +72,15 @@ const order = (id, donorId, status, extra = {}) => {
     paid_by: extra.paid_at ? approver : null, paid_at: extra.paid_at ?? null,
     lost_at: extra.lost_at ?? null, lost_reason: extra.lost_reason ?? '', notes: extra.notes ?? '',
     created_at: extra.created_at ?? t0, updated_at: extra.updated_at ?? t0,
+    quoted_invoice: extra.invoice ?? null, invoice: frozen ? (extra.invoice ?? null) : null,
   };
+};
+
+// An invoice in pounds: kept as invoiced, with its US-dollar equivalent at
+// the ECB reference rate for the invoice date.
+const gbpInvoice = {
+  currency: 'GBP', amount_minor: 50000, invoice_date: '2026-11-10', usd_amount_minor: 63540,
+  fx_rate: 1.2708, fx_rate_date: '2026-11-10', fx_rate_source: 'ecb',
 };
 
 const orders = [
@@ -103,6 +112,12 @@ const orders = [
     target_url: '/free-proxy-list', published_url: 'https://infrachronicle.example/proxy-list', published_at: '2026-10-01T00:00:00Z',
     paid_at: '2026-10-05T00:00:00Z', payment_id: '70000000-0000-4000-8000-000000000005', invoice_id: '71000000-0000-4000-8000-000000000005',
     last_check_at: '2026-11-08T09:00:00Z', last_check_live: true, last_check_target_match: true, last_check_rel: 'dofollow', last_check_anchor: 'free proxy list',
+  }),
+  order('40000000-0000-4000-8000-000000000015', '50000000-0000-4000-8000-000000000004', 'paid', {
+    target_url: '/pricing', published_url: 'https://growthopsblog.example/pricing', published_at: '2026-11-03T00:00:00Z',
+    paid_at: '2026-11-10T00:00:00Z', payment_id: '70000000-0000-4000-8000-000000000015', invoice_id: '71000000-0000-4000-8000-000000000015',
+    last_check_at: '2026-11-08T09:00:00Z', last_check_live: true, last_check_target_match: true, last_check_rel: 'dofollow',
+    quoted_amount_minor: 63540, quoted_currency: 'USD', invoice: gbpInvoice,
   }),
   order('40000000-0000-4000-8000-000000000004', '50000000-0000-4000-8000-000000000002', 'lost', {
     target_url: '/blog', published_url: 'https://securityledger.example/inserts/geonode', published_at: '2026-10-12T00:00:00Z',
@@ -158,10 +173,14 @@ const members = [
   { user_id: operator, email: 'operator@example.com', name: 'Operator', role: 'member', role_name: 'Member', created_at: t0, brand_ids: [] },
 ];
 const scopesFor = user => user === approver
-  ? ['workspace.manage', 'coverage.read', 'coverage.manage', 'coverage.approve', 'coverage.finance.read', 'coverage.finance.manage', 'members.read']
+  ? ['workspace.manage', 'coverage.read', 'coverage.manage', 'coverage.approve', 'coverage.finance.read', 'coverage.finance.manage', 'members.read', 'sequences.read', 'sequences.manage']
   : ['coverage.read', 'coverage.manage', 'coverage.finance.read', 'members.read'];
 
 const calls = [];
+const waitFor = async (ok, what) => {
+  for (let n = 0; n < 50; n++) { if (ok()) return; await new Promise(r => setTimeout(r, 100)); }
+  assert.fail(what);
+};
 let actingAs = approver;
 let catalog = [...donors];
 
@@ -186,6 +205,21 @@ function answer(method, u, body) {
   }
   if (p === `${b}/link-orders/catalog/import` && method === 'POST') {
     return { created: 1, updated: 0, errors: [] };
+  }
+  const items = p.match(new RegExp(`^${b}/link-orders/catalog/items/([0-9a-f-]+)/(contacts|outreach)$`));
+  if (items) {
+    const row = catalog.find(d => d.id === items[1]);
+    if (!row) return null;
+    if (items[2] === 'contacts') {
+      return { donor_id: row.id, domain: row.domain, searched: ["people at the site's company", 'contacts from link-building checks', `Outreach leads at ${row.domain}`, "the donor's notes"],
+        contacts: row.domain === 'infrachronicle.example'
+          ? [{ email: 'editor@infrachronicle.example', name: 'Ana Roe', source: 'link_check', record_id: null, lead_id: null, at_domain: true, suppressed: false, contacted: false }]
+          : [] };
+    }
+    return { donor_id: row.id, domain: row.domain, email: body.email, lead_id: '60000000-0000-4000-8000-000000000001', sequence_id: body.sequence_id, sequence_name: 'Donor outreach', sequence_status: 'draft', result: 'enrolled' };
+  }
+  if (p === `${b}/sequences` && method === 'GET') {
+    return { data: [{ id: '70000000-0000-4000-8000-000000000001', name: 'Donor outreach', status: 'draft', links: [] }] };
   }
   if (p === `${b}/link-orders/candidates`) return { data: candidates, next_cursor: null };
   if (p.endsWith('/add-to-catalog') && method === 'POST') {
@@ -326,6 +360,24 @@ try {
     await approve.waitFor();
     assert.equal(await approve.isDisabled(), false, 'Approve is disabled for the brand approver on a quoted order');
     await shot(page, 'order-approve-desktop-dark');
+    // Quote in pounds: every common invoice currency is offered; nobody
+    // types a rate (Outflare takes the ECB reference rate itself).
+    const currencySelect = page.getByLabel('Quoted currency');
+    const offered = await currencySelect.locator('option').allTextContents();
+    for (const c of ['USD', 'EUR', 'GBP', 'PLN', 'CHF', 'JPY', 'UAH']) assert(offered.includes(c), `quote currency ${c} missing: ${offered}`);
+    await currencySelect.selectOption('GBP');
+    await page.getByLabel('Quoted donor amount').fill('500');
+    await page.getByLabel('Invoice date').fill('2026-11-10');
+    await page.getByTestId('quote-rate-note').waitFor();
+    assert.match(await page.getByTestId('quote-rate-note').innerText(), /ECB reference rate/);
+    const sheetText = await page.locator('[role="dialog"]').innerText();
+    assert.doesNotMatch(sheetText, /google/i, 'the order sheet still mentions Google');
+    assert.equal(await page.locator('[role="dialog"] a[href*="google."]').count(), 0, 'the order sheet still links to Google');
+    assert.equal(await page.getByLabel(/rate/i).count(), 0, 'the order sheet still has a rate field');
+    await page.getByRole('button', { name: 'Save quote' }).click();
+    await waitFor(() => calls.some(c => c.method === 'POST' && c.path.endsWith('/quote')), 'quote was not posted');
+    const quote = calls.find(c => c.method === 'POST' && c.path.endsWith('/quote'));
+    assert.deepEqual(quote.body, { amount_minor: 50000, currency: 'GBP', invoice_date: '2026-11-10' });
     await closeSheet(page);
 
     // Published, no live check yet: Paid disabled.
@@ -356,6 +408,14 @@ try {
 
     await tab(page, 'Payments');
     await page.getByRole('heading', { name: 'Payments ledger' }).waitFor();
+    // Both amounts: as on the invoice, and in US dollars with the rate.
+    const gbpRow = page.locator('tr', { hasText: 'growthopsblog.example' }).first();
+    const gbpText = await gbpRow.innerText();
+    assert.match(gbpText, /£500\.00/, `ledger row lacks the invoiced amount: ${gbpText}`);
+    assert.match(gbpText, /\$635\.40/, `ledger row lacks the US-dollar amount: ${gbpText}`);
+    assert.match(gbpText, /ECB reference rate/, `ledger row lacks the rate source: ${gbpText}`);
+    assert.doesNotMatch(gbpText, /google/i, `ledger row mentions Google: ${gbpText}`);
+    assert.match(await page.locator('body').innerText(), /does not send money|Nothing here sends money/);
     await shot(page, 'payments-desktop-dark');
     assert.deepEqual(errors, []);
     await page.close();
@@ -410,6 +470,90 @@ try {
     assert.equal(await paid.isDisabled(), true, 'Paid is enabled for an operator who is not the brand approver');
     await shot(page, 'operator-approve-disabled-desktop-dark');
     assert(!calls.some(c => c.method === 'POST' && /\/(approve|pay)$/.test(c.path)), 'operator posted Approve or Paid');
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+
+  // 4. The catalog's right-click menu: on any cell, with Find email and
+  // Send to a sequence; left-click on the site still opens the donor.
+  {
+    calls.length = 0;
+    const { page, errors } = await open(1440, 900, 'dark', approver);
+    await openPage(page);
+    await tab(page, 'Catalog');
+    const row = page.locator('tr[data-donor]', { hasText: 'infrachronicle.example' });
+    await row.locator('td[data-col="dr"]').click({ button: 'right' });
+    const menu = page.getByRole('menu');
+    await menu.waitFor();
+    for (const label of ['Find email', 'Send to a sequence', 'Open donor']) await menu.getByRole('menuitem', { name: label }).waitFor();
+    await shot(page, 'catalog-cell-menu-desktop-dark');
+    await page.keyboard.press('Escape');
+    await menu.waitFor({ state: 'hidden' });
+    // Every column opens the same menu.
+    await row.locator('td[data-col="price"]').click({ button: 'right' });
+    await menu.getByRole('menuitem', { name: 'Find email' }).click();
+    await page.getByRole('dialog').getByText('editor@infrachronicle.example').waitFor();
+    await page.getByRole('dialog').getByText(/doesn't search the web or use a paid provider/).waitFor();
+    await shot(page, 'catalog-find-email-desktop-dark');
+    await page.getByRole('dialog').getByRole('button', { name: 'Send to a sequence' }).click();
+    await page.getByRole('dialog').getByText(/nothing is sent until it is started/).waitFor();
+    assert.equal(await page.getByRole('dialog').getByLabel('Email', { exact: true }).inputValue(), 'editor@infrachronicle.example');
+    await page.getByRole('button', { name: 'Add to sequence' }).click();
+    await page.getByRole('dialog').getByText(/Added editor@infrachronicle.example to Donor outreach/).waitFor();
+    const sent = calls.find(c => c.method === 'POST' && c.path.endsWith('/outreach'));
+    assert(sent && sent.body.email === 'editor@infrachronicle.example' && sent.body.sequence_id === '70000000-0000-4000-8000-000000000001', `outreach body: ${JSON.stringify(sent)}`);
+    await page.getByRole('button', { name: 'Done' }).click();
+    // Nothing stored: an honest empty answer, then a typed address.
+    const other = page.locator('tr[data-donor]').filter({ hasNotText: 'infrachronicle.example' }).first();
+    await other.locator('td[data-col="niche"]').click({ button: 'right' });
+    await menu.getByRole('menuitem', { name: 'Find email' }).click();
+    await page.getByRole('dialog').getByText(/^No email is stored for/).waitFor();
+    await page.getByRole('button', { name: 'Close' }).last().click();
+    // Left-click keeps opening the donor card.
+    await row.getByRole('button', { name: 'infrachronicle.example' }).click();
+    await page.locator('[data-slot="sheet-content"]').waitFor();
+    await closeSheet(page);
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+
+  // 5. Without sequences.manage, Send to a sequence is disabled with a reason.
+  {
+    const { page, errors } = await open(1440, 900, 'dark', operator);
+    await openPage(page);
+    await tab(page, 'Catalog');
+    await page.locator('tr[data-donor] td[data-col="traffic"]').first().click({ button: 'right' });
+    const item = page.getByRole('menuitem', { name: /Send to a sequence/ });
+    await item.waitFor();
+    assert.equal(await item.getAttribute('aria-disabled'), 'true', 'Send to a sequence is enabled without sequences.manage');
+    await page.getByText('You need permission to manage sequences.').waitFor();
+    await page.keyboard.press('Escape');
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+
+  // 6. Direct contact: the mark, the filter, and the same Find email and
+  // Send to a sequence from the row. Nothing is sent by the mark itself.
+  {
+    calls.length = 0;
+    const { page, errors } = await open(1440, 900, 'dark', approver);
+    await openPage(page);
+    await tab(page, 'Catalog');
+    await page.getByLabel('Direct contact').selectOption('yes');
+    const rows = page.locator('tr[data-donor]');
+    await rows.first().waitFor();
+    assert.equal(await rows.count(), 1, 'only the recommended site is listed');
+    const row = rows.first();
+    await row.getByText('Direct contact', { exact: true }).waitFor();
+    assert(!calls.some(c => c.method === 'POST' && c.path.endsWith('/outreach')), 'the mark sent something');
+    await shot(page, 'catalog-direct-contact-desktop-dark');
+    await row.getByRole('button', { name: 'Find email' }).click();
+    await page.getByRole('dialog').getByText('editor@infrachronicle.example').waitFor();
+    await page.getByRole('button', { name: 'Close' }).last().click();
+    await row.getByRole('button', { name: 'Send to a sequence' }).click();
+    await page.getByRole('dialog').getByText(/nothing is sent until it is started/).waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+    assert(!calls.some(c => c.method === 'POST' && c.path.endsWith('/outreach')), 'opening Send to a sequence sent something');
     assert.deepEqual(errors, []);
     await page.close();
   }

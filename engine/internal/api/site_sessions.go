@@ -38,6 +38,8 @@ type siteVisitor struct {
 	region, city, isp string
 	asn               int64
 	detail            deviceDetail
+	// userAgent is the browser's, for the brand's click filter lists.
+	userAgent string
 }
 
 // botUA matches the user agents of crawlers, previews, monitors and

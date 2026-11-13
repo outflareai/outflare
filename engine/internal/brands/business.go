@@ -96,7 +96,8 @@ func (a Address) Lines() []string {
 	if len(place) > 0 {
 		out = append(out, strings.Join(place, " "))
 	}
-	if n := CountryName(a.Country); n != "" {
+	// A city-state (Singapore, Monaco) names the country once.
+	if n := CountryName(a.Country); n != "" && !strings.EqualFold(n, a.City) {
 		out = append(out, n)
 	}
 	return out

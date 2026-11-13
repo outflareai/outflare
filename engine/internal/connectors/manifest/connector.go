@@ -57,6 +57,9 @@ func New(m *Manifest, pubs map[string]PublisherEntry) (*Connector, error) {
 	if m.Caps.Verify != nil {
 		d.Capabilities = append(d.Capabilities, c.CapVerify)
 	}
+	if m.Caps.IPScore != nil {
+		d.Capabilities = append(d.Capabilities, c.CapIPScore)
+	}
 	return &Connector{m: m, def: d}, nil
 }
 
@@ -131,6 +134,39 @@ func (x *Connector) Verify(ctx context.Context, cl *c.Client, creds c.Creds, ema
 		out.Reason = word
 	}
 	return out, nil
+}
+
+// ScoreIP looks up an address's reputation, spending the workspace's own
+// credits with the provider.
+func (x *Connector) ScoreIP(ctx context.Context, cl *c.Client, creds c.Creds, ip, userAgent string) (c.IPScore, error) {
+	v := x.m.Caps.IPScore
+	if v == nil {
+		return c.IPScore{}, c.Errf(c.ErrInvalid, "%s cannot score addresses", x.m.Name)
+	}
+	ans, err := x.call(ctx, cl, v.Request, v.Errors, vars(creds, map[string]string{"ip": ip, "user_agent": userAgent}))
+	if err != nil {
+		return c.IPScore{}, err
+	}
+	r := v.Result
+	out := c.IPScore{Proxy: r.Proxy.true(ans), VPN: r.VPN.true(ans), Tor: r.Tor.true(ans), Hosting: r.Hosting.true(ans), Crawler: r.Crawler.true(ans)}
+	if n, ok := num(lookup(ans, r.Score)); ok {
+		if s := int(n + 0.5); s >= 0 && s <= 100 {
+			out.Score = &s
+		}
+	}
+	return out, nil
+}
+
+// true reads a flag: the value at its path is true, or equals its word.
+func (f Flag) true(ans any) bool {
+	if f.Path == "" {
+		return false
+	}
+	v := lookup(ans, f.Path)
+	if f.Equals != "" {
+		return v != nil && strings.EqualFold(text(v), f.Equals)
+	}
+	return truthy(v)
 }
 
 // vars are the template variables: the credentials and the inputs.

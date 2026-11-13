@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -117,6 +118,17 @@ func (s *Server) directClick(ctx context.Context, tx pgx.Tx, a *access, v siteVi
 	var reasons []string
 	if v.asn > 0 && v.asn <= math.MaxUint32 {
 		reasons = fraud.ClickReasons(uint32(v.asn), 0)
+	}
+	// The brand's click filter lists (B7b): the user agent pieces only, as
+	// site events keep no address.
+	if brand != "" {
+		filters, err := loadClickFilters(ctx, tx, a.WorkspaceID, brand)
+		if err != nil {
+			return err
+		}
+		if filters.Match(netip.Addr{}, v.userAgent) {
+			reasons = append(reasons, fraud.FilterList)
+		}
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO tracking_link_clicks (workspace_id, brand_id, link_id, click_key, likely_bot, clicked_at,
 			country, region, city, asn, isp, device, device_brand, device_model, os, os_version, browser, browser_version, language,

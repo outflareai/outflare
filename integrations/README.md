@@ -32,6 +32,9 @@ Manifests support these capabilities today. More are coming (enrichment, email f
 | Capability | Category | Inputs | Maps onto |
 | --- | --- | --- | --- |
 | `verify` | `email_verification` | `{{email}}` | `status` (deliverable, undeliverable, risky, unknown), `reason`, `provider_status`, `catch_all`, `disposable`, `role`, `free`, `suggestion`, `score` (0–100) |
+| `ip_score` | `fraud` | `{{ip}}`, `{{user_agent}}` | `score` (0–100 risk, required), and the flags `proxy`, `vpn`, `tor`, `hosting` and `crawler`. A flag is a path to a true/false value, or `{path, equals}` for a word that means true, such as `{path: connection_type, equals: Data Center}` |
+
+In `tests.yaml`, a capability's cases name it as the engine does: `run: verify` or `run: ip.score`.
 
 ## manifest.yaml
 

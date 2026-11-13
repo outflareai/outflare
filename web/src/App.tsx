@@ -68,6 +68,9 @@ import { TrackerReport } from "./pages/TrackerReport";
 import { TrackerCampaigns } from "./pages/TrackerCampaigns";
 import { TrackerFlows } from "./pages/TrackerFlows";
 import { TrackerLanders, TrackerOffers } from "./pages/TrackerOffers";
+import { TrackerNetworks, TrackerTrafficSources } from "./pages/TrackerSources";
+import { TrackerSetup } from "./pages/TrackerSetup";
+import { TrackerLogs } from "./pages/TrackerLogs";
 import { Channels } from "./pages/Channels";
 import { Funnels } from "./pages/Funnels";
 import { Trends } from "./pages/Trends";
@@ -699,6 +702,10 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "tracker-offers" && <TrackerOffers key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} />}
         {ready && ws && tab === "tracker-landers" && <TrackerLanders key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} />}
         {ready && ws && tab === "tracker-flows" && <TrackerFlows key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
+        {ready && ws && tab === "tracker-sources" && <TrackerTrafficSources key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "tracker-networks" && <TrackerNetworks key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "tracker-setup" && <TrackerSetup key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "tracker-logs" && <TrackerLogs key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "tracking" && <WebsiteTracking key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "ideal-customers" && <IdealCustomers key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "brand-accounts" && <BrandAccounts key={ws.id} ws={ws.id} canManage={can("accounts.manage")} />}

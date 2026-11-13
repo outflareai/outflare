@@ -46,7 +46,8 @@ func (s *Server) integrationSignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	signer, ok := o.Connector.(connectors.AccountSignIn)
-	if !ok {
+	o1, isOAuth1 := o.Connector.(connectors.AccountSignInOAuth1)
+	if !ok && !isOAuth1 {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", o.Connector.Definition().Name+" has no account sign-in; connect it from Connectors")
 		return
 	}
@@ -60,6 +61,10 @@ func (s *Server) integrationSignIn(w http.ResponseWriter, r *http.Request) {
 	}
 	st, _ := json.Marshal(state)
 	sealed := base64.RawURLEncoding.EncodeToString(s.box.Seal(st, []byte(integrationStatePurpose)))
+	if isOAuth1 {
+		s.integrationSignInOAuth1(w, r, o, o1, sealed)
+		return
+	}
 	link := signer.SignInURL(o.Client, o.Creds, s.integrationRedirectURI(), sealed)
 	if pk, ok := signer.(connectors.AccountSignInPKCE); ok {
 		link = pk.SignInURLPKCE(o.Client, o.Creds, s.integrationRedirectURI(), sealed, state.Verifier)
@@ -71,9 +76,45 @@ func (s *Server) integrationSignIn(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, link, http.StatusFound)
 }
 
+// oauth1StateCookie carries an OAuth 1.0a sign-in's sealed state through
+// the provider. X matches callback URLs exactly, so the state can't ride in
+// the callback's query string as it does for OAuth 2.0; the browser that
+// started the sign-in brings it back instead.
+const oauth1StateCookie = "outflare_oauth1_state"
+
+// integrationSignInOAuth1 starts an OAuth 1.0a sign-in (X Ads): the
+// provider hands out a request token for the plain callback URL, its secret
+// is kept on the connection (sealed with its other credentials) until the
+// person comes back, and the sealed state goes in a short-lived cookie.
+func (s *Server) integrationSignInOAuth1(w http.ResponseWriter, r *http.Request, o *connectors.Opened, o1 connectors.AccountSignInOAuth1, sealed string) {
+	ctx := r.Context()
+	a := accessFrom(ctx)
+	link, tok, sec, err := o1.SignInRequest(ctx, o.Client, o.Creds, s.integrationRedirectURI())
+	if err != nil {
+		connectorError(w, r, err)
+		return
+	}
+	creds := connectors.Creds{}
+	for k, v := range o.Creds {
+		creds[k] = v
+	}
+	creds[connectors.OAuth1RequestToken], creds[connectors.OAuth1RequestSecret] = tok, sec
+	if err := s.integrations.SetCreds(ctx, s.pool, a.WorkspaceID, o.ID, "", creds); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: oauth1StateCookie, Value: sealed, Path: "/v1/integrations/oauth/callback",
+		MaxAge: 15 * 60, HttpOnly: true, Secure: s.secureCookies, SameSite: http.SameSiteLaxMode})
+	if r.URL.Query().Get("format") == "json" {
+		writeJSON(w, http.StatusOK, map[string]string{"url": link, "redirect_uri": s.integrationRedirectURI()})
+		return
+	}
+	http.Redirect(w, r, link, http.StatusFound)
+}
+
 // validReturn is an app page a sign-in may come back to.
 func validReturn(p string) bool {
-	return p == "get-started" || p == "setup" || p == "reddit" || p == "social" || p == "providers" || p == "audits" || p == "domains"
+	return p == "get-started" || p == "setup" || p == "reddit" || p == "social" || p == "providers" || p == "audits" || p == "domains" || p == "ads"
 }
 
 // finishAccountSignIn completes integrationSignIn: it trades the code for
@@ -87,13 +128,26 @@ func (s *Server) finishAccountSignIn(w http.ResponseWriter, r *http.Request, st 
 		return
 	}
 	signer, ok := o.Connector.(connectors.AccountSignIn)
-	if !ok || o.Connector.Definition().ID != st.Connector {
+	o1, isOAuth1 := o.Connector.(connectors.AccountSignInOAuth1)
+	if (!ok && !isOAuth1) || o.Connector.Definition().ID != st.Connector {
 		fail("this connection cannot sign in to an account")
 		return
 	}
 	var creds connectors.Creds
 	var account connectors.Account
-	if pk, ok := signer.(connectors.AccountSignInPKCE); ok {
+	if isOAuth1 {
+		q := r.URL.Query()
+		if q.Get("denied") != "" {
+			fail("access was not granted")
+			return
+		}
+		tok := q.Get("oauth_token")
+		if tok == "" || tok != o.Creds[connectors.OAuth1RequestToken] {
+			fail("the sign-in does not match the one started here; start again")
+			return
+		}
+		creds, account, err = o1.SignInAccess(ctx, o.Client, o.Creds, tok, o.Creds[connectors.OAuth1RequestSecret], q.Get("oauth_verifier"))
+	} else if pk, ok := signer.(connectors.AccountSignInPKCE); ok {
 		creds, account, err = pk.SignInPKCE(ctx, o.Client, o.Creds, r.URL.Query().Get("code"), s.integrationRedirectURI(), st.Verifier)
 	} else {
 		creds, account, err = signer.SignIn(ctx, o.Client, o.Creds, r.URL.Query().Get("code"), s.integrationRedirectURI())

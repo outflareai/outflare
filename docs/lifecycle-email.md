@@ -244,6 +244,17 @@ until it is sent, now or at `send_at` (within 30 days).
   basis (`audience_bases`) and plain-words `warnings`.
   `GET .../email-broadcasts/{id}/recipients?skipped=true` lists who was
   skipped and why.
+- **Who got it.** The broadcast's page has a Recipients table, one row per
+  person: the status of their email (delivered, bounced with the receiving
+  server's reply, marked as spam, not sent, skipped with why) and when it
+  was sent, delivered, first opened and first clicked, and when they
+  bounced or unsubscribed. The buttons above it list one group at a time,
+  each the people behind a number at the top of the page, and the search
+  finds a person by name or address. Rows go by name, a click opens the
+  person's email, and Download CSV saves the whole group. Over the API,
+  `GET .../email-broadcasts/{id}/recipients?show=bounced` (or `sent`,
+  `delivered`, `opened`, `clicked`, `complained`, `unsubscribed`,
+  `not_sent`, `skipped`) and `q=` do the same.
 - **Holdout.** `holdout_percent` (0 to 50, 0 by default) holds a share of
   the audience out on purpose: among the people who could get it, picked
   at random and the same way every time for the same broadcast and

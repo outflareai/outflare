@@ -349,7 +349,7 @@ func TestAutonomyAndLevers(t *testing.T) {
 	if !Saves("pause") || Saves("resume") || !Saves("exclusion_add") || Saves("alert.x") || !IsAlert("alert.auto_apply_on") {
 		t.Fatal("savings and alerts")
 	}
-	if g.Allows("keyword_split") || !g.Allows("draft_campaign") || Caps("tiktok_ads").Allows("negative_add") || !Caps("tiktok_ads").Allows("pause") || Caps("reddit_ads").Allows("pause") {
+	if g.Allows("keyword_split") || !g.Allows("draft_campaign") || Caps("tiktok_ads").Allows("negative_add") || !Caps("tiktok_ads").Allows("pause") || !Caps("reddit_ads").Allows("pause") || !Caps("x_ads").Allows("budget_down") || Caps("x_ads").Allows("negative_add") || Caps("snapchat_ads").Allows("pause") {
 		t.Fatal("capabilities")
 	}
 	e := live

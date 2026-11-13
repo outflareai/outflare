@@ -1,0 +1,62 @@
+# IPQualityScore: https://www.ipqualityscore.com/documentation/proxy-detection-api/overview
+id: ipqualityscore
+name: IPQualityScore
+category: fraud
+summary: IP reputation for tracker clicks, flagging proxies, VPNs, Tor, data centres and crawlers.
+description: Scores the address of the tracker clicks your lookup settings pick, on your own IPQualityScore account. A high fraud score or a hidden network flags the click as suspect.
+website: https://www.ipqualityscore.com/
+docs_url: https://www.ipqualityscore.com/documentation/proxy-detection-api/overview
+key_url: https://www.ipqualityscore.com/user/settings
+pricing: Free plan with monthly lookups; paid plans by volume
+publisher:
+  id: outflare
+
+base_url: https://www.ipqualityscore.com
+auth:
+  api_key:
+    fields:
+      - name: api_key
+        label: API key
+        secret: true
+        help: IPQualityScore → Account Settings → API Key.
+
+test:
+  request:
+    method: GET
+    path: /api/json/account/{{api_key}}
+  errors:
+    - when: { path: success, not: "true" }
+      message: message
+      kinds:
+        - { contains: key, kind: auth }
+        - { contains: credit, kind: quota }
+  account:
+    credits: credits
+    details:
+      usage: usage
+
+capabilities:
+  ip_score:
+    # The key goes in the IPQS-KEY header, so it stays out of URLs.
+    request:
+      method: GET
+      path: /api/json/ip
+      headers:
+        IPQS-KEY: "{{api_key}}"
+      query:
+        ip: "{{ip}}"
+        user_agent: "{{user_agent}}"
+        strictness: "1"
+    errors:
+      - when: { path: success, not: "true" }
+        message: message
+        kinds:
+          - { contains: credit, kind: quota }
+          - { contains: key, kind: auth }
+    result:
+      score: fraud_score
+      proxy: proxy
+      vpn: vpn
+      tor: tor
+      hosting: { path: connection_type, equals: Data Center }
+      crawler: is_crawler

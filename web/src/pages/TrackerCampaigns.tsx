@@ -225,17 +225,26 @@ function General({ campaign, sources, canManage, onSaved }: { campaign: Campaign
   const [name, setName] = useState(campaign.name);
   const [source, setSource] = useState(campaign.traffic_source_id ?? "");
   const [mode, setMode] = useState<RedirectMode>(campaign.redirect_mode);
+  const [costModel, setCostModel] = useState(campaign.cost.model);
+  const [amount, setAmount] = useState(campaign.cost.amount === "0" ? "" : campaign.cost.amount);
+  const [share, setShare] = useState(campaign.cost.share ? String(campaign.cost.share) : "");
+  const [costCurrency, setCostCurrency] = useState(campaign.cost.currency);
   const [domains, setDomains] = useState<number | null>(null);
   useEffect(() => {
     api.GET("/v1/brands/{brand}/tracking-domains", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) =>
       setDomains(((data?.data ?? []) as Schemas["TrackingDomain"][]).filter((d) => d.status === "verified").length),
     );
   }, []);
-  const dirty = name !== campaign.name || source !== (campaign.traffic_source_id ?? "") || mode !== campaign.redirect_mode;
+  const costDirty =
+    costModel !== campaign.cost.model || amount !== (campaign.cost.amount === "0" ? "" : campaign.cost.amount) || share !== (campaign.cost.share ? String(campaign.cost.share) : "") || costCurrency !== campaign.cost.currency;
+  const dirty = name !== campaign.name || source !== (campaign.traffic_source_id ?? "") || mode !== campaign.redirect_mode || costDirty;
   const save = async () => {
+    const cost: Record<string, unknown> = { model: costModel, currency: costCurrency };
+    if (costModel === "cpc" || costModel === "cpa") cost.amount = amount || "0";
+    if (costModel === "revshare") cost.share = Number(share) || 0;
     const { data, error } = await api.PATCH("/v1/brands/{brand}/tracking-campaigns/{id}", {
       params: { path: { brand: pickedBrandId(), id: campaign.id } },
-      body: { name, traffic_source: source, redirect_mode: mode },
+      body: { name, traffic_source: source, redirect_mode: mode, ...(costDirty ? { cost } : {}) } as never,
     });
     if (error) return toast(errorMessage(error), "error");
     toast("Campaign saved", "ok");
@@ -265,6 +274,30 @@ function General({ campaign, sources, canManage, onSaved }: { campaign: Campaign
             <p className="mt-1 text-muted-foreground">Your verified tracking domain{domains === 1 ? "" : "s"} serve{domains === 1 ? "s" : ""} this campaign's links.</p>
           )}
         </div>
+        <fieldset className="text-sm">
+          <legend>Cost model</legend>
+          <span className="block text-xs text-muted-foreground">How the tracker report works out what this campaign's clicks cost.</span>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <select aria-label="Cost model" className={field} value={costModel} disabled={!canManage} onChange={(e) => setCostModel(e.target.value as Campaign["cost"]["model"])}>
+              <option value="token">Reported by the traffic source ({"{cost}"})</option>
+              <option value="cpc">CPC: per click</option>
+              <option value="cpa">CPA: per conversion</option>
+              <option value="revshare">Revshare: share of the payout</option>
+            </select>
+            {(costModel === "cpc" || costModel === "cpa") && (
+              <>
+                <input aria-label="Cost amount" inputMode="decimal" className={`${field} w-28`} placeholder="0.05" value={amount} disabled={!canManage} onChange={(e) => setAmount(e.target.value)} />
+                <input aria-label="Cost currency" className={`${field} w-20 uppercase`} maxLength={3} placeholder="Source's" value={costCurrency} disabled={!canManage} onChange={(e) => setCostCurrency(e.target.value.toUpperCase())} />
+              </>
+            )}
+            {costModel === "revshare" && (
+              <span className="flex items-center gap-1">
+                <input aria-label="Revenue share" inputMode="decimal" className={`${field} w-20`} placeholder="50" value={share} disabled={!canManage} onChange={(e) => setShare(e.target.value)} /> % of each payout
+              </span>
+            )}
+          </div>
+          {costModel === "token" && <span className="mt-1 block text-xs text-muted-foreground">Needs the traffic source's cost parameter in the campaign URL (Tracking tab).</span>}
+        </fieldset>
         <fieldset className="text-sm">
           <legend>Redirect mode</legend>
           <div className="mt-1 grid gap-2 sm:grid-cols-2">

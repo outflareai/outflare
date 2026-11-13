@@ -1,7 +1,9 @@
 import { Button, Card, Empty } from "../../ui";
 import {
-  amountOf,
   dash,
+  invoiceOf,
+  priceOf,
+  rateLine,
   day,
   donorBy,
   money,
@@ -37,7 +39,7 @@ export function Payments({ data }: { data: PageData }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="grid gap-3 lg:grid-cols-2">
-        <Card title="Money in this period" description="Donor price only — no commission and no client total. USD and EUR are never added together. Recording a payment does not send money.">
+        <Card title="Money in this period" description="Donor price only — no commission and no client total. USD and EUR are never added together; an invoice in any other currency counts here at its US-dollar equivalent on the invoice date. Recording a payment does not send money.">
           {data.canFinanceRead ? (
             <table className="w-full text-left text-[13px]">
               <thead className="text-muted-foreground">
@@ -89,11 +91,10 @@ export function Payments({ data }: { data: PageData }) {
             <ul className="flex flex-col gap-3">
               {lostOpen.map((o) => {
                 const d = donorBy(data.donors, o.donor_profile_id);
-                const { amount, currency } = amountOf(o);
                 return (
                   <li key={o.id} className="rounded-md border p-3 text-[13px]">
                     <div className="font-medium">
-                      {shortId(o.id)} · {d?.domain ?? o.domain} · {money(amount, currency)}
+                      {shortId(o.id)} · {d?.domain ?? o.domain} · {data.canFinanceRead ? priceOf(o) : dash}
                     </div>
                     <p className="mt-1 text-muted-foreground">
                       {o.guarantee_until ? `The donor's stated term runs until ${day(o.guarantee_until)}.` : "No guarantee end date is stored."}{" "}
@@ -113,31 +114,40 @@ export function Payments({ data }: { data: PageData }) {
           )}
         </Card>
       </div>
-      <Card title="Payments ledger" description="Immutable Coverage payment rows. A credit is a new reversal row, not an edit.">
+      <Card title="Payments ledger" description="Immutable Coverage payment rows, as on the invoice and in US dollars at the mid-market rate on the invoice date. A credit is a new reversal row, not an edit. Nothing here sends money.">
         {paid.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-[13px]">
+            <table className="w-full min-w-[860px] text-left text-[13px]">
               <thead className="text-muted-foreground">
                 <tr className="border-b">
                   <th className="py-2 pr-3 font-medium">Date</th>
                   <th className="py-2 pr-3 font-medium">Order</th>
                   <th className="py-2 pr-3 font-medium">Donor</th>
                   <th className="py-2 pr-3 font-medium">Kind</th>
-                  <th className="py-2 pr-3 text-right font-medium">Amount</th>
+                  <th className="py-2 pr-3 text-right font-medium">As invoiced</th>
+                  <th className="py-2 pr-3 text-right font-medium">In USD</th>
+                  <th className="py-2 pr-3 font-medium">Rate</th>
                   <th className="py-2 pr-3 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {paid.flatMap((o) => {
                   const d = donorBy(data.donors, o.donor_profile_id);
-                  const { amount, currency } = amountOf(o);
+                  const inv = invoiceOf(o);
+                  const cells = (
+                    <>
+                      <td className="py-2 pr-3 text-right tabular-nums">{data.canFinanceRead && inv ? money(inv.amount_minor, inv.currency) : dash}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{data.canFinanceRead && inv ? money(inv.usd_amount_minor, "USD") : dash}</td>
+                      <td className="py-2 pr-3 text-[12px] text-muted-foreground">{data.canFinanceRead && inv && inv.currency !== "USD" ? rateLine(inv) : dash}</td>
+                    </>
+                  );
                   const rows = [
                     <tr key={o.id} className="cursor-pointer border-b last:border-0 hover:bg-accent/40" onClick={() => data.goSection("orders", o.id)}>
                       <td className="py-2 pr-3">{o.paid_at ? day(o.paid_at) : dash}</td>
                       <td className="py-2 pr-3 font-mono text-[12px]">{shortId(o.id)}</td>
                       <td className="py-2 pr-3">{d?.domain ?? o.domain}</td>
                       <td className="py-2 pr-3">Payment</td>
-                      <td className="py-2 pr-3 text-right tabular-nums">{data.canFinanceRead ? money(amount, currency) : dash}</td>
+                      {cells}
                       <td className="py-2 pr-3">
                         <Badge tone={statusTone[o.status]}>{statusLabel[o.status]}</Badge>
                       </td>
@@ -150,7 +160,7 @@ export function Payments({ data }: { data: PageData }) {
                         <td className="py-2 pr-3 font-mono text-[12px]">{shortId(o.id)}</td>
                         <td className="py-2 pr-3">{d?.domain ?? o.domain}</td>
                         <td className="py-2 pr-3">Credit</td>
-                        <td className="py-2 pr-3 text-right tabular-nums">{data.canFinanceRead ? money(amount, currency) : dash}</td>
+                        {cells}
                         <td className="py-2 pr-3">
                           <Badge tone="grey">Credit</Badge>
                         </td>

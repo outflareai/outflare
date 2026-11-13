@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -168,5 +169,48 @@ func TestChromeStartIsBounded(t *testing.T) {
 	}
 	if took := time.Since(start); took > 10*time.Second {
 		t.Fatalf("open took %s past a one second deadline", took)
+	}
+}
+
+// A browser that never answers is stopped and a fresh one started, so one
+// stuck launch doesn't fail the task.
+func TestChromeDriverStartsAgainWhenStuck(t *testing.T) {
+	real := FindChrome()
+	if real == "" {
+		t.Skip("no Chrome on this host")
+	}
+	dir := t.TempDir()
+	mark := filepath.Join(dir, "tried")
+	// The first launch hangs without answering; the next runs Chrome.
+	script := "#!/bin/sh\nif [ ! -e '" + mark + "' ]; then : > '" + mark + "'; exec sleep 600; fi\nexec '" + real + "' \"$@\"\n"
+	stuck := filepath.Join(dir, "chrome")
+	if err := os.WriteFile(stuck, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := startTimeout
+	startTimeout = 3 * time.Second
+	defer func() { startTimeout = old }()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	d, err := Chrome{Path: stuck}.Open(ctx, Boundary{Hosts: []string{"example.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	if _, err := os.Stat(mark); err != nil {
+		t.Fatal("the stuck launch never ran")
+	}
+
+	// Every launch stuck: Open gives up after startTries, with a clear error.
+	hang := filepath.Join(dir, "hang")
+	if err := os.WriteFile(hang, []byte("#!/bin/sh\nexec sleep 600\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if _, err := (Chrome{Path: hang}).Open(ctx, Boundary{}); err == nil || !strings.Contains(err.Error(), "no answer") {
+		t.Fatalf("all stuck: %v", err)
+	}
+	if took := time.Since(start); took > time.Duration(startTries+1)*startTimeout {
+		t.Fatalf("giving up took %s", took)
 	}
 }

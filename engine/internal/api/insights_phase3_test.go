@@ -149,10 +149,32 @@ func TestDashboardSharesAlertsAndDigest(t *testing.T) {
 	t.Cleanup(func() { cancel(); <-done })
 	check := func(wantState string, id string) map[string]any {
 		t.Helper()
+		// A check still running holds its alert's row and moves its next
+		// check, so the last round finishes before this one is queued.
+		var last int64
+		for i := 0; ; i++ {
+			var busy bool
+			if err := e.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE workspace_id = $1 AND kind = 'insight_alerts.check' AND status IN ('queued', 'running')),
+				(SELECT coalesce(max(id), 0) FROM jobs)`, ws).Scan(&busy, &last); err != nil {
+				t.Fatal(err)
+			}
+			if !busy {
+				break
+			}
+			if i == 500 {
+				t.Fatal("the last check never finished")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 		if _, err := e.pool.Exec(ctx, `UPDATE insight_alerts SET next_check_at = now() WHERE workspace_id = $1`, ws); err != nil {
 			t.Fatal(err)
 		}
-		if n, err := e.srv.QueueDueInsightAlertChecks(ctx); err != nil || n != 2 {
+		// Other tests' alerts can be due too: count this workspace's.
+		if _, err := e.srv.QueueDueInsightAlertChecks(ctx); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE workspace_id = $1 AND kind = 'insight_alerts.check' AND id > $2`, ws, last).Scan(&n); err != nil || n != 2 {
 			t.Fatalf("queued %d, %v", n, err)
 		}
 		for range 500 {

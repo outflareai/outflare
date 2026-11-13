@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Badge } from "../../ui";
-import { amountOf, dash, donorBy, money, shortId, statusLabel, statuses, type PageData } from "./shared";
+import { dash, donorBy, priceOf, shortId, statusLabel, statuses, type PageData } from "./shared";
 import { OrdersTable } from "./OrdersTable";
 import { OrderSheet } from "./OrderSheet";
 
@@ -48,7 +48,6 @@ export function Orders({ data, openId, onClose }: { data: PageData; openId?: str
                     .filter((o) => o.status === s)
                     .map((o) => {
                       const d = donorBy(data.donors, o.donor_profile_id);
-                      const { amount, currency } = amountOf(o);
                       return (
                         <button
                           key={o.id}
@@ -63,7 +62,7 @@ export function Orders({ data, openId, onClose }: { data: PageData; openId?: str
                           <div className="truncate font-mono text-[11px] text-muted-foreground">{o.target_url || dash}</div>
                           <div className="mt-1 flex items-center justify-between text-[12px]">
                             <span className="font-mono text-muted-foreground">{shortId(o.id)}</span>
-                            <b className="tabular-nums">{money(amount, currency)}</b>
+                            <b className="tabular-nums">{priceOf(o)}</b>
                           </div>
                         </button>
                       );

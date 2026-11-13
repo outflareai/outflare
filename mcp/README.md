@@ -163,6 +163,7 @@ Read (always available):
 | `list_email_templates`, `get_email_template`, `preview_email_template` | A brand's email templates and their variables; fill content with sample data without sending. Lifecycle email is one brand's: these, the topic, broadcast, email, journey and rule tools take `brand` (a handle or id) |
 | `list_email_topics` | A brand's subscription topics for lifecycle email, such as product updates |
 | `list_email_broadcasts`, `get_email_broadcast` | Lifecycle emails sent to many people at once, with results; who was skipped and why |
+| `list_email_broadcast_recipients` | Who a broadcast went to, by status (delivered, opened, bounced and so on), with when each thing happened |
 | `list_journeys`, `get_journey`, `list_journey_runs`, `list_journey_step_kinds` | If-this-then-that flows for people on customer records, what each step did, who is in them, and every kind of step a journey can have |
 | `get_journey_lift` | What a journey's random split changed against its holdout: conversions, revenue, lift and whether it is real |
 | `get_email_broadcast_lift`, `get_sequence_lift` | What a broadcast or sequence added: the people it reached against the people it held out |
@@ -467,6 +468,10 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_affiliate_network_templates` | The affiliate networks and platforms Outflare has templates for: where each takes the click id, and its postback macros |
 | `list_offers`, `get_offer`, `create_offer`, `update_offer` | The pages the brand sends tracker clicks to, with payouts by country, daily caps on clicks or conversions and a fallback offer |
 | `list_tracker_conversion_log` | Every postback and pixel call of the last 30 days, with what it sent and why it was or wasn't recorded |
+| `get_ip_lookups`, `set_ip_lookups` | The brand's IP reputation lookups on its own IPQualityScore account: on or off, which clicks, the monthly cap |
+| `list_click_filters`, `add_click_filter`, `remove_click_filter` | The brand's click filter lists (addresses, ranges, user agent pieces) that flag matching redirect clicks as suspect |
+| `list_tracker_clicks` | The brand's redirect clicks, newest first, with where each came from and went, without likely bots unless asked |
+| `list_tracker_lander_clicks` | Clicks on the brand's landers' calls to action, with the offer or page each went on to |
 | `upload_tracker_conversions` | Record conversions from a network's report, or update their status by transaction id |
 | `set_tracking_domain_fallback` | Where a redirect code that doesn't exist on a tracking domain goes, instead of a not found page |
 | `list_tracking_link_paths`, `set_tracking_link_paths` | A redirect link's rule-based paths: conditions on country, device, network, IP range, hour, first or returning visitor and custom fields, each with its own destinations; the first match wins |
@@ -752,12 +757,13 @@ Paid link orders for a brand: the donor catalog, orders, and a summary of commit
 
 | Tools | Purpose |
 | --- | --- |
-| `list_link_order_catalog`, `import_link_order_catalog` | The donor catalog. Import accepts a CSV string only; a Google Sheet is not imported. A repeated domain updates the existing profile, and a bad row does not abort the file. |
+| `list_link_order_catalog`, `import_link_order_catalog` | The donor catalog, with each site's intermediary, theme, site age and the intermediary's metrics. Import accepts a CSV string only (up to 32 MB a call; split a larger file, repeating the header); a Google Sheet is not imported. A repeated domain updates the existing profile, and a bad row does not abort the file. |
 | `list_link_orders`, `get_link_order`, `create_link_order` | List or request a paid link order against a catalog donor. |
 | `get_link_roi` | Cost per published link against stored Search Console, ranking and referring-domain changes on the target page, 30, 60 and 90 days around publication |
 | `list_link_order_targets`, `suggest_link_order_targets`, `get_link_order_target_anchors` | Article and product pages to link to: saved (ticked) targets, suggestions from stored competitor keyword gaps and competitor backlinks, and anchor options (primary from stored SE Ranking keywords; second anchor by type: brand, url, or keyword). No paid provider read. `create_link_order` takes `target_id`, the kind, and both anchors. |
 | `list_link_order_candidates`, `add_link_order_candidate_to_catalog` | Referring domains from the already-saved competitor link gap (no paid provider read; SE Ranking cannot feed this list). Add one to the catalog with source=competitor_gap. |
 | `get_link_order_equivalents` | Catalog donors in the same domain-rating band and niche, with the current donor first when it still qualifies. |
+| `find_link_order_donor_emails`, `send_link_order_donor_to_sequence` | A catalog donor's stored email addresses (people at its company, link-building check contacts, Outreach leads at the domain, addresses in the notes; no web lookup, no paid provider), and adding one to one of the brand's Outreach sequences with Outreach's usual rules (suppressed, excluded and already-enrolled addresses are skipped). |
 | `get_link_order_summary` | Counts by status, and donor amounts by currency (committed, spent, lost). |
 
 

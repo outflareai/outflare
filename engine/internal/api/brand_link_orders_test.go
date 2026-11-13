@@ -323,6 +323,14 @@ func TestLinkOrderStatusMachineAndPayGates(t *testing.T) {
 		"donor_profile_id": donor["id"], "target_url": "https://northpeak.example/page",
 	})
 	path2 := root + "/" + order2["id"].(string)
+	// A EUR quote takes the stored ECB reference rate for the invoice date
+	// (today); without one it would not be saved. The table is shared by
+	// every test, so this writes the same 1.1 the drilldown and tracker
+	// tests use (and leave in place).
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO exchange_rates (currency, day, usd_per_unit) VALUES ('EUR', current_date, 1.1)
+		ON CONFLICT (currency, day) DO UPDATE SET usd_per_unit = EXCLUDED.usd_per_unit`); err != nil {
+		t.Fatal(err)
+	}
 	owner.must(200, "POST", path2+"/quote", map[string]any{"amount_minor": 5000, "currency": "EUR"})
 	owner.must(200, "POST", path2+"/approve", nil)
 	pub2 := owner.must(200, "POST", path2+"/publish", map[string]any{"published_url": "https://donor.example/post"})

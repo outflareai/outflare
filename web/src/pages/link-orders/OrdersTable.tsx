@@ -1,5 +1,5 @@
 import { Badge } from "../../ui";
-import { amountOf, dash, donorBy, money, shortId, slotLabel, statusLabel, statusTone, type LinkOrder, type PageData } from "./shared";
+import { dash, donorBy, priceOf, shortId, slotLabel, statusLabel, statusTone, type LinkOrder, type PageData } from "./shared";
 
 export function OrdersTable({ orders, data }: { orders: LinkOrder[]; data: PageData }) {
   if (!orders.length) {
@@ -21,7 +21,6 @@ export function OrdersTable({ orders, data }: { orders: LinkOrder[]; data: PageD
         <tbody>
           {orders.map((o) => {
             const d = donorBy(data.donors, o.donor_profile_id);
-            const { amount, currency } = amountOf(o);
             return (
               <tr key={o.id} className="cursor-pointer border-b last:border-0 hover:bg-accent/40" onClick={() => data.goSection("orders", o.id)}>
                 <td className="py-2 pr-3 font-mono text-[12px]">{shortId(o.id)}</td>
@@ -34,7 +33,7 @@ export function OrdersTable({ orders, data }: { orders: LinkOrder[]; data: PageD
                 <td className="py-2 pr-3">
                   <Badge tone={statusTone[o.status]}>{statusLabel[o.status]}</Badge>
                 </td>
-                <td className="py-2 pr-3 text-right tabular-nums">{money(amount, currency)}</td>
+                <td className="py-2 pr-3 text-right tabular-nums">{priceOf(o)}</td>
               </tr>
             );
           })}

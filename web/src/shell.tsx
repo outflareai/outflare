@@ -58,6 +58,10 @@ export const tabNames: Record<Tab, string> = {
   "tracker-offers": "Offers",
   "tracker-landers": "Landers",
   "tracker-flows": "Flows",
+  "tracker-sources": "Traffic sources",
+  "tracker-networks": "Affiliate networks",
+  "tracker-setup": "Setup",
+  "tracker-logs": "Logs",
   partners: "Partners",
   funnels: "Funnels",
   trends: "Trends",
@@ -222,6 +226,10 @@ export const tabBlurbs: Record<Tab, string> = {
   tracker: "Visits, conversions, revenue, cost and profit, grouped by any level you choose and drilled into row by row.",
   "tracker-offers": "The offers your campaigns send clicks to: their network, payout by country, daily caps with a fallback, and the tracking URL.",
   "tracker-landers": "Pages before the offer: each call to action's click URL and the script for the page.",
+  "tracker-logs": "Every click, lander click, conversion and postback, newest first, and the postbacks that weren't recorded, grouped by why with the fix.",
+  "tracker-setup": "Get conversions onto the right clicks: a checklist that ticks itself, the postback URL in each network's tokens, the pixel and script, and a test conversion.",
+  "tracker-sources": "The ad networks you buy clicks from: their campaign URL parameters, and the conversions sent back to them.",
+  "tracker-networks": "The affiliate networks that pay you: each one's postback URL in its own macros, and what a repeat conversion does.",
   "tracker-flows": "Paths, landers and offers several campaigns share, changed once for all of them.",
   "tracker-campaigns": "Your tracker campaigns: the link each ad network sends clicks to, and the paths, landers, offers and weights behind it.",
   partners: "Referral, affiliate and influencer programs: paid or voluntary tasks, partner websites and channels, referral links, rewards and payouts.",
@@ -322,6 +330,10 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   "tracker-offers": "/docs/guides/analytics/",
   "tracker-landers": "/docs/guides/analytics/",
   "tracker-flows": "/docs/guides/analytics/",
+  "tracker-sources": "/docs/guides/analytics/",
+  "tracker-networks": "/docs/guides/analytics/",
+  "tracker-setup": "/docs/guides/analytics/",
+  "tracker-logs": "/docs/guides/analytics/",
   partners: "/docs/guides/partners/",
   funnels: "/docs/guides/funnels/",
   trends: "/docs/guides/trends/",
@@ -375,54 +387,70 @@ export const shortcuts: Partial<Record<Tab, string>> = { overview: "o", tools: "
 
 export type NavGroup = { label?: string; tabs: Tab[] };
 
-// The sidebar: the everyday pages, then one item per module, then the
-// company hub. A module's pages show beneath it while you are in it. A new
-// tool joins its module; a new module is one more entry here, in this
-// order: CRM, Visitors, Outreach, Presence, Deliverability, Lifecycle, SEO, AI visibility, Competitors, Social, Reviews, Paid ads,
-// Partners, Analytics, Playbooks. A module with no pages yet is left out.
+// The sidebar: the everyday pages, then one item per module under the
+// heading of what it is for. A module's pages show beneath it while you are
+// in it. A new tool joins its module; a new module is one more entry here,
+// under the heading it belongs to (moduleGroups has the order). A module
+// with no pages yet is left out, and so is a heading with no modules.
 export const everyday: Tab[] = ["overview", "inbox", "agents"];
 
-export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
+export type ModuleGroup = "customers" | "email" | "search" | "social" | "ads" | "measure" | "company";
+export const moduleGroups: { id: ModuleGroup; label: string }[] = [
+  { id: "customers", label: "Customers" },
+  { id: "email", label: "Email and outreach" },
+  { id: "search", label: "Search" },
+  { id: "social", label: "Social" },
+  { id: "ads", label: "Ads" },
+  { id: "measure", label: "Measure" },
+  { id: "company", label: "Company" },
+];
+
+export type Module = { id: string; label: string; icon: IconName; group: ModuleGroup; tabs: Tab[] };
 export const modules: Module[] = [
-  { id: "crm", label: "CRM", icon: "leads", tabs: ["crm", "people", "query", "leads", "lists", "telegram", "lead-finder", "email-finder", "suppression"] },
-  { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
-  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "news", "stories", "pr-autopilot", "allocation", "reports"] },
-  // Presence: everywhere the brand appears, what to go after next, and the
-  // publishers behind it.
-  { id: "presence", label: "Presence", icon: "coverage", tabs: ["coverage"] },
-  { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
-  { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
-  { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "seo", "backlinks", "link-orders", "link-roi"] },
+  // Customers: who they are, who is on the site, answering them, and the
+  // partners who send them.
+  { id: "crm", label: "CRM", icon: "leads", group: "customers", tabs: ["crm", "people", "query", "leads", "lists", "telegram", "lead-finder", "email-finder", "suppression"] },
+  { id: "visitors", label: "Visitors", icon: "visitors", group: "customers", tabs: ["visitors"] },
+  { id: "support", label: "Support", icon: "support", group: "customers", tabs: ["support"] },
+  { id: "partners", label: "Partners", icon: "partners", group: "customers", tabs: ["partners"] },
+  // Email and outreach: cold outreach, the mailboxes behind it, and the
+  // email customers get.
+  { id: "outreach", label: "Outreach", icon: "sequences", group: "email", tabs: ["sequences", "link-building", "link-autopilot", "news", "stories", "pr-autopilot", "allocation", "reports"] },
+  { id: "deliverability", label: "Deliverability", icon: "mailboxes", group: "email", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
+  { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", group: "email", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
+  { id: "agent-mail", label: "Agent Mail", icon: "inbox", group: "email", tabs: ["agent-mail"] },
+  // Search: where the brand is found, in search engines and AI answers,
+  // against its competitors, and everywhere else it appears.
+  { id: "seo", label: "SEO", icon: "seo", group: "search", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "seo", "backlinks", "link-orders", "link-roi"] },
   // AI visibility: how AI assistants answer the questions buyers ask, against competitors.
-  { id: "ai-visibility", label: "AI visibility", icon: "ai-visibility", tabs: ["ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings"] },
+  { id: "ai-visibility", label: "AI visibility", icon: "ai-visibility", group: "search", tabs: ["ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings"] },
   // Competitors: how the brand stands against everyone it competes with,
   // across search, AI answers, Presence and, as they arrive, social and reviews.
-  { id: "competitors", label: "Competitors", icon: "competitors", tabs: ["competition", "competitors"] },
-  { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit", "reddit-campaigns"] },
-  { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
-  { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
+  { id: "competitors", label: "Competitors", icon: "competitors", group: "search", tabs: ["competition", "competitors"] },
+  // Presence: everywhere the brand appears, what to go after next, and the
+  // publishers behind it.
+  { id: "presence", label: "Presence", icon: "coverage", group: "search", tabs: ["coverage"] },
+  { id: "social", label: "Social", icon: "social", group: "social", tabs: ["social", "reddit", "reddit-campaigns"] },
+  { id: "reviews", label: "Reviews", icon: "reviews", group: "social", tabs: ["reviews"] },
+  { id: "ads", label: "Paid ads", icon: "ads", group: "ads", tabs: ["ads"] },
   // The tracker (plans/ad-tracker-ui.md B0): the report first; campaigns,
   // offers, landers, flows and the rest join it.
-  { id: "tracker", label: "Tracker", icon: "reports", tabs: ["tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows"] },
-  { id: "partners", label: "Partners", icon: "partners", tabs: ["partners"] },
-  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["dashboards", "funnels", "trends", "retention", "paths", "channels", "outcomes", "analytics", "live", "page-speed", "tracking", "flags", "ab-tests", "links"] },
+  { id: "tracker", label: "Tracker", icon: "reports", group: "ads", tabs: ["tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs"] },
+  { id: "analytics", label: "Analytics", icon: "reports", group: "measure", tabs: ["dashboards", "funnels", "trends", "retention", "paths", "channels", "outcomes", "analytics", "live", "page-speed", "tracking", "flags", "ab-tests", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
-  { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
-  // Answering customers: the support inbox.
-  { id: "support", label: "Support", icon: "support", tabs: ["support"] },
+  { id: "playbooks", label: "Playbooks", icon: "playbooks", group: "company", tabs: ["playbooks"] },
   // What the business knows: knowledge, company context and memories, which
   // every module and agent reads.
-  { id: "knowledge", label: "Knowledge", icon: "book", tabs: ["knowledge", "help-centre", "company"] },
+  { id: "knowledge", label: "Knowledge", icon: "book", group: "company", tabs: ["knowledge", "help-centre", "company"] },
   // The company hub: its brands, their setup and who it sells to.
-  { id: "company", label: "Company", icon: "company", tabs: ["brands", "setup", "ideal-customers", "brand-accounts"] },
-  { id: "agent-mail", label: "Agent Mail", icon: "inbox", tabs: ["agent-mail"] },
+  { id: "company", label: "Company", icon: "company", group: "company", tabs: ["brands", "setup", "ideal-customers", "brand-accounts"] },
 ];
 export const moduleOf = (t: Tab) => modules.find((m) => m.tabs.includes(t));
 const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "telegram"];
+const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "telegram"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -641,10 +669,11 @@ export function Sidebar(p: SidebarProps) {
             </SidebarMenu>
           </SidebarGroup>
         )}
-        <SidebarGroup className="py-1">
-          <SidebarGroupLabel className="h-5 font-mono text-[10px] tracking-wider uppercase">Modules</SidebarGroupLabel>
+        {moduleGroups.map((g) => ({ ...g, modules: modules.filter((m) => m.group === g.id) })).filter((g) => g.modules.length > 0).map((g) => (
+        <SidebarGroup key={g.id} className="py-1 group-data-[collapsible=icon]:py-0">
+          <SidebarGroupLabel className="h-5 font-mono text-[10px] tracking-wider uppercase group-data-[collapsible=icon]:hidden">{g.label}</SidebarGroupLabel>
           <SidebarMenu className="gap-px">
-            {modules.map((m) => {
+            {g.modules.map((m) => {
               const inside = m.tabs.includes(p.tab);
               const expanded = open === m.id;
               return (
@@ -685,6 +714,7 @@ export function Sidebar(p: SidebarProps) {
             })}
           </SidebarMenu>
         </SidebarGroup>
+        ))}
       </SidebarContent>
 
       <SidebarFooter className="gap-1 border-t pt-1.5 pb-3">
@@ -1293,6 +1323,14 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Offers", path: "/v1/brands/{brand}/offers", params: brandBase, mcp: "list_offers", ask: "Which offers hit their cap today, and where are their clicks going instead?", scope: "analytics.read" };
     case "tracker-landers":
       return { title: "Landers", path: "/v1/brands/{brand}/landers", params: brandBase, mcp: "list_landers", ask: "Give me the click URLs and script for our quiz lander.", scope: "analytics.read" };
+    case "tracker-logs":
+      return { title: "Tracker clicks", path: "/v1/brands/{brand}/tracker-clicks", params: brandBase, mcp: "list_tracker_clicks", ask: "Show me the last clicks on our push campaign and whether any were flagged.", scope: "analytics.read" };
+    case "tracker-setup":
+      return { title: "Conversion log", path: "/v1/brands/{brand}/tracker-conversion-log", params: brandBase, mcp: "list_tracker_conversion_log", ask: "Why were yesterday's postbacks from our network refused?", scope: "analytics.read" };
+    case "tracker-sources":
+      return { title: "Traffic sources", path: "/v1/brands/{brand}/traffic-sources", params: brandBase, mcp: "list_traffic_sources", ask: "Set up PropellerAds as a traffic source and give me its campaign URL parameters.", scope: "analytics.read" };
+    case "tracker-networks":
+      return { title: "Affiliate networks", path: "/v1/brands/{brand}/postback-sources", params: brandBase, mcp: "list_postback_sources", ask: "Which affiliate network brought the most conversions this week?", scope: "analytics.read" };
     case "tracker-flows":
       return item
         ? { title: "One flow", path: "/v1/brands/{brand}/flows/{id}", params: { brand, id: item }, mcp: "get_flow", ask: "Which links use this flow, and which of its offers converts best?", scope: "analytics.read" }

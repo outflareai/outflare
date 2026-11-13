@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -75,7 +76,71 @@ type trackingCampaignView struct {
 	// RedirectMode is how its redirect links send people on: 302, 307,
 	// meta or double_meta. Only 302 on the shared domain.
 	RedirectMode string `json:"redirect_mode"`
-	source       *campaignSource
+	// Cost is how the tracker report works out what its clicks cost (B6).
+	Cost   campaignCost `json:"cost"`
+	source *campaignSource
+}
+
+// campaignCost is a tracker campaign's cost model: token (what the traffic
+// source reported on each click with {cost}), cpc or cpa (a fixed amount a
+// click or a conversion) or revshare (a share of each payout).
+type campaignCost struct {
+	Model    string  `json:"model"`
+	Amount   string  `json:"amount"`
+	Share    float64 `json:"share"`
+	Currency string  `json:"currency"`
+}
+
+// campaignCostInput changes a campaign's cost model; what it leaves out
+// stays.
+type campaignCostInput struct {
+	Model    *string  `json:"model"`
+	Amount   any      `json:"amount"`
+	Share    *float64 `json:"share"`
+	Currency *string  `json:"currency"`
+}
+
+// costColumns are a campaign's cost columns after in applies to cur.
+func (in *campaignCostInput) apply(cur campaignCost) (model string, amount int64, shareBP int, currency string, err error) {
+	model, currency = cur.Model, cur.Currency
+	if model == "" {
+		model = "token"
+	}
+	amount, _ = payoutMicros("", cur.Amount)
+	shareBP = int(math.Round(cur.Share * 100))
+	if in == nil {
+		return
+	}
+	if in.Model != nil {
+		if !slices.Contains([]string{"token", "cpc", "cpa", "revshare"}, *in.Model) {
+			return model, amount, shareBP, currency, errInvalid("cost.model is token, cpc, cpa or revshare")
+		}
+		model = *in.Model
+	}
+	if in.Amount != nil {
+		if amount, err = payoutMicros("cost.amount", in.Amount); err != nil {
+			return
+		}
+	}
+	if in.Share != nil {
+		if math.IsNaN(*in.Share) || *in.Share < 0 || *in.Share > 100 {
+			return model, amount, shareBP, currency, errInvalid("cost.share is a percentage of the payout, 0 to 100")
+		}
+		shareBP = int(math.Round(*in.Share * 100))
+	}
+	if in.Currency != nil {
+		currency = strings.ToUpper(strings.TrimSpace(*in.Currency))
+		if currency != "" && !currencyCode.MatchString(currency) {
+			return model, amount, shareBP, currency, errInvalid("cost.currency is a three-letter code such as USD, or \"\" for the traffic source's")
+		}
+	}
+	switch {
+	case (model == "cpc" || model == "cpa") && amount == 0:
+		err = errInvalid("cost.amount is what a " + map[string]string{"cpc": "click", "cpa": "conversion"}[model] + " costs, above 0")
+	case model == "revshare" && shareBP == 0:
+		err = errInvalid("cost.share is the percentage of each payout the traffic source takes, above 0")
+	}
+	return
 }
 
 const trackingCampaignSelect = `
@@ -84,7 +149,8 @@ const trackingCampaignSelect = `
 	       (SELECT count(*) FROM tracking_link_clicks k JOIN tracking_links l ON l.id = k.link_id WHERE l.campaign_id = c.id AND NOT k.likely_bot)::int,
 	       (SELECT count(*) FROM tracking_link_clicks k JOIN tracking_links l ON l.id = k.link_id WHERE l.campaign_id = c.id AND NOT k.likely_bot AND k.landed_at IS NOT NULL)::int,
 	       c.created_at, c.updated_at, ts.id::text, COALESCE(ts.click_id_param, ''), COALESCE(ts.click_id_token, ''),
-	       COALESCE(ts.cost_param, ''), COALESCE(ts.cost_token, ''), COALESCE(ts.parameters, '[]'), c.redirect_mode
+	       COALESCE(ts.cost_param, ''), COALESCE(ts.cost_token, ''), COALESCE(ts.parameters, '[]'), c.redirect_mode,
+	       c.cost_model, c.cost_amount_micros, c.cost_share_bp, c.cost_currency
 	FROM tracking_campaigns c
 	LEFT JOIN tracker_traffic_sources ts ON ts.id = c.traffic_source_id AND ts.workspace_id = c.workspace_id
 	WHERE c.workspace_id = $1`
@@ -93,9 +159,13 @@ func scanTrackingCampaign(row pgx.Row) (trackingCampaignView, error) {
 	var v trackingCampaignView
 	var clickParam, clickToken, costParam, costToken string
 	var params []byte
+	var amount int64
+	var shareBP int
 	err := row.Scan(&v.ID, &v.Name, &v.Slug, &v.Code, &v.Channel, &v.Source, &v.Medium, &v.BrandID, &v.ObjectKind, &v.ObjectID,
 		&v.LandingURL, &v.RedirectLinks, &v.Status, &v.Links, &v.Clicks, &v.Landed, &v.CreatedAt, &v.UpdatedAt,
-		&v.TrafficSourceID, &clickParam, &clickToken, &costParam, &costToken, &params, &v.RedirectMode)
+		&v.TrafficSourceID, &clickParam, &clickToken, &costParam, &costToken, &params, &v.RedirectMode,
+		&v.Cost.Model, &amount, &shareBP, &v.Cost.Currency)
+	v.Cost.Amount, v.Cost.Share = formatMicros(amount), float64(shareBP)/100
 	v.source = readCampaignSource(v.TrafficSourceID, clickParam, clickToken, costParam, costToken, params)
 	if err == nil && v.LandingURL != "" {
 		v.LandingLink, _ = v.campaign().Link(v.LandingURL, "")
@@ -190,6 +260,8 @@ type trackingCampaignInput struct {
 	TrafficSource *string `json:"traffic_source"`
 	// RedirectMode is 302, 307, meta or double_meta.
 	RedirectMode *string `json:"redirect_mode"`
+	// Cost changes the cost model (B6).
+	Cost *campaignCostInput `json:"cost"`
 }
 
 func checkRedirectMode(m *string) error {
@@ -305,6 +377,10 @@ func (s *Server) createTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 	if s.allocError(w, r, checkRedirectMode(in.RedirectMode)) {
 		return
 	}
+	costModel, costAmount, costShare, costCurrency, err := in.Cost.apply(campaignCost{})
+	if s.allocError(w, r, err) {
+		return
+	}
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var n int
@@ -316,11 +392,11 @@ func (s *Server) createTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 		}
 		err := tx.QueryRow(ctx, `
 			INSERT INTO tracking_campaigns (workspace_id, brand_id, name, slug, code, channel, source, medium, landing_url, created_by, redirect_links,
-				traffic_source_id, redirect_mode)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false), $12, COALESCE($13, '302'))
+				traffic_source_id, redirect_mode, cost_model, cost_amount_micros, cost_share_bp, cost_currency)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false), $12, COALESCE($13, '302'), $14, $15, $16, $17)
 			ON CONFLICT DO NOTHING RETURNING id::text`,
 			a.WorkspaceID, brand, name, slug, utm.NewCode(), ch.ID, source, ch.Medium, deref(landing), nullIfEmpty(a.ActorID), in.RedirectLinks,
-			trafficSource, in.RedirectMode).Scan(&id)
+			trafficSource, in.RedirectMode, costModel, costAmount, costShare, costCurrency).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict
 		}
@@ -395,13 +471,19 @@ func (s *Server) updateTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 	if s.allocError(w, r, checkRedirectMode(in.RedirectMode)) {
 		return
 	}
+	costModel, costAmount, costShare, costCurrency, err := in.Cost.apply(cur.Cost)
+	if s.allocError(w, r, err) {
+		return
+	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
 			UPDATE tracking_campaigns SET name = COALESCE($3, name), landing_url = COALESCE($4, landing_url),
 				brand_id = $5, status = COALESCE($6, status), redirect_links = COALESCE($7, redirect_links), traffic_source_id = $8,
-				redirect_mode = COALESCE($9, redirect_mode), updated_at = now()
+				redirect_mode = COALESCE($9, redirect_mode), cost_model = $10, cost_amount_micros = $11, cost_share_bp = $12, cost_currency = $13,
+				updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
-			a.WorkspaceID, cur.ID, name, landing, brand, in.Status, in.RedirectLinks, trafficSource, in.RedirectMode); err != nil {
+			a.WorkspaceID, cur.ID, name, landing, brand, in.Status, in.RedirectLinks, trafficSource, in.RedirectMode,
+			costModel, costAmount, costShare, costCurrency); err != nil {
 			return err
 		}
 		action := "tracking_campaign.updated"

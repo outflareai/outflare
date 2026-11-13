@@ -270,7 +270,7 @@ function LinkOrdersBrand({ ws, myId, item, can, go }: Props) {
             {section === "impact" && <Impact data={data} />}
             {section === "payments" && <Payments data={data} />}
           </div>
-          <DonorSheet donor={donor} onClose={() => setDonor(undefined)} />
+          <DonorSheet donor={donor} onClose={() => setDonor(undefined)} brand={brand} canManage={canManage} onSaved={(d) => { setDonor(d); reload(); }} />
         </>
       )}
     </>

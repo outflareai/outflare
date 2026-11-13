@@ -29,7 +29,7 @@ func TestDrilldownReport(t *testing.T) {
 		}
 		return id
 	}
-	if _, err := e.pool.Exec(ctx, `INSERT INTO exchange_rates (currency, day, usd_per_unit) VALUES ('EUR', current_date, 1.1) ON CONFLICT DO NOTHING`); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO exchange_rates (currency, day, usd_per_unit) VALUES ('EUR', current_date, 1.1) ON CONFLICT (currency, day) DO UPDATE SET usd_per_unit = EXCLUDED.usd_per_unit`); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC)

@@ -16,6 +16,7 @@ import (
 	"embed"
 	"fmt"
 	"hash/fnv"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,10 +36,66 @@ const (
 	// FastConversion is a conversion less than FastConversionWithin after
 	// its click: faster than a person fills in an offer.
 	FastConversion = "fast_conversion"
+	// FilterList is a click whose address or browser (user agent) is on
+	// one of the brand's own filter lists (B7b).
+	FilterList = "filter_list"
+	// Honeypot is a click whose lander page then followed a link no
+	// person can see or reach: the lander script's hidden link (B7b).
+	Honeypot = "honeypot"
+	// IPReputation is a click whose address the brand's own reputation
+	// provider (IPQualityScore) scored at or over the brand's threshold
+	// (B7c).
+	IPReputation = "ip_reputation"
 )
 
 // Reasons lists every reason, for documentation and validation.
-var Reasons = []string{DatacenterNetwork, RepeatClick, FastConversion}
+var Reasons = []string{DatacenterNetwork, RepeatClick, FastConversion, FilterList, Honeypot, IPReputation}
+
+// ClickFilters are a brand's filter lists: addresses and ranges, and
+// pieces of a user agent, matched without regard to case.
+type ClickFilters struct {
+	Prefixes []netip.Prefix
+	Agents   []string
+}
+
+// Empty says there is nothing to match.
+func (f ClickFilters) Empty() bool { return len(f.Prefixes) == 0 && len(f.Agents) == 0 }
+
+// Match says whether a click from addr with userAgent is on the lists. An
+// invalid addr matches no address.
+func (f ClickFilters) Match(addr netip.Addr, userAgent string) bool {
+	if addr.IsValid() {
+		addr = addr.Unmap()
+		for _, p := range f.Prefixes {
+			if p.Contains(addr) {
+				return true
+			}
+		}
+	}
+	if len(f.Agents) > 0 {
+		ua := strings.ToLower(userAgent)
+		for _, a := range f.Agents {
+			if strings.Contains(ua, a) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ParseFilterPrefix reads an address (1.2.3.4) or a range (1.2.3.0/24) as
+// a prefix.
+func ParseFilterPrefix(v string) (netip.Prefix, bool) {
+	v = strings.TrimSpace(v)
+	if p, err := netip.ParsePrefix(v); err == nil {
+		return p.Masked(), true
+	}
+	if a, err := netip.ParseAddr(v); err == nil {
+		a = a.Unmap()
+		return netip.PrefixFrom(a, a.BitLen()), true
+	}
+	return netip.Prefix{}, false
+}
 
 const (
 	RepeatClickLimit     = 10

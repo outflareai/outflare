@@ -22,14 +22,16 @@ export function registerLinkOrderTools(
     "list_link_order_catalog",
     {
       title: "List the link-order catalog",
-      description: "Donor profiles for paid link orders: domain, niches, PBN flag, and current published prices in minor units (the donor price only). Page with cursor=next_cursor.",
+      description: "Donor profiles for paid link orders: domain, niches, PBN flag, intermediary, theme, site age, the intermediary's metrics (referring domains, backlinks, keywords, outgoing links and more), current published prices in minor units (the donor price only), and direct_contact: whether the site is recommended for writing to directly, not only through the intermediary, with the rules it misses. A recommendation only; use find_link_order_donor_emails and send_link_order_donor_to_sequence to write. Page with cursor=next_cursor.",
       inputSchema: {
         brand,
         cursor: z.string().optional().describe("next_cursor from the previous page."),
         limit: z.number().int().min(1).max(200).optional(),
-        q: z.string().optional().describe("Filter by domain."),
+        q: z.string().optional().describe("Search the domain, intermediary and theme."),
         pbn: z.boolean().optional(),
         niche: z.string().optional(),
+        intermediary: z.string().optional().describe("Only sites bought through this intermediary (exact name, ignoring case)."),
+        direct_contact: z.boolean().optional().describe("true: only sites recommended for direct contact (not a PBN, DR or traffic stored, and a stored, unsuppressed address at the site's own domain); false: the rest."),
         archived: z.enum(["true", "false", "all"]).optional().describe("Default omits archived rows."),
       },
       annotations: read,
@@ -178,9 +180,43 @@ export function registerLinkOrderTools(
       ),
   );
 
+  server.registerTool(
+    "find_link_order_donor_emails",
+    {
+      title: "Find a catalog donor's stored emails",
+      description: "The email addresses already stored for a catalog donor's site: people at its company record, contacts a link-building check found on its pages, the brand's Outreach leads at the domain, and addresses in the notes (such as the intermediary's). Reads stored data only: no web lookup and no paid provider, so an empty list means nothing is stored yet. Each address says whether it is at the site's domain, suppressed, or already contacted.",
+      inputSchema: { brand, id: z.string().uuid().describe("The catalog row (donor profile) id.") },
+      annotations: read,
+    },
+    ({ brand, id }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/link-orders/catalog/items/{id}/contacts", { params: { path: { brand, id } } }),
+      ),
+  );
+
   if (readOnly) {
     return;
   }
+
+  server.registerTool(
+    "send_link_order_donor_to_sequence",
+    {
+      title: "Send a catalog donor to an Outreach sequence",
+      description: "Make an email address a lead of the brand (the donor's domain as its company) and add it to one of the brand's Outreach sequences, with the same rules as adding leads there: suppressed, excluded and already-enrolled addresses are skipped, and so is one active in another sequence. The sequence sends on its own schedule from its own mailboxes; a draft or paused one sends nothing until it is started. Needs coverage.manage and sequences.manage.",
+      inputSchema: {
+        brand,
+        id: z.string().uuid().describe("The catalog row (donor profile) id."),
+        sequence_id: z.string().uuid().describe("One of the brand's sequences."),
+        email: z.string().email().max(320),
+        name: z.string().max(200).optional().describe("The person's name, when known."),
+      },
+      annotations: write,
+    },
+    ({ brand, id, ...body }) =>
+      call(() =>
+        gtm.POST("/v1/brands/{brand}/link-orders/catalog/items/{id}/outreach", { params: { path: { brand, id } }, body }),
+      ),
+  );
 
   server.registerTool(
     "create_link_order",
@@ -217,7 +253,7 @@ export function registerLinkOrderTools(
     "import_link_order_catalog",
     {
       title: "Import the link-order catalog from CSV",
-      description: "Import a CSV string only; a Google Sheet is not imported. The first row is the header and must include domain. A repeated domain updates the existing profile. A bad row is listed in errors and does not abort the rest of the file. Amounts are the donor price only, in minor units.",
+      description: "Import a CSV string only; a Google Sheet is not imported. The first row is the header and must include a domain column. Headers are matched ignoring case and punctuation (\"Traffic / Organic\" is traffic), and an intermediary's export is read in full: intermediary, theme, site age, and metrics such as referring domains, backlinks, keywords and outgoing links. A repeated domain updates the existing profile. A bad row is listed in errors and does not abort the rest of the file; ignored_columns lists headers that were not read. Up to 32 MB per call; send a larger file as several calls that each repeat the header. price is in dollars or euros, amount_minor in cents; amounts are the donor price only.",
       inputSchema: {
         brand,
         csv: z.string().min(1).describe("The CSV file contents, including the header row."),

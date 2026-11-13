@@ -334,7 +334,7 @@ var channels = []Channel{
 		ID: "paid_ads", Name: "Paid ads", Summary: "Campaigns on the brand's own ad accounts: read results, pause, resume and set daily budgets within spend grants; the kill switch pauses every campaign.",
 		Goals: []string{"customers", "revenue"},
 		Needs: playbooks.Needs{
-			Connections: []playbooks.ConnectionNeed{capability("ads.manage", "An ad platform that can be managed", "google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads")},
+			Connections: []playbooks.ConnectionNeed{capability("ads.manage", "An ad platform that can be managed", "google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads", "reddit_ads", "x_ads")},
 			Data:        []playbooks.DataNeed{data("ad_accounts", "An ad account read from the platform")},
 		},
 		Actions: []Action{

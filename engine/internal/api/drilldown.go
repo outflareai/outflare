@@ -44,6 +44,34 @@ var drilldownDims = map[string]string{
 	"weekday": `lower(to_char(s.started_at AT TIME ZONE $tz, 'Dy'))`,
 }
 
+// drilldownTrackerDims are the dimensions of the tracker source (B5d): SQL
+// over a redirect click (k), its link (l), the link's campaign (tc) and the
+// report's time zone as $tz.
+var drilldownTrackerDims = func() map[string]string {
+	m := map[string]string{
+		"tracking_campaign": `l.campaign_id::text`, "traffic_source": `tc.traffic_source_id::text`,
+		"offer": `k.offer_id::text`, "lander": `k.lander_id::text`, "path": `k.path_id::text`, "destination": `k.destination_id::text`,
+		"country": `k.country`, "region": `k.region`, "city": `k.city`, "isp": `k.isp`, "asn": `NULLIF(k.asn, 0)::text`, "language": `k.language`,
+		"device": `k.device`, "device_brand": `k.device_brand`, "os": `k.os`, "browser": `k.browser`,
+		"suspect": `CASE WHEN cardinality(k.fraud_reasons) > 0 THEN 'yes' ELSE 'no' END`,
+		"day":     `to_char(k.clicked_at AT TIME ZONE $tz, 'YYYY-MM-DD')`, "hour": `to_char(k.clicked_at AT TIME ZONE $tz, 'HH24')`,
+		"weekday": `lower(to_char(k.clicked_at AT TIME ZONE $tz, 'Dy'))`,
+	}
+	for i := 1; i <= 20; i++ {
+		n := strconv.Itoa(i)
+		m["field"+n] = `k.fields->>'` + n + `'`
+	}
+	return m
+}()
+
+// drilldownDimsFor is the dimensions of a report's source.
+func drilldownDimsFor(source string) map[string]string {
+	if source == "tracker" {
+		return drilldownTrackerDims
+	}
+	return drilldownDims
+}
+
 // drilldownSpendDims are the dimensions spend can be split by: the ad ids
 // (one level at a time, at the matching ad entities) and the day (the ad
 // account's day, as platforms report it).
@@ -87,6 +115,7 @@ type drilldownView struct {
 	Timezone       string               `json:"timezone"`
 	Model          string               `json:"model"`
 	ConversionTime string               `json:"conversion_time"`
+	Source         string               `json:"source"`
 	Currency       string               `json:"currency"`
 	GroupBy        []string             `json:"group_by"`
 	CostAvailable  bool                 `json:"cost_available"`
@@ -119,6 +148,9 @@ type drilldownSpec struct {
 	limit    int
 	convTime string
 	columns  []drilldownColumn
+	// source is site (visits and attribution credits, the default) or
+	// tracker (redirect clicks and the click ledger's conversions, B5d).
+	source string
 }
 
 const drilldownMaxColumns = 10
@@ -160,7 +192,19 @@ func drilldownQueryValues(q url.Values) (sp drilldownSpec, err error) {
 	if len(sp.columns) > drilldownMaxColumns {
 		return sp, errInvalid("a report has at most 10 custom columns")
 	}
+	sp.source = q.Get("source")
+	switch sp.source {
+	case "":
+		sp.source = "site"
+	case "site", "tracker":
+	default:
+		return sp, errInvalid("source is site (visits, the default) or tracker (tracker clicks and their conversions)")
+	}
+	dims := drilldownDimsFor(sp.source)
 	groups = []string{"channel"}
+	if sp.source == "tracker" {
+		groups = []string{"tracking_campaign"}
+	}
 	if v := q.Get("group_by"); v != "" {
 		groups = strings.Split(v, ",")
 	}
@@ -168,8 +212,8 @@ func drilldownQueryValues(q url.Values) (sp drilldownSpec, err error) {
 		return sp, errInvalid("group_by has at most 5 levels")
 	}
 	for _, g := range groups {
-		if _, ok := drilldownDims[g]; !ok {
-			return sp, errInvalid("group_by " + g + " isn't a dimension; see the list in the API reference")
+		if _, ok := dims[g]; !ok {
+			return sp, errInvalid("group_by " + g + " isn't a dimension of the " + sp.source + " source; see the list in the API reference")
 		}
 	}
 	// Values of one dimension are OR'd; dimensions are AND'd.
@@ -177,7 +221,7 @@ func drilldownQueryValues(q url.Values) (sp drilldownSpec, err error) {
 	for _, kind := range []string{"filter", "exclude"} {
 		for _, f := range q[kind] {
 			dim, val, ok := strings.Cut(f, ":")
-			if _, known := drilldownDims[dim]; !ok || !known {
+			if _, known := dims[dim]; !ok || !known {
 				return sp, errInvalid(kind + " is dimension:value, such as country:US")
 			}
 			key := kind + ":" + dim
@@ -316,7 +360,7 @@ func (m drilldownMetricsView) sortValue(name string) float64 {
 func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drilldownSpec) (drilldownView, error) {
 	groups, filters, sortBy, desc, limit, convTime := sp.groups, sp.filters, sp.sortBy, sp.desc, sp.limit, sp.convTime
 	a := accessFrom(ctx)
-	v := drilldownView{From: f.from, To: f.to, Timezone: f.loc.String(), Model: f.ref, ConversionTime: convTime, GroupBy: groups, Rows: []*drilldownRow{}}
+	v := drilldownView{From: f.from, To: f.to, Timezone: f.loc.String(), Model: f.ref, ConversionTime: convTime, Source: sp.source, GroupBy: groups, Rows: []*drilldownRow{}}
 	if err := s.pool.QueryRow(ctx, `SELECT currency FROM brands WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, a.Brand).Scan(&v.Currency); err != nil {
 		return v, err
 	}
@@ -336,7 +380,8 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 	// The SQL for the levels, filters and grouping sets, with the time
 	// zone, workspace, brand and range as $1 to $5.
 	args := []any{f.loc.String(), a.WorkspaceID, a.Brand, f.start, f.end}
-	dim := func(name string) string { return strings.ReplaceAll(drilldownDims[name], "$tz", "$1") }
+	dims := drilldownDimsFor(sp.source)
+	dim := func(name string) string { return strings.ReplaceAll(dims[name], "$tz", "$1") }
 	var cols, sets []string
 	for i, g := range groups {
 		cols = append(cols, `COALESCE(`+dim(g)+`, '') AS d`+strconv.Itoa(i))
@@ -404,155 +449,262 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 		return out
 	}
 
-	// Visits and visitors, exactly at every level.
-	rows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, count(*), count(DISTINCT anon) FROM (
-		SELECT `+inKeys+`s.anonymous_id AS anon FROM site_sessions s
-		WHERE s.workspace_id = $2 AND s.brand_id = $3 AND s.started_at >= $4 AND s.started_at < $5 AND $1::text <> ''`+f.visitsSQL("s.")+where+`) x`+groupBy, args...)
-	if err != nil {
-		return v, err
-	}
-	for rows.Next() {
-		keys := keyDest()
-		var bits int
-		var visits, visitors int64
-		if err := rows.Scan(append(keys, &bits, &visits, &visitors)...); err != nil {
-			rows.Close()
-			return v, err
-		}
-		n := node(scanKeys(keys, bits))
-		n.Metrics.Visits, n.Metrics.Visitors = visits, visitors
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return v, err
-	}
-
-	// Conversions and revenue credited to those visits under the model,
-	// by the visit's time (default) or the conversion's.
-	cargs := append(slices.Clone(args), f.model)
-	pm := "$" + strconv.Itoa(len(cargs))
-	creditJoin := ` JOIN site_sessions s ON s.id = cr.session_id AND s.started_at >= $4 AND s.started_at < $5`
-	when := ``
-	if convTime == "conversion" {
-		creditJoin = ` LEFT JOIN site_sessions s ON s.id = cr.session_id`
-		when = ` AND c.occurred_at >= $4 AND c.occurred_at < $5`
-	}
-	j, cw := f.creditSQL()
 	withCurrency := func(sets []string) string {
 		out := " GROUP BY GROUPING SETS (" + strings.ReplaceAll(strings.Join(sets, ", "), ")", ", cur)") + ")"
 		return strings.ReplaceAll(out, "(, cur)", "(cur)")
-	}
-	crows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, cur, sum(w)::float8, sum(v)::float8 FROM (
-		SELECT `+inKeys+`c.currency AS cur, cr.weight AS w, cr.weight * c.value_minor AS v
-		FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id`+creditJoin+j+`
-		WHERE cr.workspace_id = $2 AND COALESCE(c.brand_id, outflare_first_brand(c.workspace_id)) = $3 AND cr.model = `+pm+` AND $1::text <> ''`+when+cw+where+`) x`+
-		withCurrency(sets), cargs...)
-	if err != nil {
-		return v, err
 	}
 	type money struct {
 		n        *drilldownRow
 		currency string
 		minor    float64
 	}
-	var revenue []money
-	for crows.Next() {
-		keys := keyDest()
-		var bits int
-		var currency string
-		var weight float64
-		var value *float64
-		if err := crows.Scan(append(keys, &bits, &currency, &weight, &value)...); err != nil {
-			crows.Close()
-			return v, err
-		}
-		n := node(scanKeys(keys, bits))
-		n.Metrics.Conversions += weight
-		if value != nil && currency != "" {
-			revenue = append(revenue, money{n, currency, *value})
-		}
-	}
-	crows.Close()
-	if err := crows.Err(); err != nil {
-		return v, err
-	}
-
-	// Spend, where every level and filter can split it the same way.
+	var revenue, spend []money
 	note := ""
-	adLevel := ""
-	for _, g := range groups {
-		lvl, ok := drilldownSpendDims[g]
-		switch {
-		case !ok:
-			note = "Spend can't be split by " + g + ": group by day and one ad level (ad_campaign, ad_adset or ad_ad) to see cost."
-		case lvl != "" && adLevel != "":
-			note = "Spend splits by one ad level at a time."
-		case lvl != "":
-			adLevel = lvl
-		}
-	}
-	for _, fl := range filters {
-		if _, ok := drilldownSpendDims[fl.dim]; !ok && note == "" {
-			note = "Spend can't be filtered by " + fl.dim + "."
-		}
-	}
-	var spend []money
-	if note == "" {
-		entityLevel := adLevel
-		if entityLevel == "" {
-			entityLevel = "campaign"
-		}
-		var scols []string
-		for i, g := range groups {
-			x := `e.external_id`
-			if g == "day" {
-				x = `to_char(m.day, 'YYYY-MM-DD')`
-			}
-			scols = append(scols, x+` AS d`+strconv.Itoa(i))
-		}
-		sargs := []any{a.WorkspaceID, a.Brand, f.from, f.to, entityLevel}
-		swhere := ""
-		for _, fl := range filters {
-			sargs = append(sargs, fl.values)
-			x := `e.external_id`
-			if fl.dim == "day" {
-				x = `to_char(m.day, 'YYYY-MM-DD')`
-			}
-			op := x + ` = ANY($` + strconv.Itoa(len(sargs)) + `::text[])`
-			if fl.not {
-				op = `NOT (` + op + `)`
-			}
-			swhere += ` AND ` + op
-		}
-		ssel := ""
-		if len(groups) > 0 {
-			ssel = strings.Join(scols, ", ") + ", "
-		}
-		srows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, cur, sum(v)::float8 FROM (
-			SELECT `+ssel+`a.currency AS cur, m.spend_micros AS v
-			FROM ad_metrics_daily m JOIN ad_entities e ON e.id = m.ad_entity_id JOIN ad_accounts a ON a.id = e.ad_account_id
-			WHERE e.workspace_id = $1 AND COALESCE(e.brand_id, a.brand_id) = $2 AND e.level = $5 AND m.day BETWEEN $3::date AND $4::date`+swhere+`) x`+
-			withCurrency(sets), sargs...)
+	if sp.source == "tracker" {
+		// Tracker clicks (likely bots left out) and distinct visitors by
+		// their address hash.
+		from := ` FROM tracking_link_clicks k JOIN tracking_links l ON l.id = k.link_id AND l.workspace_id = k.workspace_id
+			LEFT JOIN tracking_campaigns tc ON tc.id = l.campaign_id`
+		rows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, count(*), count(DISTINCT NULLIF(ip, '')) FROM (
+			SELECT `+inKeys+`k.ip_hash AS ip`+from+`
+			WHERE k.workspace_id = $2 AND k.brand_id = $3 AND k.clicked_at >= $4 AND k.clicked_at < $5 AND NOT k.likely_bot AND $1::text <> ''`+where+`) x`+groupBy, args...)
 		if err != nil {
 			return v, err
 		}
-		for srows.Next() {
+		for rows.Next() {
+			keys := keyDest()
+			var bits int
+			var clicks, visitors int64
+			if err := rows.Scan(append(keys, &bits, &clicks, &visitors)...); err != nil {
+				rows.Close()
+				return v, err
+			}
+			n := node(scanKeys(keys, bits))
+			n.Metrics.Visits, n.Metrics.Visitors = clicks, visitors
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return v, err
+		}
+		// The click ledger's conversions on those clicks (declined ones
+		// left out), by the click's time (default) or the conversion's.
+		when := `cv.clicked_at`
+		if convTime == "conversion" {
+			when = `cv.converted_at`
+		}
+		crows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, cur, count(*)::float8, sum(v)::float8 FROM (
+			SELECT `+inKeys+`cv.currency AS cur, cv.payout_micros AS v
+			FROM tracker_conversions cv JOIN tracking_link_clicks k ON k.id = cv.click_id AND k.workspace_id = cv.workspace_id
+			JOIN tracking_links l ON l.id = k.link_id AND l.workspace_id = k.workspace_id LEFT JOIN tracking_campaigns tc ON tc.id = l.campaign_id
+			WHERE cv.workspace_id = $2 AND cv.brand_id = $3 AND cv.status <> 'declined' AND `+when+` >= $4 AND `+when+` < $5 AND $1::text <> ''`+where+`) x`+
+			withCurrency(sets), args...)
+		if err != nil {
+			return v, err
+		}
+		for crows.Next() {
 			keys := keyDest()
 			var bits int
 			var currency string
-			var micros float64
-			if err := srows.Scan(append(keys, &bits, &currency, &micros)...); err != nil {
-				srows.Close()
+			var count, micros float64
+			if err := crows.Scan(append(keys, &bits, &currency, &count, &micros)...); err != nil {
+				crows.Close()
 				return v, err
 			}
-			spend = append(spend, money{node(scanKeys(keys, bits)), currency, micros})
+			n := node(scanKeys(keys, bits))
+			n.Metrics.Conversions += count
+			revenue = append(revenue, money{n, currency, micros / 1e6 * math.Pow10(fxrates.MinorDigits(currency))})
 		}
-		srows.Close()
-		if err := srows.Err(); err != nil {
+		crows.Close()
+		if err := crows.Err(); err != nil {
 			return v, err
 		}
+		// Cost, by each campaign's cost model (B6): per click for token
+		// (what the traffic source reported with {cost}) and cpc, per
+		// conversion for cpa and revshare. A fixed amount is in the
+		// campaign's currency, else its traffic source's, else the
+		// brand's; a share is in the payout's. It splits by every level.
+		cargs := append(slices.Clone(args), v.Currency)
+		pc := `$` + strconv.Itoa(len(cargs))
+		fixedCur := `COALESCE(NULLIF(tc.cost_currency, ''), ts.currency, ` + pc + `)`
+		costQueries := []string{
+			`SELECT ` + inKeys + `CASE WHEN tc.cost_model = 'cpc' THEN ` + fixedCur + ` ELSE COALESCE(ts.currency, ` + pc + `) END AS cur,
+				CASE WHEN tc.cost_model = 'cpc' THEN tc.cost_amount_micros WHEN COALESCE(tc.cost_model, 'token') = 'token' THEN k.cost_micros ELSE 0 END AS v` + from + `
+			LEFT JOIN tracker_traffic_sources ts ON ts.id = tc.traffic_source_id
+			WHERE k.workspace_id = $2 AND k.brand_id = $3 AND k.clicked_at >= $4 AND k.clicked_at < $5 AND NOT k.likely_bot
+			  AND $1::text <> ''` + where,
+			`SELECT ` + inKeys + `CASE WHEN tc.cost_model = 'cpa' THEN ` + fixedCur + ` ELSE cv.currency END AS cur,
+				CASE WHEN tc.cost_model = 'cpa' THEN tc.cost_amount_micros ELSE cv.payout_micros * tc.cost_share_bp / 10000 END AS v
+			FROM tracker_conversions cv JOIN tracking_link_clicks k ON k.id = cv.click_id AND k.workspace_id = cv.workspace_id
+			JOIN tracking_links l ON l.id = k.link_id AND l.workspace_id = k.workspace_id JOIN tracking_campaigns tc ON tc.id = l.campaign_id
+			LEFT JOIN tracker_traffic_sources ts ON ts.id = tc.traffic_source_id
+			WHERE cv.workspace_id = $2 AND cv.brand_id = $3 AND cv.status <> 'declined' AND tc.cost_model IN ('cpa', 'revshare')
+			  AND ` + when + ` >= $4 AND ` + when + ` < $5 AND $1::text <> ''` + where,
+		}
+		for _, q := range costQueries {
+			srows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, cur, sum(v)::float8 FROM (`+q+`) x WHERE v > 0`+withCurrency(sets), cargs...)
+			if err != nil {
+				return v, err
+			}
+			for srows.Next() {
+				keys := keyDest()
+				var bits int
+				var currency string
+				var micros float64
+				if err := srows.Scan(append(keys, &bits, &currency, &micros)...); err != nil {
+					srows.Close()
+					return v, err
+				}
+				spend = append(spend, money{node(scanKeys(keys, bits)), currency, micros})
+			}
+			srows.Close()
+			if err := srows.Err(); err != nil {
+				return v, err
+			}
+		}
+		if len(spend) == 0 {
+			note = "No cost on these clicks: give the campaigns a cost model (CPC, CPA or revshare), or add the traffic source's {cost} token to its campaign URL."
+			v.CostNote = &note
+		}
 	} else {
-		v.CostNote = &note
+		// Visits and visitors, exactly at every level.
+		rows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, count(*), count(DISTINCT anon) FROM (
+			SELECT `+inKeys+`s.anonymous_id AS anon FROM site_sessions s
+			WHERE s.workspace_id = $2 AND s.brand_id = $3 AND s.started_at >= $4 AND s.started_at < $5 AND $1::text <> ''`+f.visitsSQL("s.")+where+`) x`+groupBy, args...)
+		if err != nil {
+			return v, err
+		}
+		for rows.Next() {
+			keys := keyDest()
+			var bits int
+			var visits, visitors int64
+			if err := rows.Scan(append(keys, &bits, &visits, &visitors)...); err != nil {
+				rows.Close()
+				return v, err
+			}
+			n := node(scanKeys(keys, bits))
+			n.Metrics.Visits, n.Metrics.Visitors = visits, visitors
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return v, err
+		}
+
+		// Conversions and revenue credited to those visits under the model,
+		// by the visit's time (default) or the conversion's.
+		cargs := append(slices.Clone(args), f.model)
+		pm := "$" + strconv.Itoa(len(cargs))
+		creditJoin := ` JOIN site_sessions s ON s.id = cr.session_id AND s.started_at >= $4 AND s.started_at < $5`
+		when := ``
+		if convTime == "conversion" {
+			creditJoin = ` LEFT JOIN site_sessions s ON s.id = cr.session_id`
+			when = ` AND c.occurred_at >= $4 AND c.occurred_at < $5`
+		}
+		j, cw := f.creditSQL()
+		crows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, cur, sum(w)::float8, sum(v)::float8 FROM (
+			SELECT `+inKeys+`c.currency AS cur, cr.weight AS w, cr.weight * c.value_minor AS v
+			FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id`+creditJoin+j+`
+			WHERE cr.workspace_id = $2 AND COALESCE(c.brand_id, outflare_first_brand(c.workspace_id)) = $3 AND cr.model = `+pm+` AND $1::text <> ''`+when+cw+where+`) x`+
+			withCurrency(sets), cargs...)
+		if err != nil {
+			return v, err
+		}
+		for crows.Next() {
+			keys := keyDest()
+			var bits int
+			var currency string
+			var weight float64
+			var value *float64
+			if err := crows.Scan(append(keys, &bits, &currency, &weight, &value)...); err != nil {
+				crows.Close()
+				return v, err
+			}
+			n := node(scanKeys(keys, bits))
+			n.Metrics.Conversions += weight
+			if value != nil && currency != "" {
+				revenue = append(revenue, money{n, currency, *value})
+			}
+		}
+		crows.Close()
+		if err := crows.Err(); err != nil {
+			return v, err
+		}
+
+		// Spend, where every level and filter can split it the same way.
+		adLevel := ""
+		for _, g := range groups {
+			lvl, ok := drilldownSpendDims[g]
+			switch {
+			case !ok:
+				note = "Spend can't be split by " + g + ": group by day and one ad level (ad_campaign, ad_adset or ad_ad) to see cost."
+			case lvl != "" && adLevel != "":
+				note = "Spend splits by one ad level at a time."
+			case lvl != "":
+				adLevel = lvl
+			}
+		}
+		for _, fl := range filters {
+			if _, ok := drilldownSpendDims[fl.dim]; !ok && note == "" {
+				note = "Spend can't be filtered by " + fl.dim + "."
+			}
+		}
+		if note == "" {
+			entityLevel := adLevel
+			if entityLevel == "" {
+				entityLevel = "campaign"
+			}
+			var scols []string
+			for i, g := range groups {
+				x := `e.external_id`
+				if g == "day" {
+					x = `to_char(m.day, 'YYYY-MM-DD')`
+				}
+				scols = append(scols, x+` AS d`+strconv.Itoa(i))
+			}
+			sargs := []any{a.WorkspaceID, a.Brand, f.from, f.to, entityLevel}
+			swhere := ""
+			for _, fl := range filters {
+				sargs = append(sargs, fl.values)
+				x := `e.external_id`
+				if fl.dim == "day" {
+					x = `to_char(m.day, 'YYYY-MM-DD')`
+				}
+				op := x + ` = ANY($` + strconv.Itoa(len(sargs)) + `::text[])`
+				if fl.not {
+					op = `NOT (` + op + `)`
+				}
+				swhere += ` AND ` + op
+			}
+			ssel := ""
+			if len(groups) > 0 {
+				ssel = strings.Join(scols, ", ") + ", "
+			}
+			srows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, cur, sum(v)::float8 FROM (
+				SELECT `+ssel+`a.currency AS cur, m.spend_micros AS v
+				FROM ad_metrics_daily m JOIN ad_entities e ON e.id = m.ad_entity_id JOIN ad_accounts a ON a.id = e.ad_account_id
+				WHERE e.workspace_id = $1 AND COALESCE(e.brand_id, a.brand_id) = $2 AND e.level = $5 AND m.day BETWEEN $3::date AND $4::date`+swhere+`) x`+
+				withCurrency(sets), sargs...)
+			if err != nil {
+				return v, err
+			}
+			for srows.Next() {
+				keys := keyDest()
+				var bits int
+				var currency string
+				var micros float64
+				if err := srows.Scan(append(keys, &bits, &currency, &micros)...); err != nil {
+					srows.Close()
+					return v, err
+				}
+				spend = append(spend, money{node(scanKeys(keys, bits)), currency, micros})
+			}
+			srows.Close()
+			if err := srows.Err(); err != nil {
+				return v, err
+			}
+		} else {
+			v.CostNote = &note
+		}
+
 	}
 	v.CostAvailable = note == ""
 

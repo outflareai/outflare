@@ -42,8 +42,17 @@ func FindChrome() string {
 	return ""
 }
 
-// startTimeout bounds starting a browser, as withDeadline bounds each step.
-const startTimeout = 30 * time.Second
+// startTimeout bounds one try at starting a browser, as withDeadline
+// bounds each step. Chrome normally answers within a second or two; one
+// that hasn't answered in startTimeout is stuck, not slow, so it is
+// stopped and a fresh one gets one more try (startTries). Tests shorten it.
+var startTimeout = 20 * time.Second
+
+// startTries is how many fresh browsers Open starts before it gives up.
+const startTries = 2
+
+// errNoAnswer is a browser that never answered within startTimeout.
+var errNoAnswer = errors.New("no answer")
 
 type chromeDriver struct {
 	ctx    context.Context
@@ -62,6 +71,27 @@ func (c Chrome) Open(ctx context.Context, b Boundary) (Driver, error) {
 	if path == "" {
 		return nil, errors.New("no Chrome or Chromium on this host (set OUTFLARE_BROWSER to its path)")
 	}
+	var err error
+	for try := 1; try <= startTries; try++ {
+		var d *chromeDriver
+		d, err = c.start(ctx, path, b)
+		if err == nil {
+			return d, nil
+		}
+		if !errors.Is(err, errNoAnswer) || ctx.Err() != nil {
+			break
+		}
+	}
+	if errors.Is(err, errNoAnswer) {
+		return nil, fmt.Errorf("starting the browser: no answer within %s, %d times", startTimeout, startTries)
+	}
+	return nil, err
+}
+
+// start launches one browser and turns on request interception. A
+// browser that doesn't answer within startTimeout is stopped and the
+// error wraps errNoAnswer, so Open can try a fresh one.
+func (c Chrome) start(ctx context.Context, path string, b Boundary) (*chromeDriver, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(path),
 		chromedp.NoSandbox,
@@ -109,7 +139,7 @@ func (c Chrome) Open(ctx context.Context, b Boundary) (Driver, error) {
 		return nil, fmt.Errorf("starting the browser: %w", ctx.Err())
 	case <-timer.C:
 		d.cancel()
-		return nil, fmt.Errorf("starting the browser: no answer within %s", startTimeout)
+		return nil, fmt.Errorf("starting the browser: %w within %s", errNoAnswer, startTimeout)
 	}
 	target := chromedp.FromContext(bctx).Target
 	go func() {
@@ -130,6 +160,9 @@ func (c Chrome) Open(ctx context.Context, b Boundary) (Driver, error) {
 	defer stop()
 	if _, err := cdp.Call(ectx, target, fetch.Enable, fetch.EnableParams{Patterns: []*fetch.RequestPattern{{URLPattern: "*", RequestStage: fetch.RequestStageRequest}}}); err != nil {
 		d.cancel()
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("%w: %w", errNoAnswer, err)
+		}
 		return nil, fmt.Errorf("intercepting requests: %w", err)
 	}
 	return d, nil

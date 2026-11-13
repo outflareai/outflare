@@ -127,13 +127,15 @@ func freshEnvWith(t *testing.T, change func(*api.Options)) *env {
 	t.Cleanup(ma.Close)
 	ga := httptest.NewServer(fakeGoogleAds{})
 	t.Cleanup(ga.Close)
+	iq := httptest.NewServer(fakeIPQS{})
+	t.Cleanup(iq.Close)
 	wpFake, ghostFake = &fakeWordPress{}, &fakeGhost{}
 	wps := httptest.NewServer(wpFake)
 	t.Cleanup(wps.Close)
 	ghs := httptest.NewServer(ghostFake)
 	t.Cleanup(ghs.Close)
 	integrations := &connectors.Store{Pool: pool, Box: box, Registry: catalog.New(),
-		Client: &connectors.Client{BaseURLs: map[string]string{"zerobounce": zb.URL, "smartlead": sl.URL, "emailbison": eb.URL, "claude": cl.URL, "plausible": pl.URL, "dataforseo": dfs.URL, "geonode": gn.URL, "seranking": ser.URL, "meta_ads": ma.URL, "google_ads": ga.URL, "google_ads.datamanager": ga.URL, "wordpress": wps.URL, "ghost": ghs.URL}}}
+		Client: &connectors.Client{BaseURLs: map[string]string{"zerobounce": zb.URL, "smartlead": sl.URL, "emailbison": eb.URL, "claude": cl.URL, "plausible": pl.URL, "dataforseo": dfs.URL, "geonode": gn.URL, "seranking": ser.URL, "meta_ads": ma.URL, "google_ads": ga.URL, "google_ads.datamanager": ga.URL, "wordpress": wps.URL, "ghost": ghs.URL, "ipqualityscore": iq.URL}}}
 	send.Platforms = integrations
 	tokens.Integrations = integrations
 	importer := &imports.Service{Pool: pool, Store: integrations, Log: log}

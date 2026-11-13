@@ -668,6 +668,13 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			plat.Loop(ctx, time.Minute)
 		}()
+		// Tracker clicks' IP reputation lookups, on each brand's own
+		// connection (B7c).
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunIPLookups(ctx, 5*time.Second)
+		}()
 		// Outflare's agent takes the due turns of agent runs.
 		wg.Add(1)
 		go func() {
@@ -1054,6 +1061,11 @@ func housekeeping(ctx context.Context, log *slog.Logger, s *api.Server, logReten
 			log.Error("prune tracker conversion log", "err", err)
 		} else if n > 0 {
 			log.Info("pruned the tracker conversion log", "deleted", n)
+		}
+		if n, err := s.PruneClickAddresses(ctx); err != nil && ctx.Err() == nil {
+			log.Error("prune tracker click addresses", "err", err)
+		} else if n > 0 {
+			log.Info("deleted tracker click addresses over 30 days old", "deleted", n)
 		}
 		if n, err := s.PruneInboundWebhookIDs(ctx); err != nil && ctx.Err() == nil {
 			log.Error("prune inbound webhook ids", "err", err)

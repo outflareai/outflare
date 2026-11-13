@@ -1,6 +1,8 @@
 import { Card } from "../../ui";
 import {
-  amountOf,
+  priceOf,
+  bothAmounts,
+  quotedOf,
   committedStatuses,
   donorBy,
   liveStatuses,
@@ -62,8 +64,7 @@ function alerts(data: PageData): { tone: "red" | "amber" | "grey"; text: string;
   const replacements = new Set(data.orders.map((o) => o.replaces_order_id).filter(Boolean) as string[]);
   for (const o of data.orders) {
     const d = donorBy(data.donors, o.donor_profile_id);
-    const { amount, currency } = amountOf(o);
-    const price = money(amount, currency);
+    const price = priceOf(o);
     if (o.status === "lost" && !replacements.has(o.id) && !o.credit_payment_id) {
       const term = o.guarantee_until ? ` The donor's term runs until ${new Date(o.guarantee_until).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}.` : "";
       out.push({
@@ -116,7 +117,7 @@ function nextSteps(data: PageData): string[] {
   }
   for (const o of data.orders) {
     if ((o.status === "quoted" || o.status === "negotiating") && o.quoted_amount_minor != null) {
-      steps.push(`Approve or renegotiate ${shortId(o.id)} (${o.domain}, ${money(o.quoted_amount_minor, o.quoted_currency)}) against the ${o.quoted_currency} budget.`);
+      steps.push(`Approve or renegotiate ${shortId(o.id)} (${o.domain}, ${bothAmounts(quotedOf(o))}) against the ${o.quoted_currency} budget.`);
     }
   }
   for (const o of data.orders) {

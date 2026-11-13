@@ -38,6 +38,7 @@ const (
 	CategoryModel        = "model"        // AI models that plan and run missions
 	CategorySocial       = "social"       // Reddit, X, LinkedIn, Engain: find posts and act on them
 	CategoryCMS          = "cms"          // WordPress, Ghost: publish posts and pages on the brand's site
+	CategoryFraud        = "fraud"        // IP reputation lookups for tracker clicks, on the workspace's own key
 	CategoryMessaging    = "messaging"    // Telegram: the company's own chat accounts, read into the CRM
 	// Anything else: a generic HTTP API or an MCP server registered by the
 	// workspace, so the long tail needs no code in the engine.
@@ -54,6 +55,7 @@ const (
 // Capabilities a connector can have. Other slices add their own.
 const (
 	CapVerify          = "verify"           // implements Verifier
+	CapIPScore         = "ip.score"         // implements IPScorer
 	CapImportCampaigns = "import.campaigns" // implements Importer
 	CapImportLeads     = "import.leads"
 	CapImportMailboxes = "import.mailboxes"
@@ -77,6 +79,27 @@ type AccountSignIn interface {
 	// new credentials and the account.
 	SignIn(ctx context.Context, cl *Client, creds Creds, code, redirectURI string) (Creds, Account, error)
 }
+
+// AccountSignInOAuth1 is an account sign-in through the workspace's own
+// app over OAuth 1.0a (X Ads): the server asks the provider for a request
+// token with its callback, sends the person to the consent page, and on
+// the way back trades the request token and the verifier for the
+// account's access token.
+type AccountSignInOAuth1 interface {
+	// SignInRequest returns the consent page and the request token and
+	// its secret, which the server keeps until the person comes back.
+	SignInRequest(ctx context.Context, cl *Client, creds Creds, callback string) (link, token, secret string, err error)
+	// SignInAccess trades them for the connection's new credentials and
+	// the account.
+	SignInAccess(ctx context.Context, cl *Client, creds Creds, token, secret, verifier string) (Creds, Account, error)
+}
+
+// Credentials an OAuth 1.0a sign-in keeps on the connection between the
+// request and the person coming back.
+const (
+	OAuth1RequestToken  = "oauth1_request_token"
+	OAuth1RequestSecret = "oauth1_request_secret"
+)
 
 // Status of a connector in the catalog.
 const (
@@ -206,7 +229,7 @@ func KindFor(d Definition) string {
 	switch d.Category {
 	case CategoryAnalytics, CategoryAds:
 		return KindSplit
-	case CategoryModel, CategoryNotification, CategoryData, CategorySignals, CategoryVerification, CategoryDNS, CategoryRegistrar, CategorySEO, CategoryMailbox:
+	case CategoryModel, CategoryNotification, CategoryData, CategorySignals, CategoryVerification, CategoryDNS, CategoryRegistrar, CategorySEO, CategoryMailbox, CategoryFraud:
 		return KindShared
 	}
 	return KindBrand
@@ -573,6 +596,27 @@ type Verification struct {
 	Score      *int   `json:"score,omitempty"`      // 0–100 when the provider gives one
 	// The provider's own status words, kept for people who know them.
 	ProviderStatus string `json:"provider_status"`
+}
+
+// IPScore is one address's reputation, in provider-neutral terms: a risk
+// score and the kinds of network it comes from.
+type IPScore struct {
+	// Score is 0 (clean) to 100 (fraud) when the provider gives one.
+	Score *int `json:"score,omitempty"`
+	// Proxy, VPN and Tor: the address hides another; Hosting: a data
+	// centre or cloud network; Crawler: a known bot.
+	Proxy   bool `json:"proxy"`
+	VPN     bool `json:"vpn"`
+	Tor     bool `json:"tor"`
+	Hosting bool `json:"hosting"`
+	Crawler bool `json:"crawler"`
+}
+
+// IPScorer looks up an address's reputation. Each call spends the
+// workspace's own credits with the provider.
+type IPScorer interface {
+	Connector
+	ScoreIP(ctx context.Context, c *Client, creds Creds, ip, userAgent string) (IPScore, error)
 }
 
 // Verifier checks email addresses. Verify spends the provider's credits.

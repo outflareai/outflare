@@ -96,6 +96,10 @@ func (k *call) post(ctx context.Context, u string, body, out any) error {
 	return k.do(ctx, http.MethodPost, u, body, out)
 }
 
+func (k *call) patch(ctx context.Context, u string, body, out any) error {
+	return k.do(ctx, http.MethodPatch, u, body, out)
+}
+
 // ---- values ----
 
 // maxPages stops paging that never ends.

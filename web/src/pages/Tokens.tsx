@@ -124,7 +124,7 @@ export function Tokens({ ws, open, setOpen, go }: { ws: string; open?: string; s
                   <span className="font-medium">{t.name}</span>
                   <span className="font-mono text-[11px] text-muted-foreground">{t.prefix}…</span>
                   {byId(t.brand_id) && <Badge title={`Only ${byId(t.brand_id)!.name}`}>{byId(t.brand_id)!.name}</Badge>}
-                  {t.action_gate && <Badge tone="blue" title="Its changes go through the action layer">Agent</Badge>}
+                  {t.action_gate && <Badge tone="blue" title="Its changes follow the rules on the Agents page">Agent</Badge>}
                 </span>
               ),
             },
@@ -280,8 +280,8 @@ function TokenSheet({ ws, teams, token: t, onClose, onDone, onRevoked }: { ws: s
           <label className="flex items-start gap-2 rounded-lg border px-3 py-2.5">
             <input type="checkbox" className="mt-0.5" checked={actionGate} onChange={(e) => setActionGate(e.target.checked)} />
             <span>
-              <span className="block font-medium">It's an agent: send its changes through the action layer</span>
-              <span className="block text-[12px] text-muted-foreground">Each change it makes runs, waits for a person or is refused, by the grants you set on the Agents page. A new agent starts out asking for everything, and never needs a mission.</span>
+              <span className="block font-medium">It's an agent: its changes follow your rules</span>
+              <span className="block text-[12px] text-muted-foreground">Each change it makes runs, waits for a person or is refused, by the rules you set on the Agents page. A new agent starts out asking for everything, and never needs a mission.</span>
             </span>
           </label>
 
