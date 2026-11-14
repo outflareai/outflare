@@ -25,11 +25,11 @@ func TestExperiments(t *testing.T) {
 	svc := &experiments.Service{Pool: e.pool, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 
 	var site, bare, gsc string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, host, start_url, verify_token) VALUES ($1, 'www.acme.example', 'https://www.acme.example/', 'tok')
+	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, host, start_url, verify_token, brand_id) VALUES ($1, 'www.acme.example', 'https://www.acme.example/', 'tok', outflare_first_brand($1::uuid))
 		RETURNING id::text`, ws).Scan(&site); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, host, start_url, verify_token) VALUES ($1, 'blog.northpeak.example', 'https://blog.northpeak.example/', 'tok')
+	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, host, start_url, verify_token, brand_id) VALUES ($1, 'blog.northpeak.example', 'https://blog.northpeak.example/', 'tok', outflare_first_brand($1::uuid))
 		RETURNING id::text`, ws).Scan(&bare); err != nil {
 		t.Fatal(err)
 	}

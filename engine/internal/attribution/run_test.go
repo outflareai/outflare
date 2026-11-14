@@ -48,8 +48,8 @@ func TestTickCreditsConversions(t *testing.T) {
 	ws := q(`INSERT INTO workspaces (name, slug) VALUES ('Attribution', 'at-' || substr(gen_random_uuid()::text, 1, 8)) RETURNING id::text`)
 	q(`INSERT INTO brands (workspace_id, name, handle, website) VALUES ($1, 'Northpeak', 'northpeak', 'https://northpeak.example') RETURNING id::text`, ws)
 	rec := q(`INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana') RETURNING id::text`, ws)
-	camp := q(`INSERT INTO tracking_campaigns (workspace_id, code, slug, name, channel, source, medium)
-		VALUES ($1, substr(md5(random()::text), 1, 10), 'spring-launch', 'Spring launch', 'organic_social', 'linkedin', 'social') RETURNING id::text`, ws)
+	camp := q(`INSERT INTO tracking_campaigns (workspace_id, code, slug, name, channel, source, medium, brand_id)
+		VALUES ($1, substr(md5(random()::text), 1, 10), 'spring-launch', 'Spring launch', 'organic_social', 'linkedin', 'social', outflare_first_brand($1::uuid)) RETURNING id::text`, ws)
 	code := q(`SELECT upper(code) FROM tracking_campaigns WHERE id = $1`, camp)
 
 	now := time.Now()

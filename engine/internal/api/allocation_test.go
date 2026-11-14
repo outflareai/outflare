@@ -138,6 +138,14 @@ func TestAllocationTeamsSendersAndTokenLimits(t *testing.T) {
 	owner.must(400, "POST", base+"/teams", map[string]any{"name": "finance"})
 	ana := owner.must(201, "POST", base+"/senders", map[string]any{"name": "Ana Smith", "kind": "person", "team_ids": []string{fin}})["id"].(string)
 
+	// A sender carries the profile its mailboxes use.
+	prof := owner.must(200, "PATCH", base+"/senders/"+ana, map[string]any{"first_name": " Ana ", "last_name": "Smith", "photo_url": "https://cdn.acme.test/ana.png", "signature_html": "<b>Ana</b>"})
+	if prof["first_name"] != "Ana" || prof["photo_url"] != "https://cdn.acme.test/ana.png" || prof["signature_html"] != "<b>Ana</b>" || prof["name"] != "Ana Smith" {
+		t.Fatalf("profile: %v", prof)
+	}
+	owner.must(400, "PATCH", base+"/senders/"+ana, map[string]any{"photo_url": "http://cdn.acme.test/ana.png"})
+	owner.must(400, "PATCH", base+"/senders/"+ana, map[string]any{"first_name": "Ana\nSmith"})
+
 	// Matches come from the display name only, and need confirming.
 	m := owner.must(200, "GET", base+"/senders/matches", nil)
 	matches := m["data"].([]any)

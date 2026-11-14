@@ -90,6 +90,12 @@ export function page(name: string) {
 // without a request. Names are object.verb in the past tense, like the
 // server's; add new ones to this list (AGENTS.md, "Events").
 export type UiEvent =
+  | "ui.sales_section_opened"
+  | "ui.sales_filter_changed"
+  | "ui.sales_source_opened"
+  | "ui.sales_personal_settings_opened"
+  | "ui.sales_dialog_opened"
+  | "ui.sales_template_editor_opened"
   | "ui.ads_level_opened" // paid ads narrowed to one network or account, or widened (level)
   | "ui.ads_window_changed" // Paid ads: the attribution window switched (days)
   | "ui.ads_customers_filter_changed" // Paid ads: the customers switch changed (customers: all, new, returning)
@@ -178,7 +184,7 @@ export type UiEvent =
   | "ui.partners_filtered" // a program's partner list filtered (filter: payout_details, value: missing or all)
   | "ui.partners_searched" // a search started on a program's partner list (sort); never the search text
   | "ui.partners_sorted" // a program's partner list sorted (sort: newest, oldest, name, code, clicks, customers, sales, balance, paid)
-  | "ui.partner_opened" // a partner's page opened (from: list, record, search when a whole partner id is pasted in the list's search, rewards or conversions from a row's partner link, proof from a proof's Open payouts)
+  | "ui.partner_opened" // a partner's page opened (from: list, record, search when a whole partner id is pasted in the list's search, rewards, conversions or review from a row's partner link, proof from a proof's Open payouts)
   | "ui.partner_tab_opened" // a tab of a partner's page opened (tab: referrals, conversions, rewards, payouts, activity)
   | "ui.partner_proof_opened" // a reward's proof trail opened in its drawer (from: program or partner)
   | "ui.partner_proof_link_followed" // the proof drawer switched to another reward (to: reversed_by, reverses, or back)

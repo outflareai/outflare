@@ -53,6 +53,7 @@ const platforms: { id: string; name: string }[] = [
   { id: "apple_ads", name: "Apple Ads" },
   { id: "amazon_ads", name: "Amazon Ads" },
   { id: "pinterest_ads", name: "Pinterest Ads" },
+  { id: "chatgpt_ads", name: "ChatGPT Ads" },
 ];
 export const platformName = (id: string) => platforms.find((p) => p.id === id)?.name ?? id;
 
@@ -111,7 +112,7 @@ const pct = (v: number | null | undefined) => (v === null || v === undefined ? "
 const roas = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v.toFixed(2)}×`);
 
 // The platforms whose campaigns Outflare can change (connectors.AdsManager).
-const manageable = new Set(["google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads", "reddit_ads", "x_ads"]);
+const manageable = new Set(["google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads", "reddit_ads", "x_ads", "chatgpt_ads"]);
 
 // The page's screens, as the item in its URL (the overview has none): the
 // six of plans/paid-ads first, then the older tabs in a second row.

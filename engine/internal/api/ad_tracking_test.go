@@ -12,7 +12,7 @@ func TestAdTrackingTemplates(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 
 	all := owner.must(200, "GET", base+"/ads/tracking-templates", nil)["data"].([]any)
-	if len(all) != 14 {
+	if len(all) != 15 {
 		t.Fatalf("%d networks", len(all))
 	}
 	tiktok := owner.must(200, "GET", base+"/ads/tracking-templates?network=tiktok", nil)["data"].([]any)

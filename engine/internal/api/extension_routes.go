@@ -27,6 +27,10 @@ type WorkspaceRoute struct {
 	// Handler serves the request. Brand-limited callers are let in, so it
 	// keeps them to their brands with Caller.Sees and Caller.Writes.
 	Handler func(w http.ResponseWriter, r *http.Request, c *Caller)
+	// Brand puts the route under /v1/brands/{brand}/...: the engine finds
+	// the brand's workspace, answers 404 to a caller who can't see the
+	// brand, and sets Caller.Brand.
+	Brand bool
 }
 
 // Caller is who is making a workspace request, and what they may do.
@@ -42,6 +46,9 @@ type Caller struct {
 	Role string
 	// Brands limits the caller to some brands; nil is every brand.
 	Brands []string
+	// Brand is the brand a brand route is on (WorkspaceRoute.Brand), and
+	// empty on a workspace route.
+	Brand string
 	// Test is true in a test workspace.
 	Test bool
 
@@ -51,7 +58,7 @@ type Caller struct {
 
 func (s *Server) callerOf(a *access) *Caller {
 	return &Caller{WorkspaceID: a.WorkspaceID, ActorID: a.ActorID, ActorType: a.ActorType, UserID: a.personID(),
-		Role: a.Role, Brands: a.Brands, Test: a.Test, a: a, s: s}
+		Role: a.Role, Brands: a.Brands, Brand: a.Brand, Test: a.Test, a: a, s: s}
 }
 
 // Has reports whether the caller has a scope.
@@ -191,9 +198,13 @@ func WriteJSON(w http.ResponseWriter, status int, v any) { writeJSON(w, status, 
 func (s *Server) routesExtensions(mux *http.ServeMux) {
 	for _, rt := range s.workspaceRoutes {
 		h := rt.Handler
-		next := s.inBrand(rt.Scope, func(w http.ResponseWriter, r *http.Request) {
+		serve := func(w http.ResponseWriter, r *http.Request) {
 			h(w, r, s.callerOf(accessFrom(r.Context())))
-		})
+		}
+		next := s.inBrand(rt.Scope, serve)
+		if rt.Brand {
+			next = s.onBrand(rt.Scope, serve)
+		}
 		mux.HandleFunc(rt.Pattern, func(w http.ResponseWriter, r *http.Request) {
 			noteExtension(r)
 			next(w, r)

@@ -55,8 +55,8 @@ func TestAdKeywordSuggestions(t *testing.T) {
 	exec(`DELETE FROM ad_keyword_metrics_daily WHERE workspace_id = $1`, ws)
 	term := func(text string, spend, clicks int64, conv float64) {
 		t.Helper()
-		exec(`INSERT INTO ad_search_terms_daily (workspace_id, ad_account_id, ad_group_id, day, term, currency, spend_micros, clicks, conversions)
-			VALUES ($1, $2, $3, current_date - 3, $4, 'EUR', $5, $6, $7)`, ws, acct, group, text, spend, clicks, conv)
+		exec(`INSERT INTO ad_search_terms_daily (workspace_id, ad_account_id, ad_group_id, day, term, currency, spend_micros, clicks, conversions, brand_id)
+			VALUES ($1, $2, $3, current_date - 3, $4, 'EUR', $5, $6, $7, outflare_first_brand($1::uuid))`, ws, acct, group, text, spend, clicks, conv)
 	}
 	term("acme crm for agencies", 25_000_000, 60, 3) // 60 clicks, converts at 8.33 under the target of 10: a keyword
 	term("free crm download", 60_000_000, 14, 0)     // 14 clicks, six targets, nothing: a negative

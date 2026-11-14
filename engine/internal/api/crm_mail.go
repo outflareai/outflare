@@ -20,6 +20,7 @@ import (
 
 func (s *Server) routesCRMMail(mux *http.ServeMux) {
 	s.routesCRMGoogle(mux)
+	s.routesCRMMailSend(mux)
 	base := "/v1/brands/{brand}/crm/mail/"
 	mux.HandleFunc("GET "+base+"policy", s.onBrand(auth.ScopeMembersManage, s.getCRMMailConfig))
 	mux.HandleFunc("PUT "+base+"policy", s.onBrand(auth.ScopeMembersManage, s.putCRMMailConfig))
@@ -28,6 +29,7 @@ func (s *Server) routesCRMMail(mux *http.ServeMux) {
 		mux.HandleFunc("PUT "+base+path, s.onBrand(auth.ScopeCustomersManage, s.putCRMMailConfig))
 	}
 	mux.HandleFunc("GET "+base+"records/{record}/messages", s.onBrand(auth.ScopeCustomersRead, s.listCRMMail))
+	mux.HandleFunc("GET "+base+"records/{record}/meetings", s.onBrand(auth.ScopeCustomersRead, s.listCRMMeetings))
 	mux.HandleFunc("POST "+base+"records/{record}/messages", s.onBrand(auth.ScopeCustomersManage, s.importCRMMail))
 	mux.HandleFunc("DELETE "+base+"messages", s.onBrand(auth.ScopeCustomersManage, s.clearCRMMail))
 	mux.HandleFunc("DELETE "+base+"messages/{id}", s.onBrand(auth.ScopeCustomersManage, s.deleteCRMMail))

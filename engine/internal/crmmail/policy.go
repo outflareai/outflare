@@ -114,6 +114,10 @@ type Message struct {
 	VisibleParticipants []string  `json:"visible_participants"`
 	OwnerEmail          string    `json:"owner_email"`
 	OccurredAt          time.Time `json:"occurred_at"`
+	// MessageID and References (RFC 5322, without angle brackets) thread a
+	// reply sent as the owner; mail captured before they were kept has none.
+	MessageID  string   `json:"message_id,omitempty"`
+	References []string `json:"references,omitempty"`
 }
 
 func Parse(raw string, owner string) (Message, error) {
@@ -157,6 +161,7 @@ func Parse(raw string, owner string) (Message, error) {
 		return out, fmt.Errorf("raw could not be read")
 	}
 	out.Subject, out.Body, out.OwnerEmail, out.OccurredAt = parsed.Subject, parsed.Body, owner, parsed.Date
+	out.MessageID, out.References = strings.Trim(parsed.MessageID, "<>"), parsed.References
 	if out.OccurredAt.IsZero() {
 		out.OccurredAt = time.Now().UTC()
 	}

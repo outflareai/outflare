@@ -308,6 +308,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_saved_queries`, `get_saved_query`, `run_saved_query`, `save_query` | Queries saved in Query Studio for one brand (`brand`): find them, read their SQL and versions, run one (read-only, the same rules as `run_query`), and save SQL as a new query or a new version of one (private, or shared with the brand; needs `customers.manage`) |
 | `list_query_endpoints`, `run_query_endpoint` | See a brand's published query endpoints, and call one with its parameters (a brand token with `query.endpoints`) |
 | `get_catalog` | Everything a brand's customer records can hold: record types (person, account and the brand's own, starting with Deal), their fields, the option lists and product events. Each brand has its own catalog (`brand` is a handle or id). Read it before writing records |
+| `import_sales_lead` | Import a qualified Sales conversation into brand-scoped CRM with stable source and EmailBison references; never sends mail |
 | `get_crm_summary` | Brand relationship counts, overdue tasks, pipeline by currency and stale open deals |
 | `list_crm_activities`, `create_crm_activity`, `update_crm_activity`, `delete_crm_activity` | Read and manage record-linked tasks and notes in one brand |
 | `list_crm_views`, `create_crm_view`, `update_crm_view`, `delete_crm_view` | Personal and shared CRM views, with creator-only editing |
@@ -444,6 +445,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `log_partner_fee`, `adjust_partner_balance` | Log a fixed fee (an influencer's post) or correct what a partner is owed |
 | `report_partner_conversion` | Report a lead, sale or refund the way the workspace's backend does |
 | `approve_partner_reward`, `reject_partner_reward`, `bulk_partner_rewards`, `fulfil_partner_reward` | Approve or reject a held reward, or many at once (by id, program or partner), or mark an action reward done |
+| `list_partner_flags`, `clear_partner_flag`, `confirm_partner_flag` | The partner fraud review queue: flagged conversions whose rewards wait, cleared (rewards go on) or confirmed (pending rewards rejected, optionally suspending the partner) |
 | `list_partner_import_sources` | The programs in the connected Tolt account, to pick one for an import (`suggested` is the one taken when none is named) |
 | `switch_over_partner_program` | The day Tolt stops paying a program: its imported commissions are approved and paid here from then on (never before, so nobody is paid twice) |
 | `start_partner_import` | Bring a Tolt program in with the workspace's own Tolt key, as often as needed until switch-over day |

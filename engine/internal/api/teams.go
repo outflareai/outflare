@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -305,6 +306,10 @@ type senderView struct {
 	TeamIDs   []string  `json:"team_ids"`
 	Mailboxes int       `json:"mailboxes"`
 	CreatedAt time.Time `json:"created_at"`
+	FirstName string    `json:"first_name"`
+	LastName  string    `json:"last_name"`
+	PhotoURL  string    `json:"photo_url"`
+	Signature string    `json:"signature_html"`
 }
 
 func (s *Server) loadSenders(ctx context.Context, ws, brand string, id *string) ([]senderView, error) {
@@ -312,7 +317,7 @@ func (s *Server) loadSenders(ctx context.Context, ws, brand string, id *string) 
 		SELECT sn.id, sn.name, sn.kind, sn.user_id, sn.status,
 		       COALESCE((SELECT array_agg(team_id::text ORDER BY team_id) FROM sender_teams WHERE sender_id = sn.id), '{}'),
 		       (SELECT count(*) FROM mailboxes WHERE sender_id = sn.id AND sender_confirmed_at IS NOT NULL)::int,
-		       sn.created_at
+		       sn.created_at, sn.first_name, sn.last_name, sn.photo_url, sn.signature_html
 		FROM senders sn WHERE sn.workspace_id = $1 AND sn.brand_id = $3 AND ($2::uuid IS NULL OR sn.id = $2) ORDER BY lower(sn.name)`, ws, id, brand)
 	if err != nil {
 		return nil, err
@@ -343,6 +348,11 @@ type senderInput struct {
 	UserID  optional[string] `json:"user_id"`
 	Status  *string          `json:"status"`
 	TeamIDs []string         `json:"team_ids"`
+	// Profile applied to the sender's mailboxes.
+	FirstName *string `json:"first_name"`
+	LastName  *string `json:"last_name"`
+	PhotoURL  *string `json:"photo_url"`
+	Signature *string `json:"signature_html"`
 }
 
 func (in *senderInput) validate() error {
@@ -366,6 +376,23 @@ func (in *senderInput) validate() error {
 			return errInvalid("team_ids must be team ids")
 		}
 	}
+	for _, f := range []*string{in.FirstName, in.LastName} {
+		if f != nil {
+			*f = strings.TrimSpace(*f)
+			if len(*f) > 200 || strings.ContainsAny(*f, "\r\n") {
+				return errInvalid("first_name and last_name are at most 200 characters on one line")
+			}
+		}
+	}
+	if in.PhotoURL != nil {
+		*in.PhotoURL = strings.TrimSpace(*in.PhotoURL)
+		if u, err := url.Parse(*in.PhotoURL); *in.PhotoURL != "" && (err != nil || u.Scheme != "https" || u.Host == "" || len(*in.PhotoURL) > 2048) {
+			return errInvalid("photo_url must be an https URL")
+		}
+	}
+	if in.Signature != nil && len(*in.Signature) > 10000 {
+		return errInvalid("signature_html is at most 10000 characters")
+	}
 	return nil
 }
 
@@ -381,8 +408,11 @@ func (in *senderInput) save(ctx context.Context, tx pgx.Tx, ws, brand, id string
 	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE senders SET name = COALESCE($3, name), kind = COALESCE($4, kind),
-			user_id = CASE WHEN $5 THEN $6::uuid ELSE user_id END, status = COALESCE($7, status), updated_at = now()
-		WHERE id = $1 AND workspace_id = $2 AND brand_id = $8`, id, ws, in.Name, in.Kind, in.UserID.Set, in.UserID.Value, in.Status, brand)
+			user_id = CASE WHEN $5 THEN $6::uuid ELSE user_id END, status = COALESCE($7, status),
+			first_name = COALESCE($9, first_name), last_name = COALESCE($10, last_name),
+			photo_url = COALESCE($11, photo_url), signature_html = COALESCE($12, signature_html), updated_at = now()
+		WHERE id = $1 AND workspace_id = $2 AND brand_id = $8`, id, ws, in.Name, in.Kind, in.UserID.Set, in.UserID.Value, in.Status, brand,
+		in.FirstName, in.LastName, in.PhotoURL, in.Signature)
 	if isUnique(err) {
 		return errInvalid("the brand has a sender with that name")
 	}

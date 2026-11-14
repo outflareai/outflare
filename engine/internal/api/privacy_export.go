@@ -495,7 +495,7 @@ type exportSource struct {
 func privacyExportSources() []exportSource {
 	var out []exportSource
 	for _, ref := range slices.Concat(customers.Follows, customers.Owned) {
-		if ref.Table == "privacy_exports" || ref.Table == "crm_mail_messages" || ref.Table == "crm_mail_sharing" || ref.Table == "crm_mail_capture_targets" {
+		if ref.Table == "privacy_exports" || ref.Table == "crm_mail_messages" || ref.Table == "crm_mail_sharing" || ref.Table == "crm_mail_capture_targets" || ref.Table == "crm_calendar_events" || ref.Table == "crm_mail_sends" {
 			continue
 		}
 		i := slices.IndexFunc(out, func(s exportSource) bool { return s.table == ref.Table })

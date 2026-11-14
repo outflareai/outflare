@@ -60,12 +60,12 @@ func TestDigests(t *testing.T) {
 
 	// Something to say: an open error on a site.
 	var site string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, host, start_url, verify_token) VALUES ($1, 'acme.example', 'https://acme.example/', 'tok')
+	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, host, start_url, verify_token, brand_id) VALUES ($1, 'acme.example', 'https://acme.example/', 'tok', outflare_first_brand($1::uuid))
 		RETURNING id::text`, ws).Scan(&site); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.pool.Exec(ctx, `INSERT INTO fixes (workspace_id, source, subject_type, subject_id, rule, severity, group_key, count, unit)
-		VALUES ($1, 'seo_audit', 'seo_site', $2, 'title_missing', 'error', '/blog/*', 12, 'pages')`, ws, site); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO fixes (workspace_id, source, subject_type, subject_id, rule, severity, group_key, count, unit, brand_id)
+		VALUES ($1, 'seo_audit', 'seo_site', $2, 'title_missing', 'error', '/blog/*', 12, 'pages', outflare_first_brand($1::uuid))`, ws, site); err != nil {
 		t.Fatal(err)
 	}
 	p := owner.must(200, "GET", base+"/digests/preview?frequency=daily", nil)

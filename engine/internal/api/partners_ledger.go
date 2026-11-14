@@ -767,7 +767,7 @@ func (s *Server) RunPartnerRewards(ctx context.Context) {
 func (s *Server) approveDuePartnerRewards(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx, `SELECT w.workspace_id::text, w.id::text, w.hold_until FROM partner_rewards w
 		JOIN partner_programs p ON p.id = w.program_id JOIN partner_memberships m ON m.id = w.membership_id
-		WHERE w.status = 'pending' AND w.hold_until <= now() AND COALESCE(w.auto_approve, p.auto_approve) AND m.status = 'active' AND NOT `+heldAtSource+`
+		WHERE w.status = 'pending' AND w.hold_until <= now() AND COALESCE(w.auto_approve, p.auto_approve) AND m.status = 'active' AND NOT `+heldAtSource+` AND NOT `+openFlagOn+`
 		ORDER BY w.hold_until LIMIT $1`, partnerApproveBatch)
 	if err != nil {
 		return err

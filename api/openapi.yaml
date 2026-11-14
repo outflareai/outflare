@@ -56,6 +56,567 @@ servers:
   - url: http://localhost:8080
     description: Local self-hosted instance
 paths:
+  /v1/brands/{brand}/sales/queue-seen:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+    post:
+      operationId: markSalesQueueSeen
+      summary: Mark the shared new-lead queue seen for this person
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "200":
+          description: Read state saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - seen
+                properties:
+                  seen:
+                    type: boolean
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/brands/{brand}/sales/me:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+    get:
+      operationId: getSalesMe
+      summary: Get my Sales role and email connection
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.read
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesMember"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updateSalesIntroduction
+      summary: Save my introduction
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesMember"
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                introduction:
+                  type: string
+                  maxLength: 1000
+              required:
+                - introduction
+  /v1/brands/{brand}/sales/team:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+    get:
+      operationId: listSalesTeam
+      summary: List the Sales team
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.read
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SalesMember"
+                required:
+                  - data
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/brands/{brand}/sales/team/{user}:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+      - in: path
+        name: user
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      operationId: setSalesRole
+      summary: Set a member Sales role
+      tags:
+        - records
+      x-outflare-access:
+        scope: members.manage
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesMember"
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum:
+                    - sdr
+                    - ae
+                    - manager
+                    - none
+              required:
+                - role
+  /v1/brands/{brand}/sales/leads:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+    get:
+      operationId: listSalesLeads
+      summary: List a Sales queue
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.read
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesLeadList"
+        default:
+          $ref: "#/components/responses/Error"
+      parameters:
+        - $ref: "#/components/parameters/Fields"
+        - in: query
+          name: queue
+          schema:
+            type: string
+            enum:
+              - new
+              - mine
+              - inbox
+              - handoffs
+              - all
+        - in: query
+          name: state
+          schema:
+            type: string
+            enum:
+              - new
+              - active
+              - customer
+              - archived
+        - in: query
+          name: person
+          description: Only leads owned by, taken by, or handed to this Sales teammate. Queue access still applies.
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: cursor
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+  /v1/brands/{brand}/sales/leads/{id}:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getSalesLead
+      summary: Read a Sales conversation
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.read
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesLeadDetail"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/brands/{brand}/sales/leads/{id}/actions:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: actOnSalesLead
+      summary: Change Sales ownership or outcome
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesLead"
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SalesAction"
+  /v1/brands/{brand}/sales/leads/{id}/draft:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      operationId: saveSalesDraft
+      summary: Save an editable personal reply draft
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesDraft"
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SalesDraftInput"
+  /v1/brands/{brand}/sales/leads/{id}/send:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: sendSalesReply
+      summary: Queue a saved personal reply
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued:
+                    type: boolean
+                  message_id:
+                    type: string
+                    format: uuid
+                required:
+                  - queued
+                  - message_id
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                draft_id:
+                  type: string
+                  format: uuid
+              required:
+                - draft_id
+  /v1/brands/{brand}/sales/templates:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+    get:
+      operationId: listSalesTemplates
+      summary: List my email templates
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.read
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SalesTemplate"
+                required:
+                  - data
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createSalesTemplate
+      summary: Create a personal email template
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesTemplate"
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SalesTemplateInput"
+  /v1/brands/{brand}/sales/templates/{id}:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      operationId: updateSalesTemplate
+      summary: Version or archive a personal email template
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesTemplate"
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SalesTemplateInput"
+  /v1/brands/{brand}/sales/bridge:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+    post:
+      operationId: importSalesLead
+      summary: Import a source conversation into Sales
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesLead"
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SalesBridgeInput"
+  /v1/brands/{brand}/sales/mail/authorize:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+    post:
+      operationId: authorizeSalesGoogle
+      summary: Authorize sending and receiving for my email
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+                required:
+                  - url
+                  - expires_at
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/brands/{brand}/sales/mail/connection:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+    delete:
+      operationId: disconnectSalesGoogle
+      summary: Disconnect my Sales email
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.read
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+                required:
+                  - deleted
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/brands/{brand}/sales/mail/sync:
+    parameters:
+      - $ref: "#/components/parameters/BrandID"
+    post:
+      operationId: syncSalesGoogle
+      summary: Queue a catch-up of my Sales email
+      tags:
+        - records
+      x-outflare-access:
+        scope: customers.manage
+        brand: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued:
+                    type: boolean
+                required:
+                  - queued
+        "202":
+          $ref: "#/components/responses/MissionHeld"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sales/google/callback:
+    get:
+      operationId: finishSalesGoogle
+      summary: Finish personal Sales send and receive authorization
+      tags: [records]
+      x-outflare-access:
+        signed_in: true
+      responses:
+        "302":
+          description: Return to Sales email setup
+        default:
+          $ref: "#/components/responses/Error"
   /healthz:
     get:
       operationId: getHealth
@@ -40850,6 +41411,101 @@ paths:
                   next_cursor: { $ref: "#/components/schemas/NextCursor" }
         "400": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/partner-flags:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandPartnerFlags
+      x-outflare-access: { scope: partners.read, brand: true }
+      summary: List the fraud review queue, newest first
+      description: |
+        Scope: partners.read. Each credited lead or sale is checked for partner fraud signals, with the same
+        thresholds in every program: shared_identity (the partner's and the customer's records share an email,
+        phone or user id), payout_matches_customer (the partner's payout details contain the customer's email),
+        repeat_click (10 or more clicks from one address on the partner's links within a day of the click that
+        brought the customer), many_signups_one_ip (3 or more of the partner's referrals in 30 days came through
+        clicks from one address), fast_conversion (under 10 seconds after its click) and refund_rate (30% or more
+        of the partner's sales refunded in 90 days, from 5 sales), plus the fraud reasons of the tracker click that
+        brought the customer (datacenter_network, filter_list, honeypot, ip_reputation). Each one found is a flag;
+        the conversion's rewards wait while a flag on it is open, even past their hold. held_cents is the partner's
+        pending cash on the conversion.
+      tags: [partners]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, cleared, confirmed] } }
+        - { name: partner_id, in: query, schema: { type: string, format: uuid } }
+        - { name: program, in: query, description: "A program's id or slug.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Flags.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerFlag" } }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/partner-flags/{id}/clear:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: clearBrandPartnerFlag
+      x-outflare-access: { scope: partners.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Clear a fraud flag
+      description: "Scope: partners.manage. The signal was nothing: once no other flag on the conversion is open, its rewards go on as usual (approved when their hold ends, in a program that approves on its own)."
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 2000, description: "Why, for the record." }
+      responses:
+        "200":
+          description: The flag.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerFlag" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/partner-flags/{id}/confirm:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: confirmBrandPartnerFlag
+      x-outflare-access: { scope: partners.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Confirm a fraud flag
+      description: "Scope: partners.manage. The conversion was fraud: every open flag on it is confirmed and its pending rewards, for both sides, are rejected with the reason. With suspend_partner, the partner is suspended too. Rewards already approved stay; correct them with an adjustment."
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 2000, description: "Why, for the record and the rejected rewards' reason." }
+                suspend_partner: { type: boolean, default: false }
+      responses:
+        "200":
+          description: The flag.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerFlag" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/partner-leads:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     get:
@@ -47618,6 +48274,83 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CRMMailCapture'
+  /v1/brands/{brand}/crm/mail/sends:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    post:
+      operationId: sendMyCRMMail
+      tags: [CRM]
+      summary: Send an email from your own mailbox
+      description: |
+        Scope: customers.manage, from your own signed-in session (never a token). The one way every module sends an
+        email as a person (ADR 15). The recipients pass the outbound policy check, the send runs in a job, and the sent
+        email is kept on the record like captured mail. in_reply_to is a captured email you can see; the reply goes in
+        its thread. Your mailbox must be connected; through Google Workspace it needs gmail.send delegated to the
+        connection. Poll GET .../sends/{send} for the outcome.
+      x-outflare-access: { scope: customers.manage, brand: true }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [record_id, to, subject, body]
+              properties:
+                record_id: { type: string, format: uuid, description: The contact or company the email is about; the sent email is kept on it. }
+                to: { type: array, items: { type: string }, minItems: 1, maxItems: 20 }
+                cc: { type: array, items: { type: string }, maxItems: 19 }
+                subject: { type: string, maxLength: 500 }
+                body: { type: string, description: Plain text, at most 200 KB. }
+                in_reply_to: { type: string, format: uuid, description: A captured email's id to reply in its thread. }
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema: { oneOf: [{ $ref: "#/components/schemas/CRMMailSend" }, { $ref: "#/components/schemas/MissionHeld" }] }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/crm/mail/sends/{send}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: send, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getMyCRMMailSend
+      tags: [CRM]
+      summary: One of your sends and how it went
+      description: Scope customers.read, from your own signed-in session.
+      x-outflare-access: { scope: customers.read, brand: true }
+      responses:
+        "200":
+          description: The send.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CRMMailSend" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/crm/mail/records/{record}/meetings:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: record, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listCRMRecordMeetings
+      tags: [CRM]
+      summary: Meetings from members' calendars on a record that you may see
+      description: |
+        Scope: customers.read, from your own signed-in session. Meetings read from members' own calendars through the
+        Google Workspace connection follow the same rules as their email: your own, those shared with you (who and
+        when, or in full with the title and guests), and under team sharing those the AI check found to be about work.
+        Events the calendar marks private are never kept. Newest first, up to 100.
+      x-outflare-access: { scope: customers.read, brand: true }
+      responses:
+        "200":
+          description: The meetings you may see.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/CRMCalendarMeeting" } }
+        default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/crm/mail/records/{record}/messages:
     get:
       operationId: listCRMRecordMail
@@ -50853,6 +51586,42 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_flag.raised:
+    post:
+      operationId: webhook_partner_flag_raised
+      summary: "A credited partner conversion was flagged for fraud review, and its rewards wait until someone clears or confirms the flag. data has program_id, partner_id, conversion_id, signal (shared_identity, payout_matches_customer, repeat_click, many_signups_one_ip, fast_conversion, refund_rate, or a reason of the tracker click that brought the customer) and detail (counts and thresholds)."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_flag.cleared:
+    post:
+      operationId: webhook_partner_flag_cleared
+      summary: "A fraud flag was cleared: the conversion's rewards go on as usual once no other flag on it is open. data has program_id, partner_id, conversion_id and signal."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_flag.confirmed:
+    post:
+      operationId: webhook_partner_flag_confirmed
+      summary: "A fraud flag was confirmed: every open flag on the conversion is confirmed and its pending rewards are rejected. data has program_id, partner_id, conversion_id, signal, rejected (how many rewards) and suspended (whether the partner was suspended)."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
   partner_payout.created:
     post:
       operationId: webhook_partner_payout_created
@@ -51363,6 +52132,441 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/MissionHeld" }
   schemas:
+    SalesMember:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          type: string
+          enum:
+            - sdr
+            - ae
+            - manager
+            - none
+        introduction:
+          type: string
+        connected:
+          type: boolean
+        mail_status:
+          type: string
+        last_synced_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        open_leads:
+          type: integer
+      required:
+        - user_id
+        - name
+        - role
+        - introduction
+        - connected
+        - mail_status
+        - open_leads
+    SalesTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        version_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        name:
+          type: string
+        body:
+          type: string
+        archived:
+          type: boolean
+      required:
+        - id
+        - version_id
+        - version
+        - name
+        - body
+        - archived
+    SalesTemplateInput:
+      type: object
+      properties:
+        version:
+          type: integer
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        body:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        archived:
+          type: boolean
+      required:
+        - name
+        - body
+    SalesDraft:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+        body:
+          type: string
+        template_version_id:
+          type:
+            - string
+            - "null"
+        resolved_text:
+          type: string
+      required:
+        - id
+        - revision
+        - body
+        - resolved_text
+    SalesDraftInput:
+      type: object
+      properties:
+        revision:
+          type: integer
+        body:
+          type: string
+          maxLength: 20000
+        template_id:
+          type: string
+          format: uuid
+        discard_template:
+          type: boolean
+      required:
+        - revision
+        - body
+    SalesMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum:
+            - incoming
+            - outgoing
+        kind:
+          type: string
+        status:
+          type: string
+        from:
+          type: string
+        to:
+          type: array
+          items:
+            type: string
+        cc:
+          type: array
+          items:
+            type: string
+        subject:
+          type: string
+        body:
+          type: string
+        message_id:
+          type: string
+        in_reply_to:
+          type: string
+        references:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        draft_id:
+          type:
+            - string
+            - "null"
+        provider_id:
+          type: string
+        thread_id:
+          type: string
+      required:
+        - direction
+        - from
+        - to
+        - subject
+        - body
+        - occurred_at
+    SalesMessagePreview:
+      type: object
+      description: A bounded excerpt of a recorded message in a lead the caller can read.
+      properties:
+        body: { type: string, maxLength: 1200 }
+        direction: { type: string, enum: [incoming, outgoing] }
+        kind: { type: string }
+        occurred_at: { type: string, format: date-time }
+      required: [body, direction, kind, occurred_at]
+    SalesLeadActivity:
+      type: object
+      properties:
+        action: { type: string }
+        actor_id: { type: [string, "null"] }
+        actor_role: { type: string }
+        occurred_at: { type: string, format: date-time }
+      required: [action, actor_id, actor_role, occurred_at]
+    SalesLead:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        record_id:
+          type: string
+          format: uuid
+        source:
+          type: string
+        source_id:
+          type: string
+        state:
+          type: string
+          enum:
+            - new
+            - active
+            - customer
+            - archived
+        owner_id:
+          type:
+            - string
+            - "null"
+        sdr_id:
+          type:
+            - string
+            - "null"
+        ae_id:
+          type:
+            - string
+            - "null"
+        name:
+          type: string
+        email:
+          type: string
+        company:
+          type: string
+        job_title:
+          type: string
+          description: Current job title from the canonical person record.
+        website:
+          type: string
+          description: Current company or person website from CRM attributes.
+        linkedin_url:
+          type: string
+          description: Current LinkedIn link from the canonical person record.
+        latest_message:
+          $ref: "#/components/schemas/SalesMessagePreview"
+        latest_reply:
+          $ref: "#/components/schemas/SalesMessagePreview"
+        last_activity:
+          anyOf:
+            - $ref: "#/components/schemas/SalesLeadActivity"
+            - type: "null"
+        version:
+          type: integer
+        note:
+          type: string
+        amount_minor:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        currency:
+          type: string
+        unread:
+          type: boolean
+        reply_state:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        introduced_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        introduced_by:
+          type:
+            - string
+            - "null"
+        confirmed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        confirmed_by:
+          type:
+            - string
+            - "null"
+      required:
+        - id
+        - record_id
+        - source
+        - source_id
+        - state
+        - version
+        - name
+        - email
+        - company
+        - note
+        - amount_minor
+        - currency
+        - unread
+        - reply_state
+        - created_at
+        - updated_at
+    SalesLeadDetail:
+      type: object
+      properties:
+        lead:
+          $ref: "#/components/schemas/SalesLead"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/SalesMessage"
+        draft:
+          anyOf:
+            - $ref: "#/components/schemas/SalesDraft"
+            - type: "null"
+        events:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              action:
+                type: string
+              actor_id:
+                type:
+                  - string
+                  - "null"
+              actor_role:
+                type: string
+              occurred_at:
+                type: string
+                format: date-time
+            required:
+              - id
+              - action
+              - actor_role
+              - occurred_at
+      required:
+        - lead
+        - messages
+        - draft
+        - events
+    SalesAction:
+      type: object
+      properties:
+        action:
+          type: string
+          enum:
+            - take
+            - handoff
+            - archive
+            - reopen
+            - confirm_customer
+            - details
+            - read
+            - retry_send
+        message_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        assignee_id:
+          type: string
+          format: uuid
+        body:
+          type: string
+          maxLength: 20000
+        note:
+          type: string
+          maxLength: 20000
+        amount_minor:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+        reason:
+          type: string
+          maxLength: 1000
+      required:
+        - action
+        - version
+    SalesBridgeInput:
+      type: object
+      properties:
+        source:
+          type: string
+          maxLength: 100
+        source_id:
+          type: string
+          maxLength: 200
+        record_id:
+          type: string
+          format: uuid
+        integration_id:
+          type: string
+          format: uuid
+        sender_id:
+          type: string
+        reply_id:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/SalesMessage"
+        attribution:
+          type: object
+          additionalProperties: true
+          description: Source event ids and research provenance, sealed with the source mapping.
+      required:
+        - source
+        - source_id
+        - record_id
+        - integration_id
+        - sender_id
+        - reply_id
+        - messages
+    SalesLeadList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SalesLead"
+        next_cursor:
+          type:
+            - string
+            - "null"
+        new_unseen:
+          type: boolean
+        unread:
+          type: boolean
+      required:
+        - data
+        - next_cursor
+        - new_unseen
+        - unread
     SearchViewFilters:
       type: object
       properties:
@@ -52315,7 +53519,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, ad_campaign.paused, ad_campaign.resumed, ad_campaign.budget_changed, ads.paused_all, experiment.started, experiment.concluded, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, agent_run.created, agent_run.updated, agent_run.paused, agent_run.resumed, agent_run.stopped, agent_run.completed, action.held, action.approved, action.rejected, playbook.started, playbook_automation.created, playbook_automation.updated, playbook_automation.approved, playbook_automation.paused, playbook_automation.held, playbook_automation.ran, playbook_automation.deleted, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, privacy_export.ready, record.soft_deleted, deletion.restored, record.unmerged, batch.undone, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, content.approved, content.delivered, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, lifecycle.moved, transaction.created, transaction.updated, transaction.deleted, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, competitor_link.new, outbound_link.broken, asset.published, mention.found, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, tracker_conversion.created, tracker_conversion.updated, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, coverage_record.created, coverage_record.updated, coverage_record.imported, coverage_record.check_queued, coverage_record.checked, coverage_record.review_queued, coverage_record.reviewed, coverage_record.approved, coverage_record.discovered, coverage_record.confirmed, coverage_record.deleted, link_order.approved, link_order.published, link_order.checked, link_order.paid, link_order.verified, link_order.lost, link_order.replacement_opened, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, ad_campaign.paused, ad_campaign.resumed, ad_campaign.budget_changed, ads.paused_all, experiment.started, experiment.concluded, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, agent_run.created, agent_run.updated, agent_run.paused, agent_run.resumed, agent_run.stopped, agent_run.completed, action.held, action.approved, action.rejected, playbook.started, playbook_automation.created, playbook_automation.updated, playbook_automation.approved, playbook_automation.paused, playbook_automation.held, playbook_automation.ran, playbook_automation.deleted, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, privacy_export.ready, record.soft_deleted, deletion.restored, record.unmerged, batch.undone, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, content.approved, content.delivered, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, lifecycle.moved, transaction.created, transaction.updated, transaction.deleted, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, competitor_link.new, outbound_link.broken, asset.published, mention.found, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, tracker_conversion.created, tracker_conversion.updated, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_flag.raised, partner_flag.cleared, partner_flag.confirmed, partner_payout.created, partner_payout.paid, partner_payout.canceled, coverage_record.created, coverage_record.updated, coverage_record.imported, coverage_record.check_queued, coverage_record.checked, coverage_record.review_queued, coverage_record.reviewed, coverage_record.approved, coverage_record.discovered, coverage_record.confirmed, coverage_record.deleted, link_order.approved, link_order.published, link_order.checked, link_order.paid, link_order.verified, link_order.lost, link_order.replacement_opened, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -54058,6 +55262,25 @@ components:
           type: object
           description: "Only these fields, when the action has them: status, previous_status, group_id, by (auto, manual, refund or import), kind, side, amount_cents, currency, reference, reason, code, via, conversion_id, payout_id, reward_ids, changed (the fields a change touched, such as payout_method, never their values)."
           additionalProperties: true
+        created_at: { type: string, format: date-time }
+    PartnerFlag:
+      type: object
+      required: [id, program_id, partner_id, partner_code, conversion_id, conversion_type, amount_cents, currency, signal, detail, status, note, held_cents, resolved_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        program_id: { type: string, format: uuid }
+        partner_id: { type: string, format: uuid }
+        partner_code: { type: string }
+        conversion_id: { type: string, format: uuid }
+        conversion_type: { type: string }
+        amount_cents: { type: integer, format: int64 }
+        currency: { type: string }
+        signal: { type: string, enum: [shared_identity, payout_matches_customer, repeat_click, many_signups_one_ip, fast_conversion, refund_rate, datacenter_network, filter_list, honeypot, ip_reputation] }
+        detail: { type: object, additionalProperties: true, description: "Counts and thresholds, such as clicks and threshold; never addresses or names." }
+        status: { type: string, enum: [open, cleared, confirmed] }
+        note: { type: string }
+        held_cents: { type: integer, format: int64, description: "The partner's pending cash on the conversion, waiting for this review." }
+        resolved_at: { type: [string, "null"], format: date-time }
         created_at: { type: string, format: date-time }
     PartnerRewardRow:
       description: A ledger entry with what it belongs to, for the Rewards list.
@@ -64700,7 +65923,7 @@ components:
         waiting_on:
           type: [string, "null"]
           enum: [platform, null]
-          description: "platform while warm-up is on here but the sequencer running it doesn't show it on yet; null otherwise."
+          description: "platform while the sequencer running warm-up doesn't show what was asked for here yet: on when it was turned on, or still on after it was turned off (for example while the sequencer refuses the change); null otherwise."
     WarmupSettings:
       type: object
       description: Unset fields are left as they are.
@@ -69319,6 +70542,10 @@ components:
         team_ids: { type: array, items: { type: string, format: uuid }, description: Empty for a shared sender any team may use. }
         mailboxes: { type: integer }
         created_at: { type: string, format: date-time }
+        first_name: { type: string, maxLength: 200, description: "Given name the sender's mailboxes use." }
+        last_name: { type: string, maxLength: 200 }
+        photo_url: { type: string, maxLength: 2048, description: "https URL of the profile photo, or empty." }
+        signature_html: { type: string, maxLength: 10000, description: "Email signature the sender's mailboxes use, as HTML." }
     SenderInput:
       type: object
       properties:
@@ -69327,6 +70554,10 @@ components:
         user_id: { type: [string, "null"], format: uuid }
         status: { type: string, enum: [active, retired] }
         team_ids: { type: array, items: { type: string, format: uuid } }
+        first_name: { type: string, maxLength: 200, description: "Given name the sender's mailboxes use." }
+        last_name: { type: string, maxLength: 200 }
+        photo_url: { type: string, maxLength: 2048, description: "https URL of the profile photo, or empty." }
+        signature_html: { type: string, maxLength: 10000, description: "Email signature the sender's mailboxes use, as HTML." }
     AllocationBlocking:
       type: object
       description: Mailboxes that could not be used, grouped by why.
@@ -74328,6 +75559,32 @@ components:
         version:
           type: integer
           minimum: 0
+    CRMMailSend:
+      type: object
+      required: [id, record_id, status, error_code, crm_mail_message_id, created_at, sent_at]
+      properties:
+        id: { type: string, format: uuid }
+        record_id: { type: [string, "null"], format: uuid }
+        status: { type: string, enum: [queued, sending, sent, failed] }
+        error_code:
+          type: [string, "null"]
+          description: "Why it failed: not_eligible, mailbox_not_connected, send_not_allowed (the mailbox can't send: delegate gmail.send to the Google Workspace connection), send_refused (Google refused the email)."
+        crm_mail_message_id: { type: [string, "null"], format: uuid, description: The sent email as kept on the record. }
+        created_at: { type: string, format: date-time }
+        sent_at: { type: [string, "null"], format: date-time }
+    CRMCalendarMeeting:
+      type: object
+      required: [id, owner_id, record_id, starts_at, ends_at, canceled, visibility, title, guests]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid, description: Whose calendar it came from. }
+        record_id: { type: string, format: uuid }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: [string, "null"], format: date-time }
+        canceled: { type: boolean }
+        visibility: { type: string, enum: [metadata, full] }
+        title: { type: [string, "null"], description: Only when shared in full. }
+        guests: { type: array, items: { type: string }, description: Only when shared in full. }
     CRMMailRollout:
       type: object
       required:

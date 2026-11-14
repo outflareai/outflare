@@ -135,6 +135,47 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def act_on_sales_lead(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        action: str,
+        amount_minor: int | None = None,
+        assignee_id: str | None = None,
+        body: str | None = None,
+        currency: str | None = None,
+        message_id: str | None = None,
+        note: str | None = None,
+        reason: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change Sales ownership or outcome.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/sales/leads/{id}/actions
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/sales/leads/{id}/actions",
+            path={"id": id, "brand": brand},
+            body={
+                "action": action,
+                "amount_minor": amount_minor,
+                "assignee_id": assignee_id,
+                "body": body,
+                "currency": currency,
+                "message_id": message_id,
+                "note": note,
+                "reason": reason,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def activate_journey(
         self,
         id: str,
@@ -2747,6 +2788,24 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def authorize_sales_google(
+        self,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Authorize sending and receiving for my email.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/sales/mail/authorize
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/sales/mail/authorize",
+            path={"brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
     def backfill_metric(
         self,
         metric: str,
@@ -3919,6 +3978,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def clear_partner_flag(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Clear a fraud flag.
+
+        Scope: partners.manage. The signal was nothing: once no other flag on the conversion is open, its rewards go on as usual (approved when their hold ends, in a program that approves on its own).
+
+        Needs: the partners.manage scope.
+        POST /v1/brands/{brand}/partner-flags/{id}/clear
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/partner-flags/{id}/clear",
+            path={"id": id, "brand": brand},
+            body={"note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def close_record_identity(
         self,
         record: str,
@@ -4057,6 +4141,32 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/coverage/candidates/{id}/confirm",
             path={"id": id, "brand": brand},
             body={"publisher_id": publisher_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def confirm_partner_flag(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        note: str | None = None,
+        suspend_partner: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Confirm a fraud flag.
+
+        Scope: partners.manage. The conversion was fraud: every open flag on it is confirmed and its pending rewards, for both sides, are rejected with the reason. With suspend_partner, the partner is suspended too. Rewards already approved stay; correct them with an adjustment.
+
+        Needs: the partners.manage scope.
+        POST /v1/brands/{brand}/partner-flags/{id}/confirm
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/partner-flags/{id}/confirm",
+            path={"id": id, "brand": brand},
+            body={"note": note, "suspend_partner": suspend_partner},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -8644,6 +8754,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_sales_template(
+        self,
+        *,
+        brand: str | None = None,
+        archived: bool | None = None,
+        body: str,
+        name: str,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create a personal email template.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/sales/templates
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/sales/templates",
+            path={"brand": brand},
+            body={"archived": archived, "body": body, "name": name, "version": version},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_saved_query(
         self,
         *,
@@ -8707,8 +8842,12 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
+        first_name: str | None = None,
         kind: Literal["person", "persona", "shared"] | None = None,
+        last_name: str | None = None,
         name: str | None = None,
+        photo_url: str | None = None,
+        signature_html: str | None = None,
         status: Literal["active", "retired"] | None = None,
         team_ids: list[str] | None = None,
         user_id: str | None = None,
@@ -8726,7 +8865,17 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/senders",
             path={"brand": brand},
-            body={"kind": kind, "name": name, "status": status, "team_ids": team_ids, "user_id": user_id},
+            body={
+                "first_name": first_name,
+                "kind": kind,
+                "last_name": last_name,
+                "name": name,
+                "photo_url": photo_url,
+                "signature_html": signature_html,
+                "status": status,
+                "team_ids": team_ids,
+                "user_id": user_id,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -11534,6 +11683,24 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/crm/mail/connection",
             path={"brand": brand},
             query={"purge": purge},
+            idempotency_key=idempotency_key,
+        )
+
+    def disconnect_sales_google(
+        self,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Disconnect my Sales email.
+
+        Needs: the customers.read scope.
+        DELETE /v1/brands/{brand}/sales/mail/connection
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/sales/mail/connection",
+            path={"brand": brand},
             idempotency_key=idempotency_key,
         )
 
@@ -17415,6 +17582,25 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def get_my_crm_mail_send(
+        self,
+        send: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """One of your sends and how it went.
+
+        Scope customers.read, from your own signed-in session.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/crm/mail/sends/{send}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/crm/mail/sends/{send}",
+            path={"send": send, "brand": brand},
+        )
+
     def get_my_crm_record_mail_sharing(
         self,
         record: str,
@@ -18350,6 +18536,39 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/rules/{id}",
             path={"id": id, "brand": brand},
+        )
+
+    def get_sales_lead(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Read a Sales conversation.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/sales/leads/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/sales/leads/{id}",
+            path={"id": id, "brand": brand},
+        )
+
+    def get_sales_me(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get my Sales role and email connection.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/sales/me
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/sales/me",
+            path={"brand": brand},
         )
 
     def get_saved_query(
@@ -20467,6 +20686,44 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/integrations/{id}/import-preview",
             path={"id": id, "ws": ws},
+        )
+
+    def import_sales_lead(
+        self,
+        *,
+        brand: str | None = None,
+        attribution: dict[str, Any] | None = None,
+        integration_id: str,
+        messages: list[dict[str, Any]],
+        record_id: str,
+        reply_id: str,
+        sender_id: str,
+        source: str,
+        source_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Import a source conversation into Sales.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/sales/bridge
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/sales/bridge",
+            path={"brand": brand},
+            body={
+                "attribution": attribution,
+                "integration_id": integration_id,
+                "messages": messages,
+                "record_id": record_id,
+                "reply_id": reply_id,
+                "sender_id": sender_id,
+                "source": source,
+                "source_id": source_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
         )
 
     def import_supplier_mailboxes(
@@ -24169,6 +24426,28 @@ class Operations(_Mixin):
             query={"cursor": cursor, "fields": fields, "limit": limit},
         )
 
+    def list_crm_record_meetings(
+        self,
+        record: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Meetings from members' calendars on a record that you may see.
+
+        Scope: customers.read, from your own signed-in session. Meetings read from members' own calendars through the
+        Google Workspace connection follow the same rules as their email: your own, those shared with you (who and
+        when, or in full with the title and guests), and under team sharing those the AI check found to be about work.
+        Events the calendar marks private are never kept. Newest first, up to 100.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/crm/mail/records/{record}/meetings
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/crm/mail/records/{record}/meetings",
+            path={"record": record, "brand": brand},
+        )
+
     def list_crm_views(
         self,
         *,
@@ -26939,6 +27218,47 @@ class Operations(_Mixin):
             },
         )
 
+    def list_partner_flags(
+        self,
+        *,
+        brand: str | None = None,
+        status: Literal["open", "cleared", "confirmed"] | None = None,
+        partner_id: str | None = None,
+        program: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List the fraud review queue, newest first.
+
+        Scope: partners.read. Each credited lead or sale is checked for partner fraud signals, with the same
+        thresholds in every program: shared_identity (the partner's and the customer's records share an email,
+        phone or user id), payout_matches_customer (the partner's payout details contain the customer's email),
+        repeat_click (10 or more clicks from one address on the partner's links within a day of the click that
+        brought the customer), many_signups_one_ip (3 or more of the partner's referrals in 30 days came through
+        clicks from one address), fast_conversion (under 10 seconds after its click) and refund_rate (30% or more
+        of the partner's sales refunded in 90 days, from 5 sales), plus the fraud reasons of the tracker click that
+        brought the customer (datacenter_network, filter_list, honeypot, ip_reputation). Each one found is a flag;
+        the conversion's rewards wait while a flag on it is open, even past their hold. held_cents is the partner's
+        pending cash on the conversion.
+
+        Needs: the partners.read scope.
+        GET /v1/brands/{brand}/partner-flags
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/partner-flags",
+            path={"brand": brand},
+            query={
+                "status": status,
+                "partner_id": partner_id,
+                "program": program,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_partner_import_sources(
         self,
         id: str,
@@ -28088,6 +28408,68 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/rules",
             path={"brand": brand},
             query={"status": status},
+        )
+
+    def list_sales_leads(
+        self,
+        *,
+        brand: str | None = None,
+        fields: list[str] | None = None,
+        queue: Literal["new", "mine", "inbox", "handoffs", "all"] | None = None,
+        state: Literal["new", "active", "customer", "archived"] | None = None,
+        person: str | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> Any:
+        """List a Sales queue.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/sales/leads
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/sales/leads",
+            path={"brand": brand},
+            query={
+                "fields": fields,
+                "queue": queue,
+                "state": state,
+                "person": person,
+                "cursor": cursor,
+                "limit": limit,
+            },
+        )
+
+    def list_sales_team(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List the Sales team.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/sales/team
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/sales/team",
+            path={"brand": brand},
+        )
+
+    def list_sales_templates(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List my email templates.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/sales/templates
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/sales/templates",
+            path={"brand": brand},
         )
 
     def list_saved_queries(
@@ -30051,6 +30433,24 @@ class Operations(_Mixin):
             path={"id": id, "brand": brand},
             body={"body": body},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def mark_sales_queue_seen(
+        self,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Mark the shared new-lead queue seen for this person.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/sales/queue-seen
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/sales/queue-seen",
+            path={"brand": brand},
             idempotency_key=idempotency_key,
         )
 
@@ -34966,6 +35366,32 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def save_sales_draft(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        body: str,
+        discard_template: bool | None = None,
+        revision: int,
+        template_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save an editable personal reply draft.
+
+        Needs: the customers.manage scope.
+        PUT /v1/brands/{brand}/sales/leads/{id}/draft
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/sales/leads/{id}/draft",
+            path={"id": id, "brand": brand},
+            body={"body": body, "discard_template": discard_template, "revision": revision, "template_id": template_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def save_search_group(
         self,
         site: str,
@@ -35365,6 +35791,46 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def send_my_crm_mail(
+        self,
+        *,
+        brand: str | None = None,
+        body: str,
+        cc: list[str] | None = None,
+        in_reply_to: str | None = None,
+        record_id: str,
+        subject: str,
+        to: list[str],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Send an email from your own mailbox.
+
+        Scope: customers.manage, from your own signed-in session (never a token). The one way every module sends an
+        email as a person (ADR 15). The recipients pass the outbound policy check, the send runs in a job, and the sent
+        email is kept on the record like captured mail. in_reply_to is a captured email you can see; the reply goes in
+        its thread. Your mailbox must be connected; through Google Workspace it needs gmail.send delegated to the
+        connection. Poll GET .../sends/{send} for the outcome.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/crm/mail/sends
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/crm/mail/sends",
+            path={"brand": brand},
+            body={
+                "body": body,
+                "cc": cc,
+                "in_reply_to": in_reply_to,
+                "record_id": record_id,
+                "subject": subject,
+                "to": to,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def send_now(
         self,
         *,
@@ -35387,6 +35853,29 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/test/send-now",
             path={"ws": ws},
             body={"sequence_id": sequence_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def send_sales_reply(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        draft_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Queue a saved personal reply.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/sales/leads/{id}/send
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/sales/leads/{id}/send",
+            path={"id": id, "brand": brand},
+            body={"draft_id": draft_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -36352,6 +36841,29 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/reply-rules",
             path={"ws": ws},
             body={"rules": rules, "sequence_id": sequence_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_sales_role(
+        self,
+        user: str,
+        *,
+        brand: str | None = None,
+        role: Literal["sdr", "ae", "manager", "none"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a member Sales role.
+
+        Needs: the members.manage scope.
+        PUT /v1/brands/{brand}/sales/team/{user}
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/sales/team/{user}",
+            path={"user": user, "brand": brand},
+            body={"role": role},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -38177,6 +38689,24 @@ class Operations(_Mixin):
         return self._call(
             "POST",
             "/v1/brands/{brand}/reviews/pages/sync",
+            path={"brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
+    def sync_sales_google(
+        self,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Queue a catch-up of my Sales email.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/sales/mail/sync
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/sales/mail/sync",
             path={"brand": brand},
             idempotency_key=idempotency_key,
         )
@@ -44126,6 +44656,54 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_sales_introduction(
+        self,
+        *,
+        brand: str | None = None,
+        introduction: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save my introduction.
+
+        Needs: the customers.manage scope.
+        PUT /v1/brands/{brand}/sales/me
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/sales/me",
+            path={"brand": brand},
+            body={"introduction": introduction},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_sales_template(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        archived: bool | None = None,
+        body: str,
+        name: str,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Version or archive a personal email template.
+
+        Needs: the customers.manage scope.
+        PUT /v1/brands/{brand}/sales/templates/{id}
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/sales/templates/{id}",
+            path={"id": id, "brand": brand},
+            body={"archived": archived, "body": body, "name": name, "version": version},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_saved_query(
         self,
         saved_query: str,
@@ -44196,8 +44774,12 @@ class Operations(_Mixin):
         id: str,
         *,
         brand: str | None = None,
+        first_name: str | None = None,
         kind: Literal["person", "persona", "shared"] | None = None,
+        last_name: str | None = None,
         name: str | None = None,
+        photo_url: str | None = None,
+        signature_html: str | None = None,
         status: Literal["active", "retired"] | None = None,
         team_ids: list[str] | None = None,
         user_id: str | None = None,
@@ -44215,7 +44797,17 @@ class Operations(_Mixin):
             "PATCH",
             "/v1/brands/{brand}/senders/{id}",
             path={"id": id, "brand": brand},
-            body={"kind": kind, "name": name, "status": status, "team_ids": team_ids, "user_id": user_id},
+            body={
+                "first_name": first_name,
+                "kind": kind,
+                "last_name": last_name,
+                "name": name,
+                "photo_url": photo_url,
+                "signature_html": signature_html,
+                "status": status,
+                "team_ids": team_ids,
+                "user_id": user_id,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

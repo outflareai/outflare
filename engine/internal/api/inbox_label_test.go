@@ -28,6 +28,8 @@ func labelReply(w http.ResponseWriter, body string) {
 	case strings.Contains(body, "lots going on"):
 		v = map[string]any{"category": "not_now", "confidence": 0.92, "reason": "busy until the new year",
 			"details": map[string]string{"return_date": "2027-01-10", "made_up": "x"}}
+	case strings.Contains(body, "not sure about the timing"):
+		v = map[string]any{"category": "not_now", "confidence": 0.5, "reason": "might mean later", "details": map[string]string{"return_date": "2027-03-01"}}
 	case strings.Contains(body, "take this off"):
 		v = map[string]any{"category": "unsubscribe", "confidence": 0.6, "reason": "may want to stop", "details": map[string]string{}}
 	}

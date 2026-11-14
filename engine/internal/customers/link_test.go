@@ -127,6 +127,10 @@ func TestLeadsBecomePeopleAndActivityFollows(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	ws := workspace(t, pool)
+	// Brand data belongs to a brand: the meeting and journey below take this one.
+	if _, err := pool.Exec(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Acme', 'acme')`, ws); err != nil {
+		t.Fatal(err)
+	}
 
 	// Someone already known (they signed up) and someone new.
 	var known string
@@ -176,8 +180,8 @@ func TestLeadsBecomePeopleAndActivityFollows(t *testing.T) {
 		VALUES ($1, $2, 1, 2, 'reply', 'who@else.example', 'Hello', now()) RETURNING record_id::text`, ws, mailbox).Scan(&strangerReply); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `INSERT INTO meetings (workspace_id, source, title, attendee_email, starts_at, booked_at)
-		VALUES ($1, 'manual', 'Intro', 'ANA@acme.example', now(), now()) RETURNING record_id::text`, ws).Scan(&meeting); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO meetings (workspace_id, source, title, attendee_email, starts_at, booked_at, brand_id)
+		VALUES ($1, 'manual', 'Intro', 'ANA@acme.example', now(), now(), outflare_first_brand($1::uuid)) RETURNING record_id::text`, ws).Scan(&meeting); err != nil {
 		t.Fatal(err)
 	}
 	if boReply == nil || *boReply != boRec || strangerReply != nil || meeting == nil || *meeting != known {
@@ -186,7 +190,7 @@ func TestLeadsBecomePeopleAndActivityFollows(t *testing.T) {
 
 	// Both are in the same journey: the merge keeps Ana's run and ends Bo's.
 	var journey string
-	if err := pool.QueryRow(ctx, `INSERT INTO journeys (workspace_id, name, status) VALUES ($1, 'Welcome', 'active') RETURNING id::text`, ws).Scan(&journey); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO journeys (workspace_id, name, status, brand_id) VALUES ($1, 'Welcome', 'active', outflare_first_brand($1::uuid)) RETURNING id::text`, ws).Scan(&journey); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO journey_runs (workspace_id, journey_id, record_id) VALUES ($1, $2, $3), ($1, $2, $4)`, ws, journey, known, boRec); err != nil {

@@ -357,13 +357,14 @@ type Ref struct{ Table, Column string }
 // when a column points at records and is neither here nor in Owned, so a
 // new link is never left behind on a merged record.
 var Follows = []Ref{
+	{"sales_leads", "record_id"}, {"sales_drafts", "record_id"}, {"sales_messages", "record_id"}, {"sales_events", "record_id"},
 	// Money they paid or got back moves with them to the record kept.
 	{"transactions", "record_id"},
 	// Tracker conversions are revenue to the brand, like transactions.
 	{"tracker_conversions", "record_id"},
 	{"partner_proposals", "record_id"},
 	{"crm_activities", "record_id"},
-	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_mail_sharing", "record_id"},
+	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_calendar_events", "record_id"}, {"crm_mail_sharing", "record_id"}, {"crm_mail_sends", "record_id"},
 	{"telegram_chats", "record_id"}, {"telegram_chats", "suggested_record_id"},
 	{"review_requests", "record_id"},
 	{"coverage_publishers", "record_id"}, {"coverage_placements", "contact_record_id"}, {"coverage_parties", "record_id"},

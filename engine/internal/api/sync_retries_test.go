@@ -90,21 +90,21 @@ func TestFailedSyncsRetrySoon(t *testing.T) {
 		e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE workspace_id = $1 AND idempotency_key LIKE '%:dead_pages:%'`, ws).Scan(&n)
 		return n
 	}
-	exec(`INSERT INTO link_reads (workspace_id, integration_id, connector, target, scope, reason, status, error_code, created_at)
-		VALUES ($1, $2, 'dataforseo', 'https://rival.example/gone', 'page', 'dead_page', 'failed', 'provider_error', now() - interval '20 minutes')`, ws, dfs)
+	exec(`INSERT INTO link_reads (workspace_id, integration_id, connector, target, scope, reason, status, error_code, created_at, brand_id)
+		VALUES ($1, $2, 'dataforseo', 'https://rival.example/gone', 'page', 'dead_page', 'failed', 'provider_error', now() - interval '20 minutes', outflare_first_brand($1::uuid))`, ws, dfs)
 	queue()
 	queue()
 	if n := deadRetries(); n != 1 {
 		t.Fatalf("dead page retries: %d", n)
 	}
-	exec(`INSERT INTO link_reads (workspace_id, integration_id, connector, target, scope, reason, status, error_code, created_at)
-		VALUES ($1, $2, 'dataforseo', 'https://rival.example/gone', 'page', 'dead_page', 'failed', 'provider_error', now() - interval '20 minutes')`, ws, dfs)
+	exec(`INSERT INTO link_reads (workspace_id, integration_id, connector, target, scope, reason, status, error_code, created_at, brand_id)
+		VALUES ($1, $2, 'dataforseo', 'https://rival.example/gone', 'page', 'dead_page', 'failed', 'provider_error', now() - interval '20 minutes', outflare_first_brand($1::uuid))`, ws, dfs)
 	queue()
 	if n := deadRetries(); n != 1 {
 		t.Fatalf("dead page retried before the second wait: %d", n)
 	}
 	exec(`UPDATE link_reads SET created_at = now() - interval '2 hours' WHERE workspace_id = $1 AND reason = 'dead_page'`, ws)
-	exec(`INSERT INTO link_reads (workspace_id, integration_id, connector, target, scope, reason, status) VALUES ($1, $2, 'dataforseo', 'https://rival.example/gone', 'page', 'dead_page', 'done')`, ws, dfs)
+	exec(`INSERT INTO link_reads (workspace_id, integration_id, connector, target, scope, reason, status, brand_id) VALUES ($1, $2, 'dataforseo', 'https://rival.example/gone', 'page', 'dead_page', 'done', outflare_first_brand($1::uuid))`, ws, dfs)
 	queue()
 	if n := deadRetries(); n != 1 {
 		t.Fatalf("dead page retried after a read worked: %d", n)

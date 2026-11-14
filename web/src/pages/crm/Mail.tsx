@@ -670,6 +670,7 @@ export function RecordMail({
           </p>
         </div>
       )}
+      {brand && <RecordMeetings brand={brand.id} record={record} />}
       {loading && !messages.length ? (
         <Loading />
       ) : !messages.length && !error ? (
@@ -735,5 +736,50 @@ export function RecordMail({
         </Button>
       )}
     </div>
+  );
+}
+
+type Meeting = Schemas["CRMCalendarMeeting"];
+
+// Meetings from members' own calendars, under the same privacy as their
+// email: only those you may see, the title only when shared in full.
+function RecordMeetings({ brand, record }: { brand: string; record: string }) {
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  useEffect(() => {
+    const c = new AbortController();
+    setMeetings([]);
+    void api
+      .GET("/v1/brands/{brand}/crm/mail/records/{record}/meetings", {
+        params: { path: { brand, record } },
+        signal: c.signal,
+      })
+      .then((r) => {
+        if (!c.signal.aborted && r.data) setMeetings(r.data.data);
+      })
+      .catch(() => {});
+    return () => c.abort();
+  }, [brand, record]);
+  if (!meetings.length) return null;
+  return (
+    <section className="space-y-2 rounded-xl border p-4">
+      <h3 className="text-sm font-semibold">Meetings</h3>
+      <ul className="space-y-1 text-sm">
+        {meetings.map((m) => (
+          <li
+            key={m.id}
+            className={m.canceled ? "text-muted-foreground line-through" : ""}
+          >
+            {stamp(m.starts_at)} ·{" "}
+            {m.visibility === "full" ? m.title || "(No title)" : "A meeting"}
+            {m.visibility === "full" && m.guests.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {" "}
+                · {m.guests.join(", ")}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

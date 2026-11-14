@@ -45,8 +45,8 @@ func agentToken(t *testing.T, owner *client, base, name string, scopes ...string
 func seedMission(t *testing.T, e *env, ws, name, status, mode string, metric *string, target *int, maxSends, maxSpend *int) string {
 	t.Helper()
 	var id string
-	if err := e.pool.QueryRow(t.Context(), `INSERT INTO missions (workspace_id, name, goal, goal_metric, goal_target, status, mode, max_sends, max_spend_cents, started_at)
-		VALUES ($1, $2, 'A goal', $3, $4, $5, $6, $7, $8, CASE WHEN $5 = 'draft' THEN NULL ELSE now() END) RETURNING id::text`,
+	if err := e.pool.QueryRow(t.Context(), `INSERT INTO missions (workspace_id, name, goal, goal_metric, goal_target, status, mode, max_sends, max_spend_cents, started_at, brand_id)
+		VALUES ($1, $2, 'A goal', $3, $4, $5, $6, $7, $8, CASE WHEN $5 = 'draft' THEN NULL ELSE now() END, outflare_first_brand($1::uuid)) RETURNING id::text`,
 		ws, name, metric, target, status, mode, maxSends, maxSpend).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func TestMissionsRetired(t *testing.T) {
 	agent := agentToken(t, owner, base, "Agent", "missions.read", "missions.run", "sequences.read", "sequences.manage")
 	id := seedMission(t, e, ws, "Fintech CFOs", "running", "approve_writes", ptr("meetings"), ptr(10), nil, nil)
 	var tokenAction string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO mission_actions (mission_id, workspace_id, method, path, body, status)
-		VALUES ($1, $2, 'POST', $3, '{}', 'pending') RETURNING id::text`, id, ws, base+"/sequences").Scan(&tokenAction); err != nil {
+	if err := e.pool.QueryRow(ctx, `INSERT INTO mission_actions (mission_id, workspace_id, method, path, body, status, brand_id)
+		VALUES ($1, $2, 'POST', $3, '{}', 'pending', outflare_first_brand($2::uuid)) RETURNING id::text`, id, ws, base+"/sequences").Scan(&tokenAction); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.pool.Exec(ctx, `INSERT INTO mission_updates (mission_id, workspace_id, author, kind, body) VALUES ($1, $2, 'agent', 'progress', 'Sequence drafted')`, id, ws); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO mission_updates (mission_id, workspace_id, author, kind, body, brand_id) VALUES ($1, $2, 'agent', 'progress', 'Sequence drafted', outflare_first_brand($2::uuid))`, id, ws); err != nil {
 		t.Fatal(err)
 	}
 
@@ -178,10 +178,10 @@ func TestMissionRevenueGoals(t *testing.T) {
 	}
 	seq := exec(`INSERT INTO sequences (workspace_id, name, mission_id) VALUES ($1, 'Outbound', $2) RETURNING id::text`, ws, attributed)
 	other := exec(`INSERT INTO sequences (workspace_id, name) VALUES ($1, 'Other') RETURNING id::text`, ws)
-	camp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
-		VALUES ($1, 'Outbound', 'outbound', 'code000001', 'outbound_email', 'outflare', 'email', 'sequence', $2) RETURNING id::text`, ws, seq)
-	otherCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
-		VALUES ($1, 'Other', 'other', 'code000002', 'outbound_email', 'outflare', 'email', 'sequence', $2) RETURNING id::text`, ws, other)
+	camp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id, brand_id)
+		VALUES ($1, 'Outbound', 'outbound', 'code000001', 'outbound_email', 'outflare', 'email', 'sequence', $2, outflare_first_brand($1::uuid)) RETURNING id::text`, ws, seq)
+	otherCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id, brand_id)
+		VALUES ($1, 'Other', 'other', 'code000002', 'outbound_email', 'outflare', 'email', 'sequence', $2, outflare_first_brand($1::uuid)) RETURNING id::text`, ws, other)
 	// A payment credited to the mission's campaign under the default model
 	// counts; one under another model, one in euros and one credited to
 	// another sequence don't.
@@ -197,22 +197,22 @@ func TestMissionRevenueGoals(t *testing.T) {
 	// A broadcast made in the mission counts the same way; a social post
 	// and a reply count by their own content tag, since their campaign is
 	// the account's or the watch's, shared with posts outside the mission.
-	tmpl := exec(`INSERT INTO email_templates (workspace_id, handle, name) VALUES ($1, 'launch', 'Launch') RETURNING id::text`, ws)
+	tmpl := exec(`INSERT INTO email_templates (workspace_id, handle, name, brand_id) VALUES ($1, 'launch', 'Launch', outflare_first_brand($1::uuid)) RETURNING id::text`, ws)
 	bc := exec(`INSERT INTO email_broadcasts (workspace_id, name, template_id, mission_id) VALUES ($1, 'Launch', $2, $3) RETURNING id::text`, ws, tmpl, attributed)
-	bcCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
-		VALUES ($1, 'Launch', 'launch', 'code000003', 'lifecycle_email', 'outflare', 'email', 'email_broadcast', $2) RETURNING id::text`, ws, bc)
+	bcCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id, brand_id)
+		VALUES ($1, 'Launch', 'launch', 'code000003', 'lifecycle_email', 'outflare', 'email', 'email_broadcast', $2, outflare_first_brand($1::uuid)) RETURNING id::text`, ws, bc)
 	pay(1000, "USD", bcCamp, "last_non_direct")
-	acct := exec(`INSERT INTO social_accounts (workspace_id, channel, kind, external_id, name) VALUES ($1, 'linkedin', 'page', 'urn-1', 'Northpeak') RETURNING id::text`, ws)
-	exec(`INSERT INTO social_publications (workspace_id, account_id, channel, utm_content, mission_id) VALUES ($1, $2, 'linkedin', 'linkedin-mission', $3) RETURNING id::text`, ws, acct, attributed)
-	exec(`INSERT INTO social_actions (workspace_id, channel, type, utm_content, mission_id) VALUES ($1, 'reddit', 'reply', 'reddit-mission', $2) RETURNING id::text`, ws, attributed)
-	acctCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
-		VALUES ($1, 'Northpeak', 'northpeak', 'code000004', 'organic_social', 'linkedin', 'social', 'social_account', $2) RETURNING id::text`, ws, acct)
-	watchCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
-		VALUES ($1, 'Watch', 'watch', 'code000005', 'reddit', 'reddit', 'social', 'social_watch', gen_random_uuid()::text) RETURNING id::text`, ws)
+	acct := exec(`INSERT INTO social_accounts (workspace_id, channel, kind, external_id, name, brand_id) VALUES ($1, 'linkedin', 'page', 'urn-1', 'Northpeak', outflare_first_brand($1::uuid)) RETURNING id::text`, ws)
+	exec(`INSERT INTO social_publications (workspace_id, account_id, channel, utm_content, mission_id, brand_id) VALUES ($1, $2, 'linkedin', 'linkedin-mission', $3, outflare_first_brand($1::uuid)) RETURNING id::text`, ws, acct, attributed)
+	exec(`INSERT INTO social_actions (workspace_id, channel, type, utm_content, mission_id, brand_id) VALUES ($1, 'reddit', 'reply', 'reddit-mission', $2, outflare_first_brand($1::uuid)) RETURNING id::text`, ws, attributed)
+	acctCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id, brand_id)
+		VALUES ($1, 'Northpeak', 'northpeak', 'code000004', 'organic_social', 'linkedin', 'social', 'social_account', $2, outflare_first_brand($1::uuid)) RETURNING id::text`, ws, acct)
+	watchCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id, brand_id)
+		VALUES ($1, 'Watch', 'watch', 'code000005', 'reddit', 'reddit', 'social', 'social_watch', gen_random_uuid()::text, outflare_first_brand($1::uuid)) RETURNING id::text`, ws)
 	payVisit := func(minor int, campaign, content string) {
 		t.Helper()
-		ss := exec(`INSERT INTO site_sessions (workspace_id, anonymous_id, started_at, channel, source, utm_content, tracking_campaign_id)
-			VALUES ($1, 'anon', now(), 'organic_social', 'linkedin', $2, $3) RETURNING id::text`, ws, content, campaign)
+		ss := exec(`INSERT INTO site_sessions (workspace_id, anonymous_id, started_at, channel, source, utm_content, tracking_campaign_id, brand_id)
+			VALUES ($1, 'anon', now(), 'organic_social', 'linkedin', $2, $3, outflare_first_brand($1::uuid)) RETURNING id::text`, ws, content, campaign)
 		ev := exec(`INSERT INTO customer_events (workspace_id, kind, name, occurred_at) VALUES ($1, 'track', 'payment.succeeded', now()) RETURNING id::text`, ws)
 		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, name, occurred_at, value_minor, currency) VALUES ($1, $2, 'payment.succeeded', now(), $3, 'USD') RETURNING event_id::text`,
 			ev, ws, minor)

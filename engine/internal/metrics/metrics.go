@@ -788,6 +788,10 @@ var (
 		Namespace: namespace, Subsystem: "partners", Name: "import_objects_total",
 		Help: "Objects partner imports read, by kind (groups, links, partners, flows, promo_codes, customers, transactions, commissions) and result (created, updated, unchanged, skipped).",
 	}, []string{"kind", "result"})
+	partnerFlags = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "partners", Name: "flags_total",
+		Help: "Partner fraud flags by signal (shared_identity, payout_matches_customer, repeat_click, many_signups_one_ip, fast_conversion, refund_rate, or a shared click reason such as datacenter_network or honeypot) and event: raised (a credited conversion's rewards now wait for review), cleared or confirmed (its pending rewards rejected).",
+	}, []string{"signal", "event"})
 	partnerRewardsOverdue = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "partners", Name: "rewards_overdue_seconds",
 		Help: "How long past its hold the oldest reward that should approve on its own has waited, as of this process's last round.",
@@ -797,6 +801,7 @@ var (
 	// web search connection.
 	coverageReviews   = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "reviews_total", Help: "Coverage AI reviews by bounded result status."}, []string{"status"})
 	mailPrivacyChecks = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "crm_mail", Name: "privacy_checks_total", Help: "Emails the workspace's AI model checked before team email sharing shows them, by outcome: work (shown to colleagues), private (kept to its owner), failed (the model call or its answer failed; the email stays private), no_ai (no AI connection) and budget (the AI limit was reached)."}, []string{"outcome"})
+	crmMailSends      = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "crm_mail", Name: "sends_total", Help: "Emails members sent from their own mailbox through Outflare (ADR 15), by outcome: sent, failed (refused by the policy job, Google or a missing permission) and deduplicated (a retry found the email already in Sent and did not send it again)."}, []string{"outcome"})
 	eventNameChecks   = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "customer_events", Name: "name_checks_total", Help: "New event names checked for typos of names the brand already has, by how (ai: the workspace's own AI model; spelling: compared letter by letter, with no AI connected or when the AI call failed) and outcome (ok: nothing to ask; asked: a person is asked whether it is a typo)."}, []string{"method", "outcome"})
 	coverageChecks    = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "checks_total", Help: "Coverage page checks by observed condition."}, []string{"health"})
 	coverageFound     = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "found_total", Help: "Pages Presence discovery added to a brand's review list for the first time, by source (news, backlinks, link_prospects, social, ai_citations, web_search)."}, []string{"source"})
@@ -1169,8 +1174,9 @@ var own = []prometheus.Collector{
 	socialPublishes,
 	redditSends,
 	redditChecks,
-	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
-	mailPrivacyChecks, eventNameChecks,
+	partnerClicks, partnerConversions, partnerRewards, partnerFlags, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
+	mailPrivacyChecks, crmMailSends, eventNameChecks,
+	salesSendResults, salesStoredMessages,
 	coverageChecks, coverageReviews, coverageFound, coverageSearches, competitorScans, competitorFound, competitorSuggest, opportunities, newsRuns, newsFound, newsReads, storyAIRuns,
 	quoteApprovalEmails, quoteApprovalPages, quoteApprovalDecisions,
 	automationRuns, automationLag,
@@ -2059,6 +2065,9 @@ func PartnerRewards(kind, event string, n int) {
 	}
 }
 
+// PartnerFlag counts a partner fraud flag raised, cleared or confirmed.
+func PartnerFlag(signal, event string) { partnerFlags.WithLabelValues(signal, event).Inc() }
+
 // PartnerPostback counts a postback to a partner's tracker by outcome.
 func PartnerPostback(outcome string) { partnerPostbacks.WithLabelValues(outcome).Inc() }
 
@@ -2265,6 +2274,10 @@ func DesktopPurged(n int64) { desktopPurged.Add(float64(n)) }
 // MailPrivacyCheck counts one email's privacy check before team sharing:
 // work, private, failed, no_ai or budget.
 func MailPrivacyCheck(outcome string) { mailPrivacyChecks.WithLabelValues(outcome).Inc() }
+
+// CRMMailSend counts one email a member sent from their own mailbox:
+// sent, failed or deduplicated.
+func CRMMailSend(outcome string) { crmMailSends.WithLabelValues(outcome).Inc() }
 
 // EventNameCheck counts one new event name's check: method ai or
 // spelling, outcome ok or asked.

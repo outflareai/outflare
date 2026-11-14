@@ -6,6 +6,28 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.96.0] - 2026-11-14
+
+### Added
+
+- ChatGPT Ads joins Paid ads: connect your ad account with your own OpenAI Advertiser API key to see spend, clicks and conversions per campaign, pause, resume and set budgets with your approval, get budget suggestions, track ChatGPT ad clicks (oppref), and send sign-ups and purchases back through OpenAI's Conversions API.
+- Connect Google Workspace with your own service account, without downloading a key, to check a tenant and its domains, and, if you allow it, change users' names, photos and Gmail signatures.
+- Connect an InboxKit account and workspace to discover and import selected mailboxes, or automatically synchronize its inventory through the supplier mailbox interface. InboxKit continues to bill your connected account directly.
+- Partner conversions are now checked for fraud (self-referrals, payout details matching the customer, cookie stuffing, instant conversions, high refund rates, suspect tracker clicks), and a flagged conversion's rewards wait until you clear or confirm the flag.
+- Sales teams can work a shared new-lead queue, open full conversations, save personal email templates, keep notes through handoffs and confirm customers without recording a payment. Personal email sending requires each person's own consent.
+- People can send email from their own Gmail address through Outflare. It checks every recipient against your opt-outs first, keeps the sent email on the contact, and never sends twice. It uses your Google Workspace connection, once it is allowed to send.
+
+### Changed
+
+- Brand data always belongs to a brand: records, sequences, reports and the rest can no longer be saved without one.
+- Meetings read from your team's calendars now follow the same privacy as their email: private to the calendar's owner unless they share the contact, or team sharing shows those the AI check finds to be about work. Events marked private in Google are never saved.
+- The Partners page has a Review tab: see each flagged conversion's signal, partner and held reward, then clear the flag or confirm fraud, optionally suspending the partner.
+
+### Fixed
+
+- Sales queues show the prospect’s reply, source links and arrival time before you open a conversation. Managers start on All leads with status and teammate filters; Sales keeps the API panel closed until opened and gives browser tabs readable names.
+- When a connected sequencer refuses to turn a mailbox's warm-up off, the Mailboxes page now says it is still turning off there, and Outflare keeps retrying, instead of showing it as off.
+
 ## [0.95.0] - 2026-11-13
 
 ### Added

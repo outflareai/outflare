@@ -45,6 +45,8 @@ var ClickIDs = []ClickID{
 	{"li_fat_id", "linkedin", "linkedin", true, "paid_ads"},
 	{"rdt_cid", "reddit", "reddit", true, "paid_ads"},
 	{"twclid", "x", "x", true, "paid_ads"},
+	// ChatGPT Ads adds oppref to the landing page itself.
+	{"oppref", "chatgpt_ads", "chatgpt_ads", true, "paid_ads"},
 	{"ttclid", "tiktok", "tiktok", true, "paid_ads"},
 	{"ScCid", "snapchat", "snapchat", true, "paid_ads"},
 	{"epik", "pinterest", "pinterest", true, "paid_ads"},
@@ -90,6 +92,8 @@ var Cookies = []Cookie{
 	{"_gcl_aw", "gcl_aw", "google"},
 	{"_ttp", "ttp", "tiktok"},
 	{"_scid", "scid", "snapchat"},
+	// The OpenAI pixel's browser reference.
+	{"__obref", "obref", "chatgpt_ads"},
 }
 
 // IsCookie reports whether key is a Cookies key.
@@ -206,6 +210,12 @@ var Networks = []Network{
 	{ID: "pinterest", Label: "Pinterest Ads", Connector: "pinterest_ads", Field: "Destination URL (ad)",
 		Macros: Macros{CampaignID: "{campaignid}", AdSetID: "{adgroupid}", AdID: "{adid}", Keyword: "{keyword}"},
 		Note:   "Pinterest adds epik itself."},
+	// OpenAI's Advertiser API docs (campaign management, tracking
+	// parameters) give {campaign_id}, {ad_group_id} and {ad_id}; the click
+	// adds oppref itself, which the pixel and site.js read.
+	{ID: "chatgpt_ads", Label: "ChatGPT Ads", Connector: "chatgpt_ads", Field: "Tracking parameters (account, campaign, ad group or ad)",
+		Macros: Macros{CampaignID: "{campaign_id}", AdSetID: "{ad_group_id}", AdID: "{ad_id}"},
+		Note:   "ChatGPT adds oppref itself. Account-level parameters apply to every campaign."},
 	// Taboola's "Creating and Adding URL Parameters for Tracking" lists the
 	// macros; its S2S guide says it appends tblci={click_id} to every ad
 	// URL itself, so the template doesn't repeat it.

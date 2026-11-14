@@ -94,7 +94,7 @@ func TestFailedGlancesRetrySoon(t *testing.T) {
 		}
 	}
 	var site, rival string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, host, start_url, verify_token) VALUES ($1, 'acme.example', 'https://acme.example/', 'tok') RETURNING id`, ws).Scan(&site); err != nil {
+	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, host, start_url, verify_token, brand_id) VALUES ($1, 'acme.example', 'https://acme.example/', 'tok', outflare_first_brand($1::uuid)) RETURNING id`, ws).Scan(&site); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_competitors (workspace_id, site_id, host, status, checked_at) VALUES ($1, $2, 'rival.example', 'tracked', now() - interval '20 minutes') RETURNING id`,

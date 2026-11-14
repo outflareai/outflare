@@ -19,6 +19,15 @@ type Querier interface {
 type sealedColumn struct{ table, key, column string }
 
 var sealedColumns = []sealedColumn{
+	{"sales_mail_connections", "id", "credentials_sealed"},
+	{"sales_oauth_flows", "id", "verifier_sealed"},
+	{"sales_leads", "id", "source_sealed"},
+	{"sales_leads", "id", "details_sealed"},
+	{"sales_template_versions", "id", "content_sealed"},
+	{"sales_drafts", "id", "content_sealed"},
+	{"sales_messages", "id", "content_sealed"},
+	{"sales_message_copies", "id", "content_sealed"},
+	{"sales_events", "id", "content_sealed"},
 	{"crm_mail_oauth_flows", "id", "verifier_sealed"},
 	{"crm_google_connections", "id", "credentials_sealed"},
 	{"crm_mail_messages", "id", "content_sealed"},

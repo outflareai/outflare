@@ -52,7 +52,7 @@ func fake(t *testing.T, routes map[string]any) (*c.Client, *[]seen, string) {
 	cl := &c.Client{BaseURLs: map[string]string{}}
 	for _, id := range []string{"google_ads", "google_ads.datamanager", "meta_ads", "microsoft_ads.customer", "microsoft_ads.campaign", "microsoft_ads.reporting",
 		"reddit_ads", "reddit_ads.conversions", "x_ads", "x_ads.auth", "linkedin_ads", "tiktok_ads", "snapchat_ads", "snapchat_ads.conversions",
-		"taboola_ads", "taboola_ads.conversions", "outbrain_ads", "apple_ads", "apple_ads.token", "amazon_ads.na", "amazon_ads.token", "pinterest_ads"} {
+		"taboola_ads", "taboola_ads.conversions", "outbrain_ads", "apple_ads", "apple_ads.token", "amazon_ads.na", "amazon_ads.token", "pinterest_ads", "chatgpt_ads", "chatgpt_ads.events"} {
 		cl.BaseURLs[id] = srv.URL
 	}
 	return cl, &reqs, srv.URL
@@ -76,8 +76,8 @@ func TestDefinitions(t *testing.T) {
 			t.Errorf("%s offers OAuth without a consent screen", d.ID)
 		}
 	}
-	if len(ids) != 13 {
-		t.Fatalf("want thirteen ad platforms, got %d", len(ids))
+	if len(ids) != 14 {
+		t.Fatalf("want fourteen ad platforms, got %d", len(ids))
 	}
 }
 

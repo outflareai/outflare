@@ -88,7 +88,7 @@ func (s *Server) routesPartners(mux *http.ServeMux) {
 
 // partnerEventProps are the audit data keys that also go on the product
 // event: enums, counts and flags, never notes, codes or amounts.
-var partnerEventProps = []string{"kind", "program_kind", "side", "type", "source", "via", "status", "previous_status", "by", "rules", "has_note", "replaced",
+var partnerEventProps = []string{"signal", "rejected", "suspended", "kind", "program_kind", "side", "type", "source", "via", "status", "previous_status", "by", "rules", "has_note", "replaced",
 	"default", "renamed", "partners"}
 
 // partnerRecord is record for partner actions, with their enums as event
@@ -216,7 +216,7 @@ var urlParamRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 // reservedURLParams are query parameters the website script reads already:
 // ref, via and the ad networks' click ids.
-var reservedURLParams = []string{"ref", "via", "gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid",
+var reservedURLParams = []string{"ref", "via", "gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid", "oppref",
 	"ttclid", "sccid", "epik", "tblci", "ob_click_id", "qclid", "irclickid"}
 
 // partnerQuerier is a pool or a transaction.

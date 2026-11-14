@@ -17,8 +17,8 @@ func TestLinkProspectsAddScoreAndPitch(t *testing.T) {
 	siteID := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://www.example.com/"})["id"].(string)
 	// What is stored: a live link from linked.example (strength 70), a
 	// tracked competitor and a suppressed domain.
-	if _, err := e.pool.Exec(ctx, `INSERT INTO backlinks (workspace_id, site_id, source_url, target_url, source_domain, source_rating, domain_traffic)
-		VALUES ($1, $2, 'https://linked.example/a', 'https://example.com/', 'linked.example', 70, 20000)`, ws, siteID); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO backlinks (workspace_id, site_id, source_url, target_url, source_domain, source_rating, domain_traffic, brand_id)
+		VALUES ($1, $2, 'https://linked.example/a', 'https://example.com/', 'linked.example', 70, 20000, outflare_first_brand($1::uuid))`, ws, siteID); err != nil {
 		t.Fatal(err)
 	}
 	owner.must(201, "POST", base+"/seo-competitors", map[string]any{"site_id": siteID, "host": "rival.example"})
@@ -160,12 +160,12 @@ func TestReclaimProspects(t *testing.T) {
 	siteID := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://www.example.com/"})["id"].(string)
 	// Lost links: a recent one (its site still links elsewhere), one lost
 	// long ago, one marked to disavow and a toxic one; and a live link.
-	if _, err := e.pool.Exec(context.Background(), `INSERT INTO backlinks (workspace_id, site_id, source_url, target_url, source_domain, source_rating, status, lost_at, review, spam_score) VALUES
-		($1, $2, 'https://blog.example.org/tools', 'https://example.com/guide', 'blog.example.org', 50, 'lost', now() - interval '10 days', '', 5),
-		($1, $2, 'https://blog.example.org/home', 'https://example.com/', 'blog.example.org', 50, 'live', NULL, '', 5),
-		($1, $2, 'https://old.example.org/a', 'https://example.com/', 'old.example.org', 70, 'lost', now() - interval '200 days', '', 5),
-		($1, $2, 'https://bad.example.org/a', 'https://example.com/', 'bad.example.org', 70, 'lost', now() - interval '5 days', 'disavow', 5),
-		($1, $2, 'https://spam.example.org/a', 'https://example.com/', 'spam.example.org', 70, 'lost', now() - interval '5 days', '', 90)`, ws, siteID); err != nil {
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO backlinks (workspace_id, site_id, source_url, target_url, source_domain, source_rating, status, lost_at, review, spam_score, brand_id) VALUES
+		($1, $2, 'https://blog.example.org/tools', 'https://example.com/guide', 'blog.example.org', 50, 'lost', now() - interval '10 days', '', 5, outflare_first_brand($1::uuid)),
+		($1, $2, 'https://blog.example.org/home', 'https://example.com/', 'blog.example.org', 50, 'live', NULL, '', 5, outflare_first_brand($1::uuid)),
+		($1, $2, 'https://old.example.org/a', 'https://example.com/', 'old.example.org', 70, 'lost', now() - interval '200 days', '', 5, outflare_first_brand($1::uuid)),
+		($1, $2, 'https://bad.example.org/a', 'https://example.com/', 'bad.example.org', 70, 'lost', now() - interval '5 days', 'disavow', 5, outflare_first_brand($1::uuid)),
+		($1, $2, 'https://spam.example.org/a', 'https://example.com/', 'spam.example.org', 70, 'lost', now() - interval '5 days', '', 90, outflare_first_brand($1::uuid))`, ws, siteID); err != nil {
 		t.Fatal(err)
 	}
 	res := owner.must(200, "POST", base+"/link-prospects/reclaim", map[string]any{"site_id": siteID})

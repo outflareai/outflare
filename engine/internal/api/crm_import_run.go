@@ -264,8 +264,11 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 // RegisterJobs adds the server's own background work to the queue.
 func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobCRMGoogleSync, s.crmGoogleSyncJob)
+	q.Handle(jobSalesSend, s.salesSendJob)
+	q.Handle(jobSalesSync, s.salesSyncJob)
 	q.Handle(jobCRMMailPrivacy, s.crmMailPrivacyJob)
 	q.Handle(jobCRMCalendarWorkspace, s.crmCalendarWorkspaceJob)
+	q.Handle(jobCRMMailSend, s.crmMailSendJob)
 	q.Handle(jobCRMImport, s.crmImportJob)
 	q.Handle(jobBatchUndo, s.batchUndoJob)
 	q.Handle(jobBulkEdit, s.bulkEditJob)

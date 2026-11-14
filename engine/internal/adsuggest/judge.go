@@ -301,7 +301,7 @@ func leverWord(kind string) string {
 
 // networkName is a connector's name as a sentence says it.
 func networkName(connector string) string {
-	return map[string]string{"google_ads": "Google Ads", "meta_ads": "Meta", "microsoft_ads": "Microsoft Advertising", "linkedin_ads": "LinkedIn", "tiktok_ads": "TikTok", "reddit_ads": "Reddit", "x_ads": "X"}[connector] + ""
+	return map[string]string{"google_ads": "Google Ads", "meta_ads": "Meta", "microsoft_ads": "Microsoft Advertising", "linkedin_ads": "LinkedIn", "tiktok_ads": "TikTok", "reddit_ads": "Reddit", "x_ads": "X", "chatgpt_ads": "ChatGPT"}[connector] + ""
 }
 
 // Verdict compares the days after a change with as many days before it,

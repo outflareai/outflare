@@ -333,8 +333,8 @@ func TestJudgeOnPayers(t *testing.T) {
 	group := f.q(`INSERT INTO ad_entities (brand_id, workspace_id, ad_account_id, level, parent_id, external_id, name, status) VALUES ($1, $2, $3, 'ad_group', $4, '101', 'Assets', 'active') RETURNING id::text`, f.brand, f.ws, f.acct, pmax)
 	f.days(pmax, 30, 1, 20_000_000, 1)
 	f.payers(pmax, 30, 1, 1)
-	f.exec(`INSERT INTO ad_search_terms_daily (workspace_id, ad_account_id, ad_group_id, day, term, currency, spend_micros, clicks, conversions)
-		VALUES ($1, $2, $3, current_date - 3, 'free crm download', 'USD', 90000000, 60, 0)`, f.ws, f.acct, group)
+	f.exec(`INSERT INTO ad_search_terms_daily (workspace_id, ad_account_id, ad_group_id, day, term, currency, spend_micros, clicks, conversions, brand_id)
+		VALUES ($1, $2, $3, current_date - 3, 'free crm download', 'USD', 90000000, 60, 0, outflare_first_brand($1::uuid))`, f.ws, f.acct, group)
 	if _, err = f.run.Run(ctx, f.ws); err != nil {
 		t.Fatal(err)
 	}

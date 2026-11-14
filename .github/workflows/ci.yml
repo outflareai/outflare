@@ -405,6 +405,9 @@ jobs:
       - name: Partner program settings page
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:partner-settings
+      - name: Partner fraud review tab
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:partner-review
       - if: env.WEB != 'false'
         run: pnpm --filter @outflare/sdk test
       - if: env.WEB != 'false'

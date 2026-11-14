@@ -98,9 +98,9 @@
   // Click ids ad networks add to landing pages, the ad ids an Outflare
   // tracking template adds (of_campaign and the rest), and the cookies ad
   // pixels set, read only with marketing consent.
-  var clickIDs = ["gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid", "ttclid", "ScCid", "epik", "tblci", "ob_click_id", "qclid", "irclickid"];
+  var clickIDs = ["gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid", "oppref", "ttclid", "ScCid", "epik", "tblci", "ob_click_id", "qclid", "irclickid"];
   var adParams = ["campaign", "adset", "ad", "placement"];
-  var adCookies = { _fbp: "fbp", _fbc: "fbc", _gcl_aw: "gcl_aw", _ttp: "ttp", _scid: "scid" };
+  var adCookies = { _fbp: "fbp", _fbc: "fbc", _gcl_aw: "gcl_aw", _ttp: "ttp", _scid: "scid", __obref: "obref" };
 
   function needsConsent() {
     if (mode === "required") return true;

@@ -1096,6 +1096,15 @@ groups:
         annotations:
           summary: "A partner reward has waited over 30 minutes past its hold to be approved; check the engine log and partner_reward.approve_failed events for the error."
 
+      - alert: OutflarePartnerFlagsBurst
+        # Far more fraud flags than a program normally sees: a partner is
+        # gaming it, or a check misfires and holds honest partners' money.
+        expr: sum(increase(outflare_partners_flags_total{event="raised"}[1h])) > 200
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Over 200 partner fraud flags were raised in an hour, so many partners' rewards are waiting for review: look at the signals on the Partner fraud flags panel (Partners row) and at the flags' detail in GET /v1/brands/{brand}/partner-flags; a single signal everywhere usually means a check misfires."
+
       - alert: OutflarePartnerConversionsFailing
         # Our errors (not bad input) recording conversions from workspaces'
         # backends: they retry, but referred sales go uncredited meanwhile.
@@ -1618,6 +1627,13 @@ groups:
         annotations:
           summary: "Personal CRM Google capture jobs are over fifteen minutes late; check worker capacity and database access."
 
+      - alert: OutflareCRMMailSendsFailing
+        expr: sum(increase(outflare_crm_mail_sends_total{outcome="failed"}[1h])) > 5 or sum(increase(outflare_jobs_processed_total{kind="crm_mail.send",outcome="dead"}[1h])) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Emails members send from their own mailbox are failing; check the Google Workspace connection's gmail.send delegation and crm_mail.send jobs."
+
       - alert: OutflareWorkspaceCalendarCaptureFailing
         expr: sum(increase(outflare_jobs_processed_total{kind="crm_calendar.workspace_sync",outcome=~"retried|dead"}[30m])) > 2
         for: 10m
@@ -1719,3 +1735,41 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "Over a week, changes of one kind of paid ads finding did not work more often than they worked (the kind label says which): that rule's thresholds want a look (engine/internal/adsuggest/rules.go) before more brands let it apply on its own. Check the Paid media (findings and verdicts) row."
+
+      # Sales introductions, personal replies and continuous mailbox catch-up.
+      - alert: OutflareSalesJobsFailing
+        expr: sum by (kind) (increase(outflare_jobs_processed_total{kind=~"sales[.](send|sync)",outcome=~"retried|dead"}[30m])) > 5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sales send or sync jobs repeatedly fail. Check the Sales email row, the job log and the affected person's connection status."
+      - alert: OutflareSalesSyncDelayed
+        expr: max(outflare_jobs_oldest_due_seconds{kind="sales.sync"}) > 900
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sales mailbox synchronization is over fifteen minutes late. Check worker capacity and sync job errors in the Sales email row."
+      - alert: OutflareSalesSendsStuck
+        expr: max(outflare_sales_oldest_message_seconds{status=~"queued|sending"}) > 600
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "A Sales send has waited over ten minutes. Check the send job and connection; a sending attempt must be reconciled before it is retried."
+      - alert: OutflareSalesSendUncertain
+        expr: max(outflare_sales_messages{status="uncertain"}) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A Sales send still has no certain provider outcome. Inspect the original provider thread or Gmail reconciliation; do not resend an uncertain message."
+      - alert: OutflareSalesSendsFailed
+        expr: max(outflare_sales_oldest_message_seconds{status="failed"}) > 1800
+        for: 10m
+        labels: { severity: info }
+        annotations:
+          summary: "A definitely failed Sales send has waited for repair for over thirty minutes. Check its policy or connection error before using Retry send."
+      - alert: OutflareSalesJobsSlow
+        expr: histogram_quantile(0.95, sum by (le,kind) (rate(outflare_jobs_duration_seconds_bucket{kind=~"sales[.](send|sync)"}[30m]))) > 120
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Sales send or sync jobs keep taking over two minutes. Check provider response times and the size of historical catch-up work in the Sales email row."

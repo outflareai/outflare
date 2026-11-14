@@ -18,7 +18,7 @@ needs:
   connections:
     - capability: ads.manage
       label: An ad platform that can be managed
-      recommended: [google_ads, meta_ads, microsoft_ads, linkedin_ads, tiktok_ads, reddit_ads, x_ads]
+      recommended: [google_ads, meta_ads, microsoft_ads, linkedin_ads, tiktok_ads, reddit_ads, x_ads, chatgpt_ads]
     - capability: plan
       label: An AI model, unless you run this from your own AI app
       optional: true

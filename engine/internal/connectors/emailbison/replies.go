@@ -19,6 +19,15 @@ import (
 // reply is one EmailBison reply, with the names its API uses and the
 // likely alternatives.
 type reply struct {
+	ToList []struct {
+		Address string `json:"address"`
+	} `json:"to"`
+	CC []struct {
+		Address string `json:"address"`
+	} `json:"cc"`
+	ParentID       id     `json:"parent_id"`
+	InReplyTo      string `json:"in_reply_to"`
+	References     string `json:"references"`
 	ID             id     `json:"id"`
 	SenderEmailID  id     `json:"sender_email_id"`
 	FromEmail      string `json:"from_email_address"`
@@ -86,6 +95,20 @@ func toReply(r reply) c.Reply {
 		Body:      strings.TrimSpace(r.TextBody),
 		MessageID: strings.Trim(first(r.MessageID, r.MessageIDAlt), "<> "),
 	}
+	out.Direction = "incoming"
+	if strings.EqualFold(r.Folder, "sent") {
+		out.Direction = "outgoing"
+	}
+	out.InReplyTo, out.References = r.InReplyTo, r.References
+	for _, p := range r.ToList {
+		out.To = append(out.To, p.Address)
+	}
+	if len(out.To) == 0 && r.To != "" {
+		out.To = []string{r.To}
+	}
+	for _, p := range r.CC {
+		out.CC = append(out.CC, p.Address)
+	}
 	if r.SenderEmail != nil {
 		if out.MailboxExternalID == "" {
 			out.MailboxExternalID = string(r.SenderEmail.ID)
@@ -131,21 +154,68 @@ func parseTime(s string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (EmailBison) SendReply(ctx context.Context, cl *c.Client, creds c.Creds, r c.ReplyOut) error {
+func (e EmailBison) SendReply(ctx context.Context, cl *c.Client, creds c.Creds, r c.ReplyOut) error {
+	_, err := e.SendReplyReceipt(ctx, cl, creds, r)
+	return err
+}
+func (EmailBison) SendReplyReceipt(ctx context.Context, cl *c.Client, creds c.Creds, r c.ReplyOut) (c.Reply, error) {
 	a, err := open(cl, creds)
 	if err != nil {
-		return err
+		return c.Reply{}, err
 	}
 	sender, err := strconv.Atoi(r.MailboxExternalID)
 	if err != nil {
-		return c.Errf(c.ErrInvalid, "EmailBison sender email id %q is not a number", r.MailboxExternalID)
+		return c.Reply{}, c.Errf(c.ErrInvalid, "EmailBison sender id is invalid")
 	}
-	return a.do(ctx, http.MethodPost, "/api/replies/"+url.PathEscape(r.ReplyExternalID)+"/reply", map[string]any{
-		"message":                    r.Body,
-		"sender_email_id":            sender,
-		"to_emails":                  []map[string]string{{"name": r.ToName, "email_address": r.ToEmail}},
-		"inject_previous_email_body": true,
-	}, nil)
+	cc := make([]map[string]string, 0, len(r.CC))
+	for _, address := range r.CC {
+		cc = append(cc, map[string]string{"email_address": address})
+	}
+	var result struct {
+		Data struct {
+			Reply reply `json:"reply"`
+		} `json:"data"`
+	}
+	err = a.do(ctx, http.MethodPost, "/api/replies/"+url.PathEscape(r.ReplyExternalID)+"/reply", map[string]any{"message": r.Body, "content_type": "text", "sender_email_id": sender, "to_emails": []map[string]string{{"name": r.ToName, "email_address": r.ToEmail}}, "cc_emails": cc, "inject_previous_email_body": true}, &result)
+	return toReply(result.Data.Reply), err
+}
+func (EmailBison) ReadReplyThread(ctx context.Context, cl *c.Client, creds c.Creds, id string) ([]c.Reply, error) {
+	a, err := open(cl, creds)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Data struct {
+			Current reply   `json:"current_reply"`
+			Older   []reply `json:"older_messages"`
+			Newer   []reply `json:"newer_messages"`
+		} `json:"data"`
+	}
+	if err = a.do(ctx, http.MethodGet, "/api/replies/"+url.PathEscape(id)+"/conversation-thread", nil, &result); err != nil {
+		return nil, err
+	}
+	if string(result.Data.Current.ID) != id {
+		return nil, c.Errf(c.ErrUnavailable, "EmailBison returned an incomplete conversation")
+	}
+	all := append(append(result.Data.Older, result.Data.Current), result.Data.Newer...)
+	byID := map[string]string{}
+	for _, r := range all {
+		byID[string(r.ID)] = first(r.MessageID, r.MessageIDAlt)
+	}
+	out := []c.Reply{}
+	seen := map[string]bool{}
+	for _, r := range all {
+		if r.ID == "" || seen[string(r.ID)] {
+			continue
+		}
+		seen[string(r.ID)] = true
+		got := toReply(r)
+		if got.InReplyTo == "" {
+			got.InReplyTo = byID[string(r.ParentID)]
+		}
+		out = append(out, got)
+	}
+	return out, nil
 }
 
 var _ c.ReplySource = EmailBison{}

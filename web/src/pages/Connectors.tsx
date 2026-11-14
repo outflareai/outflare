@@ -198,6 +198,25 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
     load();
   }
 
+  // Connections that sign in through the workspace's own OAuth client (such
+  // as Google Workspace without a key) report account.details.signer. The
+  // client must list this server's redirect URI, so show it before leaving.
+  async function signIn(i: Integration) {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/integrations/{id}/sign-in", { params: { path: { ws, id: i.id }, query: { format: "json" } } });
+    if (error || !data) return toast(`${i.name}: ${errorMessage(error)}`, "error");
+    const { url, redirect_uri } = data as { url: string; redirect_uri?: string };
+    if (redirect_uri) {
+      const body = (
+        <div className="space-y-2 text-[13px]">
+          <p>Sign in with the Google account allowed to sign as this connection's service account. Your OAuth client must list this redirect URI:</p>
+          <p className="flex items-center gap-2"><code className="rounded bg-muted px-1.5 py-0.5 text-xs break-all">{redirect_uri}</code></p>
+        </div>
+      );
+      if (!(await confirmAction(`Sign in ${i.name}`, body, "Continue to sign-in", false))) return;
+    }
+    location.assign(url);
+  }
+
   async function rename(i: Integration) {
     const r = await ask({ title: `Rename "${i.name}"`, input: { label: "Name", placeholder: i.name }, choices: [{ label: "Cancel", value: "cancel" }, { label: "Rename", value: "ok", variant: "primary" }] });
     if (!r?.value.trim()) return;
@@ -298,6 +317,7 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
                     cell: ({ row: { original: i } }) => (
                       <div className="text-[12px]">
                         <div>{i.account?.email || i.account?.name || <span className="text-muted-foreground">—</span>}</div>
+                        {i.account?.details?.signer === "sign_in_required" && <div className="text-muted-foreground">Sign in to finish connecting</div>}
                         {i.account?.credits !== undefined && <div className="font-mono text-muted-foreground">{credits(i.account.credits)}</div>}
                         {usage.has(i.id) && <button type="button" className="text-left text-muted-foreground underline-offset-2 hover:underline" onClick={() => setOpen(i.id)}>{usageLine(usage.get(i.id)!)}</button>}
                       </div>
@@ -318,6 +338,11 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
                         {canImport && i.capabilities.includes("import.campaigns") && <Button onClick={() => setImporting(i)}>Import</Button>}
                         {canManage && i.capabilities.includes("import.crm") && <Button onClick={() => setImportingCRM(i)}>Import</Button>}
                         {i.capabilities.includes("deploys.read") && <Button variant="ghost" onClick={() => setDeploys(i)}>Deploys</Button>}
+                        {canManage && i.account?.details?.signer && (
+                          <Button variant={i.account.details.signer === "sign_in_required" ? undefined : "ghost"} onClick={() => signIn(i)}>
+                            {i.account.details.signer === "sign_in_required" ? "Sign in" : "Sign in again"}
+                          </Button>
+                        )}
                         {canManage && <Button variant="ghost" onClick={() => test(i)}>Test</Button>}
                         {canManage && (
                           <Menu

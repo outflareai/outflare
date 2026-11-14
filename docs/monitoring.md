@@ -141,6 +141,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_partners_clicks_total` | `outcome` (`tracked`, `inactive`, `not_found`, `error`) | Clicks on partners' short links ([partners.md](partners.md)). |
 | `outflare_partners_conversions_total` | `type` (`signup`, `sale`, `refund`, `custom`), `source` (`api`, `postback`, `browser`), `outcome` (`credited`, `not_credited`, `duplicate`, `rejected`, `error`) | Partner conversions reported by workspaces' backends, postback URLs and websites' `outflare.signup()`. |
 | `outflare_partners_rewards_total` | `kind` (`cash`, `fee`, `action`, `adjustment`), `event` (`created`, `approved`, `rejected`, `reversed`, `fulfilled`, `paid`) | Changes to the partner reward ledger. |
+| `outflare_partners_flags_total` | `signal`, `event` (`raised`, `cleared`, `confirmed`) | Partner fraud flags: raised on a credited conversion (its rewards wait), cleared or confirmed. |
 | `outflare_partners_postbacks_total` | `outcome` (`sent`, `retried`, `rejected`, `unreachable`, `invalid`) | Postbacks to partners' own trackers ([partners.md](partners.md#postbacks-to-your-partners-trackers)). |
 | `outflare_partners_rewards_overdue_seconds` | | How long past its hold the oldest reward due to approve on its own has waited. |
 | `outflare_partners_imports_total` | `connector` (`tolt`), `outcome` (`done`, `failed`) | Partner program imports from another platform that finished ([moving from Tolt](partners-tolt-migration.md)). |
@@ -369,6 +370,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - a conversion waiting over 30 minutes to be sent
 - over 500 meetings waiting 30 minutes for their meeting event on people's timelines
 - a partner reward waiting over 30 minutes past its hold to be approved
+- over 200 partner fraud flags raised in an hour (info: a partner gaming a program, or a check misfiring; flagged rewards wait for a person, so they never count as overdue)
 - partner conversions failing with server errors
 - partner link clicks not being stored
 - over half of partner postbacks failing for an hour (info: usually partners' trackers, or outbound traffic blocked)
@@ -470,5 +472,26 @@ Personal CRM Google capture uses the existing per-kind queue throughput, duratio
 
 The email privacy check (`crm_mail.privacy_check`) counts each email it reads in `outflare_crm_mail_privacy_checks_total{outcome}` (work, private, failed, no_ai, budget), on a panel beside Gmail capture.
 
+- `OutflareCRMMailSendsFailing` (warning): more than five emails sent as members failed in an hour, or a `crm_mail.send` job died; check the Google Workspace connection's `gmail.send` delegation. `outflare_crm_mail_sends_total{outcome}` (sent, failed, deduplicated) is on a panel beside Gmail capture.
 - `OutflareWorkspaceCalendarCaptureFailing` (warning): reading Workspace members' calendars into the CRM (`crm_calendar.workspace_sync`) keeps retrying or dying; check the connection's delegation for `calendar.readonly`. Its jobs share the Gmail capture panel.
 - `OutflareMailPrivacyChecksFailing` (warning): over twenty email privacy checks failed, found no AI model or hit the AI limit in an hour, so colleagues stop seeing new work email.
+
+## Sales email
+
+The Sales email row uses the shared per-kind throughput, duration, queue depth
+and oldest-due metrics for `sales.send` and `sales.sync`. Additional bounded
+metrics count committed send results (`outflare_sales_send_results_total{status}`)
+and newly retained sync messages (`outflare_sales_stored_messages_total{direction}`).
+Duplicate provider copies do not increase the stored-message count.
+
+`outflare_sales_messages{status}` and `outflare_sales_oldest_message_seconds{status}`
+report outstanding queued, sending, failed and uncertain sends from the database.
+They expose no ids or message content. Uncertain means the provider may already
+have accepted the message; it must be reconciled before any retry.
+
+- `OutflareSalesJobsFailing`: Sales send or sync jobs repeatedly retry or die.
+- `OutflareSalesSyncDelayed`: a mailbox poll is over fifteen minutes overdue.
+- `OutflareSalesSendsStuck`: a queued or sending message is over ten minutes old.
+- `OutflareSalesSendUncertain`: a provider outcome remains uncertain for ten minutes.
+- `OutflareSalesSendsFailed`: a definitely failed send needs repair after thirty minutes.
+- `OutflareSalesJobsSlow`: Sales jobs sustain a 95th-percentile runtime over two minutes.

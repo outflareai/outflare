@@ -9,7 +9,7 @@ import { Button, Empty, ErrorText, Loading, PageHeader, Stat, Stats } from "../u
 import { Overview } from "./link-orders/Overview";
 import { Catalog } from "./link-orders/Catalog";
 import { Candidates } from "./link-orders/Candidates";
-import { Targets } from "./link-orders/Targets";
+import { Targets } from "./link-orders/TargetsPanel";
 import { Orders } from "./link-orders/Orders";
 import { Checks } from "./link-orders/Checks";
 import { Impact } from "./link-orders/Impact";

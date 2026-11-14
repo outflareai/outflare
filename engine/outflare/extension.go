@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/outflareai/outflare/engine/internal/adsuggest"
 	"github.com/outflareai/outflare/engine/internal/api"
@@ -100,6 +101,14 @@ func (h *Host) HandleJob(kind string, fn func(ctx context.Context, payload json.
 // key makes a repeated enqueue a no-op.
 func (h *Host) EnqueueJob(ctx context.Context, kind string, payload any, idempotencyKey string) error {
 	_, err := jobs.Enqueue(ctx, h.Pool, jobs.NewJob{Kind: kind, Payload: payload, IdempotencyKey: idempotencyKey})
+	return err
+}
+
+// EnqueueJobTx atomically queues an extension job with the state change that
+// requires it. Rollback removes both. Payloads must contain references, not
+// credentials; handlers resolve authorized resources from persisted scope.
+func (h *Host) EnqueueJobTx(ctx context.Context, tx pgx.Tx, kind string, payload any, idempotencyKey string) error {
+	_, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: kind, Payload: payload, IdempotencyKey: idempotencyKey})
 	return err
 }
 

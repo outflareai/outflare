@@ -601,7 +601,7 @@ func gmailTextMessage(root gmailPart) (string, error) {
 			return "", errors.New("invalid email headers")
 		}
 		switch strings.ToLower(h.Name) {
-		case "from", "to", "cc", "bcc", "sender", "reply-to", "date", "subject", "message-id":
+		case "from", "to", "cc", "bcc", "sender", "reply-to", "date", "subject", "message-id", "in-reply-to", "references":
 			out.WriteString(h.Name + ": " + h.Value + "\r\n")
 		}
 	}

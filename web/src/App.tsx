@@ -2,6 +2,7 @@ import { UnassignedNotice } from "@/components/connection-brands";
 import { SearchDashboard } from "./pages/SearchDashboard";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { salesPageName } from "@/lib/sales";
 import type { Workspace } from "@outflare/sdk";
 import { api, errorMessage } from "./api";
 import { identify, page, resetAnalytics, track } from "./lib/analytics";
@@ -440,7 +441,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     query.delete("brand");
     const search = query.toString() ? `?${query}` : "";
     if (location.pathname !== path || location.search !== search) history[stale || otherBrand ? "replaceState" : "pushState"](null, "", path + search);
-    document.title = `${link?.name ?? (kind ? undefined : item) ?? tabNames[tab]} · ${ws.name} · Outflare`;
+    document.title = `${(tab === "crm" ? salesPageName(item) : undefined) ?? link?.name ?? (kind ? undefined : item) ?? tabNames[tab]} · ${ws.name} · Outflare`;
   }, [ws?.id, ws?.slug, ws?.name, tab, item, link, findWs, findItem, pickedBrand, brandState.loaded, brandState.active.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Switching brand shows the new brand's records everywhere: the page
@@ -516,20 +517,26 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
 
   const [theme, toggleTheme] = useTheme();
   const [palette, setPalette] = useState(false);
-  const [apiOpen, setApiOpen] = useState(() => {
+  const [generalApiOpen, setGeneralApiOpen] = useState(() => {
     try {
       return localStorage.getItem("api-panel") === "open";
     } catch {
       return false;
     }
   });
+  // Sales opens on the work itself. Opening the developer panel elsewhere
+  // should not take room away from a rep's queue or conversation.
+  const [salesApiOpen, setSalesApiOpen] = useState(false);
+  const salesPage = tab === "crm" && (!item || item.startsWith("sales:"));
+  const apiOpen = salesPage ? salesApiOpen : generalApiOpen;
+  const setApiOpen = salesPage ? setSalesApiOpen : setGeneralApiOpen;
   useEffect(() => {
     try {
-      localStorage.setItem("api-panel", apiOpen ? "open" : "closed");
+      localStorage.setItem("api-panel", generalApiOpen ? "open" : "closed");
     } catch {
       // Not remembered; fine.
     }
-  }, [apiOpen]);
+  }, [generalApiOpen]);
   // The agent panel shares the right edge with the API panel: one at a time.
   const [agentOpen, setAgentOpenState] = useState(() => {
     try {

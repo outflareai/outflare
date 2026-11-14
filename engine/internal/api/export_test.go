@@ -152,3 +152,8 @@ func (s *Server) RunMailPrivacyCheck(ctx context.Context, ws, brand string) erro
 func (s *Server) RunWorkspaceCalendar(ctx context.Context, ws, connection string) error {
 	return s.crmCalendarWorkspaceJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"connection_id":"` + connection + `"}`)})
 }
+
+// RunCRMMailSend runs one queued send's job once.
+func (s *Server) RunCRMMailSend(ctx context.Context, ws, send string) error {
+	return s.crmMailSendJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"send_id":"` + send + `"}`)})
+}

@@ -24,6 +24,7 @@ import { registerABTestTools } from "./abtests.js";
 import { registerInsightTools } from "./insights.js";
 import { registerRedditTools } from "./reddit.js";
 import { registerSupplierTools } from "./suppliers.js";
+import { registerSalesTools } from "./sales.js";
 import { registerPartnerTools } from "./partners.js";
 import { CORE, TOOLS_HINT, Toolbox, registerToolbox, type ToolMode } from "./toolbox.js";
 
@@ -335,6 +336,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
   registerBrandTools(server, gtm, () => ws, readOnly, call);
   registerSetupTools(server, gtm, () => ws, readOnly, call);
   registerRecordTools(server, gtm, () => ws, readOnly, call);
+  registerSalesTools(server, gtm, () => ws, readOnly, call);
   registerQueryTools(server, gtm, () => ws, readOnly, call);
   registerSearchInsightTools(server, gtm, readOnly, call);
 
@@ -3935,7 +3937,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/attribution/conversions", { params: { path: { brand: b }, query } }))),
   );
 
-  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "taboola_ads", "outbrain_ads", "apple_ads", "amazon_ads", "pinterest_ads"]).optional();
+  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "taboola_ads", "outbrain_ads", "apple_ads", "amazon_ads", "pinterest_ads", "chatgpt_ads"]).optional();
   const adDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
 
   server.registerTool(

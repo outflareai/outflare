@@ -109,6 +109,41 @@ func TestExtensionWorkspaceRoutes(t *testing.T) {
 	}
 }
 
+// An extension's brand route finds the brand's workspace, keeps callers
+// to brands they can see, and tells the handler the brand.
+func TestExtensionBrandRoutes(t *testing.T) {
+	e := freshEnvWith(t, func(o *api.Options) {
+		o.WorkspaceRoutes = []api.WorkspaceRoute{{
+			Pattern: "GET /v1/brands/{brand}/finder/where", Scope: "leads.read", Brand: true,
+			Handler: func(w http.ResponseWriter, r *http.Request, c *api.Caller) {
+				api.WriteJSON(w, http.StatusOK, map[string]any{"brand": c.Brand, "workspace": c.WorkspaceID})
+			},
+		}}
+	})
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
+
+	out := owner.must(200, "GET", "/v1/brands/"+rp+"/finder/where", nil)
+	if out["brand"] != rp || out["workspace"] != ws {
+		t.Fatalf("where = %v", out)
+	}
+	owner.must(404, "GET", "/v1/brands/00000000-0000-0000-0000-000000000000/finder/where", nil)
+	owner.must(404, "GET", "/v1/brands/nope/finder/where", nil)
+	(&client{t: t, h: e.h}).must(401, "GET", "/v1/brands/"+rp+"/finder/where", nil)
+
+	// A token kept to Geonode doesn't find Repocket, and scopes hold.
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Geonode agent", "scopes": []string{"leads.read"}, "brand": "geonode"})["token"].(string)
+	agent := &client{t: t, h: e.h, bearer: tok}
+	if out := agent.must(200, "GET", "/v1/brands/"+geo+"/finder/where", nil); out["brand"] != geo {
+		t.Fatalf("agent = %v", out)
+	}
+	agent.must(404, "GET", "/v1/brands/"+rp+"/finder/where", nil)
+	noScope := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Mail", "scopes": []string{"mailboxes.read"}})["token"].(string)
+	(&client{t: t, h: e.h, bearer: noScope}).must(403, "GET", "/v1/brands/"+rp+"/finder/where", nil)
+}
+
 func TestCompanyDomain(t *testing.T) {
 	for in, want := range map[string]string{
 		"https://www.Acme.example/about?x=1": "acme.example", "acme.example:443": "acme.example", "localhost": "", "not a domain": "", "": "",

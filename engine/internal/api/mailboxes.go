@@ -141,8 +141,8 @@ type warmupView struct {
 	// Provider is the id of the connected sequencer that runs the
 	// warm-up (or will when it is turned on), or null when none does.
 	Provider *string `json:"provider"`
-	// WaitingOn is platform while a mailbox has warm-up on here but its
-	// sequencer doesn't show it on yet, and null otherwise.
+	// WaitingOn is platform while the sequencer doesn't show what was asked
+	// for here yet (on, or off), and null otherwise.
 	WaitingOn *string `json:"waiting_on"`
 }
 
@@ -182,7 +182,9 @@ func scanMailbox(r pgx.CollectableRow) (mailboxView, error) {
 	if lock.Kind != nil {
 		m.Lock = &mailboxLock{Kind: *lock.Kind, SequenceID: lock.SequenceID, TeamID: lock.TeamID, Until: lock.Until, Note: *lock.Note}
 	}
-	if w.Enabled && (platformWarm == nil || !*platformWarm) {
+	// Waiting until the sequencer shows what Outflare asked for, either way:
+	// a switch it refused or hasn't made yet is never shown as done.
+	if w.Enabled != (platformWarm != nil && *platformWarm) && (w.Enabled || platformWarm != nil) {
 		waiting := "platform"
 		w.WaitingOn = &waiting
 	}

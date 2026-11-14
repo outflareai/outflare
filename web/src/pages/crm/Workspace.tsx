@@ -28,6 +28,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { crmApi } from "./client";
+import { SalesFloor } from "./Sales";
 import { api, errorMessage } from "@/api";
 import {
   Button,
@@ -141,6 +142,7 @@ export function CRMWorkspace({
         </div>
       </Empty>
     );
+  if (!open || open.startsWith("sales:")) return <SalesFloor ws={ws} brand={brand.id} open={open} setOpen={setOpen} go={go} canManageTeam={canManageMailPolicy} />;
   return (
     <Workspace
       key={`${ws}:${brand?.id ?? "all"}`}
@@ -623,6 +625,7 @@ function WorkspaceBody({
           )}
         </div>
       </header>
+      <Button variant="ghost" onClick={() => setOpen("sales:new")}>Open Sales conversations</Button>
       <nav
         aria-label="CRM sections"
         className="flex flex-wrap gap-1 rounded-xl border bg-card p-1.5 shadow-xs"

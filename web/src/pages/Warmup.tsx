@@ -48,7 +48,7 @@ export function Warmup({ ws, canManage, go }: { ws: string; canManage: boolean; 
   const outside = mailboxes.filter((m) => !inSequencer(m)).length;
   const scores = warming.flatMap((m) => warmupScore(m) ?? []);
   const score = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-  const turningOn = warming.filter((m) => m.warmup.waiting_on).length;
+  const turningOn = warming.filter((m) => m.warmup.waiting_on).length; // turning off is shown per mailbox
 
   async function change(list: Mailbox[], enabled: boolean) {
     if (await changeWarmup(ws, list, enabled)) load();

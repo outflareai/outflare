@@ -18,7 +18,7 @@ The first rule that matches wins:
 | --- | --- | --- | --- |
 | 1 | An `ofc` code from a [campaign link](campaign-links.md) | the campaign's channel, source and slug | `ofc` |
 | 2 | A partner's `ref` code | `affiliates`, source `partner` | `ref` |
-| 3 | An ad click id: `gclid`, `gbraid`, `wbraid`, `dclid` (Google), `msclkid` (Microsoft), `li_fat_id` (LinkedIn), `rdt_cid` (Reddit), `twclid` (X), `ttclid` (TikTok), `ScCid` (Snapchat), `epik` (Pinterest), `tblci` (Taboola), `ob_click_id` (Outbrain), `qclid` (Quora); or Impact's `irclickid`, which is a partner click | `paid_ads`, or `affiliates` for `irclickid` | `click_id` |
+| 3 | An ad click id: `gclid`, `gbraid`, `wbraid`, `dclid` (Google), `msclkid` (Microsoft), `li_fat_id` (LinkedIn), `rdt_cid` (Reddit), `twclid` (X), `oppref` (ChatGPT), `ttclid` (TikTok), `ScCid` (Snapchat), `epik` (Pinterest), `tblci` (Taboola), `ob_click_id` (Outbrain), `qclid` (Quora); or Impact's `irclickid`, which is a partner click | `paid_ads`, or `affiliates` for `irclickid` | `click_id` |
 | 4 | UTM tags: `utm_medium` decides the channel (`cpc`, `paid_social`, `display` are paid ads; `email` is lifecycle email, or outbound email from a sequencer; `social` is organic social or Reddit; `affiliate`, `referral`, `organic`, `ai`), otherwise the source does | from the tags | `utm` |
 | 5 | A referrer that isn't one of the workspace's own sites: AI assistants (ChatGPT, Perplexity, Gemini, Claude, Copilot), Reddit, search engines, social networks, else referral | from the referrer | `referrer` |
 | 6 | Nothing | `direct` | `none` |

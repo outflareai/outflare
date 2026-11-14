@@ -4,6 +4,331 @@
  */
 
 export interface paths {
+    "/v1/brands/{brand}/sales/queue-seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark the shared new-lead queue seen for this person */
+        post: operations["markSalesQueueSeen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** Get my Sales role and email connection */
+        get: operations["getSalesMe"];
+        /** Save my introduction */
+        put: operations["updateSalesIntroduction"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/team": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** List the Sales team */
+        get: operations["listSalesTeam"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/team/{user}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                user: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Set a member Sales role */
+        put: operations["setSalesRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/leads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** List a Sales queue */
+        get: operations["listSalesLeads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/leads/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Read a Sales conversation */
+        get: operations["getSalesLead"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/leads/{id}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change Sales ownership or outcome */
+        post: operations["actOnSalesLead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/leads/{id}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Save an editable personal reply draft */
+        put: operations["saveSalesDraft"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/leads/{id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a saved personal reply */
+        post: operations["sendSalesReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** List my email templates */
+        get: operations["listSalesTemplates"];
+        put?: never;
+        /** Create a personal email template */
+        post: operations["createSalesTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Version or archive a personal email template */
+        put: operations["updateSalesTemplate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/bridge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import a source conversation into Sales */
+        post: operations["importSalesLead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/mail/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Authorize sending and receiving for my email */
+        post: operations["authorizeSalesGoogle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/mail/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect my Sales email */
+        delete: operations["disconnectSalesGoogle"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/mail/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a catch-up of my Sales email */
+        post: operations["syncSalesGoogle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sales/google/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Finish personal Sales send and receive authorization */
+        get: operations["finishSalesGoogle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -31345,6 +31670,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/partner-flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the fraud review queue, newest first
+         * @description Scope: partners.read. Each credited lead or sale is checked for partner fraud signals, with the same
+         *     thresholds in every program: shared_identity (the partner's and the customer's records share an email,
+         *     phone or user id), payout_matches_customer (the partner's payout details contain the customer's email),
+         *     repeat_click (10 or more clicks from one address on the partner's links within a day of the click that
+         *     brought the customer), many_signups_one_ip (3 or more of the partner's referrals in 30 days came through
+         *     clicks from one address), fast_conversion (under 10 seconds after its click) and refund_rate (30% or more
+         *     of the partner's sales refunded in 90 days, from 5 sales), plus the fraud reasons of the tracker click that
+         *     brought the customer (datacenter_network, filter_list, honeypot, ip_reputation). Each one found is a flag;
+         *     the conversion's rewards wait while a flag on it is open, even past their hold. held_cents is the partner's
+         *     pending cash on the conversion.
+         */
+        get: operations["listBrandPartnerFlags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-flags/{id}/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear a fraud flag
+         * @description Scope: partners.manage. The signal was nothing: once no other flag on the conversion is open, its rewards go on as usual (approved when their hold ends, in a program that approves on its own).
+         */
+        post: operations["clearBrandPartnerFlag"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-flags/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm a fraud flag
+         * @description Scope: partners.manage. The conversion was fraud: every open flag on it is confirmed and its pending rewards, for both sides, are rejected with the reason. With suspend_partner, the partner is suspended too. Rewards already approved stay; correct them with an adjustment.
+         */
+        post: operations["confirmBrandPartnerFlag"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/partner-leads": {
         parameters: {
             query?: never;
@@ -33986,6 +34391,84 @@ export interface paths {
         get: operations["getMyCRMMailCapture"];
         /** Select a contact or account for your Google capture */
         put: operations["updateMyCRMMailCapture"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/crm/mail/sends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send an email from your own mailbox
+         * @description Scope: customers.manage, from your own signed-in session (never a token). The one way every module sends an
+         *     email as a person (ADR 15). The recipients pass the outbound policy check, the send runs in a job, and the sent
+         *     email is kept on the record like captured mail. in_reply_to is a captured email you can see; the reply goes in
+         *     its thread. Your mailbox must be connected; through Google Workspace it needs gmail.send delegated to the
+         *     connection. Poll GET .../sends/{send} for the outcome.
+         */
+        post: operations["sendMyCRMMail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/crm/mail/sends/{send}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                send: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * One of your sends and how it went
+         * @description Scope customers.read, from your own signed-in session.
+         */
+        get: operations["getMyCRMMailSend"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/crm/mail/records/{record}/meetings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Meetings from members' calendars on a record that you may see
+         * @description Scope: customers.read, from your own signed-in session. Meetings read from members' own calendars through the
+         *     Google Workspace connection follow the same rules as their email: your own, those shared with you (who and
+         *     when, or in full with the title and guests), and under team sharing those the AI check found to be about work.
+         *     Events the calendar marks private are never kept. Newest first, up to 100.
+         */
+        get: operations["listCRMRecordMeetings"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -38056,6 +38539,57 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "partner_flag.raised": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A credited partner conversion was flagged for fraud review, and its rewards wait until someone clears or confirms the flag. data has program_id, partner_id, conversion_id, signal (shared_identity, payout_matches_customer, repeat_click, many_signups_one_ip, fast_conversion, refund_rate, or a reason of the tracker click that brought the customer) and detail (counts and thresholds). */
+        post: operations["webhook_partner_flag_raised"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_flag.cleared": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A fraud flag was cleared: the conversion's rewards go on as usual once no other flag on it is open. data has program_id, partner_id, conversion_id and signal. */
+        post: operations["webhook_partner_flag_cleared"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_flag.confirmed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A fraud flag was confirmed: every open flag on the conversion is confirmed and its pending rewards are rejected. data has program_id, partner_id, conversion_id, signal, rejected (how many rewards) and suspended (whether the partner was suspended). */
+        post: operations["webhook_partner_flag_confirmed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "partner_payout.created": {
         parameters: {
             query?: never;
@@ -38450,6 +38984,177 @@ export interface webhooks {
 }
 export interface components {
     schemas: {
+        SalesMember: {
+            /** Format: uuid */
+            user_id: string;
+            name: string;
+            /** @enum {string} */
+            role: "sdr" | "ae" | "manager" | "none";
+            introduction: string;
+            connected: boolean;
+            mail_status: string;
+            /** Format: date-time */
+            last_synced_at?: string | null;
+            open_leads: number;
+        };
+        SalesTemplate: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            version_id: string;
+            version: number;
+            name: string;
+            body: string;
+            archived: boolean;
+        };
+        SalesTemplateInput: {
+            version?: number;
+            name: string;
+            body: string;
+            archived?: boolean;
+        };
+        SalesDraft: {
+            /** Format: uuid */
+            id: string;
+            revision: number;
+            body: string;
+            template_version_id?: string | null;
+            resolved_text: string;
+        };
+        SalesDraftInput: {
+            revision: number;
+            body: string;
+            /** Format: uuid */
+            template_id?: string;
+            discard_template?: boolean;
+        };
+        SalesMessage: {
+            /** Format: uuid */
+            id?: string;
+            /** @enum {string} */
+            direction: "incoming" | "outgoing";
+            kind?: string;
+            status?: string;
+            from: string;
+            to: string[];
+            cc?: string[];
+            subject: string;
+            body: string;
+            message_id?: string;
+            in_reply_to?: string;
+            references?: string;
+            /** Format: date-time */
+            occurred_at: string;
+            draft_id?: string | null;
+            provider_id?: string;
+            thread_id?: string;
+        };
+        /** @description A bounded excerpt of a recorded message in a lead the caller can read. */
+        SalesMessagePreview: {
+            body: string;
+            /** @enum {string} */
+            direction: "incoming" | "outgoing";
+            kind: string;
+            /** Format: date-time */
+            occurred_at: string;
+        };
+        SalesLeadActivity: {
+            action: string;
+            actor_id: string | null;
+            actor_role: string;
+            /** Format: date-time */
+            occurred_at: string;
+        };
+        SalesLead: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            record_id: string;
+            source: string;
+            source_id: string;
+            /** @enum {string} */
+            state: "new" | "active" | "customer" | "archived";
+            owner_id?: string | null;
+            sdr_id?: string | null;
+            ae_id?: string | null;
+            name: string;
+            email: string;
+            company: string;
+            /** @description Current job title from the canonical person record. */
+            job_title?: string;
+            /** @description Current company or person website from CRM attributes. */
+            website?: string;
+            /** @description Current LinkedIn link from the canonical person record. */
+            linkedin_url?: string;
+            latest_message?: components["schemas"]["SalesMessagePreview"];
+            latest_reply?: components["schemas"]["SalesMessagePreview"];
+            last_activity?: components["schemas"]["SalesLeadActivity"] | null;
+            version: number;
+            note: string;
+            amount_minor: number | null;
+            currency: string;
+            unread: boolean;
+            reply_state: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            introduced_at?: string | null;
+            introduced_by?: string | null;
+            /** Format: date-time */
+            confirmed_at?: string | null;
+            confirmed_by?: string | null;
+        };
+        SalesLeadDetail: {
+            lead: components["schemas"]["SalesLead"];
+            messages: components["schemas"]["SalesMessage"][];
+            draft: components["schemas"]["SalesDraft"] | null;
+            events: {
+                /** Format: uuid */
+                id: string;
+                action: string;
+                actor_id?: string | null;
+                actor_role: string;
+                /** Format: date-time */
+                occurred_at: string;
+            }[];
+        };
+        SalesAction: {
+            /** @enum {string} */
+            action: "take" | "handoff" | "archive" | "reopen" | "confirm_customer" | "details" | "read" | "retry_send";
+            /** Format: uuid */
+            message_id?: string;
+            version: number;
+            /** Format: uuid */
+            assignee_id?: string;
+            body?: string;
+            note?: string;
+            amount_minor?: number | null;
+            currency?: string;
+            reason?: string;
+        };
+        SalesBridgeInput: {
+            source: string;
+            source_id: string;
+            /** Format: uuid */
+            record_id: string;
+            /** Format: uuid */
+            integration_id: string;
+            sender_id: string;
+            reply_id: string;
+            messages: components["schemas"]["SalesMessage"][];
+            /** @description Source event ids and research provenance, sealed with the source mapping. */
+            attribution?: {
+                [key: string]: unknown;
+            };
+        };
+        SalesLeadList: {
+            data: components["schemas"]["SalesLead"][];
+            next_cursor: string | null;
+            new_unseen: boolean;
+            unread: boolean;
+        };
         SearchViewFilters: {
             report?: string;
             from?: string;
@@ -38980,7 +39685,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "ad_campaign.paused" | "ad_campaign.resumed" | "ad_campaign.budget_changed" | "ads.paused_all" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "agent_run.created" | "agent_run.updated" | "agent_run.paused" | "agent_run.resumed" | "agent_run.stopped" | "agent_run.completed" | "action.held" | "action.approved" | "action.rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "record.unmerged" | "batch.undone" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "content.approved" | "content.delivered" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "lifecycle.moved" | "transaction.created" | "transaction.updated" | "transaction.deleted" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "tracker_conversion.created" | "tracker_conversion.updated" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "coverage_record.created" | "coverage_record.updated" | "coverage_record.imported" | "coverage_record.check_queued" | "coverage_record.checked" | "coverage_record.review_queued" | "coverage_record.reviewed" | "coverage_record.approved" | "coverage_record.discovered" | "coverage_record.confirmed" | "coverage_record.deleted" | "link_order.approved" | "link_order.published" | "link_order.checked" | "link_order.paid" | "link_order.verified" | "link_order.lost" | "link_order.replacement_opened" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "ad_campaign.paused" | "ad_campaign.resumed" | "ad_campaign.budget_changed" | "ads.paused_all" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "agent_run.created" | "agent_run.updated" | "agent_run.paused" | "agent_run.resumed" | "agent_run.stopped" | "agent_run.completed" | "action.held" | "action.approved" | "action.rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "record.unmerged" | "batch.undone" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "content.approved" | "content.delivered" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "lifecycle.moved" | "transaction.created" | "transaction.updated" | "transaction.deleted" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "tracker_conversion.created" | "tracker_conversion.updated" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_flag.raised" | "partner_flag.cleared" | "partner_flag.confirmed" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "coverage_record.created" | "coverage_record.updated" | "coverage_record.imported" | "coverage_record.check_queued" | "coverage_record.checked" | "coverage_record.review_queued" | "coverage_record.reviewed" | "coverage_record.approved" | "coverage_record.discovered" | "coverage_record.confirmed" | "coverage_record.deleted" | "link_order.approved" | "link_order.published" | "link_order.checked" | "link_order.paid" | "link_order.verified" | "link_order.lost" | "link_order.replacement_opened" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -41106,6 +41811,39 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+            /** Format: date-time */
+            created_at: string;
+        };
+        PartnerFlag: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            program_id: string;
+            /** Format: uuid */
+            partner_id: string;
+            partner_code: string;
+            /** Format: uuid */
+            conversion_id: string;
+            conversion_type: string;
+            /** Format: int64 */
+            amount_cents: number;
+            currency: string;
+            /** @enum {string} */
+            signal: "shared_identity" | "payout_matches_customer" | "repeat_click" | "many_signups_one_ip" | "fast_conversion" | "refund_rate" | "datacenter_network" | "filter_list" | "honeypot" | "ip_reputation";
+            /** @description Counts and thresholds, such as clicks and threshold; never addresses or names. */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            status: "open" | "cleared" | "confirmed";
+            note: string;
+            /**
+             * Format: int64
+             * @description The partner's pending cash on the conversion, waiting for this review.
+             */
+            held_cents: number;
+            /** Format: date-time */
+            resolved_at: string | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -54245,7 +54983,7 @@ export interface components {
              */
             provider: string | null;
             /**
-             * @description platform while warm-up is on here but the sequencer running it doesn't show it on yet; null otherwise.
+             * @description platform while the sequencer running warm-up doesn't show what was asked for here yet: on when it was turned on, or still on after it was turned off (for example while the sequencer refuses the change); null otherwise.
              * @enum {string|null}
              */
             waiting_on: "platform" | null;
@@ -60347,6 +61085,13 @@ export interface components {
             mailboxes?: number;
             /** Format: date-time */
             created_at?: string;
+            /** @description Given name the sender's mailboxes use. */
+            first_name?: string;
+            last_name?: string;
+            /** @description https URL of the profile photo, or empty. */
+            photo_url?: string;
+            /** @description Email signature the sender's mailboxes use, as HTML. */
+            signature_html?: string;
         };
         SenderInput: {
             name?: string;
@@ -60357,6 +61102,13 @@ export interface components {
             /** @enum {string} */
             status?: "active" | "retired";
             team_ids?: string[];
+            /** @description Given name the sender's mailboxes use. */
+            first_name?: string;
+            last_name?: string;
+            /** @description https URL of the profile photo, or empty. */
+            photo_url?: string;
+            /** @description Email signature the sender's mailboxes use, as HTML. */
+            signature_html?: string;
         };
         /** @description Mailboxes that could not be used, grouped by why. */
         AllocationBlocking: {
@@ -63381,6 +64133,47 @@ export interface components {
             readonly capture_all_contacts?: boolean;
             version: number;
         };
+        CRMMailSend: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            record_id: string | null;
+            /** @enum {string} */
+            status: "queued" | "sending" | "sent" | "failed";
+            /** @description Why it failed: not_eligible, mailbox_not_connected, send_not_allowed (the mailbox can't send: delegate gmail.send to the Google Workspace connection), send_refused (Google refused the email). */
+            error_code: string | null;
+            /**
+             * Format: uuid
+             * @description The sent email as kept on the record.
+             */
+            crm_mail_message_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            sent_at: string | null;
+        };
+        CRMCalendarMeeting: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Whose calendar it came from.
+             */
+            owner_id: string;
+            /** Format: uuid */
+            record_id: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string | null;
+            canceled: boolean;
+            /** @enum {string} */
+            visibility: "metadata" | "full";
+            /** @description Only when shared in full. */
+            title: string | null;
+            /** @description Only when shared in full. */
+            guests: string[];
+        };
         CRMMailRollout: {
             enabled: boolean;
             allowed_user_ids: string[];
@@ -63571,6 +64364,521 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    markSalesQueueSeen: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read state saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        seen: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getSalesMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesMember"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSalesIntroduction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    introduction: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesMember"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listSalesTeam: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SalesMember"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setSalesRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                user: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    role: "sdr" | "ae" | "manager" | "none";
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesMember"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listSalesLeads: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                queue?: "new" | "mine" | "inbox" | "handoffs" | "all";
+                state?: "new" | "active" | "customer" | "archived";
+                /** @description Only leads owned by, taken by, or handed to this Sales teammate. Queue access still applies. */
+                person?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesLeadList"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSalesLead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesLeadDetail"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    actOnSalesLead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SalesAction"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesLead"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    saveSalesDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SalesDraftInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesDraft"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    sendSalesReply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    draft_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                        /** Format: uuid */
+                        message_id: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listSalesTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SalesTemplate"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createSalesTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SalesTemplateInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesTemplate"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSalesTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SalesTemplateInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesTemplate"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    importSalesLead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SalesBridgeInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesLead"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    authorizeSalesGoogle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        url: string;
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    disconnectSalesGoogle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        deleted: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    syncSalesGoogle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    finishSalesGoogle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Return to Sales email setup */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     getHealth: {
         parameters: {
             query?: never;
@@ -117919,6 +119227,138 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerFlags: {
+        parameters: {
+            query?: {
+                status?: "open" | "cleared" | "confirmed";
+                partner_id?: string;
+                /** @description A program's id or slug. */
+                program?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Flags. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerFlag"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    clearBrandPartnerFlag: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Why, for the record. */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The flag. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerFlag"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    confirmBrandPartnerFlag: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Why, for the record and the rejected rewards' reason. */
+                    note?: string;
+                    /** @default false */
+                    suspend_partner?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The flag. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerFlag"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listBrandPartnerLeads: {
         parameters: {
             query?: {
@@ -123591,6 +125031,103 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    sendMyCRMMail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The contact or company the email is about; the sent email is kept on it.
+                     */
+                    record_id: string;
+                    to: string[];
+                    cc?: string[];
+                    subject: string;
+                    /** @description Plain text */
+                    body: string;
+                    /**
+                     * Format: uuid
+                     * @description A captured email's id to reply in its thread.
+                     */
+                    in_reply_to?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CRMMailSend"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getMyCRMMailSend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                send: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The send. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CRMMailSend"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCRMRecordMeetings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The meetings you may see. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CRMCalendarMeeting"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listCRMRecordMail: {
         parameters: {
             query?: {
@@ -129016,6 +130553,72 @@ export interface operations {
         };
     };
     webhook_partner_reward_fulfilled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_flag_raised: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_flag_cleared: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_flag_confirmed: {
         parameters: {
             query?: never;
             header?: never;

@@ -15,6 +15,7 @@ import (
 
 func (s *Server) routesCRM(mux *http.ServeMux) {
 	s.routesCRMMail(mux)
+	s.routesSales(mux)
 	base := "/v1/brands/{brand}/crm/"
 	mux.HandleFunc("GET "+base+"summary", s.onBrand(auth.ScopeCustomersRead, s.crmSummary))
 	for _, resource := range []string{"activities", "views"} {

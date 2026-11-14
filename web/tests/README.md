@@ -78,6 +78,12 @@ pnpm --filter @outflare/web test:partner-settings
 
 Opens a program's settings at `/partners/settings` with every API request mocked: the page fills the main area, each tab (with its own URL) shows only its sections, edits survive switching tabs, the save bar shows only after a change and sends what was edited, Discard and the archive question work, and it fits a phone in light and dark. `OUTFLARE_TEST_SHOTS=<dir>` saves screenshots. CI runs it in the web-and-sdk job.
 
+```sh
+pnpm --filter @outflare/web test:partner-review
+```
+
+Opens the Partners page's Review tab at `/partners` with every API request mocked: open fraud flags show their signal in words with its counts, the partner and the cash they hold; Clear sends the note and the flag leaves the list; Confirm can suspend the partner; the status filter shows resolved flags with their note; it fits a phone. `OUTFLARE_TEST_SHOTS=<dir>` saves screenshots. CI runs it in the web-and-sdk job.
+
 Link orders page:
 
 ```sh

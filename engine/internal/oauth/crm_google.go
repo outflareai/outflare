@@ -47,12 +47,16 @@ func readonlyScopes(scope string) bool {
 	return true
 }
 func (t *Tokens) ExchangePersonalGoogle(ctx context.Context, code, redirect, nonce, verifier string) (PersonalGoogleGrant, error) {
+	return t.exchangePersonalGoogle(ctx, code, redirect, nonce, verifier, readonlyScopes)
+}
+
+func (t *Tokens) exchangePersonalGoogle(ctx context.Context, code, redirect, nonce, verifier string, validScopes func(string) bool) (PersonalGoogleGrant, error) {
 	var g PersonalGoogleGrant
 	r, err := t.post(ctx, t.Endpoints.GoogleToken, url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {t.Google.ID}, "client_secret": {t.Google.Secret}, "code_verifier": {verifier}})
 	if err != nil {
 		return g, err
 	}
-	if r.RefreshToken == "" || !readonlyScopes(r.Scope) {
+	if r.RefreshToken == "" || !validScopes(r.Scope) {
 		return g, errors.New("Google must grant only read-only Gmail access and a refresh token")
 	}
 	parts := strings.Split(r.IDToken, ".")

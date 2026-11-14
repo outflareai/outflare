@@ -451,6 +451,8 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 		return cast, "bravo00000000000"
 	case "visitor_alerts.kind":
 		return cast, "hot"
+	case "partner_flags.signal":
+		return cast, "fast_conversion"
 	case "support_chat_widgets.key":
 		return cast, "ofw_bravobravobravobravobrav"
 	}

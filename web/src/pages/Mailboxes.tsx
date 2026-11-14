@@ -379,6 +379,8 @@ export function WarmupCell({ m }: { m: Mailbox }) {
   const running = warmupPlatform(m);
   // Sequencers whose own warm-up is on for it, besides the one running it.
   const elsewhere = (m.platforms ?? []).filter((p) => p.warmup_enabled && p.integration_id !== w.provider).map((p) => shortPlatform(p.integration_name));
+  if (!w.enabled && w.waiting_on && running)
+    return <Badge tone="blue" title="Outflare asked the sequencer to turn its warm-up off. It still shows on there; Outflare keeps retrying until it does.">Turning off in {running.integration_name}</Badge>;
   if (!w.enabled || !running)
     return elsewhere.length > 0 ? (
       <Badge tone="blue" title={`${elsewhere.join(" and ")}'s own warm-up is on for this mailbox.`}>On in {elsewhere.join(", ")}</Badge>

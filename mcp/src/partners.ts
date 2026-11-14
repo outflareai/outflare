@@ -715,6 +715,46 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "list_partner_flags",
+    {
+      title: "List the partner fraud review queue",
+      description:
+        "Credited partner conversions flagged for fraud, newest first. A flag's signal is shared_identity, payout_matches_customer, " +
+        "repeat_click, many_signups_one_ip, fast_conversion, refund_rate, or a reason of the tracker click that brought the customer " +
+        "(datacenter_network, filter_list, honeypot, ip_reputation); detail has counts and thresholds. While a flag is open, the " +
+        "conversion's rewards wait (held_cents is the partner's pending cash on it).",
+      inputSchema: { brand: brandRef, status: z.enum(["open", "cleared", "confirmed"]).optional(), partner_id: id.optional(), program: z.string().optional(), ...page },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-flags", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "clear_partner_flag",
+    {
+      title: "Clear a partner fraud flag",
+      description: "The signal was nothing: once no other flag on the conversion is open, its rewards go on as usual. Say why in note.",
+      inputSchema: { brand: brandRef, flag_id: id, note: z.string().max(2000).optional() },
+      annotations: write,
+    },
+    ({ brand, flag_id, note }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-flags/{id}/clear", { params: { path: { brand: b, id: flag_id } }, body: { note } }))),
+  );
+
+  server.registerTool(
+    "confirm_partner_flag",
+    {
+      title: "Confirm a partner fraud flag",
+      description:
+        "The conversion was fraud: every open flag on it is confirmed and its pending rewards, for both sides, are rejected. " +
+        "suspend_partner also suspends the partner. Approved rewards stay; correct them with an adjustment.",
+      inputSchema: { brand: brandRef, flag_id: id, note: z.string().max(2000).optional(), suspend_partner: z.boolean().optional() },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ brand, flag_id, note, suspend_partner }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-flags/{id}/confirm", { params: { path: { brand: b, id: flag_id } }, body: { note, suspend_partner } }))),
+  );
+
+  server.registerTool(
     "reject_partner_reward",
     {
       title: "Reject a held partner reward",

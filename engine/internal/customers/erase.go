@@ -13,7 +13,8 @@ import (
 var Erased = []Ref{
 	{"partner_proposals", "record_id"},
 	{"crm_activities", "record_id"},
-	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_mail_sharing", "record_id"},
+	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_calendar_events", "record_id"}, {"crm_mail_sharing", "record_id"}, {"crm_mail_sends", "record_id"},
+	{"sales_leads", "record_id"}, {"sales_drafts", "record_id"}, {"sales_messages", "record_id"}, {"sales_events", "record_id"},
 	{"telegram_chats", "record_id"},
 	{"review_requests", "record_id"},
 	{"coverage_publishers", "record_id"},

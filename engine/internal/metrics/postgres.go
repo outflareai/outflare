@@ -123,6 +123,8 @@ type rowser interface {
 }
 
 func (p *Postgres) Describe(ch chan<- *prometheus.Desc) {
+	ch <- salesAttention
+	ch <- salesAttentionAge
 	for _, d := range allDescs {
 		ch <- d
 	}
@@ -177,6 +179,27 @@ func (p *Postgres) query() []prometheus.Metric {
 			}
 		}
 	}
+	// This operational aggregate has no workspace or person dimensions. The
+	// partial index covers only sends needing attention, not conversation history.
+	run("sales_messages", `
+		SELECT states.status, count(m.id),
+			coalesce(extract(epoch FROM now() - min(m.occurred_at)), 0)::float8
+		FROM (VALUES ('queued'),('sending'),('failed'),('uncertain')) states(status)
+		LEFT JOIN sales_messages m ON m.status=states.status
+			AND m.status IN ('queued','sending','failed','uncertain')
+		GROUP BY states.status`, func(r rowser) error {
+		for r.Next() {
+			var status string
+			var count int64
+			var age float64
+			if err := r.Scan(&status, &count, &age); err != nil {
+				return err
+			}
+			add(salesAttention, gauge, float64(count), status)
+			add(salesAttentionAge, gauge, max(age, 0), status)
+		}
+		return nil
+	})
 	// Both filters use the partial indexes on queued and running jobs.
 	run("jobs_queued", `
 		SELECT kind,

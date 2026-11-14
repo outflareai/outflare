@@ -36,6 +36,7 @@ var aliases = map[string]string{
 	"linkedin_ads":             "linkedin",
 	"reddit_ads":               "reddit",
 	"x_ads":                    "x",
+	"chatgpt_ads":              "openai",
 }
 
 // Get returns the logo for a connector and whether it is the company's

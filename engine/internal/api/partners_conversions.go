@@ -865,6 +865,11 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 		"product_id": in.ProductID, "source": c.source, "payment_source": in.PaymentSource, "interval": in.Interval}); err != nil {
 		return err
 	}
+	// Partner fraud checks (B7d): a flag holds the rewards for review.
+	flags, err := c.fraudChecks(ctx, m, f.id, rec, conv)
+	if err != nil {
+		return err
+	}
 	rules, err := partnerRules(ctx, tx, c.ws, m.programID)
 	if err != nil {
 		return err
@@ -918,7 +923,8 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 		if err := c.audit(ctx, "partner_reward.created", "partner_reward", id, d); err != nil {
 			return err
 		}
-		if (auto == nil && m.autoApprove || auto != nil && *auto) && !hold.After(time.Now()) {
+		// A flagged conversion's rewards wait for review, even past the hold.
+		if (auto == nil && m.autoApprove || auto != nil && *auto) && !hold.After(time.Now()) && flags == 0 {
 			if err := approvePartnerReward(ctx, tx, c.p, c.ws, id, "auto"); err != nil {
 				return err
 			}

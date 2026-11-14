@@ -109,6 +109,45 @@ func TestEveryWorkspaceTableHasABrand(t *testing.T) {
 	}
 }
 
+// A row of brand data belongs to a brand: brand_id is NOT NULL or checked
+// to be set, except in the tables listed in brandtables/shared.txt.
+func TestBrandIsRequired(t *testing.T) {
+	pool := testPool(t)
+	shared := tableList(t, "shared.txt")
+	known := knownTables(t)
+	rows, err := pool.Query(context.Background(), `
+		SELECT c.table_name, c.is_nullable = 'NO' OR EXISTS (SELECT 1 FROM pg_constraint k
+			WHERE k.conrelid = format('%I.%I', c.table_schema, c.table_name)::regclass AND k.contype = 'c'
+			AND pg_get_constraintdef(k.oid) ILIKE '%brand_id IS NOT NULL%')
+		FROM information_schema.columns c
+		JOIN information_schema.tables x ON x.table_schema = c.table_schema AND x.table_name = c.table_name AND x.table_type = 'BASE TABLE'
+		WHERE c.table_schema = 'public' AND c.column_name = 'brand_id' ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var required bool
+		if err := rows.Scan(&name, &required); err != nil {
+			t.Fatal(err)
+		}
+		if !known[name] {
+			continue // made by a newer version (see knownTables)
+		}
+		if !required && !slices.Contains(shared, name) {
+			t.Errorf("%s.brand_id may be empty: make it NOT NULL (brand data belongs to a brand), "+
+				"or list the table in engine/internal/db/brandtables/shared.txt if a row can belong to the whole workspace", name)
+		}
+		if required && slices.Contains(shared, name) {
+			t.Errorf("%s requires a brand now: take it off engine/internal/db/brandtables/shared.txt", name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")

@@ -37,6 +37,7 @@ func TestCRMCalendarThroughWorkspace(t *testing.T) {
 		return map[string]any{"id": id, "status": "confirmed", "summary": title, "organizer": map[string]any{"email": "employee@northpeak.example"},
 			"start": map[string]any{"dateTime": start}, "end": map[string]any{"dateTime": end}, "attendees": att}
 	}
+	private := func(e map[string]any) map[string]any { e["visibility"] = "private"; return e }
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		reply := func(v any) { _ = json.NewEncoder(w).Encode(v) }
@@ -60,6 +61,7 @@ func TestCRMCalendarThroughWorkspace(t *testing.T) {
 				event("e1", "Fictional renewal call", "employee@northpeak.example", "ana@customer.example"),
 				event("e2", "Team standup", "employee@northpeak.example", "colleague@northpeak.example"),
 				event("e3", "Dentist", "employee@northpeak.example", "front-desk@clinic.example"),
+				private(event("e4", "Fictional private chat", "employee@northpeak.example", "ana@customer.example")),
 			}})
 		default:
 			w.WriteHeader(404)
@@ -85,23 +87,40 @@ func TestCRMCalendarThroughWorkspace(t *testing.T) {
 	if err := e.srv.RunWorkspaceCalendar(ctx, ws, mailbox); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := e.pool.Query(ctx, `SELECT title, record_id::text, brand_id::text, attendee_email FROM meetings WHERE workspace_id=$1`, ws)
-	if err != nil {
+	// Nothing goes into the team-visible meetings.
+	var shared int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM meetings WHERE workspace_id=$1`, ws).Scan(&shared); err != nil || shared != 0 {
+		t.Fatalf("team-visible meetings: %d %v", shared, err)
+	}
+	meetings := root + "/records/" + anaID + "/meetings"
+	mine := employee.must(200, "GET", meetings, nil)["data"].([]any)
+	if len(mine) != 1 || mine[0].(map[string]any)["title"] != "Fictional renewal call" || mine[0].(map[string]any)["record_id"] != anaID {
+		t.Fatalf("kept %v; only the work meeting with a CRM contact should be", mine)
+	}
+	// Private to its owner, like their email, until they share the contact.
+	if got := owner.must(200, "GET", meetings, nil)["data"].([]any); len(got) != 0 {
+		t.Fatalf("a colleague saw a private meeting: %v", got)
+	}
+	// Under team sharing, a colleague sees it only once the AI check finds it is about work.
+	owner.must(200, "PUT", root+"/policy", map[string]any{"internal_domains": []string{"northpeak.example"}, "blocked_addresses": []string{}, "blocked_domains": []string{}, "team_sharing": true, "version": 1})
+	if _, err := e.pool.Exec(ctx, `UPDATE crm_mail_policy SET config = jsonb_set(config, '{team_sharing_from}', to_jsonb(now() - interval '1 hour')) WHERE brand_id=$1`, brand); err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for rows.Next() {
-		var title, rec, b, guest string
-		if err := rows.Scan(&title, &rec, &b, &guest); err != nil {
-			t.Fatal(err)
-		}
-		if rec != anaID || b != brand || guest != "ana@customer.example" {
-			t.Errorf("meeting %q on %s/%s with %s", title, rec, b, guest)
-		}
-		got = append(got, title)
+	if got := owner.must(200, "GET", meetings, nil)["data"].([]any); len(got) != 0 {
+		t.Fatalf("shown before the AI check: %v", got)
 	}
-	if len(got) != 1 || got[0] != "Fictional renewal call" {
-		t.Fatalf("kept %v; only the meeting with a CRM contact should be", got)
+	connectFakePrivacyModel(t, e, owner, ws)
+	if err := e.srv.RunMailPrivacyCheck(ctx, ws, brand); err != nil {
+		t.Fatal(err)
+	}
+	if got := owner.must(200, "GET", meetings, nil)["data"].([]any); len(got) != 1 || got[0].(map[string]any)["title"] != "Fictional renewal call" {
+		t.Fatalf("after the AI check: %v", got)
+	}
+	// The owner's own choice wins: who and when only.
+	employee.must(200, "PUT", root+"/records/"+anaID+"/sharing", map[string]any{"visibility": "metadata", "audience": "brand", "viewer_ids": []string{}, "version": 0})
+	got := owner.must(200, "GET", meetings, nil)["data"].([]any)
+	if len(got) != 1 || got[0].(map[string]any)["title"] != nil || got[0].(map[string]any)["visibility"] != "metadata" {
+		t.Fatalf("who and when only: %v", got)
 	}
 	var cursor string
 	if err := e.pool.QueryRow(ctx, `SELECT calendar_cursor FROM crm_google_connections WHERE id=$1`, mailbox).Scan(&cursor); err != nil || !strings.Contains(cursor, "sync-1") {
@@ -112,7 +131,7 @@ func TestCRMCalendarThroughWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM meetings WHERE workspace_id=$1`, ws).Scan(&n); err != nil || n != 1 {
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM crm_calendar_events WHERE workspace_id=$1`, ws).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("meetings after a second read: %d %v", n, err)
 	}
 }

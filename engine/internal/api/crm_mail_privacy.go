@@ -96,18 +96,23 @@ func (s *Server) crmMailPrivacyJob(ctx context.Context, j jobs.Job) error {
 	if json.Unmarshal(raw, &policy) != nil || !policy.TeamSharing {
 		return nil
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id::text, content_sealed FROM crm_mail_messages WHERE workspace_id=$1 AND brand_id=$2 AND privacy='unchecked' ORDER BY created_at LIMIT $3`,
+	// Emails and meetings from members' calendars, oldest first.
+	rows, err := s.pool.Query(ctx, `SELECT kind, id, sealed FROM (
+			SELECT 'mail' AS kind, id::text AS id, content_sealed AS sealed, created_at FROM crm_mail_messages WHERE workspace_id=$1 AND brand_id=$2 AND privacy='unchecked'
+			UNION ALL
+			SELECT 'meeting', id::text, content_sealed, created_at FROM crm_calendar_events WHERE workspace_id=$1 AND brand_id=$2 AND privacy='unchecked'
+		) u ORDER BY created_at LIMIT $3`,
 		ws, req.Brand, mailPrivacyBatch)
 	if err != nil {
 		return err
 	}
 	type unchecked struct {
-		id     string
-		sealed []byte
+		kind, id string
+		sealed   []byte
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (unchecked, error) {
 		var u unchecked
-		err := r.Scan(&u.id, &u.sealed)
+		err := r.Scan(&u.kind, &u.id, &u.sealed)
 		return u, err
 	})
 	if err != nil || len(list) == 0 {
@@ -131,7 +136,7 @@ func (s *Server) crmMailPrivacyJob(ctx context.Context, j jobs.Job) error {
 			metrics.MailPrivacyCheck("budget")
 			return fail("ai_budget_reached", err)
 		}
-		verdict, usage, err := s.classifyMailPrivacy(ctx, choice, u.id, u.sealed)
+		verdict, usage, err := s.classifyMailPrivacy(ctx, choice, u.kind, u.id, u.sealed)
 		if usage.InputTokens+usage.OutputTokens > 0 {
 			if e := recordAISpend(ctx, s.pool, choice, ws, nil, nil, usage, "crm_mail:"+u.id, "Check an email's privacy before team sharing"); e != nil {
 				return e
@@ -144,7 +149,11 @@ func (s *Server) crmMailPrivacyJob(ctx context.Context, j jobs.Job) error {
 			s.log.Warn("mail privacy check failed", "workspace_id", ws, "error", err)
 			continue
 		}
-		if _, err := s.pool.Exec(ctx, `UPDATE crm_mail_messages SET privacy=$3, privacy_checked_at=now() WHERE workspace_id=$1 AND id=$2 AND privacy='unchecked'`,
+		table := "crm_mail_messages"
+		if u.kind == "meeting" {
+			table = "crm_calendar_events"
+		}
+		if _, err := s.pool.Exec(ctx, `UPDATE `+table+` SET privacy=$3, privacy_checked_at=now() WHERE workspace_id=$1 AND id=$2 AND privacy='unchecked'`,
 			ws, u.id, verdict); err != nil {
 			return err
 		}
@@ -160,15 +169,28 @@ func (s *Server) crmMailPrivacyJob(ctx context.Context, j jobs.Job) error {
 }
 
 // classifyMailPrivacy asks the workspace's model whether one email is
-// work or private, from its subject and first lines only.
-func (s *Server) classifyMailPrivacy(ctx context.Context, c aiChoice, id string, sealed []byte) (string, llm.Usage, error) {
-	raw, err := s.box.Open(sealed, mailAAD(id))
-	if err != nil {
-		return "", llm.Usage{}, err
-	}
+// work or private, from its subject and first lines only; a meeting from
+// its title only.
+func (s *Server) classifyMailPrivacy(ctx context.Context, c aiChoice, kind, id string, sealed []byte) (string, llm.Usage, error) {
 	var m crmmail.Message
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return "", llm.Usage{}, err
+	if kind == "meeting" {
+		raw, err := s.box.Open(sealed, calendarAAD(id))
+		if err != nil {
+			return "", llm.Usage{}, err
+		}
+		var e calendarEvent
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return "", llm.Usage{}, err
+		}
+		m.Subject = "Meeting: " + e.Title
+	} else {
+		raw, err := s.box.Open(sealed, mailAAD(id))
+		if err != nil {
+			return "", llm.Usage{}, err
+		}
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return "", llm.Usage{}, err
+		}
 	}
 	body := strings.TrimSpace(m.Body)
 	for len(body) > 800 {

@@ -64,11 +64,12 @@ type googleCursor struct {
 }
 
 type googleEvent struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	Summary   string `json:"summary"`
-	Created   string `json:"created"`
-	Organizer struct {
+	ID         string `json:"id"`
+	Status     string `json:"status"`
+	Summary    string `json:"summary"`
+	Visibility string `json:"visibility"`
+	Created    string `json:"created"`
+	Organizer  struct {
 		Email string `json:"email"`
 	} `json:"organizer"`
 	Start, End struct {
@@ -150,6 +151,7 @@ func googleMeeting(e googleEvent) (outcomes.SyncedMeeting, bool) {
 	m := outcomes.SyncedMeeting{
 		ExternalID: e.ID, Title: e.Summary, StartsAt: *start, EndsAt: parseTime(e.End.DateTime), BookedAt: parseTime(e.Created),
 		Canceled: e.Status == "cancelled", OrganizerEmail: e.Organizer.Email,
+		Private: e.Visibility == "private" || e.Visibility == "confidential",
 	}
 	for _, a := range e.Attendees {
 		if a.Resource {

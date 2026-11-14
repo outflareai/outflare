@@ -27,8 +27,9 @@ import (
 // then only what changed), and a meeting is kept when everyone from
 // outside the company on it belongs to one of the brand's contacts or
 // companies, under the same rules as their email. It goes on that record,
-// so its timeline and relationship check show it. The rest of a calendar
-// is never copied.
+// as that member's own, private like their email unless they share the
+// contact or team sharing shows it after the AI check. The rest of a
+// calendar is never copied.
 
 const jobCRMCalendarWorkspace = "crm_calendar.workspace_sync"
 
@@ -114,7 +115,7 @@ func (s *Server) crmCalendarWorkspaceJob(ctx context.Context, job jobs.Job) (run
 	saved := 0
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		for _, m := range page.Meetings {
-			ok, err := upsertWorkspaceMeeting(ctx, tx, ws, brand, *integration, email, base, m)
+			ok, err := s.upsertWorkspaceMeeting(ctx, tx, ws, brand, owner, email, base, m)
 			if err != nil {
 				return err
 			}
@@ -129,6 +130,12 @@ func (s *Server) crmCalendarWorkspaceJob(ctx context.Context, job jobs.Job) (run
 		if _, err := tx.Exec(ctx, `UPDATE crm_google_connections SET calendar_cursor=NULLIF($3,''), calendar_synced_at=now() WHERE workspace_id=$1 AND id=$2`, ws, payload.ID, next); err != nil {
 			return err
 		}
+		// With team sharing on, new meetings are checked before colleagues see them.
+		if saved > 0 {
+			if err := queueMailPrivacyIfShared(ctx, tx, ws, brand); err != nil {
+				return err
+			}
+		}
 		return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "crm_calendar.synced", TargetType: "crm_mail_connection", TargetID: payload.ID,
 			Data: map[string]any{"brand_id": brand, "read": len(page.Meetings), "saved": saved}})
 	})
@@ -136,14 +143,33 @@ func (s *Server) crmCalendarWorkspaceJob(ctx context.Context, job jobs.Job) (run
 	return err
 }
 
+// calendarEvent is a meeting from a member's calendar, sealed in
+// crm_calendar_events.
+type calendarEvent struct {
+	Title     string     `json:"title"`
+	Organizer string     `json:"organizer"`
+	Guests    []string   `json:"guests"`
+	StartsAt  time.Time  `json:"starts_at"`
+	EndsAt    *time.Time `json:"ends_at,omitempty"`
+}
+
+func calendarAAD(id string) []byte { return []byte("crm_calendar:" + id) }
+
 // upsertWorkspaceMeeting keeps a meeting from a member's calendar on the
-// one contact or company its outside guests belong to. One event on
-// several members' calendars is one meeting.
-func upsertWorkspaceMeeting(ctx context.Context, tx pgx.Tx, ws, brand, integration, owner string, base mailContext, m outcomes.SyncedMeeting) (bool, error) {
-	external := "workspace:" + m.ExternalID
-	if m.StartsAt.IsZero() {
-		// Deleted: a meeting already kept is canceled.
-		tag, err := tx.Exec(ctx, `UPDATE meetings SET status='canceled', updated_at=now() WHERE workspace_id=$1 AND source='google_calendar' AND external_id=$2 AND status<>'canceled'`, ws, external)
+// one contact or company its outside guests belong to, as that member's
+// own, like their email: private unless they share the contact, or team
+// sharing shows it after the AI check. An event the calendar marks private
+// or confidential is never kept.
+func (s *Server) upsertWorkspaceMeeting(ctx context.Context, tx pgx.Tx, ws, brand, ownerID, owner string, base mailContext, m outcomes.SyncedMeeting) (bool, error) {
+	if m.StartsAt.IsZero() || m.Private {
+		// Deleted, or made private: what was kept is marked canceled, or
+		// removed when it turned private.
+		if m.Private {
+			tag, err := tx.Exec(ctx, `DELETE FROM crm_calendar_events WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND event_key=$4`, ws, brand, ownerID, m.ExternalID)
+			return tag.RowsAffected() > 0, err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE crm_calendar_events SET canceled=true, updated_at=now() WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND event_key=$4 AND NOT canceled`,
+			ws, brand, ownerID, m.ExternalID)
 		return tag.RowsAffected() > 0, err
 	}
 	msg := crmmail.Message{OwnerEmail: owner, Participants: []string{owner}}
@@ -160,31 +186,20 @@ func upsertWorkspaceMeeting(ctx context.Context, tx pgx.Tx, ws, brand, integrati
 	if err != nil || rec == "" {
 		return false, err
 	}
-	guest, name := "", ""
-	for _, p := range crmmail.External(msg, base.brand, base.members) {
-		guest = p
-		break
+	id := newID()
+	data, _ := json.Marshal(calendarEvent{Title: strings.TrimSpace(m.Title), Organizer: strings.ToLower(m.OrganizerEmail), Guests: msg.Participants, StartsAt: m.StartsAt, EndsAt: m.EndsAt})
+	var existing string
+	err = tx.QueryRow(ctx, `SELECT id::text FROM crm_calendar_events WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND event_key=$4`, ws, brand, ownerID, m.ExternalID).Scan(&existing)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
 	}
-	for _, at := range m.Attendees {
-		if strings.EqualFold(at.Email, guest) {
-			name = at.Name
-		}
+	if existing != "" {
+		// A changed title is checked again before colleagues see it.
+		_, err = tx.Exec(ctx, `UPDATE crm_calendar_events SET content_sealed=$2, starts_at=$3, ends_at=$4, canceled=$5, record_id=$6, privacy='unchecked', privacy_checked_at=NULL, updated_at=now() WHERE id=$1`,
+			existing, s.box.Seal(data, calendarAAD(existing)), m.StartsAt, m.EndsAt, m.Canceled, rec)
+		return err == nil, err
 	}
-	status := outcomes.MeetingBooked
-	if m.Canceled {
-		status = outcomes.MeetingCanceled
-	}
-	booked := time.Now()
-	if m.BookedAt != nil {
-		booked = *m.BookedAt
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO meetings (workspace_id, brand_id, record_id, source, integration_id, external_id, title, starts_at, ends_at, booked_at, status,
-			attendee_email, attendee_name, organizer_email, attribution)
-		VALUES ($1, $2, $3, 'google_calendar', $4, $5, left($6, 500), $7, $8, $9, $10, $11, left($12, 200), lower($13), 'none')
-		ON CONFLICT (workspace_id, source, external_id) WHERE external_id IS NOT NULL DO UPDATE SET
-			title = EXCLUDED.title, starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at,
-			status = CASE WHEN EXCLUDED.status = 'canceled' THEN 'canceled' WHEN meetings.status = 'canceled' THEN 'booked' ELSE meetings.status END,
-			record_id = COALESCE(meetings.record_id, EXCLUDED.record_id), updated_at = now()`,
-		ws, brand, rec, integration, external, strings.TrimSpace(m.Title), m.StartsAt, m.EndsAt, booked, status, guest, name, m.OrganizerEmail)
+	_, err = tx.Exec(ctx, `INSERT INTO crm_calendar_events (id, workspace_id, brand_id, owner_id, record_id, event_key, content_sealed, starts_at, ends_at, canceled)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, id, ws, brand, ownerID, rec, m.ExternalID, s.box.Seal(data, calendarAAD(id)), m.StartsAt, m.EndsAt, m.Canceled)
 	return err == nil, err
 }

@@ -33,7 +33,7 @@ import (
 
 // All returns every available ad connector.
 func All() []c.Connector {
-	return []c.Connector{GoogleAds{}, MetaAds{}, MicrosoftAds{}, RedditAds{}, XAds{}, LinkedInAds{}, TikTokAds{}, SnapchatAds{}, TaboolaAds{}, OutbrainAds{}, AppleAds{}, AmazonAds{}, PinterestAds{}}
+	return []c.Connector{GoogleAds{}, MetaAds{}, MicrosoftAds{}, RedditAds{}, XAds{}, LinkedInAds{}, TikTokAds{}, SnapchatAds{}, TaboolaAds{}, OutbrainAds{}, AppleAds{}, AmazonAds{}, PinterestAds{}, ChatGPTAds{}}
 }
 
 func def(id, name, site, docs, keyURL, summary, description string) c.Definition {

@@ -26,7 +26,7 @@ func TestStatusCoversEveryModule(t *testing.T) {
 	}
 	exec(`WITH p AS (INSERT INTO email_providers (workspace_id, integration_id, connector, secrets) VALUES ($1, $2, 'amazon_ses', '\x00') RETURNING id)
 		INSERT INTO email_domains (workspace_id, provider_id, domain, status, status_reason) SELECT $1, id, 'mail.acme.example', 'failed', 'DKIM record missing' FROM p`, ws, ses)
-	exec(`INSERT INTO social_actions (workspace_id, channel, type, body, utm_content) VALUES ($1, 'reddit', 'reply', 'Happy to help: I work at Acme.', 'reply-1')`, ws)
+	exec(`INSERT INTO social_actions (workspace_id, channel, type, body, utm_content, brand_id) VALUES ($1, 'reddit', 'reply', 'Happy to help: I work at Acme.', 'reply-1', outflare_first_brand($1::uuid))`, ws)
 	exec(`INSERT INTO event_definitions (workspace_id, name, status) VALUES ($1, 'trial.extended', 'quarantined')`, ws)
 	exec(`WITH a AS (INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana'), ($1, 'person', 'Ana B') RETURNING id)
 		INSERT INTO record_merge_candidates (workspace_id, record_a, record_b, record_type, reason)

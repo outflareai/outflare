@@ -20,6 +20,7 @@ import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Flows } from "./PartnerFlows";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PartnerTasks } from "./PartnerTasks";
+import { PartnerReview } from "./PartnerReview";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProgramSettings, settingsTabs } from "./PartnerSettings";
 import { AppLink, PartnerPage, partnerActions, partnerName, type Section as PartnerSection } from "./PartnerPage";
@@ -30,7 +31,7 @@ type Go = (t: Tab, item?: string) => void;
 type Props = { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go };
 type PartnerSort = NonNullable<NonNullable<paths["/v1/brands/{brand}/partners"]["get"]["parameters"]["query"]>["sort"]>;
 type PartnerFind = { q: string; sort: PartnerSort };
-type Section = "proposals" | "tasks" | "partners" | "groups" | "flows" | "leads" | "conversions" | "log" | "rewards" | "payouts";
+type Section = "proposals" | "tasks" | "partners" | "groups" | "flows" | "leads" | "conversions" | "log" | "review" | "rewards" | "payouts";
 type Kind = PartnerProgram["kind"];
 
 const kinds: { id: Kind; label: string; blurb: string }[] = [
@@ -137,6 +138,7 @@ export function Partners({ ws, canManage, open, onOpen, go }: Props) {
               {current.portal.lead_submissions && <TabsTrigger value="leads" className="h-9 px-3 text-[12px]">Leads</TabsTrigger>}
               <TabsTrigger value="conversions" className="h-9 px-3 text-[12px]">Conversions</TabsTrigger>
               <TabsTrigger value="log" className="h-9 px-3 text-[12px]">Log</TabsTrigger>
+              <TabsTrigger value="review" className="h-9 px-3 text-[12px]">Review</TabsTrigger>
               <TabsTrigger value="rewards" className="h-9 px-3 text-[12px]">Rewards</TabsTrigger>
               <TabsTrigger value="payouts" className="h-9 px-3 text-[12px]">Payouts</TabsTrigger>
             </TabsList>
@@ -149,6 +151,7 @@ export function Partners({ ws, canManage, open, onOpen, go }: Props) {
           {section === "leads" && <Leads key={current.id} ws={ws} program={current} canManage={canManage} />}
           {section === "conversions" && <ConversionList key={current.id} ws={ws} go={go} programId={current.id} openPartner={fromLedger("conversions")} />}
           {section === "log" && <ConversionLog key={current.id} ws={ws} program={current} />}
+          {section === "review" && <PartnerReview key={current.id} program={current} canManage={canManage} onOpenPartner={(id) => { track("ui.partner_opened", { from: "review" }); openPartner(id); }} />}
           {section === "rewards" && (
             <RewardList key={current.id} ws={ws} go={go} canManage={canManage} slug={current.slug} importedFrom={current.imported_from} programId={current.id}
               openPartner={fromLedger("rewards")} openPayouts={(id) => fromLedger("proof")(id, "payouts")} />

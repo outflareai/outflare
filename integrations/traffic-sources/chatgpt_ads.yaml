@@ -1,0 +1,13 @@
+id: chatgpt_ads
+name: "ChatGPT Ads"
+category: search_social
+connector: chatgpt_ads
+click_id: {param: oppref}
+parameters:
+  - {name: Campaign ID, param: of_campaign, token: "{campaign_id}", field: 1}
+  - {name: Ad set ID, param: of_adset, token: "{ad_group_id}", field: 2}
+  - {name: Ad ID, param: of_ad, token: "{ad_id}", field: 3}
+note: "ChatGPT adds oppref itself. Account-level parameters apply to every campaign."
+# The macros are the ones engine/internal/adtrack verified for the site
+# script's tracking templates; a test checks the two agree.
+sources: [engine/internal/adtrack/adtrack.go]

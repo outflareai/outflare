@@ -12,6 +12,8 @@ const CapReadReplies = "replies.read"
 
 // Reply is one received reply as a platform reports it.
 type Reply struct {
+	To, CC                           []string
+	InReplyTo, References, Direction string
 	// ExternalID is the platform's id for the reply; answering uses it.
 	ExternalID string
 	// MailboxExternalID and MailboxEmail are the sender email it arrived
@@ -37,6 +39,7 @@ type ReplyOut struct {
 	MailboxExternalID string
 	ToEmail           string
 	ToName            string
+	CC                []string
 	Body              string
 }
 
@@ -49,4 +52,12 @@ type ReplySource interface {
 	// first or in any order.
 	ListReplies(ctx context.Context, c *Client, creds Creds, since time.Time) ([]Reply, error)
 	SendReply(ctx context.Context, c *Client, creds Creds, r ReplyOut) error
+}
+
+// ReplyThreadSource preserves provider conversation membership and send receipts.
+// A missing receipt after a send must not be treated as permission to resend.
+type ReplyThreadSource interface {
+	ReplySource
+	ReadReplyThread(context.Context, *Client, Creds, string) ([]Reply, error)
+	SendReplyReceipt(context.Context, *Client, Creds, ReplyOut) (Reply, error)
 }

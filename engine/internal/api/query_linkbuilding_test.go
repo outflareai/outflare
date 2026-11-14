@@ -18,9 +18,9 @@ func TestQueryLinkBuilding(t *testing.T) {
 		map[string]any{"page_url": "https://blog.example.org/tools", "method": "broken_link"},
 		map[string]any{"page_url": "https://list.example.net/resources", "method": "resource_page"},
 	}})
-	if _, err := e.pool.Exec(ctx, `INSERT INTO backlinks (workspace_id, site_id, source_url, target_url, source_domain, source_rating, status)
-		VALUES ($1, $2, 'https://linked.example/a', 'https://example.com/', 'linked.example', 70, 'live'),
-		       ($1, $2, 'https://gone.example/b', 'https://example.com/', 'gone.example', 20, 'lost')`, ws, siteID); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO backlinks (workspace_id, site_id, source_url, target_url, source_domain, source_rating, status, brand_id)
+		VALUES ($1, $2, 'https://linked.example/a', 'https://example.com/', 'linked.example', 70, 'live', outflare_first_brand($1::uuid)),
+		       ($1, $2, 'https://gone.example/b', 'https://example.com/', 'gone.example', 20, 'lost', outflare_first_brand($1::uuid))`, ws, siteID); err != nil {
 		t.Fatal(err)
 	}
 

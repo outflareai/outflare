@@ -387,6 +387,7 @@ func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	mux.HandleFunc("/p/", http.NotFound)
 	s.routesPartnerProposals(mux)
 	s.routesPartnerTasks(mux)
+	s.routesPartnerFlags(mux)
 	s.routesPartnerPostbacks(mux)
 	s.routesPartnerImports(mux)
 	s.routesPartnerSite(mux)

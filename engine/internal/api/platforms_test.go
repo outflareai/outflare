@@ -19,6 +19,8 @@ var ebWarm = struct {
 	sync.Mutex
 	on    map[int]bool
 	calls []string
+	// refuse makes the warm-up switch fail, as a sequencer that is down does.
+	refuse bool
 }{on: map[int]bool{}}
 
 // fakeEmailBison has one live campaign with Ana on it, and three sender
@@ -54,6 +56,11 @@ func (fakeEmailBison) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(b, &body)
 		enable := strings.HasSuffix(r.URL.Path, "/enable")
 		ebWarm.Lock()
+		if ebWarm.refuse {
+			ebWarm.Unlock()
+			w.WriteHeader(503)
+			return
+		}
 		for _, id := range body.IDs {
 			ebWarm.on[id] = enable
 			ebWarm.calls = append(ebWarm.calls, map[bool]string{true: "enable ", false: "disable "}[enable]+string(rune('0'+id)))
@@ -291,5 +298,36 @@ func TestWarmupOnAConnectedSequencer(t *testing.T) {
 	ebWarm.Unlock()
 	if !on {
 		t.Fatalf("bulk did not turn EmailBison warm-up on: %v", ebWarm.on)
+	}
+
+	// The sequencer refuses the switch: the job fails (and is retried), the
+	// mailbox keeps saying it is waiting on the sequencer, and nothing is
+	// shown as off until the sequencer says so.
+	ebWarm.Lock()
+	ebWarm.refuse = true
+	ebWarm.Unlock()
+	owner.must(200, "PATCH", base+"/mailboxes/"+ana, map[string]any{"warmup": map[string]any{"enabled": false}})
+	if err := e.platforms.SetWarmup(ctx, ws, ana, id); err == nil {
+		t.Fatal("a refused warm-up switch reported success")
+	}
+	if w := owner.must(200, "GET", base+"/mailboxes/"+ana, nil)["warmup"].(map[string]any); w["enabled"] != false || w["waiting_on"] != "platform" {
+		t.Fatalf("after a refused switch: %v", w)
+	}
+	ebWarm.Lock()
+	still := ebWarm.on[1]
+	ebWarm.refuse = false
+	ebWarm.Unlock()
+	if !still {
+		t.Fatal("warm-up changed at a sequencer that refused")
+	}
+	runJobs()
+	if w := owner.must(200, "GET", base+"/mailboxes/"+ana, nil)["warmup"].(map[string]any); w["waiting_on"] != nil {
+		t.Fatalf("after the retry: %v", w)
+	}
+	ebWarm.Lock()
+	off := !ebWarm.on[1]
+	ebWarm.Unlock()
+	if !off {
+		t.Fatal("the retry did not turn warm-up off")
 	}
 }

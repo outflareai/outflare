@@ -175,6 +175,23 @@ func (s *Server) recordRelationship(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Team, out.Contact.LastEmailAt = team, last
 	}
+	// Meetings from members' calendars count when the person may see them.
+	if a.UserID != "" && len(subjects) > 0 && s.box != nil {
+		meetings, err := s.visibleCalendarEvents(ctx, a, subjects, 200)
+		if s.allocError(w, r, err) {
+			return
+		}
+		for _, m := range meetings {
+			if m.Canceled || m.StartsAt.After(time.Now()) {
+				continue
+			}
+			if out.Contact.LastMeetingAt == nil || m.StartsAt.After(*out.Contact.LastMeetingAt) {
+				at := m.StartsAt
+				out.Contact.LastMeetingAt = &at
+			}
+			break
+		}
+	}
 	for _, t := range []*time.Time{out.Contact.LastSentAt, out.Contact.LastReceivedAt, out.Contact.LastMeetingAt, out.Contact.LastEmailAt} {
 		if t != nil && (out.Contact.LastAt == nil || t.After(*out.Contact.LastAt)) {
 			out.Contact.LastAt = t

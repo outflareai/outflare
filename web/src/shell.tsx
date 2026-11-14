@@ -12,6 +12,7 @@ import { CopyButton, Kbd, Logo, toast } from "./ui";
 import type { Tab } from "./App";
 import { appPath, appTabs } from "./lib/paths";
 import { cn } from "@/lib/utils";
+import { salesPageName } from "@/lib/sales";
 import { track } from "@/lib/analytics";
 import { desktop, desktopInfo, isDesktopApp, onUpdateReady, type UpdateState } from "@/lib/desktop";
 import { pickedBrandId, setBrand, useBrand } from "@/lib/brand";
@@ -1140,7 +1141,10 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent
     window.addEventListener("outflare:item-name", on);
     return () => window.removeEventListener("outflare:item-name", on);
   }, []);
-  const itemLabel = item && (itemName ?? (item === "new" ? "New" : tab === "domains" ? item : named?.id === item ? named.name : uuidish.test(item) ? "…" : item));
+  const salesSection = tab === "crm" && item?.startsWith("sales:") ? item.split(":")[1] : undefined;
+  const salesLabel = salesSection && salesPageName(item);
+  const itemID = salesSection ? (salesSection === "lead" ? item?.split(":")[2] : undefined) : item;
+  const itemLabel = item && (itemName ?? salesLabel ?? (item === "new" ? "New" : tab === "domains" ? item : named?.id === item ? named.name : uuidish.test(item) ? "…" : item));
   return (
     <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
       <SidebarTrigger className="-ml-1 size-7 text-muted-foreground" />
@@ -1169,7 +1173,7 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent
           <>
             <span aria-hidden="true" className="text-muted-foreground/50">/</span>
             <span aria-current="page" className={cn("truncate text-foreground", itemLabel === item && "font-mono text-[12px]")} title={item}>{itemLabel}</span>
-            {item !== "new" && <CopyButton text={item} label={`Copy id ${item}`} />}
+            {itemID && itemID !== "new" && <CopyButton text={itemID} label={`Copy id ${itemID}`} />}
           </>
         )}
       </nav>
@@ -1203,6 +1207,14 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "agent-mail":
       return { title: "Agent Mail inboxes", path: "/v1/workspaces/{ws}/cloud/agent-mail/brands/{brand}/inboxes", params: { ws, brand }, scope: "inbox.read" };
     case "crm":
+      if (!item || item.startsWith("sales:")) {
+        const [, section = "new", lead] = (item ?? "sales:new").split(":");
+        if (section === "lead" && lead) return { title: "Sales conversation (personal session)", path: "/v1/brands/{brand}/sales/leads/{id}", params: { ...brandBase, id: lead }, scope: "customers.read" };
+        if (section === "templates") return { title: "My Sales templates (personal session)", path: "/v1/brands/{brand}/sales/templates", params: brandBase, scope: "customers.read" };
+        if (section === "email" || section === "introduction") return { title: "My Sales profile and email (personal session)", path: "/v1/brands/{brand}/sales/me", params: brandBase, scope: "customers.read" };
+        if (section === "team") return { title: "Sales team (personal session)", path: "/v1/brands/{brand}/sales/team", params: brandBase, scope: "customers.read" };
+        return { title: "Sales queue (personal session)", path: "/v1/brands/{brand}/sales/leads", params: brandBase, query: { queue: ["new", "mine", "inbox", "handoffs", "all"].includes(section) ? section : "mine" }, scope: "customers.read" };
+      }
       return { title: "CRM records", path: "/v1/brands/{brand}/records", params: brandBase, query: { type: item?.split(":")[0] ?? "person", limit: 50 }, mcp: "list_records", ask: "Show my sales relationships and the next follow-ups.", scope: "customers.read" };
     case "overview":
       return { title: "Brand stats", path: "/v1/brands/{brand}/stats", params: brandBase, mcp: "get_overview", ask: "How is sending going this week?", scope: "workspace.read" };

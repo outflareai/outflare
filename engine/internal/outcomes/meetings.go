@@ -350,6 +350,8 @@ type SyncedMeeting struct {
 	Attendees []Attendee
 	// LeadID when the source already resolved a lead (e.g. a CRM contact).
 	LeadID *string
+	// Private: the calendar marks the event private or confidential.
+	Private bool
 }
 
 // Attendee is one invitee.

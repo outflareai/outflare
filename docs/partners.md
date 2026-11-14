@@ -240,6 +240,28 @@ Rewards are an append-only ledger: an amount never changes once written.
 - **Refunds.** A refund rejects the sale's rewards still on hold. Approved or paid cash gets a negative `adjustment` entry, pro rata for a partial refund, which the next payout nets. An approved or fulfilled action gets a reversal entry (`partner_reward.reversed`) naming the action, so your system can take back what it gave.
 - **Adjustments.** `POST .../partners/{id}/adjustments` corrects a balance either way, with a note saying why.
 
+### Fraud review
+
+Every credited lead or sale is checked for partner fraud, with the same thresholds in every program:
+
+| Signal | Flagged when |
+|---|---|
+| `shared_identity` | the partner's and the customer's records share an email, phone number or user id: a self-referral under a second record |
+| `payout_matches_customer` | the partner's payout details contain the customer's email address (read in memory only; they stay sealed) |
+| `repeat_click` | 10 or more clicks from one address on the partner's links within a day of the click that brought the customer (cookie stuffing) |
+| `many_signups_one_ip` | 3 or more of the partner's referrals in 30 days came through clicks from one address |
+| `fast_conversion` | the conversion came under 10 seconds after the click that brought the customer |
+| `refund_rate` | 30% or more of the partner's sales in 90 days were refunded, from 5 sales |
+
+A customer brought by a [tracker click](campaign-links.md#fraud-signals) also carries that click's fraud reasons (`datacenter_network`, `filter_list`, `honeypot`, `ip_reputation`). Addresses are compared by their keyed hash; none is stored or shown.
+
+Each signal found is a flag, and the conversion's rewards wait while a flag on it is open: past their hold, and even in a program that approves on its own. Nothing is rejected on its own. Review the queue on the Partners page's **Review** tab (or `GET /v1/brands/{brand}/partner-flags`, MCP `list_partner_flags`): each flag shows the partner's pending cash it holds (`held_cents`).
+
+- **Clear** (`POST .../partner-flags/{id}/clear`, `clear_partner_flag`): the signal was nothing. Once no other flag on the conversion is open, its rewards go on as usual.
+- **Confirm** (`POST .../partner-flags/{id}/confirm`, `confirm_partner_flag`): the conversion was fraud. Every open flag on it is confirmed and its pending rewards, for both sides, are rejected with the reason; `suspend_partner` also suspends the partner. Rewards already approved stay; correct them with an adjustment.
+
+A person can still approve a flagged reward by hand. Flags are webhooks: `partner_flag.raised`, `.cleared` and `.confirmed`.
+
 ## Payouts
 
 `POST .../partner-payouts` makes one payout per partner whose approved, unpaid balance reaches the program's minimum. It can run for one partner, one program or all of them. Each payout fires `partner_payout.created`, so a payout tool can pick it up.
@@ -371,7 +393,7 @@ A mission can aim at referred revenue: `goal_metric` `revenue_referred`, in whol
 
 ## Webhooks
 
-`partner_program.created`, `.updated`, `.rules_updated`; `partner.created`, `.updated`; `partner_referral.created`; `partner_conversion.created`; `partner_reward.created`, `.approved`, `.rejected`, `.reversed`, `.fulfilled`; `partner_payout.created`, `.paid`, `.canceled`. They are signed like every Outflare webhook ([events and webhooks](api-conventions.md#events-and-webhooks)). Every `partner_reward.*` event from a conversion carries the sale: `conversion_id`, `conversion_type`, `revenue_cents`, `external_id` (the id your backend sent, such as a charge id), `record_id` and `customer_id` (your own user id for the referred customer); `partner_payout.paid` lists the `reward_ids` it paid. An action reward's `partner_reward.approved` carries `action`, `action_data`, `recipient_id` and `recipient_customer_id` (your own user id for the person to reward).
+`partner_program.created`, `.updated`, `.rules_updated`; `partner.created`, `.updated`; `partner_referral.created`; `partner_conversion.created`; `partner_flag.raised`, `.cleared`, `.confirmed`; `partner_reward.created`, `.approved`, `.rejected`, `.reversed`, `.fulfilled`; `partner_payout.created`, `.paid`, `.canceled`. They are signed like every Outflare webhook ([events and webhooks](api-conventions.md#events-and-webhooks)). Every `partner_reward.*` event from a conversion carries the sale: `conversion_id`, `conversion_type`, `revenue_cents`, `external_id` (the id your backend sent, such as a charge id), `record_id` and `customer_id` (your own user id for the referred customer); `partner_payout.paid` lists the `reward_ids` it paid. An action reward's `partner_reward.approved` carries `action`, `action_data`, `recipient_id` and `recipient_customer_id` (your own user id for the person to reward).
 
 ## Scopes
 
@@ -407,10 +429,6 @@ Every call below is under the brand, `/v1/brands/{brand}/`; the same calls under
 | `GET`/`POST /v1/partner-postbacks/{token}` | the postback secret |
 
 The MCP tools are listed in [mcp/README.md](../mcp/README.md): `list_partner_programs`, `add_partner`, `report_partner_conversion`, `create_partner_payouts`, `list_partner_activity`, `get_partner_reward_proof`, `export_partner_proofs` and the rest.
-
-## Coming next
-
-- A fraud review queue with partner checks (self-referral, matching payment details, cookie stuffing). It's on hold for now.
 
 ## Tasks and audience profiles
 

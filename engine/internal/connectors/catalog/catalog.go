@@ -19,7 +19,9 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/emailbison"
 	"github.com/outflareai/outflare/engine/internal/connectors/emailsend"
 	"github.com/outflareai/outflare/engine/internal/connectors/engain"
+	"github.com/outflareai/outflare/engine/internal/connectors/googleworkspace"
 	"github.com/outflareai/outflare/engine/internal/connectors/hubspot"
+	"github.com/outflareai/outflare/engine/internal/connectors/inboxkit"
 	"github.com/outflareai/outflare/engine/internal/connectors/instantly"
 	"github.com/outflareai/outflare/engine/internal/connectors/linkedin"
 	"github.com/outflareai/outflare/engine/internal/connectors/mailsignin"
@@ -44,7 +46,8 @@ func Available() []c.Connector {
 	var out []c.Connector
 	out = append(out, verifiers.All()...)
 	out = append(out, data.All()...)
-	out = append(out, emailbison.EmailBison{}, instantly.Instantly{}, smartlead.Smartlead{}, cheapinboxes.Connector{})
+	out = append(out, emailbison.EmailBison{}, instantly.Instantly{}, smartlead.Smartlead{}, cheapinboxes.Connector{}, inboxkit.Connector{})
+	out = append(out, googleworkspace.Connector{})
 	out = append(out, mailsignin.All()...)
 	out = append(out, calendars.All()...)
 	out = append(out, hubspot.All()...)

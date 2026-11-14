@@ -141,6 +141,29 @@ func TestHandleWorkspaceChecksRoute(t *testing.T) {
 	}
 }
 
+func TestHandleBrandChecksRoute(t *testing.T) {
+	ok := func(w http.ResponseWriter, r *http.Request, c *Caller) {}
+	for _, tc := range []struct{ pattern, scope string }{
+		{"GET /v1/workspaces/{ws}/cloud/thing", "workspace.read"},
+		{"GET /v1/brands/{brand}", "workspace.read"},
+		{"GET /v1/brands/{brand}/cloud/thing", "workspace.everything"},
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s %s was accepted", tc.pattern, tc.scope)
+				}
+			}()
+			(&Host{}).HandleBrand(tc.pattern, tc.scope, ok)
+		}()
+	}
+	h := &Host{}
+	h.HandleBrand("GET /v1/brands/{brand}/cloud/thing", "workspace.read", ok)
+	if len(h.workspaceRoutes) != 1 || !h.workspaceRoutes[0].Brand {
+		t.Fatal("a good route was not added as a brand route")
+	}
+}
+
 func TestCredsAreRedacted(t *testing.T) {
 	creds := connectors.Creds{"api_key": "sk-test-not-a-real-key"}
 	for _, s := range []string{fmt.Sprint(creds), fmt.Sprintf("%v %+v %#v %s", creds, creds, creds, creds), (&Connection{ID: "x", Connector: "geonode"}).String()} {

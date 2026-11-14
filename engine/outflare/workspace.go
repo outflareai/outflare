@@ -53,6 +53,28 @@ func (h *Host) HandleWorkspace(pattern, scope string, fn func(w http.ResponseWri
 	h.workspaceRoutes = append(h.workspaceRoutes, api.WorkspaceRoute{Pattern: pattern, Scope: scope, Handler: fn})
 }
 
+// HandleBrand adds a brand route under the extension's own prefix, such
+// as "POST /v1/brands/{brand}/cloud/lead-finder/runs". The engine finds the
+// brand's workspace and checks the caller as HandleWorkspace does, answers
+// 404 for a brand the caller can't see, and sets Caller.Brand. Keep what
+// the route reads and writes to that brand.
+//
+// It panics at start-up for a path outside /v1/brands/{brand}/ or an
+// unknown scope.
+func (h *Host) HandleBrand(pattern, scope string, fn func(w http.ResponseWriter, r *http.Request, c *Caller)) {
+	path := pattern
+	if _, p, ok := strings.Cut(pattern, " "); ok {
+		path = strings.TrimSpace(p)
+	}
+	if !strings.HasPrefix(path, "/v1/brands/{brand}/") {
+		panic("outflare: brand route " + pattern + " must be under /v1/brands/{brand}/")
+	}
+	if !auth.ValidScope(scope) {
+		panic("outflare: brand route " + pattern + " has unknown scope " + scope)
+	}
+	h.workspaceRoutes = append(h.workspaceRoutes, api.WorkspaceRoute{Pattern: pattern, Scope: scope, Handler: fn, Brand: true})
+}
+
 // WriteError writes the engine's error body: {"error": {"code", "message",
 // "request_id"}}. Codes come from the engine's catalog where one fits.
 func WriteError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
@@ -285,6 +307,26 @@ func (c *Connection) Fetch(ctx context.Context, url string, renderJS bool, ref s
 		err = serr
 	}
 	return p, err
+}
+
+// DNS: the workspace's own DNS host (Cloudflare), connected by the
+// workspace. An extension adds records through it without seeing its
+// credentials.
+const CapDNSWrite = connectors.CapDNSWrite
+
+type (
+	DNSRecord = connectors.DNSRecord
+	DNSResult = connectors.DNSResult
+)
+
+// EnsureDNSRecords adds records on the connection's DNS host. It only adds:
+// a record already there is left as it is, and none is changed or removed.
+func (c *Connection) EnsureDNSRecords(ctx context.Context, records []DNSRecord) (DNSResult, error) {
+	d, ok := c.o.Connector.(connectors.DNSHost)
+	if !ok {
+		return DNSResult{}, ErrNotConnected
+	}
+	return d.EnsureRecords(ctx, c.o.Client, c.o.Creds, records)
 }
 
 // People search: the workspace's own people-data account (Apollo, PDL)

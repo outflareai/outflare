@@ -46,6 +46,7 @@ workspace added before is still sent and does no harm.
 | Apple Ads (`apple_ads`, formerly Apple Search Ads) | Your own Apple Ads API user: its client id, team id and key id from Account Settings → API, and the private key whose public half you uploaded there (see below). Every ad account the user can reach is listed, App Store and Apple Maps. | An API role for that user (API Account Read Only is enough) |
 | Amazon Ads (`amazon_ads`) | Sign in with Amazon (Login with Amazon, `advertising::campaign_management`). Every advertising profile the sign-in reaches is an ad account: one advertiser in one marketplace, with its currency and time zone, in North America, Europe or the Far East. Sponsored Products campaigns are read; their daily numbers come from Amazon's reports, which Amazon builds in a few minutes, so a sync can take longer than for other platforms. Purchases and sales are Amazon's seven-day attribution. | Nothing |
 | Pinterest Ads (`pinterest_ads`) | Sign in with Pinterest (`ads:read`, read-only) | Nothing |
+| ChatGPT Ads (`chatgpt_ads`) | Your own Advertiser API key from OpenAI Ads Manager (Settings). A key reaches one ad account, so connect each account with its own key. To send conversions back, add the pixel ID, a conversion key (Conversions, Manage conversion keys) and your website address on the connection. | Nothing |
 
 **Apple Ads** has no sign-in: it uses OAuth client credentials that belong to
 your own Apple Ads organization. An account administrator invites a user with
@@ -243,6 +244,7 @@ definitions first.
 | Snapchat Ads | A Snap Pixel, through the Conversions API, as PURCHASE, SIGN_UP, SUBSCRIBE and so on | `ScCid`, the `_scid` cookie (`scid`), hashed email, phone and record id | The sign-in's access; if Snapchat refuses it, a Conversions API token from Ads Manager → Business Details on the connection |
 | Taboola Ads | An active event-based conversion (Realize → Tracking, "Create conversions using code"), by its event name, as a server-to-server action | `tblci` only | Nothing: the bulk S2S endpoint takes no token |
 | Pinterest Ads | The Conversions API, as checkout, signup, lead and so on | `epik`, hashed email, phone and record id | The workspace's own conversion access token, from Pinterest Ads Manager → Conversions |
+| ChatGPT Ads | The pixel, through OpenAI's Conversions API, as `registration_completed`, `order_created`, `lead_created`, `subscription_created` and so on, with the value in the currency's minor unit | `oppref`, the pixel's `__obref` cookie, hashed email, phone and record id | The pixel ID and a conversion key from OpenAI Ads Manager → Conversions, and the website address (OpenAI asks for it on web events). OpenAI takes conversions from the last 7 days only. |
 
 Taboola matches only on its click id: a conversion with no `tblci` from the
 click is skipped. Taboola accepts each batch at once and processes it later
@@ -449,7 +451,7 @@ connect again). See
 
 ## Findings and decisions
 
-After each hourly sync Outflare reads every campaign it can change (Google Ads, Meta, Microsoft Advertising, LinkedIn and TikTok) and writes what it finds into one queue, the brand's **findings** (`GET /v1/brands/{brand}/ads/findings`; the same rows, and the same calls, as `GET /v1/brands/{brand}/ads/suggestions`): a change it proposes, a change it made on its own, or an alert. Each is a yes/no question a person answers (`reason`), with the numbers behind it (`evidence`: the window, the spend, the payers, the target, the search terms or segments it rests on), the lever (`kind`), the rule that made it and its version (`rule`, `rule_version`), its autonomy class, and its expected change in cost per new paying customer (`impact_micros`, negative is better: a cut's from the campaign's marginal cost per payer, a negative keyword's from the wasted spend spread over the brand's payers).
+After each hourly sync Outflare reads every campaign it can change (Google Ads, Meta, Microsoft Advertising, LinkedIn, TikTok, Reddit, X and ChatGPT) and writes what it finds into one queue, the brand's **findings** (`GET /v1/brands/{brand}/ads/findings`; the same rows, and the same calls, as `GET /v1/brands/{brand}/ads/suggestions`): a change it proposes, a change it made on its own, or an alert. Each is a yes/no question a person answers (`reason`), with the numbers behind it (`evidence`: the window, the spend, the payers, the target, the search terms or segments it rests on), the lever (`kind`), the rule that made it and its version (`rule`, `rule_version`), its autonomy class, and its expected change in cost per new paying customer (`impact_micros`, negative is better: a cut's from the campaign's marginal cost per payer, a negative keyword's from the wasted spend spread over the brand's payers).
 
 **One unit.** A brand that has set a target cost per new paying customer (its economics, below) is judged in **payers**: the sign-ups and first-time payers Outflare's own ledger ties to each campaign per day, beside the network's spend, clicks and impressions (`unit` `payers`). A brand without a target is judged on the network's own conversions against the campaign's, account's or network's target cost per conversion, and every finding says so (`unit` `platform_conversions`). The network's target (a tCPA or tROAS) is compared with the network's own numbers, since that is what it bids to; the payers are the floor.
 
@@ -540,13 +542,16 @@ X Ads has no tests here: X splits an audience only between campaigns that alread
 ## Managing campaigns
 
 Three changes, on Google Ads, Meta, Microsoft Advertising, LinkedIn,
-TikTok, Reddit and X (the other platforms are read but not changed yet, and
+TikTok, Reddit, X and ChatGPT (the other platforms are read but not changed yet, and
 say so with `422 connector_invalid`). On Reddit, a campaign with campaign
 budget optimization holds its daily budget; otherwise the campaign's budget
 is the sum of its ad groups' daily budgets, and a new one is shared between
 them in the same proportions. A campaign with only lifetime budgets is
 refused with a reason. On X, the app must have Read and write permission
-before you sign in (sign in again after changing it):
+before you sign in (sign in again after changing it). On ChatGPT, the
+campaign's daily spend limit is set (at least 1 of the account's currency);
+a campaign with only a lifetime limit is refused with a reason, and
+resuming starts delivery once its ad groups and ads are active and approved:
 
 | Call | What it does |
 | --- | --- |

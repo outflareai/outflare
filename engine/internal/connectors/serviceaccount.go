@@ -127,7 +127,7 @@ func ServiceAccountToken(ctx context.Context, cl *Client, keyJSON string, scopes
 		return SAToken{}, Errf(ErrInvalid, "could not sign with the service account key")
 	}
 	form := url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"}, "assertion": {unsigned + "." + base64.RawURLEncoding.EncodeToString(sig)}}
-	req, _ := http.NewRequest(http.MethodPost, cl.Base("google.token", tokenURI), strings.NewReader(form.Encode()))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, cl.Base("google.token", tokenURI), strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	var t tokenResponse
 	if _, err := DoJSON(ctx, cl, "Google", req, &t); err != nil {
