@@ -23,6 +23,10 @@ type crmMailRollout struct {
 	Enabled  bool     `json:"enabled"`
 	Allowed  []string `json:"allowed_user_ids"`
 	Excluded []string `json:"excluded_user_ids"`
+	// ExcludedEmails are always left out by address, including people who
+	// don't have an Outflare account yet: whoever joins with one is
+	// excluded from the start.
+	ExcludedEmails []string `json:"excluded_emails"`
 	// WorkspaceIntegrationID reads every enabled person's mailbox through
 	// the company's Google Workspace connection, without them signing in.
 	WorkspaceIntegrationID *string `json:"workspace_integration_id"`
@@ -48,7 +52,7 @@ func (s *Server) routesCRMGoogle(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/crm-mail/google/callback", s.requireUser(s.finishCRMGoogle))
 }
 func readMailRollout(ctx context.Context, q mailQuery, ws, brand string) (crmMailRollout, error) {
-	out := crmMailRollout{Allowed: []string{}, Excluded: []string{}}
+	out := crmMailRollout{Allowed: []string{}, Excluded: []string{}, ExcludedEmails: []string{}}
 	var raw []byte
 	var version int
 	err := q.QueryRow(ctx, `SELECT config,version FROM crm_mail_rollout WHERE workspace_id=$1 AND brand_id=$2`, ws, brand).Scan(&raw, &version)
@@ -60,6 +64,9 @@ func readMailRollout(ctx context.Context, q mailQuery, ws, brand string) (crmMai
 	}
 	if err = json.Unmarshal(raw, &out); err != nil {
 		return out, err
+	}
+	if out.ExcludedEmails == nil {
+		out.ExcludedEmails = []string{}
 	}
 	out.Version = version
 	return out, nil
@@ -102,7 +109,7 @@ func eligibleCRMMail(ctx context.Context, q mailQuery, ws, brand, user string) (
 	if err = json.Unmarshal(raw, &p); err != nil {
 		return false, err
 	}
-	if len(p.Internal) == 0 || slices.Contains(p.Addresses, email) {
+	if len(p.Internal) == 0 || slices.Contains(p.Addresses, email) || slices.Contains(rollout.ExcludedEmails, email) {
 		return false, nil
 	}
 	_, domain, _ := strings.Cut(email, "@")
@@ -143,6 +150,15 @@ func (s *Server) putCRMMailRollout(w http.ResponseWriter, r *http.Request) {
 	if in.Excluded == nil {
 		in.Excluded = []string{}
 	}
+	emails, err := mailRules(in.ExcludedEmails, true)
+	if err != nil || len(emails) > 500 {
+		writeError(w, r, 400, "invalid_request", "excluded_emails must be at most 500 email addresses")
+		return
+	}
+	if emails == nil {
+		emails = []string{}
+	}
+	in.ExcludedEmails = emails
 	for _, id := range append(append([]string{}, in.Allowed...), in.Excluded...) {
 		if !validUUID(id) {
 			writeError(w, r, 400, "invalid_request", "eligibility lists must contain member ids")
@@ -156,7 +172,7 @@ func (s *Server) putCRMMailRollout(w http.ResponseWriter, r *http.Request) {
 	if in.WorkspaceIntegrationID != nil && *in.WorkspaceIntegrationID == "" {
 		in.WorkspaceIntegrationID = nil
 	}
-	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "crm-rollout:"+a.Brand); err != nil {
 			return err
 		}
@@ -190,7 +206,8 @@ func (s *Server) putCRMMailRollout(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		// Removing eligibility destroys the local grant; re-enabling needs consent again.
-		if _, err = tx.Exec(r.Context(), `DELETE FROM crm_google_connections WHERE workspace_id=$1 AND brand_id=$2 AND (NOT $3 OR NOT(owner_id=ANY($4::uuid[])) OR owner_id=ANY($5::uuid[]))`, a.WorkspaceID, a.Brand, in.Enabled, in.Allowed, in.Excluded); err != nil {
+		if _, err = tx.Exec(r.Context(), `DELETE FROM crm_google_connections WHERE workspace_id=$1 AND brand_id=$2 AND (NOT $3 OR NOT(owner_id=ANY($4::uuid[])) OR owner_id=ANY($5::uuid[])
+			OR owner_id IN (SELECT id FROM users WHERE lower(email)=ANY($6::text[])))`, a.WorkspaceID, a.Brand, in.Enabled, in.Allowed, in.Excluded, in.ExcludedEmails); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(r.Context(), `DELETE FROM crm_mail_oauth_flows WHERE workspace_id=$1 AND brand_id=$2 AND (NOT $3 OR NOT(owner_id=ANY($4::uuid[])) OR owner_id=ANY($5::uuid[]))`, a.WorkspaceID, a.Brand, in.Enabled, in.Allowed, in.Excluded); err != nil {
@@ -201,7 +218,7 @@ func (s *Server) putCRMMailRollout(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "crm_mail.rollout_updated", "crm_mail_rollout", a.Brand, map[string]any{"brand_id": a.Brand, "enabled": in.Enabled, "allowed_count": len(in.Allowed), "excluded_count": len(in.Excluded),
+		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "crm_mail.rollout_updated", "crm_mail_rollout", a.Brand, map[string]any{"brand_id": a.Brand, "enabled": in.Enabled, "allowed_count": len(in.Allowed), "excluded_count": len(in.Excluded), "excluded_email_count": len(in.ExcludedEmails),
 			"workspace": in.WorkspaceIntegrationID != nil, "workspace_mailboxes_added": added, "history_days": in.HistoryDays})
 	})
 	if errors.Is(err, errConflict) {

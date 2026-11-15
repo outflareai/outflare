@@ -228,7 +228,7 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 
 	// One tool reads three sites: two match a brand's domain, one no brand's.
 	// A domain only suggests a brand: until someone assigns them, every
-	// site has no brand (no brand, no data).
+	// site counts for the workspace's first brand.
 	ga := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "plausible", "name": "GA4", "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}})["id"].(string)
 	day := time.Now().UTC().AddDate(0, 0, -2).Format(time.DateOnly)
 	for site, host := range map[string]string{"properties/1": "geonode.com", "properties/2": "app.repocket.com", "properties/3": "games.io"} {
@@ -240,7 +240,7 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Home lists the three sites as having no brand, and the brands as
+	// Home lists the three sites as needing a brand, and the brands as
 	// having no analytics.
 	blockers := func() map[string]map[string]any {
 		t.Helper()
@@ -283,17 +283,15 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 		t.Fatalf("sites: %v", sites)
 	}
 
-	// Picking a brand for the games site, then making the Geonode one shared.
+	// Picking a brand for the games site. No site can be shared.
 	owner.must(400, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/3", "brand": "nope"})
 	owner.must(404, "PUT", base+"/analytics/00000000-0000-0000-0000-000000000000/site-brand", map[string]any{"site": "x", "brand": "repocket"})
 	sb := owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/3", "brand": "repocket"})
 	if sb["brand_id"] != rp || sb["source"] != "set" || sb["host"] != "games.io" {
 		t.Fatalf("set: %v", sb)
 	}
-	if sb := owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "none"}); sb["brand_id"] != nil || sb["source"] != "set" {
-		t.Fatalf("shared: %v", sb)
-	}
-	if visitors("&brand=repocket") != 20 || visitors("&brand=geonode") != 0 {
+	owner.must(400, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "none"})
+	if visitors("&brand=repocket") != 20 || visitors("&brand=geonode") != 10 {
 		t.Fatal("after mapping")
 	}
 	if b := blockers(); b["analytics_site_unmapped"] != nil {
@@ -303,8 +301,8 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 		t.Fatalf("repocket sites: %d", n)
 	}
 	// auto takes the assignment away: the domain only suggests, so the
-	// site has no brand until it is assigned again.
-	if sb := owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "auto"}); sb["source"] != "none" {
+	// site counts for the first brand until it is assigned again.
+	if sb := owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "auto"}); sb["source"] != "default" || sb["brand_id"] == nil {
 		t.Fatalf("auto: %v", sb)
 	}
 	owner.must(200, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("properties/1"), map[string]any{"brand_id": "geonode"})
@@ -314,7 +312,7 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 		t.Fatalf("overview: %v", o)
 	}
 	time.Sleep(10 * time.Millisecond)
-	if len(named(got(), "analytics.site_brand_set")) != 5 {
+	if len(named(got(), "analytics.site_brand_set")) != 4 {
 		t.Error("no analytics.site_brand_set events")
 	}
 }

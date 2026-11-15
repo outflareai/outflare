@@ -739,7 +739,7 @@ func (s *Server) runPlaybook(w http.ResponseWriter, r *http.Request) {
 			if brand != nil {
 				kitBrand = *brand
 			}
-			if _, err := applyKit(ctx, tx, a, kitBrand, kit, kitInputs, kitFromCatalog); err != nil {
+			if _, err := applyKit(ctx, tx, a, kitBrand, kit, kitInputs, kitFromCatalog, 0); err != nil {
 				return err
 			}
 		}

@@ -23,6 +23,7 @@ const aggregates: Record<Metric["aggregate"], string> = {
   max: "Largest value of a number property",
   days: "Days with an event",
   last: "When the latest event happened",
+  latest: "Latest value of a number property (a balance, a limit)",
 };
 
 export function Metrics({ ws, canManage, tabs }: { ws: string; canManage: boolean; tabs: ReactNode }) {
@@ -178,7 +179,7 @@ function MetricEditor({ brand, metric, onClose, onSaved }: { brand: string; metr
   const [perProduct, setPerProduct] = useState(metric?.per_product ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const needsProperty = aggregate === "sum" || aggregate === "min" || aggregate === "max";
+  const needsProperty = aggregate === "sum" || aggregate === "min" || aggregate === "max" || aggregate === "latest";
   const eventList = events.split(",").map((e) => e.trim()).filter(Boolean);
   const valid = name.trim() && (metric || /^[a-z][a-z0-9_]{0,39}$/.test(key)) && (eventList.length > 0 || usage) && (!needsProperty || property.trim()) && levels.length > 0 && Number(windowDays) >= 1 && Number(offsetDays) >= 0;
 

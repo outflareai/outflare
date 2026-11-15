@@ -57,7 +57,7 @@ const columns: ColumnDef<Journey>[] = [
     cell: ({ row: { original: j } }) => (
       <span className="block min-w-0">
         <span className="block truncate font-medium">{j.name}</span>
-        <span className="block truncate text-[12px] text-muted-foreground">{triggerText(j)}</span>
+        <span className="block truncate text-[12px] text-muted-foreground">{j.record_type === "account" ? "Companies · " : j.record_type === "deal" ? "Deals · " : ""}{triggerText(j)}</span>
       </span>
     ),
   },
@@ -155,6 +155,7 @@ function NewJourneyDialog({ ws, onClose, onSaved }: { ws: string; onClose: () =>
   const events = useEvents(ws);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"event" | "manual">("event");
+  const [about, setAbout] = useState<"person" | "account" | "deal">("person");
   const [event, setEvent] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -163,7 +164,7 @@ function NewJourneyDialog({ ws, onClose, onSaved }: { ws: string; onClose: () =>
     setBusy(true);
     const { data, error } = await api.POST("/v1/brands/{brand}/journeys", {
       params: { path: { brand: brandId } },
-      body: { name, trigger: kind === "event" ? { kind, event } : { kind } },
+      body: { name, record_type: about, trigger: kind === "event" ? { kind, event } : { kind } },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -180,10 +181,28 @@ function NewJourneyDialog({ ws, onClose, onSaved }: { ws: string; onClose: () =>
         <form onSubmit={save} className="space-y-3">
           <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Onboarding" maxLength={200} required autoFocus />
           <label className="block space-y-1 text-[13px]">
+            <span className="font-medium">Who goes through it</span>
+            <select aria-label="Who goes through it" className={`${field} w-full`} value={about} onChange={(e) => setAbout(e.target.value as "person" | "account" | "deal")}>
+              <option value="person">Each person</option>
+              <option value="account">Each company</option>
+              <option value="deal">Each deal</option>
+            </select>
+            {about === "deal" && (
+              <span className="block text-xs text-muted-foreground">
+                The deal goes through it. It starts on the deal's own events (deal.created, deal.stage_changed, deal.won, deal.lost) and its steps act on the deal: tasks, fields, owners, alerts, signals, Slack and webhooks.
+              </span>
+            )}
+            {about === "account" && (
+              <span className="block text-xs text-muted-foreground">
+                The company goes through it once, whoever there set it off. Its steps act on the company: tasks, fields, owners, alerts, signals, Slack and webhooks. Email and sequence steps need a journey about people.
+              </span>
+            )}
+          </label>
+          <label className="block space-y-1 text-[13px]">
             <span className="font-medium">Starts</span>
             <select aria-label="Starts" className={`${field} w-full`} value={kind} onChange={(e) => setKind(e.target.value as "event" | "manual")}>
-              <option value="event">When someone does an event</option>
-              <option value="manual">When someone is added, by hand or through the API</option>
+              <option value="event">{about === "account" ? "When the company, or anyone there, does an event" : about === "deal" ? "When something happens to the deal" : "When someone does an event"}</option>
+              <option value="manual">{about === "account" ? "When a company is added, by hand or through the API" : about === "deal" ? "When a deal is added, by hand or through the API" : "When someone is added, by hand or through the API"}</option>
             </select>
           </label>
           {kind === "event" && <EventInput id="new-journey-events" label="Event" value={event} onChange={setEvent} events={events} hint="An event your product sends to Outflare, approved in the event catalog." required />}
@@ -485,6 +504,28 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
   const sim = useDryRun(ws, rule);
 
   if (error && !j) return <Empty title="Could not load this journey" action={<Button onClick={back}>All journeys</Button>}>{error}</Empty>;
+  // A journey drafted from a rule's "When this fires, do…" opens with the
+  // step picked there already added and its settings open, ready to fill in.
+  const empty = !!work && !!templates && work.steps.length === 0 && j?.status === "draft";
+  useEffect(() => {
+    if (!empty) return;
+    const key = `outflare:first-step:${id}`;
+    let kind: string | null = null;
+    try {
+      kind = sessionStorage.getItem(key);
+    } catch {
+      return;
+    }
+    const k = kind ? kinds.find((x) => x.kind === kind) : undefined;
+    if (!k) return;
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      // Nothing to tidy.
+    }
+    addStep({ from: null, field: "next" }, k);
+  }, [empty, kinds, id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!j || !shown || !templates) return <Loading />;
 
   const errors = errorCount(probs);
@@ -632,7 +673,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
               setTesting(true);
             }}><FlaskConical className="size-4" />Test</Button>}
             {canManage && <>
-            {editable && <SaveState state={dirty && saving === "saved" ? "pending" : saving} error={saveError} retry={() => saveRef.current()}
+            {editable && <SaveState state={saving === "failed" && [...probs.values()].some((l) => l.some((x) => x.level === "error")) ? "unfinished" : dirty && saving === "saved" ? "pending" : saving} error={saveError} retry={() => saveRef.current()}
               undo={past.current.length > 0 ? () => undoRef.current(false) : undefined} redo={future.current.length > 0 ? () => undoRef.current(true) : undefined} />}
             {live && !draft && !mobile && <Button variant="ghost" onClick={edit} disabled={busy}>Edit</Button>}
             {live && draft && <Button variant="ghost" onClick={discard} disabled={busy}>Discard draft</Button>}
@@ -698,7 +739,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
           }} />
       )}
       {j.stats.entered > 0 && <RunsCard ws={ws} j={j} canManage={canManage} go={go} />}
-      {picker && <StepPicker kinds={kinds} onPick={(k) => addStep(picker, k)} onClose={() => setPicker(null)} onConnect={() => go("connectors")} />}
+      {picker && <StepPicker kinds={j.record_type === "account" ? kinds.filter((k) => k.companies) : j.record_type === "deal" ? kinds.filter((k) => k.deals) : kinds} onPick={(k) => addStep(picker, k)} onClose={() => setPicker(null)} onConnect={() => go("connectors")} />}
       {open && (
         <StepPanel ws={ws} step={open} steps={shown.steps} kinds={kinds} templates={templates} catalog={catalog} event={shown.trigger.kind === "event" ? shown.trigger.event : null}
           problems={probs.get(open.id) ?? []} editable={editable} go={go} guardrails={guardrails}
@@ -799,7 +840,7 @@ function VersionsCard({ versions, current, viewing, kinds, templates, live, onVi
 }
 
 // SaveState says whether the builder's edits are saved, with undo and redo.
-function SaveState({ state, error, retry, undo, redo }: { state: "pending" | "saving" | "saved" | "failed"; error: string; retry: () => void; undo?: () => void; redo?: () => void }) {
+function SaveState({ state, error, retry, undo, redo }: { state: "pending" | "saving" | "saved" | "failed" | "unfinished"; error: string; retry: () => void; undo?: () => void; redo?: () => void }) {
   const btn = "flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40";
   return (
     <span className="flex items-center gap-1 text-[12px] text-muted-foreground">
@@ -809,6 +850,8 @@ function SaveState({ state, error, retry, undo, redo }: { state: "pending" | "sa
         <span className="flex items-center gap-1 text-red-700 dark:text-red-400" title={error}>
           <CircleAlert className="size-3.5" />Not saved: {error.slice(0, 80)} <button type="button" className="underline" onClick={retry}>Try again</button>
         </span>
+      ) : state === "unfinished" ? (
+        <span className="text-amber-700 dark:text-amber-400" title={error}>Not saved yet: finish the step marked in red</span>
       ) : <span className="w-16">{state === "saved" ? "Saved" : "Saving…"}</span>}
     </span>
   );

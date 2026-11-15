@@ -3,6 +3,7 @@ import type { Department, Member, StaffAccount, StaffMember, Team as TeamT, Tele
 import { api, errorMessage } from "../api";
 import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Status, toast } from "../ui";
 import { plural } from "../format";
+import { track } from "@/lib/analytics";
 import { useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,6 +28,7 @@ const statusLabel = { active: "Active", leaving: "Leaving", left: "Left" } as co
 // to the next person, and the history keeps who held them.
 export function TeamDirectory({ ws, canManage }: Props) {
   const [people, setPeople] = useState<StaffMember[] | null>(null);
+  const [view, setView] = useState<"list" | "chart">("list");
   const [departments, setDepartments] = useState<Department[]>([]);
   const [teams, setTeams] = useState<TeamT[]>([]);
   const [accounts, setAccounts] = useState<StaffAccount[]>([]);
@@ -185,8 +187,21 @@ export function TeamDirectory({ ws, canManage }: Props) {
       {addingAccount && <AccountForm ws={ws} people={current} onDone={(addr) => { setAddingAccount(false); if (addr) { toast(`Added ${addr}.`); load(); } }} />}
 
       <section className="space-y-3">
-        <h2 className="flex items-baseline gap-2 text-[13px] font-semibold">People <span className="font-mono text-[12px] font-normal text-muted-foreground">{current.length}</span></h2>
-        {people.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="flex items-baseline gap-2 text-[13px] font-semibold">People <span className="font-mono text-[12px] font-normal text-muted-foreground">{current.length}</span></h2>
+          {people.length > 0 && (
+            <div role="tablist" aria-label="View" className="flex gap-1">
+              {([["list", "List"], ["chart", "Org chart"]] as const).map(([k, label]) => (
+                <Button key={k} role="tab" aria-selected={view === k} variant="ghost" className={view === k ? "bg-muted" : "border-transparent text-muted-foreground"} onClick={() => { setView(k); if (k === "chart") track("ui.team_org_chart_opened", { people: current.length }); }}>
+                  {label}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+        {people.length > 0 && view === "chart" ? (
+          <OrgChart people={current} onOpen={canManage ? (p) => setEditing(p) : undefined} />
+        ) : people.length === 0 ? (
           <Empty title="Nobody here yet" action={canManage && <Button onClick={() => setEditing("new")}>Add person</Button>}>
             Add everyone who talks to customers or partners, including people who never sign in to Outflare. Their company accounts, and the conversations on them, hang off this list.
           </Empty>
@@ -707,5 +722,57 @@ function TelegramPanel({ ws, account, canManage, onClose }: { ws: string; accoun
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+// Who reports to whom: each person under their manager, the people with
+// no manager at the top.
+function OrgChart({ people, onOpen }: { people: StaffMember[]; onOpen?: (p: StaffMember) => void }) {
+  const ids = new Set(people.map((p) => p.id));
+  const under = new Map<string, StaffMember[]>();
+  const top: StaffMember[] = [];
+  for (const p of people) {
+    if (p.manager_id && ids.has(p.manager_id) && p.manager_id !== p.id) under.set(p.manager_id, [...(under.get(p.manager_id) ?? []), p]);
+    else top.push(p);
+  }
+  const byName = (a: StaffMember, b: StaffMember) => (a.name ?? "").localeCompare(b.name ?? "");
+  const count = (id: string, seen = new Set<string>()): number => {
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    return (under.get(id) ?? []).reduce((n, c) => n + 1 + count(c.id!, seen), 0);
+  };
+  const seen = new Set<string>();
+  const node = (p: StaffMember) => {
+    if (seen.has(p.id!)) return null;
+    seen.add(p.id!);
+    const reports = (under.get(p.id!) ?? []).sort(byName);
+    const total = count(p.id!);
+    const body = (
+      <>
+        <span className="block text-sm font-medium">{p.name}</span>
+        <span className="block text-[12px] text-muted-foreground">
+          {p.title || "No job title"}
+          {total > 0 ? ` · ${plural(total, "person", "people")} under them` : ""}
+        </span>
+      </>
+    );
+    return (
+      <li key={p.id}>
+        {onOpen ? (
+          <button type="button" className="w-full max-w-sm rounded-lg border px-3 py-2 text-left hover:bg-muted" onClick={() => onOpen(p)}>{body}</button>
+        ) : (
+          <div className="max-w-sm rounded-lg border px-3 py-2">{body}</div>
+        )}
+        {reports.length > 0 && <ul className="ml-4 mt-2 space-y-2 border-l pl-4">{reports.map(node)}</ul>}
+      </li>
+    );
+  };
+  const roots = top.sort(byName).map(node);
+  const loops = people.filter((p) => !seen.has(p.id!)).map(node); // managers who report to each other
+  return (
+    <div className="space-y-2">
+      <ul className="space-y-2">{roots}{loops}</ul>
+      <p className="text-[12px] text-muted-foreground">Set who someone reports to with Manager when you edit them. Quotas and commission for the sales team follow these lines.</p>
+    </div>
   );
 }

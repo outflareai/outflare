@@ -169,10 +169,26 @@ Read (always available):
 | `get_email_broadcast_lift`, `get_sequence_lift` | What a broadcast or sequence added: the people it reached against the people it held out |
 | `list_journey_step_secrets` | Which webhook steps have their key set (never the keys: people set them in the app, so keys never pass through the chat) |
 | `get_automation_map` | Every rule and journey of a brand as one graph, with what sets each off, what it touches, its volume for the last 7 days, and flags for loops, overlapping emails, unused events and journeys that never start; with a person, what they reached. Needs `emails.read` and `customers.read` |
+| `list_signals`, `list_signal_types` | Needs attention: the signals to act on about people and companies (churn risk, upsell, renewal), who owns each, when it is due and how closed ones ended |
 | `list_rules`, `get_rule`, `simulate_rule`, `list_rule_firings` | The rules engine: rules that turn what happens to records into business events, a dry run of what one would have done, and when it fired for whom |
 | `list_metrics`, `get_record_metrics` | A brand's live metrics (spend, usage, last seen…) and a company's or person's values, overall and per product |
+| `list_scores`, `create_score`, `update_score`, `get_record_scores`, `get_score_track_record` | A brand's scores, such as health, a lead score, churn risk or a deal's win likelihood: numbers from 0 to 100 on every company, person or deal, built from factors or from other scores, each marked measured, AI-read or predicted; add, change or archive one, read why a record scores what it does and where it is heading, and check a prediction against what happened. Changing needs `catalog.manage` |
+| `get_routing`, `set_routing`, `route_record` | A brand's routing rules: which teammate gets a person or company with no owner, by rules tried in order, each with a pool (people or a team) and an optional territory of countries; replace the list, and route or preview one record. Changing the rules needs `catalog.manage` |
+| `get_revenue` | A brand's revenue report: recurring revenue and how it moved, retention, what was collected and by which product, renewals coming up and revenue at risk |
+| `get_revenue_forecast` | A quarter's forecast against its target: won deals, renewals weighted by health, open deals weighted by stage, line by line and split by owner |
+| `set_revenue_forecast` | Set a quarter's target and the forecast's weights per health band and deal stage |
+| `get_sales_team` | The sales team's quarter: each person's quota, won, forecast and percent of quota, rolled up to their manager |
+| `set_sales_quotas` | Set people's quotas for a quarter |
+| `list_commission_plans` | A brand's commission plans and their rules |
+| `create_commission_plan` | Add a commission plan: who it covers and its rules |
+| `update_commission_plan` | Change a commission plan |
+| `delete_commission_plan` | Delete a commission plan |
+| `get_commissions` | What each person earns in a month, line by line with the rule that paid it |
+| `set_commission_statement` | Approve a person's month, mark it paid, or reopen it |
 | `list_products`, `list_product_names`, `get_lifecycle`, `get_record_lifecycle` | A brand's products, the product names its events and billing use (held ones wait to be mapped), its lifecycle stages and moves, and where a company or person stands with each product, with a company's overall status |
 | `get_record_relationship` | The relationship check on a card: already a customer, deals, other pipelines, last contact and stale threads, and who on the team has emailed them for a warm intro |
+| `get_record_summary` | The account summary for a person or company in one call: stage, owner, account plan, billing, products and usage trend, people, deals, conversations, last contact, visits, tasks, automations, alerts and what needs attention |
+| `get_record_group` | A company's parent, the companies under it and the group's totals (revenue, payments, health, signals), plus its share of wallet |
 | `list_emails`, `get_email`, `get_email_recipient` | Transactional and lifecycle emails with delivery status, opens, clicks and what triggered each; one email's content and timeline; everything one address was sent |
 | `list_lead_lists`, `get_lead_list` | Lead lists with sizes, search settings and the latest build |
 | `list_lead_list_members` | A list's leads with their ICP fit score and reasons, best first |
@@ -240,6 +256,9 @@ Read (always available):
 | `match_telegram_chat` | Link a synced Telegram chat to a customer record (or to none of the suggestions); the record gets the chat's Telegram id. Needs `customers.manage` |
 | `update_telegram_chat` | Sort a synced Telegram chat (customer, internal, personal: nothing kept) or make it private to the account's holder. Needs `customers.manage` |
 | `list_playbooks`, `get_playbook` | Ready-made playbooks with whether the workspace is ready for each (connections and data still missing). Needs `agents.read`; `run_playbook` below starts one |
+| `get_playbook_home` | What a playbook's setup kit put in a brand (rules, journeys, lists, signal types), whether each is on, what it has done and how its signals ended. Needs `customers.read` |
+| `get_playbook_lift` | Did a playbook work: each of its journeys that holds some back at random, against the ones held back (conversions, revenue, lift, verdict) |
+| `list_own_playbooks`, `create_own_playbook`, `update_own_playbook`, `delete_own_playbook` | A brand's own playbooks: a title around rules, journeys, lists and signal types it already has, with what each part has done and how its signals ended |
 | `list_playbook_automations`, `create_playbook_automation`, `update_playbook_automation`, `pause_playbook_automation`, `run_playbook_automation`, `list_playbook_automation_runs`, `delete_playbook_automation` | Run a playbook by itself on a schedule or when an event happens. An agent sets one up as a draft; a person approves it in Outflare, then each run is an agent run of Outflare's agent inside the approved mode and spend limits. Needs `agents.read`, and `agents.run` to change |
 | `preview_kit`, `apply_kit` | What a playbook's setup kit (a pipeline, fields on people and companies, option lists, email drafts, and a flow kit's smart lists, rules and journeys) would add, and setting it up once the person agrees, for the workspace's first brand or the `brand` given (flow kits only for the first), with the kit's inputs. It only adds, adds automations as drafts, and stops at a conflict. Needs `customers.read` to preview; `catalog.manage`, plus `emails.manage` for email drafts and journeys and `customers.manage` for smart lists and rules, to apply |
 | `export_kit` | Journeys written out as a flow kit file, with the journeys, lists, emails and rules they use. Ids become placeholders, sequences and chosen events become inputs, and the file is checked as a shipped kit is. Changes nothing. Needs `emails.read` and `customers.read` |
@@ -301,7 +320,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `add_brand_dns` | Add every DNS record a brand still needs (site proof, sending domains, tracking domain) in one go through its own Cloudflare |
 | `check_brand_dns` | Look for a brand's missing DNS records now, after they were added by hand, and see which are in place |
 | `get_brand_rules`, `set_brand_rules` | The cross-brand contact rule: no first email from a second brand within N days of another brand's email |
-| `add_to_brand`, `remove_from_brand` | Move domains, mailboxes, lead lists, sequences or missions into a brand, or take missions out of one so they are for every brand |
+| `add_to_brand`, `remove_from_brand` | Move domains, mailboxes, lead lists, sequences or missions into a brand (`remove_from_brand` is always refused: every record belongs to a brand) |
 | `search_workspace` | Find records by name, attribute text, email, phone or id, and emails sent and received, meetings, deals and lifecycle email by their words, ranked, with whose each one is. With `mode: meaning`, find records, replies, meetings and deals by what they mean |
 | `get_semantic_search`, `set_semantic_search` | Read whether meaning-based search is on and how far along it is, or turn it off and on |
 | `list_query_tables`, `run_query` | Read-only SQL over one brand's data (`brand`; people, companies, product events, each of the brand's record types as a table of its own, deals, outreach, replies, emails, visits): counts, sums, rates and joins in one call. No SQL reaches another brand's rows; it sees only what the connection may read, and never changes anything |
@@ -426,6 +445,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_journey`, `update_journey`, `activate_journey`, `pause_journey`, `archive_journey`, `add_to_journey`, `exit_journey_run` | Build a flow that an event starts (send an email, wait, branch, exit), turn it on or off, and add or take out people |
 | `list_journey_versions`, `edit_journey_draft`, `publish_journey`, `discard_journey_draft` | Change a live journey safely: edit a draft version beside it, then publish it (people in it finish on their version, or move onto the new one); every version that went live is kept |
 | `test_journey` | Test a journey with one person: the path they would take and what each step would do, without sending or writing anything |
+| `raise_signal`, `update_signal`, `set_signal_type` | Flag a person or company for someone to act on, accept, snooze, close (with an outcome) or reopen a signal, and add or change the kinds of signal a brand raises |
+| `get_conversation_signals`, `set_conversation_signals`, `add_transcript`, `get_signal_credit` | Whether a brand's own AI reads conversations (support, Telegram, shared email, call transcripts) for signals, switching it on or off, sending a call transcript to be read, and whose signals turned into revenue |
 | `create_rule`, `update_rule`, `activate_rule`, `pause_rule`, `archive_rule` | Build a rule (an event happens, a field changes, something doesn't happen in time, someone joins or leaves a smart list) that emits a business event, and turn it on or off |
 | `update_metrics`, `create_metric`, `update_metric` | Turn live metrics on (filled quietly from history) or off, add a metric, and change, archive or refill one |
 | `create_product`, `update_product`, `archive_product`, `map_product_name` | Add and change a brand's products and their aliases, archive or restore one, and map a held product name to a product or ignore it |
@@ -471,6 +492,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_offers`, `get_offer`, `create_offer`, `update_offer` | The pages the brand sends tracker clicks to, with payouts by country, daily caps on clicks or conversions and a fallback offer |
 | `list_tracker_conversion_log` | Every postback and pixel call of the last 30 days, with what it sent and why it was or wasn't recorded |
 | `get_ip_lookups`, `set_ip_lookups` | The brand's IP reputation lookups on its own IPQualityScore account: on or off, which clicks, the monthly cap |
+| `list_network_costs` | What ad networks (Zeropark) reported spending per campaign and day, and how it was shared out over the tracker's clicks |
 | `list_click_filters`, `add_click_filter`, `remove_click_filter` | The brand's click filter lists (addresses, ranges, user agent pieces) that flag matching redirect clicks as suspect |
 | `list_tracker_clicks` | The brand's redirect clicks, newest first, with where each came from and went, without likely bots unless asked |
 | `list_tracker_lander_clicks` | Clicks on the brand's landers' calls to action, with the offer or page each went on to |
@@ -731,6 +753,7 @@ Coverage tools take an explicit brand ID. Start with `get_coverage_schema` for f
 | `review_coverage_found` | Say pages (or a whole site) are about the brand, making them placements, or not, dismissing them; mark a site as spam; or check a page again in a week. |
 | `list_coverage_opportunities` | Places worth the team's effort, highest leverage (SEO and AI answers together) first, with the reason, the next action and the evidence. |
 | `update_coverage_opportunity`, `refresh_coverage_opportunities` | Pick, dismiss or win an opportunity and set its owner; suggest opportunities now. |
+| `list_coverage_sites`, `claim_coverage_site` | Who on the team is managing each site (its company's owner); claim a site, hand it to a teammate or release it, so two people never reach out to one site. Agents never take over a teammate's site. |
 | `confirm_coverage_candidate` | Create or reuse a placement from a discovery. |
 | `import_coverage_placements` | Preview and import up to 200 rows. |
 | `review_coverage_accuracy` | Queue a version-cited Knowledge accuracy review with the workspace model. |
@@ -810,3 +833,11 @@ Reads need `partners.read`; writes need `partners.manage`. Website proposals sta
 `create_partner_portal_session` creates a short-lived, single-use hosted sign-in handoff for a brand-authenticated customer. Call from a trusted backend with the stable customer ID; never expose a workspace token to a partner.
 
 Partnerships: `list_partner_proposals`, `create_partner_proposal`, and `update_partner_proposal` manage recipient-specific offers, invitations, publication verification and explicit milestone approval. These use workspace partner scopes, not a recipient's portal session.
+
+
+Sales reporting tools (available in read-only mode):
+
+| Tool | Purpose |
+| --- | --- |
+| `get_sales_reporting` | Compare Sales throughput, same-lead progress, original uploader performance, costs and mailbox capacity. |
+| `get_sales_reporting_leads` | Inspect all selected milestones for an hour, day or date range, 50 records per stage with original uploader identity. |

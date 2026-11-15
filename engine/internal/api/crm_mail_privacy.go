@@ -15,6 +15,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/llm"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/signals"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -156,6 +157,16 @@ func (s *Server) crmMailPrivacyJob(ctx context.Context, j jobs.Job) error {
 		if _, err := s.pool.Exec(ctx, `UPDATE `+table+` SET privacy=$3, privacy_checked_at=now() WHERE workspace_id=$1 AND id=$2 AND privacy='unchecked'`,
 			ws, u.id, verdict); err != nil {
 			return err
+		}
+		// Mail found to be about work is what the team shares, so it can be
+		// read for signals when the brand has that on.
+		if u.kind == "mail" && verdict == "work" {
+			var rec string
+			if err := s.pool.QueryRow(ctx, `SELECT record_id::text FROM crm_mail_messages WHERE workspace_id=$1 AND id=$2`, ws, u.id).Scan(&rec); err == nil {
+				if err := signals.EnqueueConversation(ctx, s.pool, ws, req.Brand, "email", rec); err != nil {
+					return err
+				}
+			}
 		}
 		metrics.MailPrivacyCheck(verdict)
 		counts[verdict]++

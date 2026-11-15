@@ -104,7 +104,7 @@ func (s *Syncer) storeOrganicConversions(ctx context.Context, ws, id, site, host
 		}
 		if ref.brand == nil {
 			var b *string
-			if err := s.Pool.QueryRow(ctx, `SELECT outflare_site_brand($1, $2)`, id, site).Scan(&b); err == nil {
+			if err := s.Pool.QueryRow(ctx, `SELECT outflare_site_brand_or_first($1, $2)`, id, site).Scan(&b); err == nil {
 				ref.brand = b
 			}
 		}

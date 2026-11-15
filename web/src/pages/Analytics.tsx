@@ -292,7 +292,7 @@ function Websites({ ws, days, sources, seo, selected, onPick, canManage }: { ws:
     // Every brand's sites, to count the ones still to place.
     api.GET("/v1/workspaces/{ws}/analytics/site-brands", { params: { path: { ws }, query: { brand: "all" } } }).then(({ data }) => {
       const out: Record<string, number> = {};
-      for (const b of data?.data ?? []) if (brands.length ? b.source === "none" : !b.host) out[b.integration_id] = (out[b.integration_id] ?? 0) + 1;
+      for (const b of data?.data ?? []) if (brands.length ? (b.source === "default" || b.source === "none") : !b.host) out[b.integration_id] = (out[b.integration_id] ?? 0) + 1;
       setUnmapped(out);
       setBrandSites(picked ? (data?.data ?? []).filter((b) => b.brand_id === picked.id).length : null);
     });

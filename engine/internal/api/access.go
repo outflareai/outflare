@@ -375,14 +375,15 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		ID            string `json:"id"`
 		Email         string `json:"email"`
 		Name          string `json:"name"`
+		AvatarURL     string `json:"avatar_url"`
 		EmailVerified bool   `json:"email_verified"`
 		HasPassword   bool   `json:"has_password"`
 		// Seconds until another confirmation email can be sent.
 		EmailResendAfter int `json:"email_resend_after"`
 	}
 	ctx := r.Context()
-	if err := s.pool.QueryRow(ctx, `SELECT id, email, name, email_verified_at IS NOT NULL, password_hash <> '' FROM users WHERE id = $1`, p.UserID).
-		Scan(&user.ID, &user.Email, &user.Name, &user.EmailVerified, &user.HasPassword); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT id, email, name, avatar_url, email_verified_at IS NOT NULL, password_hash <> '' FROM users WHERE id = $1`, p.UserID).
+		Scan(&user.ID, &user.Email, &user.Name, &user.AvatarURL, &user.EmailVerified, &user.HasPassword); err != nil {
 		s.internal(w, r, err)
 		return
 	}
@@ -531,6 +532,8 @@ type memberView struct {
 	UserID string `json:"user_id"`
 	Email  string `json:"email"`
 	Name   string `json:"name"`
+	// AvatarURL is their profile photo, or "" for none.
+	AvatarURL string `json:"avatar_url"`
 	// Role is the role they are on: a starting role's key or the id of
 	// one the workspace made, as GET /roles lists it.
 	Role      string    `json:"role"`
@@ -550,7 +553,7 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT u.id, u.email, u.name, m.role, m.created_at, m.brand_ids::text[], m.role_id::text FROM memberships m JOIN users u ON u.id = m.user_id
+		SELECT u.id, u.email, u.name, u.avatar_url, m.role, m.created_at, m.brand_ids::text[], m.role_id::text FROM memberships m JOIN users u ON u.id = m.user_id
 		WHERE m.workspace_id = $1 ORDER BY m.created_at`, a.WorkspaceID)
 	if err != nil {
 		s.internal(w, r, err)
@@ -559,7 +562,7 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (memberView, error) {
 		var v memberView
 		var roleID *string
-		err := row.Scan(&v.UserID, &v.Email, &v.Name, &v.Role, &v.CreatedAt, &v.BrandIDs, &roleID)
+		err := row.Scan(&v.UserID, &v.Email, &v.Name, &v.AvatarURL, &v.Role, &v.CreatedAt, &v.BrandIDs, &roleID)
 		held := roleOf(roles, v.Role, roleID)
 		v.Role, v.RoleName = held.ID, held.Name
 		return v, err
@@ -1123,7 +1126,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 				ON CONFLICT (provider, subject) DO NOTHING`, id.Subject, userID, id.Email); err != nil {
 				return err
 			}
-			if err := markVerified(ctx, tx, userID, id.Email); err != nil {
+			if err := googleSignedIn(ctx, tx, userID, id); err != nil {
 				return err
 			}
 		}

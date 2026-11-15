@@ -14,7 +14,7 @@ import (
 )
 
 // ID is the connector's id.
-const ID = "google_workspace"
+const ID = "google_workspace_mail"
 
 // Scopes are what the service account must be allowed in the Google
 // Admin console's domain-wide delegation.
@@ -39,7 +39,7 @@ type Connector struct{}
 
 func (Connector) Definition() c.Definition {
 	return c.Definition{
-		ID: ID, Name: "Google Workspace", Category: c.CategoryCRM,
+		ID: ID, Name: "Google Workspace email and calendar", Category: c.CategoryCRM,
 		Summary:     "Read your team's work email into the CRM with your Workspace's own service account, without each person signing in.",
 		Description: "Connect a service account key from your own Google Cloud project with domain-wide delegation for " + MailScope + ", and " + CalendarScope + " to read calendars and " + SendScope + " to send as a person. An admin then picks which people's mail the CRM reads (CRM email settings), under the same filters and privacy rules as Gmail people connect themselves. Nothing is sent unless a person sends it, and nothing is changed in Google.",
 		Website:     "https://workspace.google.com", DocsURL: "https://support.google.com/a/answer/162106",

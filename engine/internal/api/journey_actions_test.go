@@ -102,11 +102,13 @@ func TestJourneyActions(t *testing.T) {
 		{"id": "topic", "kind": "unsubscribe_topic", "topic": "news", "next": "alert"},
 		{"id": "alert", "kind": "alert", "title": "Went quiet", "text": "Check in", "next": "again"},
 		{"id": "again", "kind": "enter_journey", "journey_id": welcome, "next": "follow_up"},
-		{"id": "follow_up", "kind": "create_task", "title": "Follow up with customer", "due_after_seconds": 86400},
+		{"id": "follow_up", "kind": "create_task", "title": "Follow up with customer", "due_after_seconds": 86400, "next": "flag"},
+		{"id": "flag", "kind": "raise_signal", "signal_type": "churn_risk", "text": "Stalled: call them this week."},
 	}
 	// Bad action steps are refused.
 	owner.must(400, "POST", base+"/journeys", map[string]any{"name": "Bad", "steps": []map[string]any{{"id": "a", "kind": "add_tag"}}})
 	owner.must(400, "POST", base+"/journeys", map[string]any{"name": "Bad", "steps": []map[string]any{{"id": "a", "kind": "teleport"}}})
+	owner.must(400, "POST", base+"/journeys", map[string]any{"name": "Bad", "steps": []map[string]any{{"id": "a", "kind": "raise_signal", "signal_type": "Not A Key"}}})
 	owner.must(400, "POST", base+"/journeys", map[string]any{"name": "Bad", "steps": []map[string]any{
 		{"id": "a", "kind": "add_tag", "tag": "x", "on_error": "nowhere"}}})
 	owner.must(400, "POST", base+"/journeys", map[string]any{"name": "Bad", "exit_events": []string{"Not An Event"}})
@@ -175,6 +177,11 @@ func TestJourneyActions(t *testing.T) {
 	var taskCount int
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM crm_activities WHERE workspace_id=$1 AND record_id=$2 AND kind='task' AND assigned_to=$3 AND due_at>now()`, ws, ana, me).Scan(&taskCount); err != nil || taskCount != 1 {
 		t.Fatalf("automated follow-up: %d %v", taskCount, err)
+	}
+	// The last step put her in the Needs attention queue.
+	var flagged int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM signals WHERE workspace_id=$1 AND record_id=$2 AND type='churn_risk' AND source='journey' AND status='open' AND title='Churn risk'`, ws, ana).Scan(&flagged); err != nil || flagged != 1 {
+		t.Fatalf("the journey's signal: %d %v", flagged, err)
 	}
 	attrs := owner.must(200, "GET", base+"/records/"+ana, nil)["attributes"].(map[string]any)
 	if tags := attrs["tags"].([]any); !slices.Contains(tags, "churn-risk") || !slices.Contains(tags, "vip") {

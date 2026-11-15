@@ -200,9 +200,58 @@ journeys:
       - { id: nudge, kind: email, template: activation-nudge }   # one of the kit's own email drafts
 ```
 
+A rule or a journey about companies says `record_type: account` (people are the default), and a journey about deals `record_type: deal`; such a journey takes only the steps that act on a record, as in the API. A kit can also add kinds of signal for the brand's Needs attention queue, for its `raise_signal` steps or raised straight from events:
+
+```yaml
+signal_types:
+  - key: went_quiet              # not one every brand starts with (churn_risk, upsell, cross_sell, renewal, billing, other)
+    label: Went quiet
+    description: Nobody at the company has used the product for a while.
+    events: ["{{quiet_event}}"]  # optional: events that raise a signal of this type on their own
+    due_days: 3                  # days its owner has; 2 when left out
+
+journeys:
+  - key: flag_quiet_companies
+    name: Flag companies that went quiet
+    record_type: account
+    trigger: { kind: event, event: account.went_quiet }
+    steps:
+      - { id: flag, kind: raise_signal, signal_type: went_quiet, title: No usage for 14 days }
+```
+
+A kit can bring the live numbers its rules read: metrics (counted from events over a rolling window) and scores (0 to 100, from points per factor), as the API takes them:
+
+```yaml
+metrics:
+  - key: key_action_days_30d
+    name: Days with the key action, last 30 days
+    aggregate: days                  # count, sum, min, max, days, last or latest
+    events: ["{{usage_event}}"]
+    window_days: 30                  # 30 when left out
+  - key: key_action_days_prev_30d    # the same over the window before: gives key_action_days_30d_change
+    name: Days with the key action, the 30 days before
+    aggregate: days
+    events: ["{{usage_event}}"]
+    window_days: 30
+    offset_days: 30
+
+scores:
+  - key: health
+    label: Health score
+    record_type: account             # account (companies) or person
+    base: 50                         # 50, high_from 70 and low_below 40 when left out
+    factors:
+      - label: Did the key action on 8 days or more in the last 30
+        points: 25
+        conditions: [{ attribute: metrics.key_action_days_30d, op: gt, value: 7 }]
+```
+
+- A metric or score the brand already has under the same key stays as it is, so a team's own health score is never replaced. A kit adds at most 10 metrics and 8 scores, and a brand that already keeps 10 scores is a conflict.
+- A new metric is counted from stored events when the brand has metrics on, and starts counting when they are turned on otherwise. A new score scores every record of its type once, quietly.
+- A routing rule can't go in a kit: its pool names members of one workspace.
 - `{{name}}` is an input's value; `{{smart_list.key}}` and `{{journey.key}}` are the ids of the kit's own parts, for an audience rule's `list_id` or a journey step's `list_id` or `journey_id`. Placeholders go only in text settings; email drafts keep their own `{{person.x}}` variables.
 - A journey's email steps send the kit's own lifecycle email drafts, by handle, and its `transactional_email` steps the kit's own transactional drafts. An `assign_owner` step can't go in a kit: it names members of one workspace. Settings that name something of one workspace's own are always inputs, written `{{name}}`: a Slack step's `channel`, an ad audience step's `ad_account_id` and `audience_id`, and a review step's `review_campaign_id`. A kit leaves `connection_id` out (the workspace's own connection is used), and its webhook steps carry no `headers` or `auth`, which can hold keys.
-- Applying the kit adds each part as a draft: rules and journeys stay in draft until a person turns them on, and a smart list only fills. Each remembers its kit and key, so applying the kit again leaves it as it is; another part with the same name is a conflict.
+- Applying the kit adds each part as a draft: rules and journeys stay in draft until a person turns them on, and a smart list only fills. Each remembers its kit and key, so applying the kit again leaves it as it is; another part with the same name is a conflict. A signal type the brand already has stays as it is, and one the brand removed is a conflict until it is added back.
 - A playbook that names a flow kit takes every input the kit takes, under the same name, and passes them on when it is started with `apply_kit`.
 - The checks fill each kit in with its inputs' examples and run the API's own checks on every part, so a kit that would fail to apply fails CI instead.
 
@@ -210,7 +259,7 @@ journeys:
 
 You don't have to write a flow kit by hand. Build the journey in a workspace, then choose **Export as a kit** in its menu (or `POST /v1/workspaces/{ws}/kits/export`, MCP `export_kit`):
 
-- It takes along what the journey uses: the journeys it starts or stops, the static lists it adds people to, the emails it sends (as plain-text drafts), the rules that emit the event that starts it, and the smart lists those rules watch.
+- It takes along what the journey uses: the journeys it starts or stops, the static lists it adds people to, the emails it sends (as plain-text drafts), the rules that emit the event that starts it, the smart lists those rules watch, and the signal types of the brand's own that its `raise_signal` steps name.
 - Ids become `{{journey.key}}` and `{{smart_list.key}}`, and a sequence becomes an input. Tick the events another workspace may name differently, and each becomes an input with yours as its default.
 - The file is checked the way CI checks a kit, so it applies as written. A smart list built on other lists or news searches, or an `assign_owner` step, can't go in a kit, and the export says so. A webhook's URL, a Slack channel, an ad audience and a review campaign become inputs with no default, which the workspace applying the kit fills in; a webhook's headers and auth are left out, with a note, since they can hold keys. A `move_deal` step keeps its pipeline's keys, and a note reminds you the other workspace needs the same pipeline.
 

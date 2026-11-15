@@ -38,8 +38,21 @@ func TestLinkPitchesFromOpenerToLive(t *testing.T) {
 		t.Fatalf("sequences: %v", seqs)
 	}
 
+	// A teammate is managing the site (its company's owner): pitching it
+	// asks first, and goes ahead once the person confirms.
+	if _, err := e.pool.Exec(ctx, `UPDATE records SET attributes = attributes || jsonb_build_object('owner', gen_random_uuid()::text) WHERE id = $1`, p["record_id"]); err != nil {
+		t.Fatal(err)
+	}
+	status, body := owner.do("POST", base+"/link-prospects/"+pid+"/pitches", map[string]any{"sequence_id": seq})
+	if status != 409 || body["error"].(map[string]any)["code"] != "site_claimed" {
+		t.Fatalf("pitching a teammate's site: %d %v", status, body)
+	}
+
 	// Pitching: the AI writes an opener, and the pitch waits as a draft.
-	pitch := owner.must(201, "POST", base+"/link-prospects/"+pid+"/pitches", map[string]any{"sequence_id": seq})
+	pitch := owner.must(201, "POST", base+"/link-prospects/"+pid+"/pitches", map[string]any{"sequence_id": seq, "confirm_claimed": true})
+	if _, err := e.pool.Exec(ctx, `UPDATE records SET attributes = attributes - 'owner' WHERE id = $1`, p["record_id"]); err != nil {
+		t.Fatal(err)
+	}
 	if pitch["status"] != "writing" || pitch["contact_email"] != "editor@blog.example.org" {
 		t.Fatalf("pitch: %v", pitch)
 	}
@@ -83,9 +96,9 @@ func TestLinkPitchesFromOpenerToLive(t *testing.T) {
 	// A reply makes it replied; the AI reads it as a yes, so it is agreed
 	// and the reply is tagged.
 	var mb, inbound string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO mailboxes (workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port,
+	if err := e.pool.QueryRow(ctx, `INSERT INTO mailboxes (brand_id, workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port,
 		imap_username, credentials, status, daily_limit, source, has_login)
-		VALUES ($1, 'pitch@example.com', '', 'other', '', 0, '', '', 0, '', '\x', 'active', 10, 'emailbison', false) RETURNING id`, ws).Scan(&mb); err != nil {
+		VALUES (outflare_first_brand($1), $1, 'pitch@example.com', '', 'other', '', 0, '', '', 0, '', '\x', 'active', 10, 'emailbison', false) RETURNING id`, ws).Scan(&mb); err != nil {
 		t.Fatal(err)
 	}
 	err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {

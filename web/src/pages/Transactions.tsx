@@ -64,7 +64,7 @@ async function deleteTransaction(brand: string, t: Transaction): Promise<boolean
         {signed(t, t.amount_minor, t.currency)} from {t.source} is hidden from transactions, Query and the person's page.
         A billing sync won't add it back while it is deleted.
       </p>
-      <p>You can restore it from People → Recently deleted for 7 days; then it is gone for good.</p>
+      <p>You can restore it from Customer data → Recently deleted for 7 days; then it is gone for good.</p>
     </>,
     "Delete",
   );

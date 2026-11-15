@@ -433,7 +433,7 @@ func (s *Syncer) finish(ctx context.Context, ws, integrationID, window string, m
 // only active brand. Otherwise null, and the account shows under no brand
 // until someone assigns it.
 const connectionBrand = `COALESCE(i.brand_id, CASE WHEN cardinality(i.brand_ids) = 1 THEN i.brand_ids[1] END,
-	(SELECT min(b.id::text)::uuid FROM brands b WHERE b.workspace_id = i.workspace_id AND b.status = 'active' HAVING count(*) = 1))`
+	outflare_first_brand(i.workspace_id))`
 
 // saveAccounts records the accounts a sign-in sees. New accounts sync
 // until MaxAccounts are on; accounts it no longer sees are marked gone.

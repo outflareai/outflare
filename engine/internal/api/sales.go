@@ -23,6 +23,8 @@ func (s *Server) routesSales(mux *http.ServeMux) {
 		method, path, scope string
 		handler             http.HandlerFunc
 	}{
+		{"GET", "/reporting", auth.ScopeCustomersRead, s.getSalesReporting},
+		{"GET", "/reporting/leads", auth.ScopeCustomersRead, s.getSalesReporting},
 		{"POST", "/queue-seen", auth.ScopeCustomersManage, s.markSalesQueueSeen},
 		{"GET", "/me", auth.ScopeCustomersRead, s.getSalesMe}, {"PUT", "/me", auth.ScopeCustomersManage, s.putSalesMe},
 		{"GET", "/team", auth.ScopeCustomersRead, s.listSalesTeam}, {"PUT", "/team/{user}", auth.ScopeMembersManage, s.putSalesRole},
@@ -179,6 +181,7 @@ func (s *Server) putSalesRole(w http.ResponseWriter, r *http.Request) {
 }
 
 type salesLead struct {
+	Attribution   *salesAttribution    `json:"attribution,omitempty"`
 	ID            string               `json:"id"`
 	RecordID      string               `json:"record_id"`
 	Source        string               `json:"source"`
@@ -352,6 +355,7 @@ func (s *Server) listSalesLeads(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
+	s.enrichSalesLeads(r.Context(), a, list)
 	writeJSON(w, 200, map[string]any{"data": list, "next_cursor": next, "new_unseen": unseen, "unread": unread})
 }
 func salesHash(v string) string { d := sha256.Sum256([]byte(v)); return hex.EncodeToString(d[:]) }
@@ -402,7 +406,9 @@ func (s *Server) getSalesLead(w http.ResponseWriter, r *http.Request) {
 			ev = []json.RawMessage{}
 		}
 	}
-	writeJSON(w, 200, map[string]any{"lead": l, "messages": messages, "draft": draft, "events": ev})
+	visible := []salesLead{l}
+	s.enrichSalesLeads(r.Context(), a, visible)
+	writeJSON(w, 200, map[string]any{"lead": visible[0], "messages": messages, "draft": draft, "events": ev})
 }
 
 type salesAction struct {

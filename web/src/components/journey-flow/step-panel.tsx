@@ -13,7 +13,7 @@ import type { Go } from "@/pages/Lifecycle";
 import { track } from "@/lib/analytics";
 import { guardrailsText, type Guardrails } from "@/pages/EmailGuardrails";
 import { ExclusionPicker, type Exclusion } from "@/components/exclusion-picker";
-import { kindOf, leadsTo, linkOf, opText, outputLabel, outputs, setLink, stepLabel, type Problem, type SettingsSchema, type Step, type StepKind } from "./model";
+import { kindOf, leadsTo, linkOf, opText, outputLabel, outputs, setLink, stepLabel, type ActionPreset, type Problem, type SettingsSchema, type Step, type StepKind } from "./model";
 
 type EventDefinition = Schemas["EventDefinition"];
 
@@ -270,16 +270,173 @@ function ReviewCampaignPicker({ ws, value, disabled, onChange }: { ws: string; v
  return <Row label="Review campaign" hint={error || (!brand ? "Select this journey's brand first." : "Choose an active workflow campaign from Reviews. Frequency and email policies apply.")}><select aria-label="Review campaign" className={`${field} w-full`} value={value} disabled={disabled || !brand} onChange={e => onChange(e.target.value)}><option value="">Choose a campaign…</option>{value && !campaigns.some(c => c.id === value) && <option value={value}>Unavailable campaign ({value})</option>}{campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Row>;
 }
 
-// SchemaFields draws a simple form for a kind the builder has no form of
-// its own for, from its settings schema.
-function SchemaFields({ ws, schema, step, onChange, disabled }: { ws: string; schema: SettingsSchema; step: Step; onChange: (s: Step) => void; disabled: boolean }) {
+// AgentPicker offers the agents a step can run as: API tokens whose
+// changes go through approvals, of this brand or of every brand.
+function AgentPicker({ ws, label, hint, value, disabled, onChange }: { ws: string; label: string; hint?: string; value: string; disabled: boolean; onChange: (id: string | undefined) => void }) {
+  const { brand } = useBrand(ws);
+  const [list, setList] = useState<Option[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.GET("/v1/workspaces/{ws}/api-tokens", { params: { path: { ws } } }).then(({ data }) => {
+      if (!live) return;
+      setList((data?.data ?? []).filter((t) => t.action_gate && (!t.brand_id || t.brand_id === brand?.id)).map((t) => ({ id: t.id ?? "", name: t.name ?? "Agent" })));
+    });
+    return () => { live = false; };
+  }, [ws, brand?.id]);
+  return (
+    <Row label={label} hint={list && list.length === 0 ? "No agent asks for approval yet. Make one under Agents, then say what it may do on its own." : hint}>
+      <select aria-label={label} className={`${field} w-full`} value={value} disabled={disabled || list === null} onChange={(e) => onChange(e.target.value || undefined)}>
+        <option value="">{list === null ? "Loading…" : "Choose an agent…"}</option>
+        {value && list && !list.some((o) => o.id === value) && <option value={value}>Unavailable agent</option>}
+        {(list ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+    </Row>
+  );
+}
+
+// JsonField edits a JSON object as text, and says so when it isn't one.
+function JsonField({ label, hint, value, disabled, onChange }: { label: string; hint?: string; value: unknown; disabled: boolean; onChange: (v: Record<string, unknown> | undefined) => void }) {
+  const [text, setText] = useState(() => (value === undefined ? "" : JSON.stringify(value, null, 2)));
+  const [bad, setBad] = useState("");
+  return (
+    <label className="block text-sm">
+      <span className="mb-1.5 block text-[13px] font-medium">{label}</span>
+      <textarea className={`${field} w-full font-mono text-[12px]`} rows={6} spellCheck={false} disabled={disabled} value={text} placeholder={'{\n  "record_id": "{{person.id}}"\n}'}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (e.target.value.trim() === "") { setBad(""); onChange(undefined); return; }
+          try {
+            const parsed: unknown = JSON.parse(e.target.value);
+            if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) { setBad("The body is an object, in braces."); return; }
+            setBad("");
+            onChange(parsed as Record<string, unknown>);
+          } catch { setBad("Not valid JSON yet; the last valid version is kept."); }
+        }} />
+      <span className={`mt-1 block text-[12px] ${bad ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>{bad || hint}</span>
+    </label>
+  );
+}
+
+// presetOf says which ready-made call a step's method and path are, and
+// what it acts on, so the pick-list shows it again when the step reopens.
+function presetOf(presets: ActionPreset[], step: Step): { preset?: ActionPreset; target: string } {
+  const method = String(step.method ?? "POST");
+  const path = String(step.path ?? "");
+  for (const p of presets) {
+    if (p.method !== method) continue;
+    if (!p.pick) {
+      if (p.path === path) return { preset: p, target: "" };
+      continue;
+    }
+    const [before, after] = p.path.split(p.pick.token);
+    if (path.startsWith(before) && path.endsWith(after) && path.length >= before.length + after.length) {
+      const target = path.slice(before.length, path.length - after.length);
+      if (!target.includes("/")) return { preset: p, target: target === p.pick.token ? "" : target };
+    }
+  }
+  return { target: "" };
+}
+
+// What a preset can act on, by name: the brand's own journeys, rules,
+// smart lists or ad campaigns.
+function useTargets(ws: string, from?: string): Option[] | null {
+  const { brand } = useBrand(ws);
+  const [list, setList] = useState<Option[] | null>(null);
+  useEffect(() => {
+    if (!from || !brand?.id) return;
+    let live = true;
+    setList(null);
+    const params = { params: { path: { brand: brand.id } } };
+    const named = (rows: { id?: string; name?: string }[] | undefined) => { if (live) setList((rows ?? []).map((r) => ({ id: r.id ?? "", name: r.name || "Untitled" }))); };
+    if (from === "journey") api.GET("/v1/brands/{brand}/journeys", params).then(({ data }) => named(data?.data));
+    else if (from === "rule") api.GET("/v1/brands/{brand}/rules", params).then(({ data }) => named(data?.data));
+    else if (from === "smart_list") api.GET("/v1/brands/{brand}/smart-lists", params).then(({ data }) => named(data?.data));
+    else if (from === "ad_campaign") api.GET("/v1/brands/{brand}/ads/campaigns", params).then(({ data }) => named(data?.data));
+    else setList([]);
+    return () => { live = false; };
+  }, [from, brand?.id]);
+  return list;
+}
+
+// ActionPresets is the pick-list of an "Do an Outflare action" step: the
+// common calls by name, so nobody has to look a path up. Picking one
+// fills in the method, path and body below, which stay editable; "Something
+// else" leaves them as they are for a call of your own.
+function ActionPresets({ ws, presets, step, onChange, onFilled, disabled }: { ws: string; presets: ActionPreset[]; step: Step; onChange: (s: Step) => void; onFilled: () => void; disabled: boolean }) {
+  const { preset, target } = presetOf(presets, step);
+  const targets = useTargets(ws, preset?.pick?.from);
+  const groups = [...new Set(presets.map((p) => p.group))];
+  const fill = (p: ActionPreset, id: string) => p.pick ? p.path.replace(p.pick.token, id || p.pick.token) : p.path;
   return (
     <>
-      {Object.entries(schema.properties ?? {}).map(([key, p]) => {
-        const title = p.title ?? key;
+      <Row label="What to do" hint={preset ? preset.description : "Pick a common action, or write the call yourself below."}>
+        <select aria-label="What to do" className={`${field} w-full`} value={preset?.id ?? ""} disabled={disabled}
+          onChange={(e) => {
+            const p = presets.find((x) => x.id === e.target.value);
+            track("ui.journey_action_preset_picked", { preset: p?.id ?? "custom" });
+            if (!p) return;
+            onChange({ ...step, method: p.method as Step["method"], path: fill(p, ""), body: p.body });
+            onFilled();
+          }}>
+          <option value="">Something else (write the call)</option>
+          {groups.map((g) => (
+            <optgroup key={g} label={g}>
+              {presets.filter((p) => p.group === g).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      </Row>
+      {preset?.pick && (
+        <Row label={preset.pick.label} hint={targets && targets.length === 0 ? "This brand has none yet." : !target ? "Choose one, or the step can't be saved." : undefined}>
+          <select aria-label={preset.pick.label} className={`${field} w-full`} value={target} disabled={disabled || targets === null}
+            onChange={(e) => onChange({ ...step, path: fill(preset, e.target.value) })}>
+            <option value="">{targets === null ? "Loading…" : "Choose…"}</option>
+            {target && targets && !targets.some((o) => o.id === target) && <option value={target}>{target}</option>}
+            {(targets ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </Row>
+      )}
+    </>
+  );
+}
+
+// SchemaFields draws a simple form for a kind the builder has no form of
+// its own for, from its settings schema.
+// plainName reads a setting's key as words: due_after_seconds is "Due
+// after (seconds)".
+function plainName(key: string): string {
+  const unit = /_(seconds|minutes|hours|days)$/.exec(key)?.[1];
+  const words = (unit ? key.slice(0, -unit.length - 1) : key).replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1) + (unit ? ` (${unit})` : "");
+}
+
+function SchemaFields({ ws, schema, step, onChange, disabled }: { ws: string; schema: SettingsSchema; step: Step; onChange: (s: Step) => void; disabled: boolean }) {
+  const presets = schema["x-outflare-presets"];
+  // A preset fills in the body, so its editor starts again from it.
+  const [filled, setFilled] = useState(0);
+  // With a ready-made call picked, the call itself (method, path, and a
+  // body it doesn't use) stays out of the way until asked for.
+  const preset = presets ? presetOf(presets, step).preset : undefined;
+  const [raw, setRaw] = useState(false);
+  // What must be filled in comes first; the rest says it is optional.
+  const needed = (key: string) => (schema.required ?? []).includes(key);
+  const tucked = (key: string) => !!preset && !raw && (key === "method" || key === "path" || key === "save_as" || (key === "body" && !preset.body));
+  return (
+    <>
+      {presets && presets.length > 0 && <ActionPresets ws={ws} presets={presets} step={step} onChange={onChange} onFilled={() => setFilled((n) => n + 1)} disabled={disabled} />}
+      {preset && (
+        <button type="button" className="text-[12px] text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => setRaw((v) => !v)}>
+          {raw ? "Hide the API call" : "Show the API call it makes"}
+        </button>
+      )}
+      {Object.entries(schema.properties ?? {}).sort(([a], [b]) => Number(needed(b)) - Number(needed(a))).map(([key, p]) => {
+        if (tucked(key)) return null;
+        const title = (p.title ?? plainName(key)) + (needed(key) ? "" : " (optional)");
         const v = step[key];
         const type = Array.isArray(p.type) ? p.type.find((t) => t !== "null") : p.type;
         const picker = p["x-outflare-picker"];
+        if (picker === "agent") return <AgentPicker key={key} ws={ws} label="Run as" hint={p.description} value={String(v ?? "")} disabled={disabled} onChange={(id) => onChange({ ...step, [key]: id })} />;
+        if (picker === "json") return <JsonField key={`${key}:${filled}`} label="Body" hint={p.description} value={v} disabled={disabled} onChange={(body) => onChange({ ...step, [key]: body })} />;
         if (picker === "review_campaign") return <ReviewCampaignPicker key={key} ws={ws} value={String(v ?? "")} disabled={disabled} onChange={id => onChange({ ...step, [key]: id })} />;
         if (picker === "ad_account" || picker === "ad_audience") {
           return <AdPicker key={key} ws={ws} pick={picker} label={title} hint={p.description} step={step} disabled={disabled}
@@ -385,8 +542,9 @@ export function StepPanel({ ws, step: s, steps, kinds, templates, catalog, event
   // A link can go to any step that doesn't lead back here.
   const targets = steps.filter((x) => x.id !== s.id && !leadsTo(kinds, steps, x.id, s.id));
   return (
-    <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto shadow-xl sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      {/* A full page of its own, never a panel over the flow. */}
+      <SheetContent className="sm:max-w-2xl">
         <SheetHeader>
           <SheetTitle>{stepLabel(s, kinds, templates)}</SheetTitle>
           <SheetDescription>{k?.description ?? s.kind}</SheetDescription>
@@ -487,8 +645,9 @@ export function TriggerPanel({ ws, value, onChange, editable, catalog, rule, onC
   const disabled = !editable;
   const events = catalog.events.map((e) => e.name);
   return (
-    <Sheet open modal={false} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto shadow-xl sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      {/* A full page of its own, never a panel over the flow. */}
+      <SheetContent className="sm:max-w-2xl">
         <SheetHeader>
           <SheetTitle>Trigger</SheetTitle>
           <SheetDescription>What starts a run, who can enter, and when they leave early.</SheetDescription>

@@ -2,6 +2,8 @@
 
 The action layer decides what an agent may change in your workspace on its own, holds the rest for a person, and keeps every change it made. It works the same for any agent: your own AI app over MCP, a script with an API token, or an agent running in Outflare Cloud. [ADR 13](adr/0013-action-layer.md) explains why.
 
+A journey can act through an agent too: its [Outflare action](lifecycle-email.md#outflare-actions) step makes one API call as the agent you pick, so the same grants decide whether it runs, waits for you or is refused.
+
 ## Turning it on for a token
 
 Tick **It's an agent: its changes follow your rules** when you create a token under API tokens, or later when editing it, or with the API:

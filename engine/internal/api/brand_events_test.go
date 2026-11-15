@@ -213,6 +213,29 @@ func TestBrandEvents(t *testing.T) {
 		t.Fatalf("codes: %v", codes)
 	}
 
+	// Events stored any other way count by source too, and list with the
+	// rest, so a brand that never uses the events API still sees its events.
+	owner.must(200, "POST", base+"/customer-events", map[string]any{"type": "track", "userId": "u9", "event": "Signed Up", "messageId": "w1", "source": "website_form"})
+	bySource := map[string]float64{}
+	for _, x := range owner.must(200, "GET", events+"/summary", nil)["sources"].([]any) {
+		x := x.(map[string]any)
+		if x["last_24h"] != x["last_7d"] {
+			t.Fatalf("source counts: %v", x)
+		}
+		bySource[x["source"].(string)] = x["last_7d"].(float64)
+	}
+	if bySource["website_form"] != 1 || bySource["segment"] == 0 {
+		t.Fatalf("sources: %v", bySource)
+	}
+	if l := owner.must(200, "GET", "/v1/brands/"+acme+"/customer-events?source=website_form", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["name"] != "signed_up" {
+		t.Fatalf("by source: %v", l)
+	}
+	for _, x := range owner.must(200, "GET", "/v1/brands/"+rp+"/events/summary", nil)["sources"].([]any) {
+		if x.(map[string]any)["source"] == "website_form" {
+			t.Fatalf("another brand's events counted: %v", x)
+		}
+	}
+
 	// The sweep deletes only rows past their retention.
 	if _, err := e.pool.Exec(ctx, `UPDATE event_inbox SET purge_after = now() - interval '1 minute' WHERE id = $1`, id(2)); err != nil {
 		t.Fatal(err)

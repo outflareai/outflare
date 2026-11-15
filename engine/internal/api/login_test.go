@@ -105,7 +105,8 @@ func TestGoogleSignIn(t *testing.T) {
 	other := googleSignIn(t, &client{t: t, h: e.h}, "/", "login:g-bob:bob@example.com").Query().Get("identity")
 	stranger.must(400, "POST", "/v1/invites/accept", map[string]string{"token": inv["token"].(string), "identity": other})
 	stranger.must(200, "POST", "/v1/invites/accept", map[string]string{"token": inv["token"].(string), "identity": back.Query().Get("identity")})
-	if me := stranger.must(200, "GET", "/v1/me", nil); me["user"].(map[string]any)["name"] != "Signed In" {
+	// Her Google photo is her profile photo, shown wherever she's assigned something.
+	if me := stranger.must(200, "GET", "/v1/me", nil); me["user"].(map[string]any)["name"] != "Signed In" || me["user"].(map[string]any)["avatar_url"] != "https://lh3.googleusercontent.com/a/test-photo" {
 		t.Fatalf("ann: %v", me)
 	}
 	// Ann has no password, so password sign-in never matches; Google does.

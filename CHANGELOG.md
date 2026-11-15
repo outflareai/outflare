@@ -6,6 +6,79 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.97.0] - 2026-11-15
+
+### Added
+
+- Account page: a person's or company's page now shows where they stand at a glance: what needs attention, stage, owner, last contact, revenue and its trend, an account plan, products and usage, people, deals, support conversations and tasks. Deals get a Lost reason, and the timeline shows support conversations, tasks and notes.
+- Agreements and renewals: a setup kit adds an Agreement record (subscription, contract, spend commitment or retainer) with its value, term and renewal date. A company's page lists its agreements and flags a renewal 60 days ahead.
+- New predictions to start from: churn risk, expansion potential and each deal's win likelihood, which the forecast uses in place of fixed stage weights. Each is checked against what really closed or churned.
+- Company groups and share of wallet: companies have a Parent company field, and a parent's page shows the whole group with each company's revenue, health and open signals. The new Share of wallet setup kit records what a company spends a year on what you sell, so its page shows how much of that is yours and how much room is left.
+- Journeys for companies: a journey can now be about each company instead of each person. It starts when the company, or anyone there, does an event, runs once per company, and its steps act on the company: tasks, fields, tags, owners, alerts, Slack, webhooks and the new "Raise a signal" step, which also works in journeys about people.
+- Signals from conversations: a brand can let its own AI read what customers say in support, company Telegram chats, shared email and call transcripts, and raise a signal with the customer's own words. It is off until you switch it on, runs on your own AI account, and never reads private email. A new Credit view shows whose signals turned into revenue.
+- New playbook: Hand every won deal over to the people who look after it. A won deal lands in Needs attention as a new customer to onboard, with a kick-off task for the owner, and a closed support conversation that comes back is flagged to the owner too.
+- New playbook "See customer health, churn risk and who is ready to grow": sets up the health sub-scores, sentiment, both predictions and the rules and journeys that flag them, in one go.
+- Journeys can be about deals. Pick "Each deal" when you make one and it starts on the deal's own events, such as a stage change, reads the deal's fields, ends when that deal is won or lost, and acts on the deal: tasks, fields, owners, alerts and signals.
+- Journeys can now do anything in Outflare: the new "Do an Outflare action" step calls any part of the product in the journey's brand, such as adding a note, pausing something or starting work in another module. It runs as one of your agents, so what that agent may do on its own runs straight away and anything else waits for your approval in Agents.
+- New playbook: Score account health and catch usage drops. Name your usage event and it adds a health score for companies, the metrics behind it, and a rule and journey that flag a company whose usage falls. Setup kits can now bring metrics and scores.
+- Build your own playbooks. New playbook on the Playbooks page groups the rules, journeys, smart lists and signal types a brand already has under one name, and gives them one page that shows what is on, what each part has done and how its signals ended. Removing a playbook never removes its parts.
+- Playbooks can show whether they work: hold back a small share of people when you set one up, and its page compares those who went through its journeys with those held back, with conversions, revenue and lift.
+- Assign a site on Presence: pick who on the team is managing a site you want a link or placement from (a dropdown of teammates with their photos), so nobody else reaches out. Opportunities show each site's assignee and filter to yours or unassigned ones, the CRM's relationship check names the teammate, and pitching a teammate's site asks you to confirm first.
+- Rules for companies: an event or inactivity rule can now be about a company, where anything anyone there does counts ("no one at the company has used the product for 14 days"). Deals, support conversations and CRM tasks also arrive as events (deal.won, support.conversation_reopened, task.completed), so rules, journeys and metrics can act on them.
+- Renewal deals open by themselves: a journey step opens one deal per renewal coming up, with its value and date, and the forecast counts it once, as the renewal. The renewals playbook now does this 60 days ahead.
+- Forecast on the Revenue page: what you can expect to book this quarter against your target. It adds the deals already won, every renewal due weighted by the company's health, and every open deal weighted by its stage. Each line shows what it adds, and you can change the target and the weights.
+- Revenue: a new page under Measure shows each brand's monthly recurring revenue and how it moved, net and gross retention, what was collected, the renewals coming up with each account's health, and the revenue sitting with customers whose health is low. It fills in from your billing connection, renewal dates and health score.
+- Routing: say which teammates get which companies and people. Each brand keeps a short list of rules tried from the top, and each new person or company with no owner goes to the teammate in the matching pool who owns the fewest. Anyone who already has an owner keeps them.
+- Sales reporting preview sits beside Sales workspace: explore seven milestones, hourly or daily volume, each tool’s cost per lead, Sales mailbox capacity and closed deals. All figures are clearly marked as example data until reporting is connected.
+- Sales team and commissions, under Revenue: quotas per person and quarter rolled up by manager, and commission plans made of rules (what it pays on, inbound or outbound, new or returning customers, days since the first payment, rates by quota, caps and refunds), with every line showing the rule that paid it.
+- Scores: keep one number from 0 to 100 on every company or person, such as a health score or a lead score. You choose what adds points and what takes them, and each record shows why it scores what it does. Rules, journeys and smart lists read the score like any field.
+- Conversation reading now also says how a customer sounds (positive, mixed or negative) with their own words, on your own AI. Scores, rules and lists read it as sentiment; unknown never counts as unhappy.
+- Signals and a Needs attention queue: rules, people and agents can now flag a person or company for someone to act on (churn risk, an upsell, a renewal coming up). Each signal has an owner, a due date and an outcome, a record holds at most five open ones, and one nobody picks up goes to the owners and admins.
+- Connect Zeropark with your own API token to bring in each campaign's daily spend, visits, conversions and payout, beside your other ad platforms.
+- Tracker cost from Zeropark is now exact: each day, Zeropark's spend per campaign and target is shared out over the matching clicks by their own visit cost, so every report shows cost and ROI that add up to what Zeropark charged.
+
+### Changed
+
+- A new playbook, "Flag renewals and quiet accounts for their owners", sets up Needs attention in a few clicks: it adds a rule for companies that stop using the product and one for renewals within 60 days, and journeys that raise a signal and a task for the account's owner. Setup kits can now carry signal types and journeys about companies, and exporting a journey as a kit takes them along.
+- Every analytics site now belongs to a brand: "Shared by all brands" is gone. A site takes the brand someone picked for it, else its connection's brand, else the workspace's first brand until someone picks one; a site's domain still only suggests a brand. Sites that were shared or had no brand moved the same way, with their stored history.
+- Needs attention has an Assign menu to give a signal to a teammate, a company or person with no owner has a Route button that applies your routing rules, and the people and company lists show their scores as columns.
+- Giving a lead, company or deal to someone is one step: an Owner control on every record's page, and "Assign to" for the rows you tick in the CRM list. Settings, Team gains an org chart.
+- Every mailbox, sending domain and ad account now belongs to a brand. New ones join their connection's or domain's brand, or else the workspace's first brand. Ones that had no brand moved to the first brand, and the "Not in a brand" card is gone. Move any of them to another brand on the Brands page.
+- Two people can share a deal: set a Second owner and their share, and the deal is split between them for quotas, the forecast and commission. A month's commission downloads as a CSV file, one row for every line, for payroll.
+- CRM email settings can now exclude people by email address, including people who don't have an Outflare account yet. Whoever joins with one of those addresses is never read.
+- The CRM menu links straight to People, Companies and Deals. The Sales workspace page is now Sales conversations, and the page of events, products, metrics, scores and imports is Customer data.
+- A brand's Events page now shows every event it received, from your website, your product's servers and any connector, newest first, with counts by source and filters by source and name. Before, it showed only events sent to the events API, so a brand tracking only its website saw an empty page. The events API's receipts, rejections and replays are on the page's second view.
+- Forms and details that used to slide in from the right now open as a full page with a Back button, across the app: new tokens, lists, flags, link orders, imports and more. The step editor in the journey builder stays beside the flow.
+- Google Workspace connections that allow profile changes can now set a user's recovery email and forward their new mail to another address, keeping a copy in the inbox.
+- The "Do an Outflare action" journey step has a pick-list of common actions (add a note, route to an owner, pause an ad campaign, pause a journey or rule and more), so you choose by name instead of typing an API path.
+- Metrics can keep the latest value of a number a product reports, such as a prepaid balance, a plan limit or a seat count, so rules and the account page can use it.
+- Tracker → Traffic sources shows where each source's cost comes from, and a Zeropark source shows how each day's spend was shared out over its clicks.
+- One list of people and one of companies. CRM → People and Companies now also show scores, records held for review and archived ones (with Restore), and the bulk edit you can undo. Customer data keeps Events, Duplicates, Products, Transactions, Metrics, Scores, Routing, Imports and Recently deleted, and no longer has a second list.
+- Each playbook now shows what it set up in your brand and what it has done: every rule, journey and list with whether it is on, and the signals it raised with how many were won. You can also set a playbook up straight from its page, without starting an agent run.
+- Taking records out of a brand (`remove_from_brand`) is refused, because brands share nothing; move a record to another brand with `add_to_brand` instead. Ad campaigns again follow their ad account's brand when the account moves.
+- The Revenue page splits what was collected by product, and the forecast shows who it sits with: what each teammate has won and what is expected from the deals and renewals they own.
+- Routing rules can give records to a team, so a new teammate starts getting leads by joining the team, and can keep to a territory: a list of countries, such as Germany, Austria and Switzerland.
+- Rules can react to dates and trends: compare a date field with today, +60d or -14d ("renews within 60 days", "not contacted for 30 days"), checked every day, and test how far a metric moved against the period before ("usage down more than 30%").
+- Compare Sales milestones as lines or bars and open an hour or day to inspect every selected stage. Connect your Lead Portal for pipeline progress, costs per verified lead and mailbox capacity, alongside Outflare SDR pickup and confirmed customers.
+- Open Reporting from Sales to follow the pipeline and confirmed customers. Explore the clearly labelled UI demo even before the leads source is connected. Live reporting keeps Outflare results available, marks missing source data clearly and links customers to their Sales conversations.
+- Sales Results compares replies, SDR pickups, confirmed customers and their recorded expected monthly revenue with the previous equal period, without repeating the flow chart. Tools & spend links to each paying provider so you can manage a plan or add funds.
+- Sales queues, lead details and reporting lists show the original uploading agent or named API key. Results compares each uploader’s pipeline progress and discovery submission quality, keeping unknown origins and revoked identities visible without exposing credentials.
+- Scores now say what kind of number they are (measured, AI-read or predicted), keep their history, and can be made of other scores: a health score with usage, billing and engagement visible under it. Deals can be scored too.
+- Tidier screens: a menu entry with one page opens it in one click, routing rules and the People tabs fit on a phone, routing conditions read in plain words, and the Outflare action step shows plain labels.
+- The sidebar is arranged around how the work flows: Needs attention is first under Customers, a new Automations group holds Playbooks and Rules and journeys, Lifecycle is now called Email, and the lead finders sit under Outreach. Every link works as before.
+- The Sales team page shows how each person handles their signals: how many they closed this quarter, how many were won, how long it usually takes, and how many are waiting or late.
+- Picking a teammate looks the same everywhere: the Owner control on a record, "Assign to…" in CRM lists and Coverage now share one searchable list with photos. People in the team directory who have no sign-in can own records too, and their deals count towards their quota and commission.
+
+### Fixed
+
+- The Google Workspace tenant checks connection is back: the new Google Workspace email and calendar connection had taken its place in the list of connectors. Both are now listed and work side by side.
+- "When this fires, do…" on a rule no longer fails with an error: the step you pick opens in the new journey, ready to fill in. Choosing a step is a bigger screen with groups down the side and a search box. On the automation map, many sources that send the same events fold into one card.
+- Notifications now show at the top right, under the header, so they never cover the agent chat's message box. Each one has a close button, can be swiped away, disappears on its own after a few seconds, and the same message never stacks twice. At most three show at once.
+
+### Security
+
+- Security improvements to the web app.
+
 ## [0.96.0] - 2026-11-14
 
 ### Added

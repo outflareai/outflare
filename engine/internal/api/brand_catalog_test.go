@@ -140,7 +140,7 @@ func TestBrandCatalog(t *testing.T) {
 				deal = x.(map[string]any)
 			}
 		}
-		if deal == nil || len(deal["fields"].([]any)) != 5 {
+		if deal == nil || len(deal["fields"].([]any)) != 12 {
 			t.Fatalf("brand %s has no default Deal type: %v", b, deal)
 		}
 		sets := map[string]bool{}

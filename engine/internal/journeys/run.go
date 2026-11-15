@@ -53,6 +53,12 @@ type Service struct {
 	// Deals moves deals for move_deal steps (the API server). Without it
 	// those steps fail.
 	Deals DealMover
+	// Agents makes outflare_action steps' API calls as an agent (the API
+	// server). Without it those steps fail.
+	Agents AgentCaller
+	// Router gives a record to the member the brand's routing rules pick,
+	// for assign_owner steps with routing on. Without it those steps fail.
+	Router RecordRouter
 }
 
 // Register adds the job handlers to q.
@@ -65,10 +71,12 @@ func (s *Service) Register(q *jobs.Queue) {
 // journey is a journey as runs read it.
 type journey struct {
 	id, ws, status, triggerKind, entry string
-	version                            int
-	brandID                            *string
-	filter                             []Condition
-	steps                              []Step
+	// The kind of record it is about: person or account.
+	recordType string
+	version    int
+	brandID    *string
+	filter     []Condition
+	steps      []Step
 	// Exit criteria: these events end a run at once; these conditions
 	// (any of them) end it before its next step.
 	exitEvents     []string
@@ -87,12 +95,12 @@ func loadJourney(ctx context.Context, q jobs.Querier, ws, id string, lock bool) 
 	var j journey
 	var filter, steps, exitConds, exclude []byte
 	sql := `SELECT id, workspace_id, status, trigger_kind, entry, version, brand_id, trigger_filter, steps, exit_events, exit_conditions, exclude,
-		entry_limit, entry_limit_per, reentry_after_seconds FROM journeys WHERE workspace_id = $1 AND id = $2`
+		entry_limit, entry_limit_per, reentry_after_seconds, record_type FROM journeys WHERE workspace_id = $1 AND id = $2`
 	if lock {
 		sql += ` FOR SHARE`
 	}
 	err := q.QueryRow(ctx, sql, ws, id).Scan(&j.id, &j.ws, &j.status, &j.triggerKind, &j.entry, &j.version, &j.brandID, &filter, &steps, &j.exitEvents, &exitConds, &exclude,
-		&j.entryLimit, &j.entryLimitPer, &j.reentryAfter)
+		&j.entryLimit, &j.entryLimitPer, &j.reentryAfter, &j.recordType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -162,8 +170,9 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 		var name string
 		var brand *string
 		var props []byte
-		err := tx.QueryRow(ctx, `SELECT record_id, name, properties, brand_id::text FROM customer_events WHERE workspace_id = $1 AND id = $2`, ws, in.EventID).
-			Scan(&rec, &name, &props, &brand)
+		var account *string
+		err := tx.QueryRow(ctx, `SELECT record_id, name, properties, brand_id::text, account_id::text FROM customer_events WHERE workspace_id = $1 AND id = $2`, ws, in.EventID).
+			Scan(&rec, &name, &props, &brand, &account)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && rec == nil) {
 			return nil
 		}
@@ -178,13 +187,52 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 			ws, name, brand).Scan(&approved); err != nil || !approved {
 			return err
 		}
+		// What a person does counts for their company too, so journeys about
+		// companies hear it: about is the event's record and, for a
+		// person's event, their company.
+		about := map[string]string{}
+		var kind string
+		if err := tx.QueryRow(ctx, `SELECT record_type FROM records WHERE workspace_id = $1 AND id = $2`, ws, *rec).Scan(&kind); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		subjects := []string{*rec}
+		if kind != "" {
+			about[kind] = *rec
+		}
+		if kind == TypePerson {
+			company, err := customers.CompanyOf(ctx, tx, ws, *rec, account)
+			if err != nil {
+				return err
+			}
+			if company != "" {
+				about[TypeAccount] = company
+				subjects = append(subjects, company)
+			}
+		}
+		// A deal's events (deal.created, deal.won and the rest) sit on its
+		// person or company and name the deal, so journeys about deals
+		// hear them too.
+		var event map[string]any
+		_ = json.Unmarshal(props, &event)
+		if id, _ := event["deal_id"].(string); id != "" && strings.HasPrefix(name, "deal.") && kind != TypeDeal {
+			var deal string
+			err := tx.QueryRow(ctx, `SELECT id::text FROM records WHERE workspace_id = $1 AND id::text = $2 AND record_type = 'deal'
+				AND merged_into IS NULL AND archived_at IS NULL`, ws, id).Scan(&deal)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if deal != "" {
+				about[TypeDeal] = deal
+				subjects = append(subjects, deal)
+			}
+		}
 		// Goals first: an event that ends a run never also restarts it.
 		// Exit events too: they end a run at once, even mid-wait.
 		rows, err := tx.Query(ctx, `UPDATE journey_runs r SET status = 'exited',
 				exit_reason = CASE WHEN j.goal_event = $2 THEN 'goal' ELSE 'exit_event' END, finished_at = now(), next_at = NULL, updated_at = now()
 			FROM journeys j WHERE j.id = r.journey_id AND j.workspace_id = $1 AND j.status IN ('active', 'paused')
 			  AND (j.goal_event = $2 OR $2 = ANY (j.exit_events))
-			  AND r.record_id = $3 AND r.status = 'active' RETURNING r.journey_id::text, r.exit_reason`, ws, name, *rec)
+			  AND r.record_id = ANY ($3::uuid[]) AND r.status = 'active' RETURNING r.journey_id::text, r.exit_reason`, ws, name, subjects)
 		if err != nil {
 			return err
 		}
@@ -201,11 +249,9 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 				return err
 			}
 		}
-		var event map[string]any
-		_ = json.Unmarshal(props, &event)
 		// Runs waiting for this event on a wait_until step go on.
-		rows, err = tx.Query(ctx, `SELECT id::text FROM journey_runs WHERE workspace_id = $1 AND record_id = $2 AND status = 'active'
-			AND wait_events @> ARRAY[$3]::text[]`, ws, *rec, name)
+		rows, err = tx.Query(ctx, `SELECT id::text FROM journey_runs WHERE workspace_id = $1 AND record_id = ANY ($2::uuid[]) AND status = 'active'
+			AND wait_events @> ARRAY[$3]::text[]`, ws, subjects, name)
 		if err != nil {
 			return err
 		}
@@ -218,16 +264,25 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 				return err
 			}
 		}
-		rows, err = tx.Query(ctx, `SELECT id::text FROM journeys WHERE workspace_id = $1 AND status = 'active' AND trigger_kind = 'event' AND trigger_event = $2`, ws, name)
+		rows, err = tx.Query(ctx, `SELECT id::text, record_type FROM journeys WHERE workspace_id = $1 AND status = 'active' AND trigger_kind = 'event' AND trigger_event = $2`, ws, name)
 		if err != nil {
 			return err
 		}
-		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		starts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) ([2]string, error) {
+			var j [2]string
+			return j, row.Scan(&j[0], &j[1])
+		})
 		if err != nil {
 			return err
 		}
-		for _, jid := range ids {
-			if _, _, err := Enroll(ctx, tx, ws, jid, *rec, &in.EventID, event, false); err != nil {
+		for _, j := range starts {
+			// A journey starts for the record of its own kind: the person,
+			// or the person's company. An event with neither starts nothing.
+			subject := about[j[1]]
+			if subject == "" {
+				continue
+			}
+			if _, _, err := Enroll(ctx, tx, ws, j[0], subject, &in.EventID, event, false); err != nil {
 				return err
 			}
 		}
@@ -288,7 +343,11 @@ func Enroll(ctx context.Context, tx pgx.Tx, ws, journeyID, recordID string, even
 	return id, "", record(ctx, tx, ws, "journey_run.entered", journeyID, map[string]any{"via": "event"})
 }
 
-const notPerson = "not a person on a customer record"
+const (
+	notPerson  = "not a person on a customer record"
+	notCompany = "not a company on a customer record"
+	notDeal    = "not a deal"
+)
 
 // refusal is why a person can't start a run of j now, or "": they are not
 // a person in its brand, are excluded, already meet its exit criteria,
@@ -296,9 +355,15 @@ const notPerson = "not a person on a customer record"
 func refusal(ctx context.Context, tx pgx.Tx, ws string, j *journey, recordID string, context map[string]any, manual bool) (string, error) {
 	var brand *string
 	var attrs []byte
-	err := tx.QueryRow(ctx, `SELECT brand_id, attributes FROM records WHERE workspace_id = $1 AND id = $2 AND record_type = 'person' AND merged_into IS NULL AND archived_at IS NULL`,
-		ws, recordID).Scan(&brand, &attrs)
+	err := tx.QueryRow(ctx, `SELECT brand_id, attributes FROM records WHERE workspace_id = $1 AND id = $2 AND record_type = $3 AND merged_into IS NULL AND archived_at IS NULL`,
+		ws, recordID, j.recordType).Scan(&brand, &attrs)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if j.recordType == TypeAccount {
+			return notCompany, nil
+		}
+		if j.recordType == TypeDeal {
+			return notDeal, nil
+		}
 		return notPerson, nil
 	}
 	if err != nil {

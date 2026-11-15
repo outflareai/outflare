@@ -43,10 +43,13 @@ type trackerClickView struct {
 	Fields        map[string]string `json:"fields"`
 	SourceClickID string            `json:"source_click_id"`
 	Cost          string            `json:"cost"`
-	LikelyBot     bool              `json:"likely_bot"`
-	FraudReasons  []string          `json:"fraud_reasons"`
-	LandedAt      *time.Time        `json:"landed_at"`
-	ClickedAt     time.Time         `json:"clicked_at"`
+	// NetworkCost is the click's share of what the network reported
+	// spending (Z2), once reconciled; the reports use it before Cost.
+	NetworkCost  *string    `json:"network_cost"`
+	LikelyBot    bool       `json:"likely_bot"`
+	FraudReasons []string   `json:"fraud_reasons"`
+	LandedAt     *time.Time `json:"landed_at"`
+	ClickedAt    time.Time  `json:"clicked_at"`
 }
 
 // clickLogFilter reads the filters both logs share. ok is false when it
@@ -110,7 +113,7 @@ func (s *Server) listTrackerClicks(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.pool.Query(r.Context(), `SELECT k.click_key, l.campaign_id::text, k.link_id::text, k.path_id::text, k.destination_id::text,
 			k.lander_id::text, k.offer_id::text, k.direct, k.country, k.region, k.city, k.isp, k.asn, k.device, k.os, k.browser, k.language,
-			k.fields, k.source_click_id, k.cost_micros, k.likely_bot, k.fraud_reasons, k.landed_at, k.clicked_at
+			k.fields, k.source_click_id, k.cost_micros, k.network_cost_micros, k.likely_bot, k.fraud_reasons, k.landed_at, k.clicked_at
 		FROM tracking_link_clicks k JOIN tracking_links l ON l.id = k.link_id AND l.workspace_id = k.workspace_id
 		WHERE k.workspace_id = $1 AND k.brand_id = $2
 		  AND ($3 = '' OR l.campaign_id = $3::uuid) AND ($4 = '' OR k.offer_id = $4::uuid) AND ($5 = '' OR k.lander_id = $5::uuid)
@@ -126,9 +129,14 @@ func (s *Server) listTrackerClicks(w http.ResponseWriter, r *http.Request) {
 		var v trackerClickView
 		var fields []byte
 		var cost int64
+		var network *int64
 		err := row.Scan(&v.ClickKey, &v.CampaignID, &v.LinkID, &v.PathID, &v.DestinationID, &v.LanderID, &v.OfferID, &v.Direct,
 			&v.Country, &v.Region, &v.City, &v.ISP, &v.ASN, &v.Device, &v.OS, &v.Browser, &v.Language,
-			&fields, &v.SourceClickID, &cost, &v.LikelyBot, &v.FraudReasons, &v.LandedAt, &v.ClickedAt)
+			&fields, &v.SourceClickID, &cost, &network, &v.LikelyBot, &v.FraudReasons, &v.LandedAt, &v.ClickedAt)
+		if network != nil {
+			n := formatMicros(*network)
+			v.NetworkCost = &n
+		}
 		if err == nil {
 			err = json.Unmarshal(fields, &v.Fields)
 		}

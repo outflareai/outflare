@@ -87,9 +87,9 @@ func TestStoryPitches(t *testing.T) {
 
 	// The journalist replies; the AI reads it as wanting the data.
 	var mb, inbound string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO mailboxes (workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port,
+	if err := e.pool.QueryRow(ctx, `INSERT INTO mailboxes (brand_id, workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port,
 		imap_username, credentials, status, daily_limit, source, has_login)
-		VALUES ($1, 'pr@example.com', '', 'other', '', 0, '', '', 0, '', '\x', 'active', 10, 'emailbison', false) RETURNING id`, ws).Scan(&mb); err != nil {
+		VALUES (outflare_first_brand($1), $1, 'pr@example.com', '', 'other', '', 0, '', '', 0, '', '\x', 'active', 10, 'emailbison', false) RETURNING id`, ws).Scan(&mb); err != nil {
 		t.Fatal(err)
 	}
 	if err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {

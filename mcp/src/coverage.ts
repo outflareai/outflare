@@ -287,7 +287,7 @@ export function registerCoverageTools(
     {
       title: "List Presence opportunities by leverage",
       description:
-        "Places worth the team's effort, highest leverage first (0 to 100: SEO and AI answers together, plus how many competitors are there). Each says why (competitor_gap, ai_cited, unlinked_mention, link_removed), what to do next (pitch, request_link, reclaim_link), and the evidence and factors behind its score. group domain gives one row per site; exclude_competitors hides competitors' own sites. Use it to pick the next outreach; drafting and sending still go through the normal outreach tools and approvals.",
+        "Places worth the team's effort, highest leverage first (0 to 100: SEO and AI answers together, plus how many competitors are there). Each says why (competitor_gap, ai_cited, unlinked_mention, link_removed), what to do next (pitch, request_link, reclaim_link), and the evidence and factors behind its score. group domain gives one row per site; exclude_competitors hides competitors' own sites. site_owner_id is the teammate managing the site; owner none lists the unclaimed ones. Leave a site a teammate manages to them. Use it to pick the next outreach; drafting and sending still go through the normal outreach tools and approvals.",
       inputSchema: {
         brand,
         state: z.enum(["open", "picked", "dismissed", "won", "all"]).optional(),
@@ -299,6 +299,7 @@ export function registerCoverageTools(
         host: z.string().optional(),
         min_domain_rating: z.number().min(0).max(100).optional(),
         exclude_competitors: z.boolean().optional(),
+        owner: z.enum(["me", "none", "others"]).optional(),
         access: z.enum(["cant_buy", "earned", "paid", "free", "unknown"]).optional(),
         group: z.enum(["domain"]).optional(),
         sort: z.enum(["score", "domain_rating", "traffic", "ai_citations", "competitors", "recent"]).optional(),
@@ -314,7 +315,40 @@ export function registerCoverageTools(
         }),
       ),
   );
+  server.registerTool(
+    "list_coverage_sites",
+    {
+      title: "Who manages each site",
+      description:
+        "For each site (host, such as example.com), the teammate managing it for the brand: the owner of its company record, or null when nobody has claimed it. Check before reaching out to a site, and leave one a teammate manages to them.",
+      inputSchema: { brand, host: z.array(z.string()).min(1).max(200) },
+      annotations: read,
+    },
+    ({ brand, host }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/coverage/sites", {
+          params: { path: { brand }, query: { host } },
+        }),
+      ),
+  );
   if (!readOnly) {
+    server.registerTool(
+      "claim_coverage_site",
+      {
+        title: "Claim a site, hand it over or release it",
+        description:
+          "Says who on the team is managing a site the brand wants a link or placement from, so nobody else reaches out at the same time: it sets the owner of the site's company record. owner_id defaults to the person you act for; null releases it. A site a teammate manages is refused with site_claimed: agents never take one over, so tell the person who manages it instead. It contacts nobody.",
+        inputSchema: { brand, host: z.string(), owner_id: z.string().uuid().nullable().optional() },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      ({ brand, ...body }) =>
+        call(() =>
+          gtm.POST("/v1/brands/{brand}/coverage/sites/claim", {
+            params: { path: { brand } },
+            body,
+          }),
+        ),
+    );
     server.registerTool(
       "update_coverage_opportunity",
       {

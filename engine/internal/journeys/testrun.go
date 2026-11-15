@@ -171,7 +171,7 @@ func (s *Service) Test(ctx context.Context, ws, journeyID string, in TestInput) 
 	if err != nil {
 		return nil, err
 	}
-	if why == notPerson {
+	if why == notPerson || why == notCompany || why == notDeal {
 		return nil, ErrNotPerson
 	}
 	out.Refusal = why

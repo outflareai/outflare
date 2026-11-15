@@ -363,9 +363,15 @@ jobs:
         run: pnpm --filter @outflare/sdk generate && git diff --exit-code sdk/ts/src/schema.ts
       - if: env.WEB != 'false'
         run: pnpm -r build
+      - name: Sales reporting periods, growth and funding destinations
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:sales-reporting-results
       - name: Browser for subscription brand checks
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web exec playwright install chromium --only-shell
+      - name: Sales reporting demo and conversation navigation
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:sales-reporting
       - name: Subscription brand assignment and workspace switching
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:ai-account-brands

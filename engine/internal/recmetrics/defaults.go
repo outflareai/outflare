@@ -11,6 +11,7 @@ package recmetrics
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
@@ -24,6 +25,9 @@ const (
 	Max   = "max"   // of property
 	Days  = "days"  // days with a matching event
 	Last  = "last"  // when the latest matching event happened
+	// Latest is the value of property in the latest matching event: a
+	// balance, a limit or a seat count the product reports.
+	Latest = "latest"
 )
 
 // Levels.
@@ -94,6 +98,51 @@ func Seed(ctx context.Context, tx pgx.Tx, ws, brand string) ([]string, error) {
 	return ids, nil
 }
 
+// Aggregates are the ways a metric counts.
+var Aggregates = []string{Count, Sum, Min, Max, Days, Last, Latest}
+
+var eventNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]*([._][a-z0-9_]+)*$`)
+
+// Check reports what is wrong with a metric, or "".
+func Check(d Definition) string {
+	reads := d.Aggregate == Sum || d.Aggregate == Min || d.Aggregate == Max || d.Aggregate == Latest
+	switch {
+	case d.Name == "" || len(d.Name) > 100:
+		return "name is 1 to 100 characters"
+	case len(d.Description) > 500:
+		return "description is at most 500 characters"
+	case !KeyRE.MatchString(d.Key) || d.Key == "by_product":
+		return "key is lowercase letters, digits and underscores, such as spend_30d (not by_product)"
+	case len(d.Levels) == 0 || len(d.Levels) > 2:
+		return "levels are company, person or both"
+	case !slices.Contains(Aggregates, d.Aggregate):
+		return "aggregate is count, sum, min, max, days, last or latest"
+	case len(d.Events) == 0 && !d.Usage:
+		return "a metric counts events (their names) or usage, or both"
+	case len(d.Events) > 20:
+		return "a metric names at most 20 events"
+	case reads && !KeyRE.MatchString(d.Property):
+		return "sum, min, max and latest read a number property of the events, such as amount_minor"
+	case !reads && d.Property != "":
+		return "only sum, min, max and latest read a property"
+	case d.WindowDays < 1 || d.WindowDays > 365:
+		return "window_days is 1 to 365"
+	case d.OffsetDays < 0 || d.OffsetDays > 365:
+		return "offset_days is 0 to 365"
+	}
+	for _, l := range d.Levels {
+		if l != LevelCompany && l != LevelPerson {
+			return "levels are company, person or both"
+		}
+	}
+	for _, e := range d.Events {
+		if len(e) > 100 || !eventNameRE.MatchString(e) {
+			return "events are event names, such as payment.succeeded"
+		}
+	}
+	return ""
+}
+
 // Insert stores a metric and returns its id.
 func Insert(ctx context.Context, tx pgx.Tx, ws, brand string, d Definition) (string, error) {
 	var id string
@@ -137,6 +186,8 @@ func (d Definition) valueSQL() string {
 		return `to_jsonb(max(b.hi) FILTER (WHERE ` + inWindow + `))`
 	case Days:
 		return `to_jsonb(count(*) FILTER (WHERE ` + inWindow + ` AND b.n > 0))`
+	case Latest:
+		return `to_jsonb((array_agg(b.total ORDER BY b.last_at DESC) FILTER (WHERE ` + inWindow + `))[1])`
 	default: // Last
 		return `to_jsonb(to_char(max(b.last_at) FILTER (WHERE ` + inWindow + `) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))`
 	}

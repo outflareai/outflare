@@ -2,7 +2,7 @@
 
 A metric is a number Outflare keeps for each company and person and keeps up to date, such as their spend in the last 30 days or how many times they used your product this week. Rules, journeys, smart lists and Query read metrics like any field, so you can act on totals, not only single events: "a company spent over $1,000 this month", or "usage this week fell below half of last week".
 
-Metrics are part of the [customer data platform](customers.md) and belong to one brand. Everything here works the same from the REST API (`/v1/brands/{brand}/metrics`), the MCP server and Query. In the app, People → Metrics turns metrics on, adds your own, changes what one counts, refills one from stored events and archives one (people with `catalog.manage`; everyone else can read them).
+Metrics are part of the [customer data platform](customers.md) and belong to one brand. Everything here works the same from the REST API (`/v1/brands/{brand}/metrics`), the MCP server and Query. In the app, CRM → Customer data → Metrics turns metrics on, adds your own, changes what one counts, refills one from stored events and archives one (people with `catalog.manage`; everyone else can read them).
 
 ## Live, always up to date
 
@@ -56,7 +56,7 @@ A fill never sets anything off. No rule, journey, email or webhook reacts to it.
 | Field | Meaning |
 | --- | --- |
 | `key` | Its name under `attributes.metrics`, such as `api_calls_30d`. It never changes, so rules and lists keep working. |
-| `aggregate` | `count` events, `sum`, `min` or `max` of a number `property`, `days` with an event, or `last` (when the latest happened). |
+| `aggregate` | `count` events, `sum`, `min` or `max` of a number `property`, `days` with an event, `last` (when the latest happened), or `latest` (the value of `property` in the latest event, for something the product reports as it stands, such as a prepaid balance, a plan limit or a seat count). |
 | `events`, `usage` | The event names it counts, and whether usage counts too. |
 | `property` | For `sum`, `min` and `max`: the number property, such as `amount_minor`. |
 | `window_days`, `offset_days` | The last `window_days` UTC days, today included, ending `offset_days` ago. |
@@ -65,8 +65,14 @@ A fill never sets anything off. No rule, journey, email or webhook reacts to it.
 
 Changing what a metric counts makes a new version and refills it. `POST .../metrics/{metric}/archive` takes it off every record. Reading needs `customers.read`; changing needs `catalog.manage`.
 
-To compare two periods, keep two metrics and compare them in a rule: `usage_7d` against `usage_prev_7d`. A ratio such as average order value is `spend_30d` divided by `payments_90d`-style totals of the same window. Counting distinct things (how many different people were active) isn't a live metric.
+### Trends
+
+To compare two periods, keep two metrics: the same events, aggregate and window, with the second one's `offset_days` moved back by one window (`usage_7d` and `usage_prev_7d`). Outflare then adds the trend to the record as `<key>_change`: how far the metric is from the window before, in percent (`usage_7d_change: -40` is down 40%), overall and per product. It is there for `count`, `sum` and `days` metrics when the window before had something in it, and a rule can test it: `metrics.usage_7d_change` `lt` `-30`. A ratio such as average order value is `spend_30d` divided by `payments_90d`-style totals of the same window. Counting distinct things (how many different people were active) isn't a live metric.
 
 ## Monitoring
 
 `outflare_record_metrics_updates_total` counts events added to metrics by outcome, `outflare_record_metrics_backfill_seconds` times fills, `outflare_record_metrics_sweep_seconds` times the daily window moves, and `outflare_record_metrics_due`, `outflare_record_metrics_oldest_due_seconds` and `outflare_record_metrics_backfilling` show how far behind they are ([monitoring](monitoring.md)).
+
+## From a playbook
+
+A [setup kit](playbooks.md) can add metrics for the rules and scores it brings, such as the days a company did your key action in the last 30 days and in the 30 before. A metric you already have under the same key stays as it is; a new one is counted from stored events when metrics are on.

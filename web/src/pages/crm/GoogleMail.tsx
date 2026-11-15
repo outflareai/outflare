@@ -30,6 +30,7 @@ export function GoogleMailSetup({
   const { brand } = useBrand(ws);
   const [status, setStatus] = useState<Connection | null>(null);
   const [rollout, setRollout] = useState<Rollout | null>(null);
+  const [excludedText, setExcludedText] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<{ id: string; name: string }[]>(
     [],
   );
@@ -105,7 +106,7 @@ export function GoogleMailSetup({
     // mailbox without each person signing in.
     void api
       .GET("/v1/workspaces/{ws}/integrations", {
-        params: { path: { ws }, query: { connector: "google_workspace" } },
+        params: { path: { ws }, query: { connector: "google_workspace_mail" } },
         signal: c.signal,
       })
       .then((r) => {
@@ -358,6 +359,34 @@ export function GoogleMailSetup({
                 })
               }
             />
+          </div>
+          <div>
+            <label
+              htmlFor="crm-mail-excluded-emails"
+              className="mb-1 block text-xs"
+            >
+              Always excluded email addresses
+            </label>
+            <textarea
+              id="crm-mail-excluded-emails"
+              className={`${field} min-h-16 w-full`}
+              placeholder={"name@company.example, one per line"}
+              value={excludedText ?? (rollout.excluded_emails ?? []).join("\n")}
+              onChange={(e) => {
+                setExcludedText(e.target.value);
+                setRollout({
+                  ...rollout,
+                  excluded_emails: e.target.value
+                    .split(/[\s,;]+/)
+                    .map((x) => x.trim().toLowerCase())
+                    .filter(Boolean),
+                });
+              }}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              For people without an Outflare account yet: whoever joins with one
+              of these addresses is excluded from the start.
+            </p>
           </div>
           <div className="space-y-2 rounded-lg border p-3">
             <label

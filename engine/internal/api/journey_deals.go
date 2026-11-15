@@ -65,6 +65,18 @@ func (s *Server) checkJourneyActionRefs(ctx context.Context, ws string, brand *s
 			case live && published == nil:
 				return errInvalid("step " + st.ID + ": the template " + st.Template + " has no published version yet; publish it first")
 			}
+		case "outflare_action":
+			if brand == nil {
+				return errInvalid("step " + st.ID + ": an Outflare action runs in the journey's brand, and this journey has none")
+			}
+			var ok bool
+			if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM api_tokens WHERE workspace_id = $1 AND id = $2 AND revoked_at IS NULL
+				AND (expires_at IS NULL OR expires_at > now()) AND action_gate AND (brand_id IS NULL OR brand_id = $3))`, ws, st.AgentID, brand).Scan(&ok); err != nil {
+				return err
+			}
+			if !ok {
+				return errInvalid("step " + st.ID + ": agent_id is not an agent of this brand whose changes go through approvals; make one under Agents")
+			}
 		case "assign_owner":
 			ids := st.Members
 			if st.OwnerID != "" {

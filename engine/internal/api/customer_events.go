@@ -1289,6 +1289,9 @@ func (s *Server) listCustomerEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		add("e.kind = ?", v)
 	}
+	if v := q.Get("source"); v != "" {
+		add("e.source = ?", v)
+	}
 	if v := q.Get("user_id"); v != "" {
 		add("e.user_id = ?", v)
 	}
@@ -1356,7 +1359,7 @@ type timelineItem struct {
 	RecordID string `json:"record_id"`
 }
 
-var timelineKinds = []string{"event", "attribute_change", "identity", "identified", "consent", "message", "meeting", "deal", "visit", "opt_out", "journey", "list"}
+var timelineKinds = []string{"event", "attribute_change", "identity", "identified", "consent", "message", "meeting", "deal", "visit", "opt_out", "journey", "list", "support", "task", "note"}
 
 // timelinePeople caps how many of a company's people its timeline reads.
 const timelinePeople = 5000
@@ -1369,7 +1372,8 @@ var timelineBranches = map[string]string{
 	"event": `SELECT 'event', e.id::text, e.occurred_at, e.name,
 			jsonb_build_object('event_kind', e.kind, 'raw_name', e.raw_name, 'properties', e.properties, 'brand_id', e.brand_id), e.source,
 			CASE WHEN e.record_id = ANY($2) THEN e.record_id ELSE e.account_id END
-		FROM customer_events e WHERE e.workspace_id = $1 AND (e.record_id = ANY($2) OR e.account_id = ANY($2)) {brand:e.brand_id}`,
+		FROM customer_events e WHERE e.workspace_id = $1 AND (e.record_id = ANY($2) OR e.account_id = ANY($2))
+			AND e.name NOT IN ('deal.created', 'support.conversation_opened', 'support.conversation_closed', 'task.created') {brand:e.brand_id}`,
 	"attribute_change": `SELECT 'attribute_change', c.id::text, c.changed_at, c.field_key,
 			jsonb_build_object('old_value', c.old_value, 'new_value', c.new_value, 'actor_id', c.actor_id, 'bulk_edit_id', c.bulk_edit_id), c.source, c.record_id
 		FROM attribute_changes c WHERE c.record_id = ANY($2)`,
@@ -1455,6 +1459,22 @@ var timelineBranches = map[string]string{
 			jsonb_build_object('change', c.change, 'list_id', c.list_id, 'kind', l.kind, 'bulk_edit_id', c.bulk_edit_id), 'list', c.record_id
 		FROM smart_list_changes c JOIN smart_lists l ON l.id = c.list_id
 		WHERE c.workspace_id = $1 AND c.record_id = ANY($2) {brand:c.brand_id}`,
+	// A support conversation shows when it opened and when it closed.
+	"support": `SELECT 'support', v.id::text || ':opened', COALESCE(v.first_message_at, v.created_at), v.subject,
+			jsonb_build_object('change', 'opened', 'conversation_id', v.id, 'channel', v.channel, 'status', v.status,
+				'last_from', v.last_from, 'assignee_id', v.assignee_id), 'support', v.record_id
+		FROM support_conversations v WHERE v.workspace_id = $1 AND v.record_id = ANY($2) {brand:v.brand_id}
+		UNION ALL
+		SELECT 'support', v.id::text || ':closed', v.closed_at, v.subject,
+			jsonb_build_object('change', 'closed', 'conversation_id', v.id, 'channel', v.channel, 'status', v.status,
+				'last_from', v.last_from, 'assignee_id', v.assignee_id), 'support', v.record_id
+		FROM support_conversations v WHERE v.workspace_id = $1 AND v.record_id = ANY($2) AND v.status = 'closed' AND v.closed_at IS NOT NULL {brand:v.brand_id}`,
+	"task": `SELECT 'task', t.id::text, t.created_at, t.title,
+			jsonb_build_object('status', t.status, 'priority', t.priority, 'due_at', t.due_at, 'assigned_to', t.assigned_to), 'crm', t.record_id
+		FROM crm_activities t WHERE t.workspace_id = $1 AND t.record_id = ANY($2) AND t.kind = 'task' {brand:t.brand_id}`,
+	"note": `SELECT 'note', t.id::text, t.created_at, t.title,
+			jsonb_build_object('created_by', t.created_by), 'crm', t.record_id
+		FROM crm_activities t WHERE t.workspace_id = $1 AND t.record_id = ANY($2) AND t.kind = 'note' {brand:t.brand_id}`,
 }
 
 // timelineBrand is the brand condition on col: items for the chosen brand

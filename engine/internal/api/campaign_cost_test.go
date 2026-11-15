@@ -76,9 +76,10 @@ func TestCampaignCostModels(t *testing.T) {
 	if got := cost(owner.must(200, "GET", base+"/tracking-campaigns/"+id, nil)); got["model"] != "revshare" || got["share"] != float64(50) || got["amount"] != "2" {
 		t.Fatalf("stored cost: %v", got)
 	}
-	// token: what the source reported on each click, 0.03 each.
+	// token: what the source reported on each click, 0.03 each, the bot's
+	// too: the network charged for it.
 	set(map[string]any{"model": "token"})
-	if got := report()["cost"]; got != 0.09 {
+	if got := report()["cost"]; got != 0.12 {
 		t.Fatalf("token cost: %v", got)
 	}
 	// Bad models are refused.

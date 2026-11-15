@@ -7,17 +7,30 @@ import { useBrand } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 import { nameItem } from "@/lib/records";
 
-// Events: what a brand's product sent to POST /v1/brands/{brand}/events.
-// Every event is saved first and processed in the background; this page
-// shows what happened to each (accepted, duplicate, rejected with what to
-// fix, or held for a name someone paused in the catalog) and replays the
-// rejected and held ones once they are fixed. New names need no approval:
-// the page asks only when one looks like a typo of another.
+// Events: every event a brand stored, from any source (the website script,
+// the events API, the workspace route, a connector), newest first, with
+// counts by source. A second view shows what was sent to
+// POST /v1/brands/{brand}/events: each is saved first and processed in the
+// background, and the view shows what happened to each (accepted,
+// duplicate, rejected with what to fix, or held for a name someone paused
+// in the catalog) and replays the rejected and held ones once they are
+// fixed. New names need no approval: the page asks only when one looks like
+// a typo of another.
 
 type Event = Schemas["BrandEvent"];
 type Detail = Schemas["BrandEventDetail"];
 type Summary = Schemas["BrandEventsSummary"];
 type Status = Event["status"];
+type Stored = Schemas["CustomerEvent"];
+type View = "all" | "api";
+
+// sourceLabel names where an event came from in plain words.
+function sourceLabel(source: string): string {
+  if (source === "browser") return "Website";
+  if (source === "api") return "API";
+  if (source === "outflare") return "Outflare";
+  return source.charAt(0).toUpperCase() + source.slice(1);
+}
 
 const statuses: Record<Status, { label: string; tone: "green" | "amber" | "red" | "grey" | "blue"; help: string }> = {
   pending: { label: "Waiting", tone: "blue", help: "Saved, waiting to be processed. Usually seconds." },
@@ -34,7 +47,7 @@ export function BrandEvents({ ws, canManage, tabs, onOpen }: { ws: string; canMa
     <div className="space-y-6">
       <PageHeader
         title="Product events"
-        description="What your product sent to this brand, and what happened to each event. Events are saved the moment they arrive and processed within seconds; rejected and held ones are kept 90 days so you can fix them and replay them."
+        description="Every event this brand received: from your website, your product's servers and anything else that sends them. They're usable in segments, lists, journeys and reports as they arrive."
       />
       {tabs}
       {brand ? (
@@ -59,6 +72,7 @@ function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<View>("all");
 
   const loadSummary = useCallback(async () => {
     const { data, error } = await api.GET("/v1/brands/{brand}/events/summary", { params: { path: { brand } } });
@@ -141,7 +155,37 @@ function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage
 
   return (
     <div className="space-y-6">
-      {summary && day && (
+      <div className="flex flex-wrap gap-1 rounded-lg bg-muted/50 p-1 text-[13px]" role="tablist">
+        {([["all", "All events"], ["api", "Sent to the events API"]] as const).map(([v, label]) => (
+          <button
+            key={v}
+            role="tab"
+            aria-selected={view === v}
+            className={`rounded-md px-3 py-1.5 ${view === v ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}
+            onClick={() => {
+              setView(v);
+              track("ui.brand_events_view_changed", { view: v });
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === "all" && summary && (
+        <Stats cols={Math.max(2, Math.min(5, summary.sources.length + 1)) as 2 | 3 | 4 | 5}>
+          <Stat
+            label="Events, 24h"
+            value={summary.sources.reduce((n, s) => n + s.last_24h, 0).toLocaleString()}
+            sub={`${summary.sources.reduce((n, s) => n + s.last_7d, 0).toLocaleString()} in 7 days`}
+          />
+          {summary.sources.slice(0, 4).map((s) => (
+            <Stat key={s.source} label={`${sourceLabel(s.source)}, 24h`} value={s.last_24h.toLocaleString()} sub={`${s.last_7d.toLocaleString()} in 7 days`} />
+          ))}
+        </Stats>
+      )}
+
+      {view === "api" && summary && day && (
         <Stats cols={5}>
           <Stat label="Accepted, 24h" value={day.accepted.toLocaleString()} sub={`${summary.last_7d.accepted.toLocaleString()} in 7 days`} />
           <Stat label="Duplicates, 24h" value={day.duplicate.toLocaleString()} />
@@ -215,6 +259,9 @@ function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage
         </Card>
       )}
 
+      {view === "all" && <AllEvents brand={brand} sources={summary?.sources.map((x) => x.source) ?? []} onOpen={onOpen} />}
+      {view === "api" && (
+        <>
       <div className="flex flex-wrap items-center gap-2">
         <select aria-label="Status" className={field} value={status} onChange={(e) => filter("status", e.target.value)}>
           <option value="">Every status</option>
@@ -297,7 +344,113 @@ function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage
         </div>
       )}
       {next && <Button variant="ghost" onClick={() => load(next)}>Show more</Button>}
+        </>
+      )}
     </div>
+  );
+}
+
+// AllEvents lists every event the brand stored, newest first, whichever
+// way it came in.
+function AllEvents({ brand, sources, onOpen }: { brand: string; sources: string[]; onOpen: (item: string) => void }) {
+  const [list, setList] = useState<Stored[] | null>(null);
+  const [next, setNext] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [source, setSource] = useState("");
+  const [name, setName] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+
+  const load = useCallback(
+    async (cursor?: string) => {
+      const query = { limit: 50, ...(source ? { source } : {}), ...(name ? { name } : {}), ...(cursor ? { cursor } : {}) };
+      const { data, error } = await api.GET("/v1/brands/{brand}/customer-events", { params: { path: { brand }, query } });
+      if (!data) return setError(errorMessage(error));
+      setError("");
+      setList((prev) => (cursor ? [...(prev ?? []), ...data.data] : data.data));
+      setNext(data.next_cursor ?? null);
+    },
+    [brand, source, name],
+  );
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="Source"
+          className={field}
+          value={source}
+          onChange={(e) => {
+            setSource(e.target.value);
+            track("ui.brand_events_filtered", { filter: "source", value: e.target.value ? "set" : "all" });
+          }}
+        >
+          <option value="">Every source</option>
+          {sources.map((s) => <option key={s} value={s}>{sourceLabel(s)}</option>)}
+        </select>
+        <input
+          aria-label="Event name"
+          className={`${field} w-48`}
+          placeholder="Event name, such as signed_up"
+          value={name}
+          onChange={(e) => setName(e.target.value.trim())}
+        />
+      </div>
+      <ErrorText>{error}</ErrorText>
+      {!list && !error && <Loading />}
+      {list?.length === 0 && (
+        <Empty title={source || name ? "Nothing matches" : "No events yet"}>
+          {source || name ? "Try another filter." : <>Add the website script in Developer setup, or send events from your product's servers to <span className="font-mono">POST /v1/brands/{brand}/events</span>. Each shows here within seconds.</>}
+        </Empty>
+      )}
+      {list && list.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-[13px]">
+            <thead className="bg-muted/40 text-left text-[12px] text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 font-medium">Event</th>
+                <th className="px-3 py-2 font-medium">Person</th>
+                <th className="hidden px-3 py-2 font-medium md:table-cell">Source</th>
+                <th className="px-3 py-2 font-medium">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((e) => (
+                <Fragment key={e.id}>
+                  <tr className="cursor-pointer border-t hover:bg-muted/30" onClick={() => setOpen(open === e.id ? null : e.id)}>
+                    <td className="px-3 py-2">
+                      <span className="font-mono">{e.name}</span>
+                      <span className="ml-2 text-[12px] text-muted-foreground">{e.kind}</span>
+                    </td>
+                    <td className="px-3 py-2" onClick={(ev) => ev.stopPropagation()}>
+                      {e.record_id ? (
+                        <button className="underline" onClick={() => onOpen(e.record_id!)}>Open</button>
+                      ) : (
+                        <span className="text-muted-foreground">Anonymous</span>
+                      )}
+                    </td>
+                    <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">{sourceLabel(e.source)}</td>
+                    <td className="px-3 py-2 text-muted-foreground" title={stamp(e.occurred_at)}>{ago(e.occurred_at)}</td>
+                  </tr>
+                  {open === e.id && (
+                    <tr className="border-t bg-muted/20">
+                      <td colSpan={4} className="px-3 py-3">
+                        <pre className="max-h-80 overflow-auto rounded-md border bg-card p-3 font-mono text-[12px]">
+                          {JSON.stringify({ properties: e.properties, context: e.context, user_id: e.user_id, anonymous_id: e.anonymous_id, raw_name: e.raw_name }, null, 2)}
+                        </pre>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {next && <Button variant="ghost" onClick={() => load(next)}>Show more</Button>}
+    </>
   );
 }
 

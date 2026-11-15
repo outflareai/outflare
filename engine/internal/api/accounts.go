@@ -127,7 +127,7 @@ func (a *Accounts) CreateAccount(ctx context.Context, tx pgx.Tx, w http.Response
 				id.Subject, userID, id.Email); err != nil {
 				return err
 			}
-			if err := markVerified(ctx, tx, userID, id.Email); err != nil {
+			if err := googleSignedIn(ctx, tx, userID, id); err != nil {
 				return err
 			}
 		}

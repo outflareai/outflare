@@ -5,6 +5,7 @@ import { Badge, Button, Empty, ErrorText, field, Loading, Menu, toast } from "..
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { PickBrand } from "@/components/pick-brand";
 import { useBrand, pickedBrandId } from "@/lib/brand";
+import { FlagButton } from "./Signals";
 import { ago, stamp } from "../format";
 import { cn } from "@/lib/utils";
 
@@ -347,6 +348,7 @@ function Messages({ chat, canSummarize, onChange, onClose }: { chat: TelegramCha
         </SheetHeader>
         <div className="space-y-2 px-4 pb-6">
           {chat.kind !== "personal" && chat.kind !== "internal" && chat.message_count > 0 && <Summary chat={chat} canSummarize={canSummarize} onChange={onChange} />}
+          {chat.record_id && chat.kind !== "personal" && chat.kind !== "internal" && <FlagButton brandId={pickedBrandId()} recordId={chat.record_id} conversation={{ channel: "telegram", ref: chat.id }} />}
           {err && <ErrorText>{err}</ErrorText>}
           {!msgs && !err && <Loading />}
           {msgs && msgs.length === 0 && <div className="text-[13px] text-muted-foreground">No messages kept for this chat.</div>}

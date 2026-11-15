@@ -1,5 +1,6 @@
 // The relationship check on a card: before anyone reaches out, what the
-// brand already has with this company. Already a customer, in another
+// brand already has with this company. A teammate managing it (its owner,
+// the claim on a site in Presence), already a customer, in another
 // pipeline, an open deal, a teammate who has emailed them (a warm intro),
 // or a conversation that went quiet.
 import { useEffect, useState } from "react";
@@ -49,6 +50,18 @@ export function RelationshipCheck({
     );
   if (!check) return null;
   const lines: { tone: "warn" | "info"; text: React.ReactNode }[] = [];
+  if (check.owner && check.owner.user_id !== myId)
+    lines.push({
+      tone: "warn",
+      text: (
+        <>
+          {check.owner.name || "A teammate"} is managing this company. Check
+          with them before you reach out.
+        </>
+      ),
+    });
+  else if (check.owner)
+    lines.push({ tone: "info", text: <>You're managing this company.</> });
   if (check.customer.is) {
     const why = [
       check.customer.active_products > 0 &&

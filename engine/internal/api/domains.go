@@ -307,7 +307,7 @@ func (s *Server) addDomain(w http.ResponseWriter, r *http.Request) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			INSERT INTO sending_domains (workspace_id, domain, spf, dkim, dmarc, checked_at, source, brand_id)
-			VALUES ($1, $2, 'pending', 'pending', 'pending', NULL, 'manual', outflare_only_brand($1))
+			VALUES ($1, $2, 'pending', 'pending', 'pending', NULL, 'manual', outflare_first_brand($1))
 			ON CONFLICT (workspace_id, domain) DO NOTHING`, a.WorkspaceID, v)
 		if err != nil {
 			return err

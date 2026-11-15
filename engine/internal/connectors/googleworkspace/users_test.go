@@ -27,6 +27,8 @@ type usersFake struct {
 	customer  string
 	failName  bool
 	denyGmail bool
+	fwdStatus string // verificationStatus Google gives a forwarding address
+	fwdExists bool   // the address was added before (409, then read)
 }
 
 func newUsersFake(t *testing.T) *usersFake {
@@ -67,6 +69,10 @@ func newUsersFake(t *testing.T) *usersFake {
 				fmt.Fprintf(w, `{"customerId":%q}`, f.customer)
 			case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/admin/directory/v1/users/") && f.failName:
 				w.WriteHeader(500)
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/settings/forwardingAddresses") && f.fwdExists:
+				w.WriteHeader(409)
+			case strings.Contains(r.URL.Path, "/settings/forwardingAddresses"):
+				fmt.Fprintf(w, `{"forwardingEmail":"x","verificationStatus":%q}`, f.fwdStatus)
 			default:
 				w.Write([]byte(`{}`))
 			}
@@ -143,6 +149,70 @@ func TestUpdateWorkspaceUser(t *testing.T) {
 		{Email: "dee@northpeak.example", GivenName: str("")},
 		{Email: "dee@northpeak.example", Photo: []byte("p"), PhotoType: "GIF"},
 		{Email: "dee@northpeak.example", Signature: str(strings.Repeat("x", maxSignature+1))},
+	} {
+		if _, err = (Connector{}).UpdateWorkspaceUser(ctx, f.client(), cr, u); c.KindOf(err) != c.ErrInvalid {
+			t.Fatalf("invalid %+v: %v", u, err)
+		}
+	}
+}
+
+func TestRecoveryEmailAndForwarding(t *testing.T) {
+	resetCache(t)
+	ctx := context.Background()
+	f := newUsersFake(t)
+	cr := keylessCreds("test-only-refresh-fwd")
+	cr["manage_users"] = "yes"
+	f.fwdStatus = "accepted"
+	res, err := (Connector{}).UpdateWorkspaceUser(ctx, f.client(), cr, c.WorkspaceUserUpdate{Email: "ana@northpeak.example", RecoveryEmail: str(" Ana.Backup@Acme.example "), Forwarding: str("team@acme.example")})
+	if err != nil || res.RecoveryEmail != PartUpdated || res.Forwarding != PartUpdated || res.Name != PartUntouched {
+		t.Fatalf("update %+v: %v", res, err)
+	}
+	want := []string{
+		"GET /admin/directory/v1/users/ana@northpeak.example",
+		"PATCH /admin/directory/v1/users/ana@northpeak.example",
+		"POST /gmail/v1/users/me/settings/forwardingAddresses",
+		"PUT /gmail/v1/users/me/settings/autoForwarding",
+	}
+	if strings.Join(f.calls, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("calls:\n%s", strings.Join(f.calls, "\n"))
+	}
+	if f.bodies[want[1]]["recoveryEmail"] != "ana.backup@acme.example" || f.bodies[want[2]]["forwardingEmail"] != "team@acme.example" {
+		t.Fatalf("bodies %v", f.bodies)
+	}
+	if b := f.bodies[want[3]]; b["enabled"] != true || b["emailAddress"] != "team@acme.example" || b["disposition"] != "leaveInInbox" {
+		t.Fatalf("auto-forwarding %v", b)
+	}
+	// Forwarding is set as the mailbox itself, with the sharing scope.
+	if last := f.scopes[len(f.scopes)-1]; f.subjects[len(f.subjects)-1] != "ana@northpeak.example" || !strings.Contains(last, forwardingScope) {
+		t.Fatalf("forwarding token %v %v", f.subjects, f.scopes)
+	}
+
+	// A new address waits for its confirmation: nothing is forwarded yet.
+	f.calls, f.fwdStatus = nil, "pending"
+	if res, err = (Connector{}).UpdateWorkspaceUser(ctx, f.client(), cr, c.WorkspaceUserUpdate{Email: "ana@northpeak.example", Forwarding: str("new@acme.example")}); err != nil || res.Forwarding != PartPending || len(f.calls) != 1 {
+		t.Fatalf("pending %+v %v %v", res, err, f.calls)
+	}
+	// An address added before is read, and forwarding starts once accepted.
+	f.calls, f.fwdStatus, f.fwdExists = nil, "accepted", true
+	if res, err = (Connector{}).UpdateWorkspaceUser(ctx, f.client(), cr, c.WorkspaceUserUpdate{Email: "ana@northpeak.example", Forwarding: str("new@acme.example")}); err != nil || res.Forwarding != PartUpdated || len(f.calls) != 3 || f.calls[1] != "GET /gmail/v1/users/me/settings/forwardingAddresses/new@acme.example" {
+		t.Fatalf("existing %+v %v %v", res, err, f.calls)
+	}
+	// "" turns forwarding off and clears the recovery email.
+	f.calls = nil
+	if res, err = (Connector{}).UpdateWorkspaceUser(ctx, f.client(), cr, c.WorkspaceUserUpdate{Email: "ana@northpeak.example", Forwarding: str(""), RecoveryEmail: str("")}); err != nil || res.Forwarding != PartUpdated || res.RecoveryEmail != PartUpdated {
+		t.Fatalf("off %+v %v", res, err)
+	}
+	if b := f.bodies["PUT /gmail/v1/users/me/settings/autoForwarding"]; b["enabled"] != false {
+		t.Fatalf("off body %v", b)
+	}
+	// A refused scope fails only its part.
+	f.denyGmail = true
+	if res, err = (Connector{}).UpdateWorkspaceUser(ctx, f.client(), cr, c.WorkspaceUserUpdate{Email: "bo@northpeak.example", Forwarding: str("team@acme.example"), RecoveryEmail: str("bo.backup@acme.example")}); err != nil || res.Forwarding != PartFailed || res.RecoveryEmail != PartUpdated {
+		t.Fatalf("denied %+v %v", res, err)
+	}
+	for _, u := range []c.WorkspaceUserUpdate{
+		{Email: "ana@northpeak.example", Forwarding: str("not an address")},
+		{Email: "ana@northpeak.example", RecoveryEmail: str("ana@northpeak.example")},
 	} {
 		if _, err = (Connector{}).UpdateWorkspaceUser(ctx, f.client(), cr, u); c.KindOf(err) != c.ErrInvalid {
 			t.Fatalf("invalid %+v: %v", u, err)

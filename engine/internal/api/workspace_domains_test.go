@@ -19,7 +19,7 @@ func TestOneListOfDomainsAndConnections(t *testing.T) {
 	owner.must(201, "POST", base+"/site-keys", map[string]any{"name": "Website", "brand_id": acme, "origins": []string{"https://www.acme.example"}})
 	owner.must(201, "POST", base+"/tracking-domains", map[string]any{"domain": "links.acme.example"})
 	if _, err := e.pool.Exec(ctx, `INSERT INTO sending_domains (workspace_id, domain, spf, dkim, dmarc, brand_id) VALUES
-		($1, 'acme.example', 'pass', 'pass', 'pass', $2), ($1, 'acme-mail.example', 'missing', 'pass', 'pass', NULL)`, ws, acme); err != nil {
+		($1, 'acme.example', 'pass', 'pass', 'pass', $2), ($1, 'acme-mail.example', 'missing', 'pass', 'pass', outflare_first_brand($1))`, ws, acme); err != nil {
 		t.Fatal(err)
 	}
 	company := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Acme",

@@ -27,6 +27,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/policy"
 	"github.com/outflareai/outflare/engine/internal/sending"
+	"github.com/outflareai/outflare/engine/internal/signals"
 )
 
 // Mailbox purposes (mailboxes.purpose).
@@ -198,6 +199,11 @@ func Intake(ctx context.Context, tx pgx.Tx, e Email) (Received, error) {
 		return out, err
 	}
 	out.ConversationID, out.New = conv, true
+	if !e.AutoReply {
+		if err := readForSignals(ctx, tx, ws, conv); err != nil {
+			return out, err
+		}
+	}
 	if err := Clock(ctx, tx, conv); err != nil {
 		return out, err
 	}
@@ -556,4 +562,14 @@ func newID() string {
 	var b [16]byte
 	rand.Read(b[:]) //nolint:errcheck // never fails
 	return fmt.Sprintf("%x", b)
+}
+
+// readForSignals queues a read of a conversation for signals, when its
+// brand has that on (engine/internal/signals).
+func readForSignals(ctx context.Context, tx pgx.Tx, ws, conv string) error {
+	var brand *string
+	if err := tx.QueryRow(ctx, `SELECT brand_id::text FROM support_conversations WHERE workspace_id = $1 AND id = $2`, ws, conv).Scan(&brand); err != nil || brand == nil {
+		return err
+	}
+	return signals.EnqueueConversation(ctx, tx, ws, *brand, "support", conv)
 }

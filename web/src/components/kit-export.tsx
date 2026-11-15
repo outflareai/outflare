@@ -22,7 +22,7 @@ const kitAction: Record<KitPlan["items"][number]["action"], { label: string; ton
   conflict: { label: "Conflict", tone: "amber" },
 };
 const kitKind: Record<KitPlan["items"][number]["kind"], string> = {
-  option_set: "List", record_type: "Pipeline", field: "Field", email_template: "Email draft", smart_list: "People list", rule: "Rule", journey: "Journey",
+  option_set: "List", record_type: "Pipeline", field: "Field", email_template: "Email draft", smart_list: "People list", rule: "Rule", journey: "Journey", signal_type: "Signal type", metric: "Metric", score: "Score",
 };
 
 // KitPlanList is what applying a kit adds, has already, or conflicts with.
@@ -90,6 +90,9 @@ export function KitExportSheet({ ws, journey, onClose }: { ws: string; journey: 
     k.rules.length > 0 && plural(k.rules.length, "rule"),
     k.smart_lists.length > 0 && plural(k.smart_lists.length, "people list"),
     k.email_templates.length > 0 && plural(k.email_templates.length, "email draft"),
+    k.signal_types.length > 0 && plural(k.signal_types.length, "signal type"),
+    (k.metrics?.length ?? 0) > 0 && plural(k.metrics?.length ?? 0, "metric"),
+    (k.scores?.length ?? 0) > 0 && plural(k.scores?.length ?? 0, "score"),
   ].filter(Boolean).join(", ");
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>

@@ -137,6 +137,10 @@ func setup(t *testing.T) (*pgxpool.Pool, *platforms.Service, *fake, string, stri
 		if err := tx.QueryRow(ctx, `INSERT INTO workspaces (name, slug) VALUES ('Acme', 'acme') RETURNING id::text`).Scan(&ws); err != nil {
 			return err
 		}
+		// Every mailbox belongs to a brand: the synced ones take the first.
+		if _, err := tx.Exec(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Acme', 'acme')`, ws); err != nil {
+			return err
+		}
 		i, err := store.Insert(ctx, tx, ws, "fakeseq", connectors.AuthAPIKey, "FakeSeq", connectors.Creds{"api_key": "k"}, connectors.Account{}, "")
 		integration = i.ID
 		return err
@@ -310,8 +314,8 @@ func TestWatchedPlatformOnlyFlagsKnownMailboxes(t *testing.T) {
 	svc := &platforms.Service{Pool: pool, Store: store, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	var integration string
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO mailboxes (workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username,
-			imap_host, imap_port, imap_username, credentials, status, daily_limit) VALUES ($1, 'own@acme.test', 'Own', 'other', 'h', 587, 'u', 'h', 993, 'u', '\x', 'active', 30)`, ws); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO mailboxes (brand_id, workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username,
+			imap_host, imap_port, imap_username, credentials, status, daily_limit) VALUES (outflare_first_brand($1), $1, 'own@acme.test', 'Own', 'other', 'h', 587, 'u', 'h', 993, 'u', '\x', 'active', 30)`, ws); err != nil {
 			return err
 		}
 		i, err := store.Insert(ctx, tx, ws, "fakewatch", connectors.AuthAPIKey, "FakeWatch", connectors.Creds{"api_key": "k"}, connectors.Account{}, "")

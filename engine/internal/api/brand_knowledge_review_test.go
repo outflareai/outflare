@@ -162,14 +162,15 @@ func TestBrandKnowledgeGate(t *testing.T) {
 		JOIN ad_entities g ON g.parent_id = c.id AND g.level = 'ad_group' AND g.external_id = '71' WHERE a.workspace_id = $1`, ws).Scan(&acct, &ggroup); err != nil {
 		t.Fatal(err)
 	}
-	// A new account takes the workspace's only brand; start from one with
-	// none, as an account of a workspace with several brands is.
-	if _, err := e.pool.Exec(ctx, `UPDATE ad_accounts SET brand_id = NULL WHERE id = $1`, acct); err != nil {
+	// A new account takes the workspace's only brand; start from one in
+	// another brand, moved there without the app.
+	if _, err := e.pool.Exec(ctx, `WITH b AS (INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Elsewhere', 'elsewhere') RETURNING id)
+		UPDATE ad_accounts SET brand_id = (SELECT id FROM b) WHERE id = $2`, ws, acct); err != nil {
 		t.Fatal(err)
 	}
 	blocker := func() map[string]any {
 		t.Helper()
-		for _, b := range owner.must(200, "GET", base+"/status", nil)["blockers"].([]any) {
+		for _, b := range owner.must(200, "GET", base+"/status?brand="+brand, nil)["blockers"].([]any) {
 			if b := b.(map[string]any); b["code"] == "ads_knowledge_unreviewed" {
 				return b
 			}

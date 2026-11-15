@@ -206,7 +206,7 @@ function FirstNode({ data }: NodeProps<Node<EndData>>) {
     <div className="h-full w-full">
       <Handle type="target" position={Position.Top} isConnectable={false} className="!size-1 !min-w-0 !border-0 !bg-transparent" />
       <button type="button" onClick={data.add}
-        className="flex h-full w-full flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-dashed text-[13px] font-medium text-muted-foreground hover:border-ring hover:text-foreground">
+        className="nodrag nopan flex h-full w-full flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-dashed text-[13px] font-medium text-muted-foreground hover:border-ring hover:text-foreground">
         <span className="flex items-center gap-1"><Plus className="size-4" />Add the first step</span>
         <span className="text-[11px] font-normal">Usually an email</span>
       </button>
@@ -237,6 +237,7 @@ function SlotEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
 // The link into an empty journey's big button needs no "+" of its own.
 const edgeHasRoom = (d: SlotData) => !d.first;
 
+const noClick = () => {};
 const nodeTypes = { trigger: TriggerNode, step: StepNode, end: EndNode, first: FirstNode };
 const edgeTypes = { slot: SlotEdge };
 
@@ -276,6 +277,9 @@ export function Flow(props: FlowProps) {
       <ReactFlowProvider>
         <ReactFlow
           nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+          // Nothing is selectable or draggable, so React Flow would switch
+          // the cards' clicks off: a click handler keeps them on.
+          onNodeClick={noClick}
           nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} nodesFocusable={false} edgesFocusable={false}
           zoomOnScroll={false} preventScrolling={false} zoomOnDoubleClick={false} panOnDrag minZoom={0.3} maxZoom={1.5}
           fitView fitViewOptions={{ maxZoom: 1, minZoom: 0.35, padding: 0.08 }}

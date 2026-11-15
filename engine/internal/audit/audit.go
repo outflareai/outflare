@@ -85,6 +85,7 @@ var brandOf = map[string]string{
 	"email_broadcast": `SELECT brand_id FROM email_broadcasts WHERE id = $1::uuid AND workspace_id = $2`,
 	"email_template":  `SELECT brand_id FROM email_templates WHERE id = $1::uuid AND workspace_id = $2`,
 	"alert":           `SELECT brand_id FROM alerts WHERE id = $1::uuid AND workspace_id = $2`,
+	"signal":          `SELECT brand_id FROM signals WHERE id = $1::uuid AND workspace_id = $2`,
 	"webhook":         `SELECT brand_id FROM webhook_endpoints WHERE id = $1::uuid AND workspace_id = $2`,
 	// A domain's id is its name.
 	"domain": `SELECT brand_id FROM sending_domains WHERE domain = lower($1) AND workspace_id = $2`,

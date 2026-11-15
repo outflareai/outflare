@@ -30,6 +30,14 @@ groups:
         annotations:
           summary: "95th percentile request time is over 2 seconds."
 
+      - alert: OutflareScriptPolicyReports
+        # Browser extensions inject scripts into every page; they are counted apart.
+        expr: sum(increase(outflare_http_csp_reports_total{source=~"inline|eval|external|data|blob"}[1h])) > 20
+        for: 10m
+        labels: { severity: info }
+        annotations:
+          summary: "Browsers report scripts the web app didn't ship (its report-only script policy). Find the 'script policy' lines in the server log for the source and host: a new third-party script needs allowing, anything else may be an injected script."
+
       - alert: OutflarePartnerTaskChecksFailing
         expr: sum(increase(outflare_jobs_processed_total{kind="partners.task_check",outcome=~"retried|dead"}[15m])) > 3
         for: 5m
@@ -184,6 +192,20 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "Every IP lookup for 30 minutes has been given up because the provider couldn't be reached, so no click is being scored: check that this server can reach IPQualityScore (outbound network) and its status page. A wrong key or no credits is the workspace's own (failed_auth, failed_quota) and shows on its Connectors page. See the IP lookups panel on the Redirect links row."
+
+      - alert: OutflareTrackerNetworkCostsFailing
+        expr: sum(increase(outflare_tracker_network_cost_syncs_total{outcome=~"failed_unavailable|failed_invalid"}[1h])) > 0 and sum(increase(outflare_tracker_network_cost_syncs_total{outcome="synced"}[1h])) == 0
+        for: 2h
+        labels: { severity: warning }
+        annotations:
+          summary: "Network cost reconciliation (Zeropark spend shared out over tracker clicks) has failed for 2 hours with nothing synced, so tracker reports show only the clicks' own cost tokens: check that this server reaches panel.zeropark.com and look for tracker.network_cost_failed in the logs. A wrong token or no credits is the workspace's own (failed_auth, failed_quota). See the Network cost reconciliation panel on the Redirect links row."
+
+      - alert: OutflareTrackerNetworkCostUnattributed
+        expr: sum(increase(outflare_tracker_network_cost_micros_total{kind="unattributed"}[6h])) > 0.2 * sum(increase(outflare_tracker_network_cost_micros_total[6h]))
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "Over a fifth of the network spend reconciled in 6 hours had no tracker click to go on, so reports show less cost than the network charged: a campaign URL probably lacks {campaign_id} or {target}, or visits aren't reaching the tracker. Check GET /v1/brands/{brand}/network-costs for the campaigns with unattributed spend."
 
       - alert: OutflareTrackerSourcePostbacksFailing
         expr: sum(rate(outflare_tracker_source_postbacks_total{outcome=~"unreachable|invalid"}[15m])) > 0
@@ -736,6 +758,75 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Over 500 meetings have waited 30 minutes for their meeting.* event on people's timelines; check meeting_events.run_failed in the engine log. Booked calls don't count as conversions until it drains."
+
+      - alert: OutflareRecordEventsBacklog
+        # Deals, support conversations and tasks are recorded as customer
+        # events every minute; a backlog that stays means the loop keeps
+        # failing.
+        expr: max by (module) (outflare_record_events_pending) > 1000
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 1,000 {{ $labels.module }} rows have waited 30 minutes for their timeline event (deal.won, support.conversation_opened, task.completed); check record_events.run_failed in the engine log. Rules and journeys on these events don't fire until it drains."
+
+      - alert: OutflareSignalsLate
+        # Signals are what people act on from the Needs attention queue;
+        # when most of the open ones are past due, nobody is working it.
+        expr: sum(outflare_signals_open{state="late"}) > 50 and sum(outflare_signals_open{state="late"}) > sum(outflare_signals_open{state="on_time"})
+        for: 6h
+        labels: { severity: info }
+        annotations:
+          summary: "More than 50 open signals are past their due date, and they outnumber the ones on time; owners aren't working the Needs attention queue, or rules raise more signals than people can act on. Check the signal types' results and the rules that raise them."
+
+      - alert: OutflareScoresPassStuck
+        # A pass scores every record of a brand again after a score was
+        # added or changed, and once a day; until it ends, records keep
+        # their old scores.
+        expr: max(outflare_scores_scoring_oldest_seconds) > 3600
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "A score has waited over an hour for its pass over every record, so records keep old health or lead scores; look for failed or dead score.pass jobs (Job queue row) and score.daily_failed in the engine log."
+
+      - alert: OutflareConversationReadsFailing
+        # A brand's own AI reads conversations with customers for signals.
+        expr: sum(increase(outflare_conversations_reads_total{outcome="failed"}[1h])) > 10 and sum(increase(outflare_conversations_reads_total{outcome="failed"}[1h])) > sum(increase(outflare_conversations_reads_total{outcome=~"raised|nothing"}[1h]))
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Most reads of conversations for signals are failing, so what customers say raises nothing; look for conversation.read_failed with ai_failed in the engine log and at the AI provider's status."
+
+      - alert: OutflareRoutingFailing
+        # Every minute records with no owner are given to the member
+        # their brand's routing rules pick.
+        expr: sum(increase(outflare_routing_records_total{outcome="error"}[30m])) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Routing records to their owners keeps failing, so new people and companies stay without an owner; look for routing.round_failed in the engine log."
+
+      - alert: OutflareRoutingBehind
+        expr: max(outflare_routing_brands_behind) > 0
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "A brand has had more records with no owner than routing gets through for over an hour; check the Routing row for a pool whose members have all left (no_member) or an import larger than the rounds keep up with."
+
+      - alert: OutflareRevenueCountFailing
+        # Every 15 minutes each brand's subscriptions are added up into
+        # its day's revenue row, which the Revenue page reads.
+        expr: sum(increase(outflare_revenue_counts_total{outcome="error"}[1h])) > 3
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Counting a brand's recurring revenue keeps failing, so its Revenue page shows old numbers and misses what moved; look for revenue.count_failed in the engine log."
+
+      - alert: OutflareRevenueRoundSlow
+        expr: max(outflare_revenue_round_seconds) > 600
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "A round of counting every brand's recurring revenue takes over 10 minutes of its 15; check the Revenue row and the database's slow queries before rounds overlap."
 
       - alert: OutflareEventInboxBehind
         # Events sent to POST /v1/brands/{brand}/events are saved, then
@@ -1773,3 +1864,15 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "Sales send or sync jobs keep taking over two minutes. Check provider response times and the size of historical catch-up work in the Sales email row."
+      - alert: OutflareSalesReportingFailing
+        expr: (sum(increase(outflare_sales_reporting_read_seconds_count{outcome="error"}[15m])) / clamp_min(sum(increase(outflare_sales_reporting_read_seconds_count[15m])), 1) > 0.5) and sum(increase(outflare_sales_reporting_read_seconds_count[15m])) >= 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sales reporting source reads are failing. Check the Sales reporting panels, the portal connection and its reporting deployment."
+      - alert: OutflareSalesReportingSlow
+        expr: histogram_quantile(0.95, sum by (le,read) (rate(outflare_sales_reporting_read_seconds_bucket[15m]))) > 5
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Sales reporting source reads are slow. Check source query performance; origin lookups stop after eight seconds and leave the queue usable."

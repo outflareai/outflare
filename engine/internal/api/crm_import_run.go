@@ -19,6 +19,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/inbox"
 	"github.com/outflareai/outflare/engine/internal/indexability"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/signals"
 	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
 
@@ -267,6 +268,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobSalesSend, s.salesSendJob)
 	q.Handle(jobSalesSync, s.salesSyncJob)
 	q.Handle(jobCRMMailPrivacy, s.crmMailPrivacyJob)
+	q.Handle(signals.JobConversation, s.conversationJob)
 	q.Handle(jobCRMCalendarWorkspace, s.crmCalendarWorkspaceJob)
 	q.Handle(jobCRMMailSend, s.crmMailSendJob)
 	q.Handle(jobCRMImport, s.crmImportJob)

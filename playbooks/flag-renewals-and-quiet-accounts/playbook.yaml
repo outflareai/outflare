@@ -1,0 +1,58 @@
+id: flag-renewals-and-quiet-accounts
+version: 1
+title: Flag renewals and quiet accounts for their owners
+summary: Put every company that goes quiet or comes up for renewal in the Needs attention queue, with an owner and a due date.
+description: |
+  Renewals slip and accounts fade when nobody is told in time. This
+  playbook adds two rules and two journeys about companies, as drafts.
+  One rule spots a company where nobody has used the product for two
+  weeks; the other spots a renewal date coming within 60 days. Their
+  journeys raise a signal in Needs attention, so the account's owner sees
+  it with a due date, add a task to prepare the renewal and open a
+  renewal deal in the pipeline. It also adds
+  a "Renews on" date to companies if you don't have one. Nothing goes
+  live until you've checked the dry runs and turned them on.
+tier: obvious
+goals: [retention, revenue]
+publisher: outflare
+author: { github: outflareai }
+kit: account-signals
+needs:
+  data:
+    - { check: records, label: Companies in the CRM with their owners }
+    - { check: customer_events, label: Product usage events sent to Outflare }
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: usage_event
+    label: The event that shows someone is using the product
+    example: project_updated
+steps:
+  - say: Check the usage event the brand receives, and how many companies have an owner and a renewal date.
+    tools: [listBrandEventDefinitions, listBrandCustomerEvents, listBrandRecords]
+  - say: Check what the setup kit would add, then add it with that event. Its rules and journeys arrive as drafts.
+    tools: [previewKit, applyKit]
+  - say: Dry-run both rules to see how many companies they would have caught, and test both journeys with one company.
+    tools: [simulateBrandRule, getBrandJourney, testBrandJourney]
+  - say: Ask a person to turn the rules and journeys on, then show what is waiting in Needs attention.
+    tools: [listSignalTypes, listSignals]
+guardrails:
+  - The rules and journeys are turned on only after a person approves them.
+  - Signals and tasks go to the team; nothing is sent to a customer.
+measure:
+  - metric: Signals picked up in time
+    how: "Share of signals accepted before their due date."
+  - metric: Renewals prepared
+    how: "Share of renewals with a done signal before the renewal date."
+prompt: |
+  Run the "Flag renewals and quiet accounts" playbook for {{brand}}. Usage
+  arrives as {{usage_event}}. Check that event, and how many companies
+  have an owner and a renewal date, then preview and apply the
+  account-signals setup kit. Dry-run both rules over the last 30 days and
+  test both journeys with one company. Don't turn anything on: show me
+  the dry runs and the tests first.
+example: |
+  For Northpeak, "Company went quiet" would have caught six companies in
+  the last 30 days, and nine renewals fall within the next 60 days; four
+  of those companies have no owner yet.

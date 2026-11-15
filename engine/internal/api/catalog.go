@@ -199,7 +199,7 @@ var billingFields = []fieldView{
 // (alerts go to them).
 var workFields = []fieldView{
 	builtinField("tags", "Tags", "text", "", "", true, true, "Labels such as vip, churn-risk or partner: lowercase, up to 50 characters each."),
-	builtinField("owner", "Owner", "actor_reference", "", "", false, true, "The workspace member who owns the record. Alerts about it go to them."),
+	builtinField("owner", "Owner", "actor_reference", "", "", false, true, "Who owns the record: a workspace member, or someone in the team directory with no sign-in. Alerts about it go to a member who owns it."),
 }
 
 // prFields are digital PR's facts: a person who writes for an outlet (a
@@ -211,19 +211,33 @@ var prFields = []fieldView{
 	builtinField("outlet_tier", "Outlet tier", "select", "outlet_tier", "", false, true, "What kind of outlet this is, for media lists: national, trade, regional, local, or a newsletter or blog."),
 }
 
+// dealFields are built in on the Deal type every brand starts with (the
+// type itself is the brand's own): why a lost deal was lost, so a
+// company's page can say why they didn't move forward, and who owns and
+// who sourced it, for quotas and commission.
+var dealFields = []fieldView{
+	builtinField("lost_reason", "Lost reason", "select", "lost_reason", "", false, true, "Why a lost deal was lost."),
+	builtinField("lost_note", "Lost note", "text", "", "", false, false, "What happened, in a sentence, and when to try again."),
+	builtinField("owner", "Owner", "actor_reference", "", "", false, true, "Who owns the deal, a workspace member or someone in the team directory with no sign-in: it counts towards their quota and commission. Empty, the deal follows the owner of its person or company."),
+	builtinField("lead_source", "Lead source", "select", "lead_source", "", false, true, "Inbound (they came to you) or outbound (you went to them). Empty, a deal tied to outreach is outbound and any other inbound. Commission rules can pay the two differently."),
+	builtinField("sourced_by", "Sourced by", "actor_reference", "", "", false, true, "The workspace member who found the deal, when that is someone other than its owner. Commission rules can pay them."),
+	builtinField("co_owner", "Second owner", "actor_reference", "", "", false, true, "Someone who shares the deal with its owner. The deal's amount is split between the two for quotas, the forecast and commission."),
+	builtinField("co_owner_percent", "Second owner's share (%)", "number", "", "", false, false, "The percent of the deal that is the second owner's, from 1 to 99. Empty, the two share it evenly."),
+}
+
 // lateBuiltins are built-in field keys added after workspaces could make
 // their own fields, so a workspace may already have a field of that key.
 // Where it does, its own field wins and the built-in is left out.
 var lateBuiltins = func() []string {
-	keys := make([]string, 0, len(billingFields)+len(touchFields)+len(workFields)+len(prFields))
-	for _, f := range slices.Concat(billingFields, touchFields, workFields, prFields) {
+	keys := make([]string, 0, len(billingFields)+len(touchFields)+len(workFields)+len(prFields)+len(accountPlanFields)+len(dealFields)+len(groupFields))
+	for _, f := range slices.Concat(billingFields, touchFields, workFields, prFields, accountPlanFields, dealFields, groupFields) {
 		keys = append(keys, f.Key)
 	}
 	return keys
 }()
 
 // lateOptionSets are built-in option sets added the same way.
-var lateOptionSets = []string{"billing_status", "outlet_tier"}
+var lateOptionSets = []string{"billing_status", "outlet_tier", "lost_reason", "lead_source"}
 
 // builtinTypes are the record types every workspace has. A person's emails,
 // phones and ids are identities, not fields, so one email is never stored
@@ -243,7 +257,7 @@ var builtinTypes = []recordTypeView{
 			builtinField("linkedin_url", "LinkedIn", "url", "", "", false, false, ""),
 			builtinField("lifecycle_stage", "Lifecycle stage", "status", "lifecycle_stage", "", false, true, ""),
 			billingFields[0], billingFields[1], billingFields[2], billingFields[3], billingFields[4],
-		}, touchFields, workFields, prFields[:2])},
+		}, touchFields, workFields, prFields[:2], accountPlanFields)},
 	{Key: "account", Name: "Company", Plural: "Companies", Builtin: true,
 		Description: "A company or other organization: a customer account, a prospect company, a partner. Its domains are identities.",
 		Fields: []fieldView{
@@ -255,6 +269,8 @@ var builtinTypes = []recordTypeView{
 			builtinField("lifecycle_stage", "Lifecycle stage", "status", "lifecycle_stage", "", false, true, ""),
 			billingFields[0], billingFields[1], billingFields[2], billingFields[3], billingFields[4],
 			workFields[0], workFields[1], prFields[2],
+			accountPlanFields[0], accountPlanFields[1], accountPlanFields[2], accountPlanFields[3],
+			groupFields[0],
 		}},
 }
 
@@ -294,6 +310,10 @@ var builtinOptionSets = func() []optionSetView {
 			"churned", "Churned", "other", "Other")},
 		{Key: "billing_status", Name: "Billing status", Builtin: true, Options: opts(
 			"trialing", "Trialing", "active", "Active", "past_due", "Past due", "canceled", "Canceled")},
+		{Key: "lost_reason", Name: "Lost reason", Builtin: true, Options: opts(
+			"price", "Price", "timing", "Timing", "competitor", "Chose a competitor", "no_budget", "No budget", "no_need", "No need",
+			"missing_feature", "Missing feature", "no_decision", "No decision", "went_quiet", "Went quiet", "other", "Other")},
+		{Key: "lead_source", Name: "Lead source", Builtin: true, Options: opts("inbound", "Inbound", "outbound", "Outbound")},
 		{Key: "outlet_tier", Name: "Outlet tier", Builtin: true, Options: opts(
 			"national", "National", "trade", "Trade", "regional", "Regional", "local", "Local", "newsletter", "Newsletter or blog")},
 	}
@@ -382,6 +402,9 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws, brand string, withEvents boo
 		return nil, err
 	}
 	c.Types = append(c.Types, custom...)
+	if t := c.recordType("deal"); t != nil {
+		t.Fields = append(t.Fields, dealFields...)
+	}
 	rows, err = q.Query(ctx, `
 		SELECT record_type, key, label, description, value_type, option_set, multiple, target_type, write_policy, precedence,
 		       sensitivity, filterable, archived_at IS NOT NULL, manual_edit_days

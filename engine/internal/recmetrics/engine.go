@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"reflect"
 	"slices"
 	"strconv"
@@ -159,7 +160,7 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 				continue
 			}
 			val, isNum := number(props, d.Property)
-			if (d.Aggregate == Sum || d.Aggregate == Min || d.Aggregate == Max) && !isNum {
+			if (d.Aggregate == Sum || d.Aggregate == Min || d.Aggregate == Max || d.Aggregate == Latest) && !isNum {
 				metrics.RecordMetricUpdated("no_value")
 				continue
 			}
@@ -175,9 +176,10 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 					if _, err := tx.Exec(ctx, `INSERT INTO metric_buckets (workspace_id, brand_id, metric_id, record_id, product_id, day, n, total, lo, hi, last_at)
 						VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $8, $9)
 						ON CONFLICT (metric_id, record_id, product_id, day) DO UPDATE SET n = metric_buckets.n + 1,
-							total = metric_buckets.total + EXCLUDED.total, lo = LEAST(metric_buckets.lo, EXCLUDED.lo),
+							total = CASE WHEN $10 THEN CASE WHEN EXCLUDED.last_at >= metric_buckets.last_at THEN EXCLUDED.total ELSE metric_buckets.total END
+								ELSE metric_buckets.total + EXCLUDED.total END, lo = LEAST(metric_buckets.lo, EXCLUDED.lo),
 							hi = GREATEST(metric_buckets.hi, EXCLUDED.hi), last_at = GREATEST(metric_buckets.last_at, EXCLUDED.last_at)`,
-						ws, brand, d.ID, t.rec, p, day, val, nullableNum(val, isNum), occurred); err != nil {
+						ws, brand, d.ID, t.rec, p, day, val, nullableNum(val, isNum), occurred, d.Aggregate == Latest); err != nil {
 						return err
 					}
 					if err := refreshValue(ctx, tx, ws, brand, d.Definition, t.rec, p); err != nil {
@@ -249,6 +251,13 @@ func publish(ctx context.Context, tx pgx.Tx, ws, rec string, live bool) error {
 	_ = json.Unmarshal(newRaw, &newV)
 	if len(newV) == 0 {
 		newV = nil
+	} else {
+		if err := addChanges(ctx, tx, rec, newV); err != nil {
+			return err
+		}
+		if newRaw, err = json.Marshal(newV); err != nil {
+			return err
+		}
 	}
 	if reflect.DeepEqual(oldV, newV) {
 		return nil
@@ -266,6 +275,50 @@ func publish(ctx context.Context, tx pgx.Tx, ws, rec string, live bool) error {
 		change.Old = oldV
 	}
 	return customers.FieldChanged(ctx, tx, ws, change)
+}
+
+// addChanges adds each metric's trend to a record's metrics: <key>_change
+// is how far the metric is from the same metric over the window just
+// before, in percent (-40 is down 40%). A brand gets it for every count,
+// sum or days metric that has such a twin (usage_7d and usage_prev_7d),
+// overall and per product; with nothing in the window before there is no
+// trend to give.
+func addChanges(ctx context.Context, tx pgx.Tx, rec string, m map[string]any) error {
+	rows, err := tx.Query(ctx, `SELECT c.key, p.key FROM metric_definitions c
+		JOIN metric_definitions p ON p.brand_id = c.brand_id AND p.status = 'active' AND p.aggregate = c.aggregate AND p.events = c.events
+			AND p.usage = c.usage AND p.property IS NOT DISTINCT FROM c.property AND p.window_days = c.window_days
+			AND p.offset_days = c.offset_days + c.window_days
+		WHERE c.brand_id = (SELECT brand_id FROM records WHERE id = $1) AND c.status = 'active' AND c.aggregate IN ('count', 'sum', 'days')
+		ORDER BY c.key, p.key`, rec)
+	if err != nil {
+		return err
+	}
+	pairs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) ([2]string, error) {
+		var p [2]string
+		return p, row.Scan(&p[0], &p[1])
+	})
+	if err != nil || len(pairs) == 0 {
+		return err
+	}
+	add := func(vals map[string]any) {
+		for _, p := range pairs {
+			before, ok := vals[p[1]].(float64)
+			if !ok || before <= 0 {
+				continue
+			}
+			now, _ := vals[p[0]].(float64)
+			vals[p[0]+"_change"] = math.Round((now - before) / before * 100)
+		}
+	}
+	add(m)
+	if by, ok := m["by_product"].(map[string]any); ok {
+		for _, v := range by {
+			if vals, ok := v.(map[string]any); ok {
+				add(vals)
+			}
+		}
+	}
+	return nil
 }
 
 // backfillJob rebuilds a metric from stored events, quietly: it writes the
@@ -325,7 +378,12 @@ func (s *Service) backfillJob(ctx context.Context, job jobs.Job) error {
 		value := `CASE WHEN e.properties->>$5 ~ '^\s*-?[0-9]+(\.[0-9]+)?\s*$' THEN (e.properties->>$5)::numeric END`
 		match := `e.workspace_id = $1 AND e.brand_id = $2 AND ($3::text[] && ARRAY[e.name] OR ($4 AND e.usage))
 			AND e.occurred_at >= (now() AT TIME ZONE 'UTC')::date - $6::int + 1 AND e.received_at < (SELECT backfilled_at FROM metric_definitions WHERE id = $7)`
-		needValue := d.Aggregate == Sum || d.Aggregate == Min || d.Aggregate == Max
+		needValue := d.Aggregate == Sum || d.Aggregate == Min || d.Aggregate == Max || d.Aggregate == Latest
+		// A day keeps the sum of its values, or for latest its last one.
+		total := `COALESCE(sum(v), 0)`
+		if d.Aggregate == Latest {
+			total = `(array_agg(v ORDER BY occurred_at DESC))[1]`
+		}
 		if needValue {
 			match += ` AND ` + value + ` IS NOT NULL`
 		}
@@ -351,7 +409,7 @@ func (s *Service) backfillJob(ctx context.Context, job jobs.Job) error {
 		}
 		tag, err := tx.Exec(ctx, `WITH hits AS (`+levels+`), split AS (`+products+`)
 			INSERT INTO metric_buckets (workspace_id, brand_id, metric_id, record_id, product_id, day, n, total, lo, hi, last_at)
-			SELECT $1, $2, $7, rec, product_id, (occurred_at AT TIME ZONE 'UTC')::date, count(*), COALESCE(sum(v), 0), min(v), max(v), max(occurred_at)
+			SELECT $1, $2, $7, rec, product_id, (occurred_at AT TIME ZONE 'UTC')::date, count(*), `+total+`, min(v), max(v), max(occurred_at)
 			FROM split GROUP BY rec, product_id, (occurred_at AT TIME ZONE 'UTC')::date`,
 			ws, brand, d.Events, d.Usage, d.Property, d.span(), d.ID)
 		if err != nil {

@@ -134,9 +134,6 @@ func Check(r Rule) string {
 	if t.Kind == KindAudience && r.RecordType != "person" && r.RecordType != "account" {
 		return "audience rules are about the records of their list: record_type person, or account for a list of companies"
 	}
-	if t.Kind != KindChange && t.Kind != KindAudience && r.RecordType != "person" {
-		return "event and absence rules are about people (record_type person); change rules can watch any record type"
-	}
 	switch t.Kind {
 	case KindEvent:
 		if !journeys.ValidEventName(t.Event) {
@@ -218,6 +215,22 @@ func WatchFields(t Trigger, conds []Condition) []string {
 		}
 	}
 	return out
+}
+
+// Daily reports whether a change rule's conditions can come true with no
+// change to the record, only because a day passed: one of them compares a
+// field with a date relative to today (renews_on lt +60d). Such a rule is
+// also tested against every record once a day.
+func (r Rule) Daily() bool {
+	if r.Trigger.Kind != KindChange {
+		return false
+	}
+	for _, c := range r.Conditions {
+		if _, ok := journeys.RelativeDate(c.Value, time.Now()); ok && c.Attribute != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Loops reports whether activating r would let rules set each other off in

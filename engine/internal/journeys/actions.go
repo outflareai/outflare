@@ -19,6 +19,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/reviewrequests"
+	"github.com/outflareai/outflare/engine/internal/signals"
 	"github.com/outflareai/outflare/engine/internal/smartlists"
 )
 
@@ -52,6 +53,11 @@ type StepKind struct {
 	Outputs []string `json:"outputs"`
 	// The field naming the step to go to when it fails, if it can fail.
 	ErrorOutput string `json:"error_output,omitempty"`
+	// Whether a journey about companies can take it: it acts on a record
+	// and needs no person to send to or enroll.
+	Companies bool `json:"companies"`
+	// Deals says whether a journey about deals can take the step.
+	Deals bool `json:"deals"`
 }
 
 // Requirement is something a step needs the workspace to have connected.
@@ -102,6 +108,18 @@ func schema(props map[string]any, required ...string) map[string]any {
 		required = []string{}
 	}
 	return map[string]any{"type": "object", "properties": props, "required": required}
+}
+
+// with adds one more key to a settings schema.
+func with(s map[string]any, key string, value any) map[string]any {
+	s[key] = value
+	return s
+}
+
+// titled gives a setting the name the builder shows for it.
+func titled(title string, s map[string]any) map[string]any {
+	s["title"] = title
+	return s
 }
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
@@ -318,9 +336,10 @@ var Actions = []actionDef{
 		check: checkConsent,
 		run:   setConsent},
 	{StepKind: StepKind{Kind: "assign_owner", Group: "data", Label: "Assign an owner",
-		Description: "Make a workspace member the person's owner: one member, or of several the one who owns the fewest people now, so new people are spread evenly. Someone who already has an owner keeps them unless replace_owner is on.",
+		Description: "Make a workspace member the person's owner: one member, of several the one who owns the fewest people now, so new people are spread evenly, or whoever the brand's routing rules pick. Someone who already has an owner keeps them unless replace_owner is on.",
 		Settings: schema(map[string]any{"owner_id": map[string]any{"type": "string", "format": "uuid", "description": "One member's user id.", "x-outflare-picker": "member"},
 			"members":       map[string]any{"type": "array", "minItems": 2, "maxItems": 50, "items": map[string]any{"type": "string", "format": "uuid", "x-outflare-picker": "member"}, "description": "Members to spread people between evenly."},
+			"routing":       map[string]any{"type": "boolean", "title": "Use the routing rules", "description": "Let the brand's routing rules pick the owner, instead of owner_id or members."},
 			"replace_owner": map[string]any{"type": "boolean", "description": "Change an owner already set (off: keep it)."}})},
 		check: checkOwner,
 		run:   assignOwner},
@@ -334,6 +353,14 @@ var Actions = []actionDef{
 		}, "type", "field", "stage")}, "deal")},
 		check: checkDealMove,
 		run:   moveDeal},
+	{StepKind: StepKind{Kind: "open_renewal_deal", Group: "data", Label: "Open a renewal deal",
+		Description: "For a company: open a deal for each renewal it has coming up (its own Renews on date, and its agreements'), with the renewal's value, closing on the renewal date and linked to the company. A renewal that has had a deal for that date never gets a second one.",
+		Settings: schema(map[string]any{
+			"stage":       str("The deal stage it opens at: one of the deal stages' keys. Default: the first stage."),
+			"within_days": map[string]any{"type": "integer", "minimum": 1, "maximum": 365, "description": "How many days ahead a renewal counts. Default 90."},
+		})},
+		check: checkRenewalDeal,
+		run:   openRenewalDeal},
 	{StepKind: StepKind{Kind: "alert", Group: "notify", Label: "Alert",
 		Description: "Raise an alert about the person: to their owner (to owner, the default) or to the owners and admins. It is emailed or sent to Slack as the workspace's alert settings say.",
 		Settings: schema(map[string]any{"title": str("What the alert says, up to 120 characters."), "text": str("A line of detail, up to 500 characters."),
@@ -350,6 +377,22 @@ var Actions = []actionDef{
 			return ""
 		},
 		run: raiseAlert},
+	{StepKind: StepKind{Kind: "raise_signal", Group: "notify", Label: "Raise a signal",
+		Description: "Put the person in the Needs attention queue with a signal of one of the brand's types (churn risk, upsell, renewal), owned by their owner and due as the type says. Skipped when they already have an open signal of the type, or five open signals.",
+		Settings: schema(map[string]any{"signal_type": str("The signal type's key, such as churn_risk. The brand's signal types list them."),
+			"title": str("What to act on, up to 300 characters. Default: the type's name."), "text": str("Why, and what to do, up to 2,000 characters.")}, "signal_type")},
+		check: func(st Step) string {
+			switch {
+			case !signals.ValidKey(st.SignalType):
+				return "signal_type is a signal type's key, such as churn_risk"
+			case len(st.Title) > 300:
+				return "title is at most 300 characters"
+			case len(st.Text) > 2000:
+				return "text is at most 2,000 characters"
+			}
+			return ""
+		},
+		run: raiseSignal},
 	{StepKind: StepKind{Kind: "slack", Group: "notify", Label: "Post to Slack",
 		Description: "Post a message to a channel in the workspace's own Slack. {{person.x}}, {{event.x}} and {{vars.x}} fill in. Tried again for about a minute when Slack is busy.",
 		Requires:    []Requirement{{Connection: "slack", Label: "Slack (Settings, Connections)"}},
@@ -374,6 +417,18 @@ var Actions = []actionDef{
 		check:    checkWebhook,
 		call:     webhookCall,
 		attempts: 10},
+	{StepKind: StepKind{Kind: "outflare_action", Group: "integrations", Label: "Do an Outflare action",
+		Description: "Do anything Outflare's API can do in this brand: pause an ad, add a note, start a task in another module. It runs as one of your agents, so that agent's grants decide: a change it may make on its own runs, anything else waits for a person in Agents, and what its grants refuse fails the step. {{person.x}}, {{event.x}} and {{vars.x}} fill in the path and body.",
+		Settings: with(schema(map[string]any{
+			"agent_id": titled("The agent it runs as", ref("agent", "The agent it runs as: an API token with approvals on (Agents).")),
+			"method":   titled("Method", enum("POST (the default), PUT, PATCH or DELETE", "POST", "PUT", "PATCH", "DELETE")),
+			"path":     titled("API path", str("The API path after /v1/brands/{brand}/, such as records/{{person.id}}/notes. The API reference lists them.")),
+			"body":     map[string]any{"title": "Body", "description": "The JSON body. A string that is only {{x}} copies the value as it is (a number stays a number).", "x-outflare-picker": "json"},
+			"save_as":  titled("Keep the answer as", str("Keep the answer in vars.<save_as> as {status, body}: lowercase letters, digits and _.")),
+		}, "agent_id", "path"), "x-outflare-presets", ActionPresets)},
+		check:    checkOutflareAction,
+		call:     outflareActionCall,
+		attempts: 5},
 	{StepKind: StepKind{Kind: "push_to_sequencer", Group: "integrations", Label: "Add to a sequencer campaign",
 		Description: "Add the person to the Smartlead, Instantly or EmailBison campaign a sequence is linked to, through the workspace's own connection; the sequencer sends from there. Someone suppressed, without a verified email, already in the campaign or left out by the sequencer is skipped and goes on. Tried again for about 40 minutes when the sequencer is busy.",
 		Requires:    []Requirement{{Connection: "sequencer", Label: "Smartlead, Instantly or EmailBison, with a campaign linked to the sequence (Settings, Connections)"}},
@@ -454,6 +509,10 @@ func StepKinds() []StepKind {
 	out := slices.Clone(builtinKinds)
 	for _, a := range Actions {
 		out = append(out, a.StepKind)
+	}
+	for i := range out {
+		out[i].Companies = companySteps[out[i].Kind]
+		out[i].Deals = dealStep(out[i].Kind)
 	}
 	return out
 }
@@ -760,6 +819,39 @@ func raiseAlert(ctx context.Context, x *act) (string, string, error) {
 		return "skipped", "already raised for this run", nil
 	}
 	return "done", "", nil
+}
+
+// raiseSignal puts the run's person in the brand's Needs attention queue.
+func raiseSignal(ctx context.Context, x *act) (string, string, error) {
+	if x.j.brandID == nil {
+		return "failed", "choose a brand for this journey", nil
+	}
+	if err := signals.EnsureTypes(ctx, x.tx, x.ws, *x.j.brandID); err != nil {
+		return "", "", err
+	}
+	var known bool
+	if err := x.tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM signal_types WHERE brand_id = $1 AND key = $2 AND archived_at IS NULL)`, *x.j.brandID, x.st.SignalType).Scan(&known); err != nil {
+		return "", "", err
+	}
+	if !known {
+		return "failed", "the brand has no signal type " + x.st.SignalType, nil
+	}
+	_, outcome, err := signals.Raise(ctx, x.tx, signals.Signal{WorkspaceID: x.ws, BrandID: *x.j.brandID, RecordID: x.r.recordID, Type: x.st.SignalType,
+		Title: strings.TrimSpace(x.st.Title), Detail: strings.TrimSpace(x.st.Text), Source: "journey",
+		Data: map[string]any{"journey_id": x.j.id, "run_id": x.r.id, "step": x.st.ID}})
+	if err != nil {
+		return "", "", err
+	}
+	metrics.SignalRaised("journey", outcome)
+	switch outcome {
+	case signals.Raised:
+		return "done", "", nil
+	case signals.Duplicate:
+		return "skipped", "they already have an open signal of this type", nil
+	case signals.Capped:
+		return "skipped", "they already have five open signals", nil
+	}
+	return "skipped", "no such person in the brand", nil
 }
 
 // describeAlert reads a journey alert's title and text from its step, so

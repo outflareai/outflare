@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import type { AgentRun, KitPlan, PlaybookAutomation, PlaybookConnectionNeed, WorkspacePlaybook } from "@outflare/sdk";
+import type { AgentRun, KitPlan, PlaybookAutomation, PlaybookConnectionNeed, PlaybookHome, WorkspacePlaybook } from "@outflare/sdk";
 import { track } from "@/lib/analytics";
 import { PlaybookAutomations } from "@/components/playbook-automations";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { KitFileSheet, KitPlanList } from "@/components/kit-export";
 import { budgetCents, RunModePicker } from "./AgentRuns";
 import { useBrand } from "@/lib/brand";
+import { PlaybookHomeSection, PlaybookLiftSection } from "@/components/playbook-home";
+import { OwnPlaybookBuilder, OwnPlaybookPage, type OwnPlaybook } from "./OwnPlaybooks";
 import { api, errorMessage } from "../api";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, PageHeader, toast, type tones } from "../ui";
 import { plural } from "../format";
@@ -18,7 +19,7 @@ import type { Tab } from "../App";
 // mode the person chose and the team's grants, and lands in the modules it
 // uses (journeys, the inbox, campaign links, fixes).
 
-type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
+type Props = { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: (tab: Tab, item?: string) => void };
 
 const tierLabel: Record<WorkspacePlaybook["tier"], string> = { obvious: "Obvious", clever: "Clever", edge: "Edge case" };
 const tierTone: Record<WorkspacePlaybook["tier"], keyof typeof tones> = { obvious: "green", clever: "amber", edge: "blue" };
@@ -29,16 +30,16 @@ const contributeURL = "https://github.com/outflareai/outflare/tree/main/playbook
 
 const needKey = (n: PlaybookConnectionNeed) => n.capability ?? n.category ?? n.label;
 
-export function Playbooks({ ws, canManage, go }: Props) {
+export function Playbooks({ ws, canManage, open, onOpen: setOpen, go }: Props) {
   // Automations are the picked brand's.
   const autoBrand = useBrand(ws).brand?.id;
   const [list, setList] = useState<WorkspacePlaybook[] | null>(null);
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("all");
-  const [open, setOpen] = useState("");
   const [names, setNames] = useState<Record<string, string>>({});
   const [autos, setAutos] = useState<PlaybookAutomation[]>([]);
   const [kitFile, setKitFile] = useState(false);
+  const [own, setOwn] = useState<OwnPlaybook[]>([]);
 
   const load = useCallback(async () => {
     const { data, error } = await api.GET("/v1/workspaces/{ws}/playbooks", { params: { path: { ws } } });
@@ -47,6 +48,8 @@ export function Playbooks({ ws, canManage, go }: Props) {
     setList(data.data);
     const a = autoBrand ? await api.GET("/v1/brands/{brand}/playbook-automations", { params: { path: { brand: autoBrand } } }) : { data: undefined };
     setAutos(a.data?.data ?? []);
+    const mine = autoBrand ? await api.GET("/v1/brands/{brand}/own-playbooks", { params: { path: { brand: autoBrand } } }) : { data: undefined };
+    setOwn(mine.data?.data ?? []);
   }, [ws, autoBrand]);
   useEffect(() => {
     load();
@@ -59,6 +62,18 @@ export function Playbooks({ ws, canManage, go }: Props) {
   const current = list?.find((p) => p.id === open);
 
   if (!list) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
+  // The brand's own playbooks: the builder, and each one's page.
+  if (autoBrand && open.startsWith("own-")) {
+    const mine = own.find((p) => `own-${p.id}` === open);
+    const back = (to = "") => {
+      setOpen(to);
+      load();
+    };
+    if (open === "own-new" && canManage) return <OwnPlaybookBuilder brandId={autoBrand} onDone={(id) => back(id ? `own-${id}` : "")} />;
+    if (mine) return <OwnPlaybookPage key={mine.id} brandId={autoBrand} playbook={mine} canManage={canManage} go={go} onClose={() => back()} onChanged={load} />;
+  }
+  // A playbook opens as a page of its own.
+  if (current) return <PlaybookPage key={current.id} ws={ws} playbook={current} names={names} canManage={canManage} go={go} onClose={() => { setOpen(""); load(); }} />;
   return (
     <div className="space-y-6">
       <PageHeader
@@ -68,10 +83,54 @@ export function Playbooks({ ws, canManage, go }: Props) {
           <div className="flex flex-wrap items-center gap-3">
             <a className="text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href={contributeURL} target="_blank" rel="noreferrer">Write your own playbook</a>
             {canManage && <Button variant="ghost" onClick={() => setKitFile(true)}>Apply a kit file</Button>}
+            {canManage && autoBrand && (
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setOpen("own-new");
+                  track("ui.own_playbook_builder_opened");
+                }}
+              >
+                New playbook
+              </Button>
+            )}
           </div>
         }
       />
       <ErrorText>{error}</ErrorText>
+      {own.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-[13px] font-medium text-muted-foreground">Your playbooks</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {own.map((p) => {
+              const off = p.parts.filter((x) => (x.kind === "rule" || x.kind === "journey") && x.status !== "active").length;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setOpen(`own-${p.id}`);
+                    track("ui.own_playbook_opened", { parts: p.parts.length });
+                  }}
+                  className="flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-4 text-left transition-colors hover:border-ring/60 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+                >
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <Badge tone="blue">Yours</Badge>
+                    {p.parts.length === 0 ? <Badge tone="grey">Empty</Badge> : off > 0 ? <Badge tone="amber">{off} to turn on</Badge> : <Badge tone="green">Running</Badge>}
+                  </span>
+                  <span className="text-[14px] font-medium leading-snug">{p.title}</span>
+                  {p.summary && <span className="text-[13px] text-muted-foreground">{p.summary}</span>}
+                  <span className="text-[12px] text-muted-foreground">
+                    {plural(p.parts.length, "part")}
+                    {p.signals.open > 0 ? ` · ${p.signals.open} need attention` : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <h2 className="pt-2 text-[13px] font-medium text-muted-foreground">Ready-made playbooks</h2>
+        </section>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <select aria-label="Show" className={field} value={view} onChange={(e) => setView(e.target.value as View)}>
           {Object.entries(views).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -109,12 +168,11 @@ export function Playbooks({ ws, canManage, go }: Props) {
         </div>
       )}
       {kitFile && <KitFileSheet ws={ws} onClose={() => setKitFile(false)} onApplied={() => { setKitFile(false); go("journeys"); }} />}
-      {current && <PlaybookSheet ws={ws} playbook={current} names={names} canManage={canManage} go={go} onClose={() => { setOpen(""); load(); }} />}
     </div>
   );
 }
 
-function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws: string; playbook: WorkspacePlaybook; names: Record<string, string>; canManage: boolean; go: Props["go"]; onClose: () => void }) {
+function PlaybookPage({ ws, playbook: p, names, canManage, go, onClose }: { ws: string; playbook: WorkspacePlaybook; names: Record<string, string>; canManage: boolean; go: Props["go"]; onClose: () => void }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -144,6 +202,37 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
     });
   }, [ws, p.kit, brandId]);
 
+  // What the playbook has set up in this brand, and what it has done.
+  const [home, setHome] = useState<PlaybookHome | null>(null);
+  const loadHome = useCallback(() => {
+    if (!p.kit || !brandId) return;
+    api.GET("/v1/brands/{brand}/playbooks/{id}/home", { params: { path: { brand: brandId, id: p.id } } }).then(({ data }) => data && setHome(data));
+  }, [p.kit, p.id, brandId]);
+  useEffect(loadHome, [loadHome]);
+
+  // Set up the kit without starting a run: its parts arrive as drafts.
+  const kitInputs = kit?.inputs ?? [];
+  const [settingUp, setSettingUp] = useState(false);
+  // The share of whoever enters its journeys to hold back, to measure it.
+  const [holdout, setHoldout] = useState(0);
+  async function setUp() {
+    if (!p.kit || !brandId) return;
+    const missingInput = kitInputs.find((i) => !i.optional && !i.default && !values[i.name]?.trim());
+    if (missingInput) return setError(`Fill in "${missingInput.label}" below first.`);
+    setError("");
+    setSettingUp(true);
+    const inputs = Object.fromEntries(kitInputs.map((i) => [i.name, values[i.name]?.trim() ?? ""]).filter(([, v]) => v !== ""));
+    const { data, error } = await api.POST("/v1/brands/{brand}/kits/{id}/apply", { params: { path: { brand: brandId, id: p.kit } }, body: { inputs, ...(holdout > 0 ? { holdout_percent: holdout } : {}) } });
+    setSettingUp(false);
+    if (error || !data || !("items" in data)) return setError(errorMessage(error));
+    track("ui.playbook_set_up", { playbook_id: p.id, changes: data.changes, holdout_percent: holdout });
+    toast("Set up. Its rules and journeys are drafts: check each one, then turn it on.");
+    // The plan as it stands now: nothing left to add.
+    api.GET("/v1/brands/{brand}/kits/{id}/preview", { params: { path: { brand: brandId, id: p.kit } } }).then(({ data }) => data && setKit(data));
+    setApplyKit(false);
+    loadHome();
+  }
+
   async function start(e: FormEvent) {
     e.preventDefault();
     const cents = mode === "autonomous" ? budgetCents(budget) : null;
@@ -159,16 +248,18 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
   }
 
   return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-        <SheetHeader>
-          <SheetTitle>{p.title}</SheetTitle>
-          <SheetDescription>
-            {tierLabel[p.tier]} · {p.publisher === "community" ? <>Community playbook by <a className="underline underline-offset-4" href={`https://github.com/${p.author.github}`} target="_blank" rel="noreferrer">@{p.author.github}</a></> : "By Outflare"} · <a className="underline underline-offset-4" href={p.source_url} target="_blank" rel="noreferrer">Source</a>
-          </SheetDescription>
-        </SheetHeader>
-        <div className="space-y-6 px-4 pb-8 text-[13px]">
+    <div className="space-y-6">
+      <PageHeader
+        title={p.title}
+        back={{ label: "Playbooks", onClick: onClose }}
+        description={<>{tierLabel[p.tier]} · {p.publisher === "community" ? <>Community playbook by <a className="underline underline-offset-4" href={`https://github.com/${p.author.github}`} target="_blank" rel="noreferrer">@{p.author.github}</a></> : "By Outflare"} · <a className="underline underline-offset-4" href={p.source_url} target="_blank" rel="noreferrer">Source</a></>}
+      />
+      <div className="grid items-start gap-8 text-[13px] lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+        <div className="min-w-0 space-y-6">
           <p className="whitespace-pre-line text-muted-foreground">{p.description || p.summary}</p>
+
+          {home?.installed && <PlaybookHomeSection home={home} go={go} />}
+          {home?.installed && brandId && home.parts.some((x) => x.kind === "journey") && <PlaybookLiftSection brand={brandId} playbook={p.id} go={go} />}
 
           <section className="space-y-2">
             <h3 className="font-medium">What it needs</h3>
@@ -207,6 +298,29 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
                   : "The setup kit adds what's missing to your CRM and email drafts. It only adds: nothing you have changes, and drafts wait for you to publish them."}
               </p>
               <KitPlanList plan={kit} />
+              {canManage && brandId && kit.changes > 0 && kit.conflicts === 0 && (
+                <div className="space-y-2 pt-1">
+                  {kitInputs.map((i) => (
+                    <Input key={i.name} label={i.optional ? `${i.label} (optional)` : i.label} hint={i.help} placeholder={i.default || i.example} value={values[i.name] ?? ""} onChange={(e) => setValues({ ...values, [i.name]: e.target.value })} />
+                  ))}
+                  {kit.items.some((it) => it.kind === "journey" && it.action === "add") && (
+                    <label className="block space-y-1">
+                      <span className="text-[12px] text-muted-foreground">Measure whether it works</span>
+                      <select aria-label="Hold some back" className={`${field} block w-full`} value={holdout} onChange={(e) => setHoldout(Number(e.target.value))}>
+                        <option value={0}>Don't measure: everyone goes through</option>
+                        <option value={10}>Hold 10% back at random, and compare</option>
+                        <option value={20}>Hold 20% back at random, and compare</option>
+                      </select>
+                      <span className="block text-[12px] text-muted-foreground">
+                        {holdout > 0
+                          ? `${holdout} in every 100 that enter its journeys are left out on purpose. "Did it work?" on this page then compares the rest with them.`
+                          : "Without anyone held back, nothing can say what would have happened anyway."}
+                      </span>
+                    </label>
+                  )}
+                  <Button type="button" variant="ghost" disabled={settingUp} onClick={setUp}>{settingUp ? "Setting up…" : "Set it up now, without a run"}</Button>
+                </div>
+              )}
             </section>
           )}
 
@@ -234,6 +348,14 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
             <ul className="space-y-1">{p.measure.map((m) => <li key={m.metric}><span className="font-medium">{m.metric}.</span> <span className="text-muted-foreground">{m.how}</span></li>)}</ul>
           </section>
 
+          {p.example && (
+            <section className="space-y-2">
+              <h3 className="font-medium">Example</h3>
+              <p className="whitespace-pre-line text-muted-foreground">{p.example}</p>
+            </section>
+          )}
+        </div>
+        <div className="min-w-0 space-y-6 rounded-lg border bg-card p-5 lg:sticky lg:top-6">
           <form className="space-y-3" onSubmit={start}>
             <h3 className="font-medium">Run it</h3>
             {p.inputs.map((i) => (
@@ -264,15 +386,8 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
           </form>
 
           <PlaybookAutomations ws={ws} playbook={p} inputs={values} canManage={canManage} go={go} />
-
-          {p.example && (
-            <section className="space-y-2">
-              <h3 className="font-medium">Example</h3>
-              <p className="whitespace-pre-line text-muted-foreground">{p.example}</p>
-            </section>
-          )}
         </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </div>
   );
 }

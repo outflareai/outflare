@@ -2051,7 +2051,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
 
   const planFields = {
     name: z.string().max(200).optional(),
-    brand_id: id.nullable().optional().describe("The brand the domains and mailboxes are for (list_brands). Null: shared by every brand."),
+    brand_id: id.nullable().optional().describe("The brand the domains and mailboxes are for (list_brands). Left out: the workspace's first brand."),
     supplier: z.string().optional().describe('"manual" (the user buys; the plan waits for them) or a supplier connector such as "cheapinboxes". See suppliers in get_infrastructure.'),
     supplier_integration_id: id.nullable().optional().describe("The connected supplier account to buy with."),
     provider: z.enum(["google", "microsoft"]).optional(),
@@ -2548,7 +2548,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "Pick the brand an analytics site reports for",
       description:
         "For a site whose domain is not one of its brand's (a GA4 property for an app, a PostHog project for a game), or to make a site shared. " +
-        "brand: a handle or id from list_brands, none for shared, or auto to match by domain again.",
+        "brand: a handle or id from list_brands, or auto to follow the connection again (else the workspace's first brand). Every site belongs to a brand.",
       inputSchema: { integration_id: id, site: z.string().min(1).max(500).describe("The site's id, from list_analytics_sites."), brand: z.string().min(1) },
       annotations: { ...write, idempotentHint: true },
     },
@@ -2942,6 +2942,21 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       annotations: read,
     },
     ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/tracker-conversion-log", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "list_network_costs",
+    {
+      title: "List what ad networks reported spending and how it was shared out",
+      description:
+        "For traffic sources made from a network template whose network reports spend per target (Zeropark), each campaign and day: " +
+        "spend as the network reported it, and how it went onto the tracker's clicks: matched (on the clicks of the target that spent it, " +
+        "by each click's own cost), spread (evenly over clicks that named no reported target) and unattributed (no click to put it on). " +
+        "spend = matched + spread + unattributed exactly. Reports use each click's share as its cost.",
+      inputSchema: { brand: brandRef, from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), source_id: id.optional() },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/network-costs", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -3937,7 +3952,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/attribution/conversions", { params: { path: { brand: b }, query } }))),
   );
 
-  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "taboola_ads", "outbrain_ads", "apple_ads", "amazon_ads", "pinterest_ads", "chatgpt_ads"]).optional();
+  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "taboola_ads", "outbrain_ads", "apple_ads", "amazon_ads", "pinterest_ads", "chatgpt_ads", "zeropark_ads"]).optional();
   const adDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
 
   server.registerTool(
@@ -3969,7 +3984,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Set an ad account's brand, or switch its sync",
       description:
-        "brand: a handle or id from list_brands, or none for shared. Its spend in the costs ledger follows the brand. sync_on false stops syncing it and keeps what is stored.",
+        "brand: a handle or id from list_brands; every ad account belongs to a brand. Its spend in the costs ledger follows the brand. sync_on false stops syncing it and keeps what is stored.",
       inputSchema: { id, brand: z.string().min(1).optional(), sync_on: z.boolean().optional() },
       annotations: { ...write, idempotentHint: true },
     },
@@ -8143,6 +8158,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "Pitch a link prospect",
       description:
         "Starts a pitch of a prospect to pitch through one of Outflare's own sequences, to one of its contacts (record_id; default the surest with an email address). " +
+        "A site a teammate is managing is refused with site_claimed: leave it to them. " +
         "The workspace's AI writes an opener for the page; the pitch then waits as a draft for approval (approve_link_pitch) unless the sequence skips approval. " +
         "Fails with conflict when the prospect already has an open pitch or has no contact with an email address, and with site_in_outreach when another prospect on the website is in outreach. " +
         "Never offer payment for a link.",
@@ -10292,6 +10308,93 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     ({ playbook_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/playbooks/{id}", { params: { path: { ws, id: playbook_id } } })),
   );
 
+  server.registerTool(
+    "get_playbook_home",
+    {
+      title: "Get what a playbook set up in a brand",
+      description:
+        "What a playbook's setup kit put in a brand (rules, journeys, lists, signal types), whether each is on and what it has done, and the signals it raised with how they ended: open, late, and won, no change or not useful in the last 90 days. Use it to report on a playbook or to see what still has to be turned on.",
+      inputSchema: { brand: brandRef, playbook_id: z.string().min(1).max(60) },
+      annotations: read,
+    },
+    ({ brand, playbook_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/playbooks/{id}/home", { params: { path: { brand: b, id: playbook_id } } }))),
+  );
+
+  server.registerTool(
+    "get_playbook_lift",
+    {
+      title: "Get what a playbook changed",
+      description:
+        "Did the playbook work? Each journey its kit set up that holds some people or companies back at random is compared with the ones it held back: conversions and revenue within days after entering, the lift, a verdict (better, worse, no_clear_change, too_early) and the incremental revenue. A journey that holds nobody back has measured false: say so instead of guessing, and offer to set the kit up with holdout_percent or to add a random split with a holdout path to the journey.",
+      inputSchema: {
+        brand: brandRef,
+        playbook_id: z.string().min(1).max(60),
+        days: z.number().int().min(1).max(180).optional().describe("How long after entering a conversion counts; 30 when left out."),
+        event: z.string().max(200).optional().describe("Only this conversion, such as payment.succeeded; any when left out."),
+      },
+      annotations: read,
+    },
+    ({ brand, playbook_id, days, event }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/playbooks/{id}/lift", { params: { path: { brand: b, id: playbook_id }, query: { days, event } } }))),
+  );
+
+  // A brand's own playbooks (docs/playbooks.md, "Your own playbooks").
+  const ownPlaybookParts = z
+    .array(
+      z.object({
+        kind: z.enum(["rule", "journey", "smart_list", "signal_type"]),
+        id: z.string().describe("The rule's, journey's or list's id, or the signal type's key."),
+      }),
+    )
+    .max(50)
+    .describe("The things it groups, in the order to show them. Replaces the whole list.");
+
+  server.registerTool(
+    "list_own_playbooks",
+    {
+      title: "List a brand's own playbooks",
+      description:
+        "The playbooks a brand made for itself: each a title and a purpose around rules, journeys, lists and signal types the brand has, with whether each part is on, what it has done, and the signals they raised with how they ended. Use it to report on what the brand runs.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/own-playbooks", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "create_own_playbook",
+    {
+      title: "Make a playbook of a brand's own",
+      description:
+        "Group rules, journeys, lists and signal types the brand already has under a title, so they are found and measured together. It changes none of them and nothing runs because of it. Find the parts with list_rules, list_journeys, list_smart_lists and list_signal_types first.",
+      inputSchema: { brand: brandRef, title: z.string().min(1).max(80), summary: z.string().max(300).optional().describe("What it is for."), parts: ownPlaybookParts.optional() },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/own-playbooks", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_own_playbook",
+    {
+      title: "Change a brand's own playbook",
+      description: "Rename it, change what it is for, or replace the list of things it groups. Only what is sent changes.",
+      inputSchema: { brand: brandRef, id: z.string(), title: z.string().min(1).max(80).optional(), summary: z.string().max(300).optional(), parts: ownPlaybookParts.optional() },
+      annotations: write,
+    },
+    ({ brand, id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/own-playbooks/{id}", { params: { path: { brand: b, id } }, body }))),
+  );
+
+  server.registerTool(
+    "delete_own_playbook",
+    {
+      title: "Remove a brand's own playbook",
+      description: "Removes the playbook only. Every rule, journey, list and signal type it grouped stays as it is.",
+      inputSchema: { brand: brandRef, id: z.string() },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ brand, id }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/own-playbooks/{id}", { params: { path: { brand: b, id } } }))),
+  );
+
   // Agent runs (docs/actions.md, "Outflare's agent on the action layer"):
   // Outflare's agent runs a playbook as an agent token of its own.
   server.registerTool(
@@ -10522,6 +10625,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       inputSchema: {
         kit_id: z.string().min(1).max(60),
         inputs: z.record(z.string(), z.string().max(200)).optional().describe("Values for a flow kit's inputs, by name: event names, a sequence's id, or text."),
+        holdout_percent: z.number().int().min(0).max(50).optional().describe("Hold this share of whoever enters each journey the kit adds back at random, so get_playbook_lift can say what the playbook changed. Ask the person first: the ones held back get nothing from the journey."),
         brand: z
           .string()
           .min(1)
@@ -10530,11 +10634,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       },
       annotations: write,
     },
-    ({ kit_id, inputs, brand }) =>
+    ({ kit_id, inputs, holdout_percent, brand }) =>
       call(() =>
         brand
-          ? gtm.POST("/v1/brands/{brand}/kits/{id}/apply", { params: { path: { brand, id: kit_id } }, body: { inputs } })
-          : gtm.POST("/v1/workspaces/{ws}/kits/{id}/apply", { params: { path: { ws, id: kit_id } }, body: { inputs } }),
+          ? gtm.POST("/v1/brands/{brand}/kits/{id}/apply", { params: { path: { brand, id: kit_id } }, body: { inputs, holdout_percent } })
+          : gtm.POST("/v1/workspaces/{ws}/kits/{id}/apply", { params: { path: { ws, id: kit_id } }, body: { inputs, holdout_percent } }),
       ),
   );
 
@@ -11959,6 +12063,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
   const journeyFields = {
     name: z.string().max(200).optional(),
     description: z.string().max(2000).optional(),
+    record_type: z
+      .enum(["person", "account"])
+      .optional()
+      .describe("Who it is about. person (default). account: each company goes through it, starting on the company's events and on what its people do; only steps that act on a record are allowed (no email or sequence steps)."),
     trigger: z
       .object({ kind: z.enum(["event", "manual"]), event: z.string().nullable().optional(), filter: z.array(condition).max(20).optional() })
       .optional()
@@ -12001,10 +12109,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
             "suppress",
             "unsubscribe_topic",
             "alert",
+            "raise_signal",
+            "outflare_action",
             "transactional_email",
             "set_consent",
             "assign_owner",
             "move_deal",
+            "open_renewal_deal",
             "slack",
             "webhook",
             "push_to_sequencer",
@@ -12045,14 +12156,20 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
           title: z.string().optional().describe("alert: what it says. slack: a bold line above the message."),
           text: z.string().optional().describe("alert: a line of detail. slack: the message; {{person.x}}, {{event.x}} and {{vars.x}} fill in."),
           to: z.enum(["owner", "admins"]).optional(),
+          agent_id: z.string().optional().describe("outflare_action: the agent to run as, an API token of the brand with action_gate on (list_tokens). Its grants decide whether the change runs, waits for a person or is refused."),
+          path: z.string().optional().describe("outflare_action: the API path after /v1/brands/{brand}/, such as records/{{person.id}}/notes, with method (POST, PUT, PATCH, DELETE) and body as for a webhook."),
+          signal_type: z.string().optional().describe("raise_signal: one of the brand's signal types (list_signal_types), such as churn_risk. title says what to act on, text why."),
           consent: z.enum(["granted", "withdrawn"]).optional().describe("set_consent: for topic, or all marketing email when topic is empty."),
           owner_id: z.string().optional().describe("assign_owner: a member's user id (list_members)."),
           members: z.array(z.string()).min(2).max(50).optional().describe("assign_owner: members to spread people between evenly."),
+          routing: z.boolean().optional().describe("assign_owner: let the brand's routing rules (get_routing) pick the owner, instead of owner_id or members."),
           replace_owner: z.boolean().optional().describe("assign_owner: change an owner already set."),
           deal: z
             .object({ type: z.string(), field: z.string(), stage: z.string(), closed: z.array(z.string()).optional() })
             .optional()
             .describe("move_deal: the deal record type, its stage field, the stage, and the closed stages."),
+          stage: z.string().optional().describe("open_renewal_deal (journeys about companies): the deal stage a renewal deal opens at; the first stage when left out."),
+          within_days: z.number().int().min(1).max(365).optional().describe("open_renewal_deal: how many days ahead a renewal counts; 90 when left out."),
           method: z.enum(["POST", "GET", "PUT", "PATCH", "DELETE"]).optional().describe("webhook: POST by default."),
           url: z.string().optional().describe("webhook: an https URL; {{…}} fills its path and query, never its host."),
           headers: z.record(z.string(), z.string()).optional().describe("webhook: headers anyone who can read the journey sees. Never put keys here: use auth."),
@@ -12613,6 +12730,32 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/relationship", { params: { path: { brand: b, record } } }))),
   );
 
+  server.registerTool(
+    "get_record_summary",
+    {
+      title: "Everything about one person or company",
+      description:
+        "The account summary for a person or company, in one call: lifecycle stage and what last changed it, owner, the account plan (goal, next step, hesitations, limits), billing and payments this month against last, products and metrics with their trend, the company's people and roles, deals and pipeline records, support conversations, who spoke last on any channel, website visits and first source, open tasks, the journeys and sequences that hold them, alerts, and what needs attention now. Read it before acting on an account.",
+      inputSchema: { brand: brandRef, record: z.string().describe("The person's or company's record id.") },
+      annotations: read,
+    },
+    ({ brand, record }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/summary", { params: { path: { brand: b, record } } }))),
+  );
+
+  server.registerTool(
+    "get_record_group",
+    {
+      title: "A company's group and share of wallet",
+      description:
+        "The companies a company belongs with: its parent (the parent_company field), the top of the group and every company under it, each with monthly recurring revenue, what it paid in 12 months, its health score, open signals and people, and the totals for the whole group. Also the company's share of wallet: what it paid in 12 months against wallet_estimate, the yearly amount it spends with every supplier on what the brand sells (null until it has an estimate; the share-of-wallet setup kit adds the fields). Set a parent with update_record: attributes.parent_company is the parent's record id.",
+      inputSchema: { brand: brandRef, record: z.string().describe("The company's record id.") },
+      annotations: read,
+    },
+    ({ brand, record }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/group", { params: { path: { brand: b, record } } }))),
+  );
+
   // Live metrics per company and person (docs/metrics.md).
   const metricFields = {
     name: z.string().min(1).max(100).optional(),
@@ -12699,6 +12842,493 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       annotations: read,
     },
     ({ brand, record }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/metrics", { params: { path: { brand: b, record } } }))),
+  );
+
+  // Scores (docs/scores.md): a number from 0 to 100 on every company or
+  // person, built from factors anyone can read.
+  const scoreFactor = z.object({
+    label: z.string().min(1).max(120).describe("What it means, as people read it on the record: Usage fell by a third."),
+    conditions: z.array(ruleCondition).min(1).max(5).describe("Tests of the record's fields (attribute only), such as metrics.usage_7d_change lt -29, sentiment.label eq negative, or another score: scores.<key>_band eq low. A deal's score also reads deal.days_in_stage, deal.days_quiet, deal.days_to_close, deal.contacts and its company under account, such as account.sentiment.label."),
+    match: z.enum(["all", "any"]).optional(),
+    points: z.number().int().min(-100).max(100).describe("Added when the conditions hold; negative takes points. Not 0."),
+  });
+  const scoreFields = {
+    label: z.string().min(1).max(80).optional(),
+    description: z.string().max(500).optional(),
+    base: z.number().int().min(0).max(100).optional().describe("Where every record starts (default 50)."),
+    factors: z.array(scoreFactor).max(30).optional(),
+    parts: z.array(z.object({ key: z.string().describe("The key of another of the brand's scores for the same record type."), weight: z.number().int().min(1).max(100) })).max(6).optional()
+      .describe("For a headline score, in place of factors: 2 to 6 other scores it is the weighted average of, such as health made of usage, billing and sentiment. A part can't have parts or read scores."),
+    nature: z.enum(["measured", "ai", "predicted"]).optional().describe("What kind of number it is, shown beside it: measured from what happened (default), ai (read from conversations by the brand's own AI) or predicted (an estimate, such as churn risk). A score that reads sentiment can't be measured."),
+    higher_is_better: z.boolean().optional().describe("False for a score such as churn risk, where high is the bad news (default true)."),
+    needs: z.string().max(80).optional().describe("A field that must be set for a record to get the score, such as sentiment.value: without it the record has no value, which is not a low one."),
+    high_from: z.number().int().min(1).max(100).optional().describe("The band is high from this value up (default 70)."),
+    low_below: z.number().int().min(0).max(99).optional().describe("The band is low under this value (default 40)."),
+  };
+
+  server.registerTool(
+    "list_scores",
+    {
+      title: "List scores",
+      description:
+        "A brand's scores: numbers from 0 to 100 kept on every company, person or deal, such as health, a lead score, churn risk or a deal's win likelihood, each with its factors (or the scores it is made of), what kind of number it is (measured, ai or predicted) and how many records are in each band (high, medium, low). " +
+        "Records carry them under attributes.scores, so rules, smart lists and journeys test scores.<key> or scores.<key>_band. starters are scores to start from.",
+      inputSchema: { brand: brandRef, archived: z.boolean().optional() },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/scores", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "create_score",
+    {
+      title: "Add a score",
+      description:
+        "A score starts every record at base and adds each factor's points when its conditions hold, kept between 0 and 100. Every record of its type is scored straight away, quietly (nothing fires for where records already stand), " +
+        "then again when a field its factors read changes and once a day. Start from one of list_scores' starters and change it.",
+      inputSchema: {
+        brand: brandRef,
+        ...scoreFields,
+        key: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/).describe("Never changes: the value is kept under attributes.scores.<key>."),
+        label: z.string().min(1).max(80),
+        record_type: z.enum(["account", "person", "deal"]).describe("account for companies. Never changes."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/scores", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_score",
+    {
+      title: "Change or archive a score",
+      description:
+        "Change its label, base, factors or bands (a change to how it scores makes a new version and scores every record again, quietly), or archive it (it leaves every record). The key and record type never change.",
+      inputSchema: { brand: brandRef, score: z.string().describe("The score's id (from list_scores)."), archive: z.boolean().optional(), ...scoreFields },
+      annotations: write,
+    },
+    ({ brand, score, archive, ...body }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          archive
+            ? gtm.POST("/v1/brands/{brand}/scores/{score}/archive", { params: { path: { brand: b, score } } })
+            : gtm.PATCH("/v1/brands/{brand}/scores/{score}", { params: { path: { brand: b, score } }, body }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_record_scores",
+    {
+      title: "A record's scores, and why",
+      description: "Each of the brand's scores for a company, person or deal: every factor, its points and whether it holds now (or, for a headline score, the scores it is made of), what kind of number it is, where it has been over 90 days, how far it moved in 30, and for sentiment the customer's own words. So you can say why a record scores what it does and where it is heading.",
+      inputSchema: { brand: brandRef, record: z.string().describe("The record's id.") },
+      annotations: read,
+    },
+    ({ brand, record }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/scores", { params: { path: { brand: b, record } } }))),
+  );
+
+  server.registerTool(
+    "get_score_track_record",
+    {
+      title: "Check a score against what happened",
+      description:
+        "How a prediction held up. For a deal's score: of the deals closed in the last year, how many in each band were won. For a risk score (higher_is_better false): of the records in each band 90 days ago, how many canceled or churned since. " +
+        "outcome is null for a score with nothing to check it against, and enough is false under 20 records: say so rather than quote a rate.",
+      inputSchema: { brand: brandRef, score: z.string().describe("The score's id (from list_scores).") },
+      annotations: read,
+    },
+    ({ brand, score }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/scores/{score}/track-record", { params: { path: { brand: b, score } } }))),
+  );
+
+  server.registerTool(
+    "get_routing",
+    {
+      title: "A brand's routing rules",
+      description: "The rules that say which teammate gets a person or company with no owner, in the order they are tried, with how many records each has routed and how many people and companies have no owner now.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/routing", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "set_routing",
+    {
+      title: "Replace a brand's routing rules",
+      description:
+        "Send the whole list in the order the rules are tried. The first rule whose conditions hold for a record with no owner gives it to the member of its pool (a list of members, or a team) who owns the fewest of the brand's records. A rule can keep to a territory with countries. A rule with no conditions and no countries takes every record of its type, so put it last. Keep a rule by sending its id; one left out is removed. Read get_routing first.",
+      inputSchema: {
+        brand: brandRef,
+        rules: z
+          .array(
+            z.object({
+              id: z.string().optional().describe("The rule's id, to keep it; leave out for a new rule."),
+              name: z.string().describe("Such as Enterprise or Europe."),
+              record_type: z.enum(["account", "person"]).describe("account for companies."),
+              conditions: z.array(ruleCondition).max(5).optional().describe("Tests of the record's fields (attribute only), such as company_size gt 200. None takes every record of the type."),
+              match: z.enum(["all", "any"]).optional(),
+              members: z.array(z.string()).max(50).optional().describe("The pool as a list: workspace members' user ids (list_members). Send members or team_id, not both."),
+              team_id: z.string().optional().describe("The pool as a team: whoever is in the team when a record is routed shares it."),
+              countries: z.array(z.string().length(2)).max(100).optional().describe("The rule's territory: two-letter country codes such as DE. It takes only records whose country is one of them; none means anywhere."),
+              status: z.enum(["active", "paused"]).optional(),
+            }),
+          )
+          .max(50),
+      },
+      annotations: write,
+    },
+    ({ brand, rules }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/routing", { params: { path: { brand: b } }, body: { rules } }))),
+  );
+
+  server.registerTool(
+    "route_record",
+    {
+      title: "Route a person or company to its owner",
+      description:
+        "Make the member the brand's routing rules pick the record's owner, or with preview only say which rule matches and who would get it. A record that has an owner keeps them unless replace is true.",
+      inputSchema: {
+        brand: brandRef,
+        record: z.string().describe("The record's id."),
+        preview: z.boolean().optional().describe("Change nothing; say what routing would do."),
+        replace: z.boolean().optional().describe("Change an owner already set."),
+      },
+      annotations: write,
+    },
+    ({ brand, record, preview, replace }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          preview
+            ? gtm.GET("/v1/brands/{brand}/records/{record}/routing", { params: { path: { brand: b, record } } })
+            : gtm.POST("/v1/brands/{brand}/records/{record}/routing", { params: { path: { brand: b, record } }, body: { replace } }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_revenue",
+    {
+      title: "A brand's revenue report",
+      description: "Recurring revenue from the brand's subscriptions and how it moved over the last days (new, expansion, reactivation, contraction, churned, net and gross retention), what was collected and how it splits by product, the renewals coming up, the paying customers whose health score is low, and the records in each band of each score. Amounts are in the brand's currency, in its minor unit.",
+      inputSchema: { brand: brandRef, days: z.number().int().min(7).max(730).optional().describe("How many days back; 90 when left out.") },
+      annotations: read,
+    },
+    ({ brand, days }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/revenue", { params: { path: { brand: b }, query: { days } } }))),
+  );
+
+  server.registerTool(
+    "get_revenue_forecast",
+    {
+      title: "A brand's forecast for a quarter",
+      description:
+        "What the brand can expect to book in a quarter, against its target: the deals already won, every renewal due in the quarter weighted by the company's health band, and every open deal weighted by its stage (expansion when the deal is with someone who already pays, else new business). Each line carries its weight and what it adds, so the total can be checked. Also the best case, the gap to the target, the same forecast split by owner, and the weights in use. Arithmetic on stored data; nothing is predicted by a model.",
+      inputSchema: { brand: brandRef, quarter: z.string().regex(/^\d{4}-Q[1-4]$/).optional().describe("Such as 2026-Q4: this quarter or one of the next four. This quarter when left out.") },
+      annotations: read,
+    },
+    ({ brand, quarter }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/revenue/forecast", { params: { path: { brand: b }, query: { quarter } } }))),
+  );
+
+  const percent = z.number().int().min(0).max(100).nullable();
+  server.registerTool(
+    "set_revenue_forecast",
+    {
+      title: "Set a quarter's target and the forecast's weights",
+      description:
+        "Save the target for one quarter and, when given, the weights. Only what is sent changes. target_minor is in the brand's minor unit (cents); null removes it. renewal_weights is the percent of a renewal's value counted per health band (high, medium, low, none); stage_weights the percent of an open deal's value counted per stage key. A null weight goes back to its default. Read get_revenue_forecast first for the stages and the weights in use.",
+      inputSchema: {
+        brand: brandRef,
+        quarter: z.string().regex(/^\d{4}-Q[1-4]$/).optional().describe("Such as 2026-Q4. This quarter when left out."),
+        target_minor: z.number().int().min(0).nullable().optional(),
+        renewal_weights: z.record(z.enum(["high", "medium", "low", "none"]), percent).optional(),
+        stage_weights: z.record(z.string(), percent).optional(),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/revenue/forecast", { params: { path: { brand: b } }, body }))),
+  );
+
+  const quarterArg = z.string().regex(/^\d{4}-Q[1-4]$/);
+  const monthArg = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+  server.registerTool(
+    "get_sales_team",
+    {
+      title: "The sales team's quarter, person by person",
+      description:
+        "Everyone on the brand's sales team for a quarter: their quota, what they have won, their forecast (won plus the weighted renewals and open deals they own), best case, open lines and percent of quota. A manager also carries team: the same numbers for them and everyone under them in the team directory. A deal counts for its owner field, then the owner of its person, then of its company. A caller who cannot manage the catalog sees only themselves and their reports.",
+      inputSchema: { brand: brandRef, quarter: quarterArg.optional().describe("Such as 2026-Q4: this quarter or one of the next four. This quarter when left out.") },
+      annotations: read,
+    },
+    ({ brand, quarter }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/revenue/team", { params: { path: { brand: b }, query: { quarter } } }))),
+  );
+
+  server.registerTool(
+    "set_sales_quotas",
+    {
+      title: "Set people's quotas for a quarter",
+      description:
+        "Set what each person named is asked to win in a quarter, in the brand's minor unit (cents). Only the people sent change; a null target_minor takes that person's quota away. staff_id is a person in the team directory (list_staff).",
+      inputSchema: {
+        brand: brandRef,
+        quarter: quarterArg.describe("Such as 2026-Q4."),
+        quotas: z.array(z.object({ staff_id: z.string().uuid(), target_minor: z.number().int().min(0).nullable() })).min(1).max(500),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/revenue/team/quotas", { params: { path: { brand: b } }, body }))),
+  );
+
+  const commissionRule = z.object({
+    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/).describe("Unique in the plan; statement lines name it."),
+    name: z.string().min(1).max(80),
+    pays_on: z.enum(["deal_won", "new_business", "expansion", "renewal", "payment"]).describe("Any deal won; a won deal with someone who did not pay before; with someone who already pays; a renewal deal; or money collected."),
+    match: z.enum(["all", "any"]).optional(),
+    conditions: z
+      .array(z.object({ attribute: z.string(), op: z.enum(["eq", "neq", "gt", "lt", "contains", "exists", "not_exists"]), value: z.unknown().optional() }))
+      .max(5)
+      .optional()
+      .describe("What the deal or payment must meet: its fields, amount (whole units), deal_kind, stage, product (a payment's product key), and the company's fields under company. such as company.country."),
+    source: z.enum(["inbound", "outbound"]).optional().describe("Only inbound, or only outbound. A deal's lead_source field says which; empty, a deal tied to outreach is outbound."),
+    customer: z.enum(["new", "reactivated"]).optional().describe("Only someone paying for the first time, or only someone who pays again after the plan's lapse_days."),
+    days_from: z.number().int().min(0).max(3650).optional().describe("Payment rules: at least this many days after the customer started paying."),
+    days_to: z.number().int().min(0).max(3650).optional().describe("Payment rules: at most this many days after the customer started paying. 30 is their first month."),
+    who: z.enum(["owner", "company_owner", "sourced_by", "manager"]).describe("The deal's owner (for a payment, the customer's), the company's owner, whoever sourced the deal, or the owner's manager."),
+    percent: z.number().min(0).max(100).optional(),
+    flat_minor: z.number().int().min(0).optional().describe("A flat amount per deal or payment, in place of a percent."),
+    tiers: z.array(z.object({ from_attainment: z.number().int().min(0).max(1000), percent: z.number().min(0).max(100) })).max(10).optional().describe("Rates that replace percent from a share of quota reached in the quarter, in rising order."),
+    cap_minor: z.number().int().min(0).nullable().optional().describe("The most the rule pays one person in a month."),
+    clawback: z.boolean().optional().describe("Payment rules: a refund takes the commission back."),
+    stack: z.boolean().optional().describe("Pays even when an earlier rule of the plan already paid the person for the same deal or payment."),
+  });
+  const commissionPlanFields = {
+    name: z.string().min(1).max(80).optional(),
+    status: z.enum(["draft", "active", "archived"]).optional().describe("Only an active plan earns anything."),
+    positions: z.array(z.string()).max(30).optional().describe("Job titles from the team directory, or role:sdr, role:ae, role:manager for a role on the sales desk."),
+    staff_ids: z.array(z.string().uuid()).max(500).optional().describe("People in the team directory, by id."),
+    lapse_days: z.number().int().min(1).max(1000).optional().describe("Days without a payment after which paying again is a reactivation. 90 when left out."),
+    rules: z.array(commissionRule).max(30).optional().describe("Tried from the top: the first that applies to a deal or payment pays, and any later one marked stack."),
+  };
+
+  server.registerTool(
+    "list_commission_plans",
+    {
+      title: "A brand's commission plans",
+      description: "Every commission plan of the brand: who it covers and its rules in order. Only an active plan earns anything.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/commission-plans", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "create_commission_plan",
+    {
+      title: "Add a commission plan",
+      description:
+        "Add a plan: who it covers and an ordered list of rules. Each rule says what it pays on, the conditions, whether inbound or outbound, new or reactivated customers, for payments how many days after the customer started paying, who gets it and how much (a percent, a flat amount, or tiers by share of quota, with an optional monthly cap). A new plan is a draft until its status is active. Outflare works commission out; it never pays anyone.",
+      inputSchema: { brand: brandRef, ...commissionPlanFields, name: z.string().min(1).max(80) },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/commission-plans", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_commission_plan",
+    {
+      title: "Change a commission plan",
+      description: "Change only what is sent; rules, positions and staff_ids are replaced whole. Approved months keep their amounts; open months are worked out under the new rules.",
+      inputSchema: { brand: brandRef, plan_id: z.string().uuid(), ...commissionPlanFields },
+      annotations: write,
+    },
+    ({ brand, plan_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/commission-plans/{id}", { params: { path: { brand: b, id: plan_id } }, body }))),
+  );
+
+  server.registerTool(
+    "delete_commission_plan",
+    {
+      title: "Delete a commission plan",
+      description: "Delete a plan. Approved months keep their amounts. To stop a plan and keep it, set its status to archived.",
+      inputSchema: { brand: brandRef, plan_id: z.string().uuid() },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ brand, plan_id }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/commission-plans/{id}", { params: { path: { brand: b, id: plan_id } } }))),
+  );
+
+  server.registerTool(
+    "get_commissions",
+    {
+      title: "What each person earns in a month",
+      description:
+        "A statement for everyone an active commission plan covers: one line per deal won or payment a rule paid them for, naming the plan and rule, the rate and the amount, in the brand's minor unit. A deal with a second owner (its co_owner and co_owner_percent fields) is split between the two, and each line says the share (split_percent). An open month is worked out now; an approved or paid month reads as it was approved. A caller who cannot manage the catalog sees only themselves and their reports.",
+      inputSchema: { brand: brandRef, month: monthArg.optional().describe("Such as 2026-11. This month when left out.") },
+      annotations: read,
+    },
+    ({ brand, month }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/commissions", { params: { path: { brand: b }, query: { month } } }))),
+  );
+
+  server.registerTool(
+    "set_commission_statement",
+    {
+      title: "Approve a person's month, mark it paid, or reopen it",
+      description:
+        "approved keeps the month's lines and total as they are worked out now. paid records that it was paid (Outflare never pays anyone). open drops what was kept, and the month is worked out again.",
+      inputSchema: { brand: brandRef, staff_id: z.string().uuid(), month: monthArg, status: z.enum(["open", "approved", "paid"]) },
+      annotations: write,
+    },
+    ({ brand, staff_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/commissions/{staff}", { params: { path: { brand: b, staff: staff_id } }, body }))),
+  );
+
+  server.registerTool(
+    "list_signals",
+    {
+      title: "Needs attention: list signals",
+      description:
+        "The brand's signals: something about a person or company that someone should act on (churn risk, an upsell, a renewal), each with an owner, a due date and, once closed, an outcome. " +
+        "By default the open ones, soonest due first, with counts of all open, the caller's, the late ones and those nobody owns.",
+      inputSchema: {
+        brand: brandRef,
+        status: z.enum(["open", "snoozed", "closed", "all"]).optional(),
+        owner: z.string().optional().describe("me, none, or a member's user id."),
+        record: z.string().optional().describe("Only signals about this person or company."),
+        type: z.string().optional().describe("A signal type's key, such as churn_risk."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/signals", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "list_signal_types",
+    {
+      title: "List signal types",
+      description: "The kinds of signal this brand raises, the events that raise each on their own, how many days an owner has, and how each kind's signals ended in the last 90 days.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/signal-types", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "raise_signal",
+    {
+      title: "Raise a signal",
+      description:
+        "Flag a person or company for someone to act on. It goes to the record's owner (or owner_id) with a due date from its type, and is refused when the record already has an open signal of this type, or five open signals.",
+      inputSchema: {
+        brand: brandRef,
+        record_id: z.string().describe("The person's or company's id."),
+        type: z.string().optional().describe("A signal type's key from list_signal_types. Default other."),
+        title: z.string().max(300).optional().describe("What to act on, in one line. Default: the type's label."),
+        detail: z.string().max(2000).optional().describe("Why, and what you suggest doing."),
+        owner_id: z.string().optional(),
+        due_at: z.string().optional().describe("ISO 8601 time. Default: the type's days from now."),
+        conversation: z
+          .object({ channel: z.enum(["support", "telegram", "email", "call"]), ref: z.string().max(200).describe("The conversation's id: a support conversation, a Telegram chat, a transcript, or for email the person or company.") })
+          .optional()
+          .describe("The conversation it was flagged from, so its owner can open it."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/signals", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "get_conversation_signals",
+    {
+      title: "Whether a brand's AI reads conversations for signals",
+      description:
+        "Whether the brand's own AI reads what customers say (support, company Telegram chats, email the team shares, call transcripts) and raises signals from it, which channels are read, whether an AI model is connected, and how many conversations were read and signals raised in the last 30 days.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/conversation-signals", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "set_conversation_signals",
+    {
+      title: "Switch reading conversations for signals on or off",
+      description:
+        "Switch a brand's reading of conversations for signals on or off, and choose the channels. Every read is a call on the workspace's own AI, so nothing is read until this is on and a model is connected. Private email is never read.",
+      inputSchema: {
+        brand: brandRef,
+        enabled: z.boolean(),
+        channels: z.array(z.enum(["support", "telegram", "email", "call"])).optional().describe("Which conversations are read. Left out, all four."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/conversation-signals", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "add_transcript",
+    {
+      title: "Send a call transcript to be read for signals",
+      description:
+        "Send the transcript of a call or meeting with a person or company, from the workspace's own recorder, for the brand's AI to read for signals. The text is kept sealed and removed once read. Refused while reading calls is off (set_conversation_signals).",
+      inputSchema: {
+        brand: brandRef,
+        record_id: z.string().describe("The person or company the call was with."),
+        text: z.string().max(200000).describe("The transcript."),
+        title: z.string().max(300).optional(),
+        occurred_at: z.string().optional().describe("ISO 8601 time of the call. Default now."),
+      },
+      annotations: write,
+    },
+    ({ brand, record_id, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/transcripts", { params: { path: { brand: b, record: record_id } }, body }))),
+  );
+
+  server.registerTool(
+    "get_signal_credit",
+    {
+      title: "Whose signals turned into revenue",
+      description:
+        "Signals raised in the last days (default 90): by the teammate who flagged them and by where they came from (support, Telegram, shared email, calls, rules, journeys), with how many were taken on, won or not useful, and what the account paid in the 90 days after each won signal.",
+      inputSchema: { brand: brandRef, days: z.number().int().min(7).max(730).optional() },
+      annotations: read,
+    },
+    ({ brand, days }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/signal-credit", { params: { path: { brand: b }, query: { days } } }))),
+  );
+
+  server.registerTool(
+    "update_signal",
+    {
+      title: "Accept, snooze, close or reopen a signal",
+      description:
+        "Move a signal along: status accepted (it becomes the caller's when nobody owns it), done or dismissed with an outcome (won, no_change, not_useful, duplicate), or open to reopen it. Also hands it to another owner, changes its due date, or snoozes it until a time (null to wake it).",
+      inputSchema: {
+        brand: brandRef,
+        signal: z.string().describe("The signal's id."),
+        status: z.enum(["open", "accepted", "done", "dismissed"]).optional(),
+        outcome: z.enum(["won", "no_change", "not_useful", "duplicate"]).optional(),
+        owner_id: z.string().nullable().optional(),
+        due_at: z.string().optional(),
+        snoozed_until: z.string().nullable().optional(),
+        title: z.string().max(300).optional(),
+        detail: z.string().max(2000).optional(),
+      },
+      annotations: write,
+    },
+    ({ brand, signal, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/signals/{id}", { params: { path: { brand: b, id: signal } }, body }))),
+  );
+
+  server.registerTool(
+    "set_signal_type",
+    {
+      title: "Add or change a signal type",
+      description:
+        "A kind of signal for this brand: its label, how many days an owner has, and the events that raise it on their own (for example a rule's emit_event such as account.churn_risk). A new key needs a label.",
+      inputSchema: {
+        brand: brandRef,
+        key: z.string().describe("Lowercase letters, digits and underscores, such as usage_drop."),
+        label: z.string().max(80).optional(),
+        description: z.string().max(500).optional(),
+        events: z.array(z.string()).max(20).optional(),
+        due_days: z.number().int().min(0).max(365).optional(),
+      },
+      annotations: write,
+    },
+    ({ brand, key, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/signal-types/{key}", { params: { path: { brand: b, key } }, body }))),
   );
 
   server.registerTool(

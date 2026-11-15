@@ -20,7 +20,7 @@ func TestCatalog(t *testing.T) {
 	c := owner.must(200, "GET", base, nil)
 	types := c["types"].([]any)
 	if len(types) != 3 || types[0].(map[string]any)["key"] != "person" || types[1].(map[string]any)["plural"] != "Companies" ||
-		types[2].(map[string]any)["key"] != "deal" || len(types[2].(map[string]any)["fields"].([]any)) != 5 {
+		types[2].(map[string]any)["key"] != "deal" || len(types[2].(map[string]any)["fields"].([]any)) != 12 {
 		t.Fatalf("built-in types: %v", types)
 	}
 	sets := map[string]bool{}

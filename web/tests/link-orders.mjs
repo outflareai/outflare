@@ -283,7 +283,7 @@ try {
   const closeSheet = async (page) => {
     const sheet = page.locator('[data-slot="sheet-content"]');
     if (await sheet.count() && await sheet.first().isVisible()) {
-      await page.getByRole('button', { name: 'Close' }).first().click();
+      await page.getByRole('button', { name: 'Back' }).first().click();
       await sheet.first().waitFor({ state: 'hidden' });
     }
   };

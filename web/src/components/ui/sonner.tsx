@@ -8,6 +8,10 @@ import {
 import { useSyncExternalStore } from "react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
+// Toasts sit at the top right, under the header, so they never cover a chat
+// box, a send button or the phone keyboard. Each has a close button, can be
+// swiped away, and at most three show at once.
+
 // Follows the app's theme, which lives in <html data-theme>.
 function subscribe(onChange: () => void) {
   const o = new MutationObserver(onChange)
@@ -22,6 +26,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      position="top-right"
+      offset={{ top: 56, right: 16 }}
+      mobileOffset={{ top: 56, left: 12, right: 12 }}
+      visibleToasts={3}
+      closeButton
+      swipeDirections={["right", "left", "top"]}
+      duration={4000}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,

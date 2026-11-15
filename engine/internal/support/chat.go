@@ -95,6 +95,9 @@ func IntakeChat(ctx context.Context, tx pgx.Tx, m ChatMessage) (Received, error)
 		return out, err
 	}
 	out.ConversationID, out.New = conv, true
+	if err := readForSignals(ctx, tx, ws, conv); err != nil {
+		return out, err
+	}
 	if err := Clock(ctx, tx, conv); err != nil {
 		return out, err
 	}

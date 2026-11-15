@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -12,6 +13,9 @@ import (
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/journeys"
 	"github.com/outflareai/outflare/engine/internal/playbooks"
+	"github.com/outflareai/outflare/engine/internal/recmetrics"
+	"github.com/outflareai/outflare/engine/internal/scores"
+	"github.com/outflareai/outflare/engine/internal/signals"
 	"github.com/outflareai/outflare/engine/internal/smartlists"
 )
 
@@ -76,6 +80,62 @@ func planFlows(ctx context.Context, tx pgx.Tx, ws, brand string, k playbooks.Kit
 		}
 		plan.add(it)
 	}
+	for _, t := range k.SignalTypes {
+		it := kitItem{Kind: "signal_type", Key: t.Key, Label: t.Label, Action: kitAdd, Detail: "a kind of signal for Needs attention"}
+		if len(t.Events) > 0 {
+			it.Detail = "a kind of signal for Needs attention, raised by " + countOf(len(t.Events), "event", "events")
+		}
+		var archived bool
+		err := tx.QueryRow(ctx, `SELECT archived_at IS NOT NULL FROM signal_types WHERE workspace_id = $1 AND key = $2
+			AND brand_id = `+kitBrandSQL("$1", "$3"), ws, t.Key, brand).Scan(&archived)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return err
+		case archived:
+			it.Action, it.Detail = kitConflict, "the signal type "+t.Key+" was removed; add it back in Needs attention first"
+		default:
+			it.Action, it.Detail = kitReuse, "already there; it stays as it is"
+		}
+		plan.add(it)
+	}
+	// Metrics and scores are the brand's by key, like signal types: one
+	// the brand already has stays as it is.
+	for _, m := range k.Metrics {
+		it := kitItem{Kind: "metric", Key: m.Key, Label: m.Name, Action: kitAdd, Detail: "a live number on records, read as metrics." + m.Key}
+		var has bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM metric_definitions WHERE workspace_id = $1 AND key = $2 AND status = 'active'
+			AND brand_id = `+kitBrandSQL("$1", "$3")+`)`, ws, m.Key, brand).Scan(&has); err != nil {
+			return err
+		}
+		if has {
+			it.Action, it.Detail = kitReuse, "already there; it stays as it is"
+		}
+		plan.add(it)
+	}
+	adding := 0
+	for _, sc := range k.Scores {
+		it := kitItem{Kind: "score", Key: sc.Key, Label: sc.Label, Action: kitAdd,
+			Detail: fmt.Sprintf("a score from 0 to 100 with %s; every record is scored once it is added", countOf(len(sc.Factors), "factor", "factors"))}
+		if len(sc.Parts) > 0 {
+			it.Detail = fmt.Sprintf("a headline score: the average of %d other scores, which stay visible under it", len(sc.Parts))
+		}
+		var has bool
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(bool_or(key = $2), false), count(*)::int FROM score_definitions WHERE workspace_id = $1 AND status = 'active'
+			AND brand_id = `+kitBrandSQL("$1", "$3"), ws, sc.Key, brand).Scan(&has, &n); err != nil {
+			return err
+		}
+		switch {
+		case has:
+			it.Action, it.Detail = kitReuse, "already there; it stays as it is"
+		case n+adding >= scores.MaxPerBrand:
+			it.Action, it.Detail = kitConflict, fmt.Sprintf("the brand already keeps %d scores, the most it can; archive one first", scores.MaxPerBrand)
+		default:
+			adding++
+		}
+		plan.add(it)
+	}
 	return nil
 }
 
@@ -93,16 +153,19 @@ func flowScopes(plan *kitPlan, a *access, brand string) error {
 		if it.Action != kitAdd {
 			continue
 		}
-		lists = lists || it.Kind == "smart_list" || it.Kind == "rule"
+		if (it.Kind == "metric" || it.Kind == "score") && ((brand == "" && !a.writes(nil)) || (brand != "" && !a.writes(&brand))) {
+			return errDenied("a kit's metrics and scores are the brand's, which needs access to that brand")
+		}
+		lists = lists || it.Kind == "smart_list" || it.Kind == "rule" || it.Kind == "signal_type"
 		journeysToo = journeysToo || it.Kind == "journey"
 	}
 	switch {
 	case (lists || journeysToo) && brand == "" && !a.writes(nil):
-		return errDenied("a kit's smart lists, rules and journeys set up the workspace's first brand from this route, which needs access to every brand; apply it on the brand's own route")
+		return errDenied("a kit's smart lists, rules, journeys and signal types set up the workspace's first brand from this route, which needs access to every brand; apply it on the brand's own route")
 	case (lists || journeysToo) && brand != "" && !a.writes(&brand):
-		return errDenied("a kit's smart lists, rules and journeys are the brand's, which needs access to that brand")
+		return errDenied("a kit's smart lists, rules, journeys and signal types are the brand's, which needs access to that brand")
 	case lists && !a.has(auth.ScopeCustomersManage):
-		return errDenied("this kit adds smart lists and rules, which needs the customers.manage scope")
+		return errDenied("this kit adds smart lists, rules or signal types, which needs the customers.manage scope")
 	case journeysToo && !a.has(auth.ScopeEmailsManage):
 		return errDenied("this kit adds journeys, which needs the emails.manage scope")
 	}
@@ -111,7 +174,7 @@ func flowScopes(plan *kitPlan, a *access, brand string) error {
 
 // applyFlows adds the plan's new smart lists, rules and journeys, in tx,
 // with values for the kit's inputs.
-func applyFlows(ctx context.Context, tx pgx.Tx, a *access, brand string, k playbooks.Kit, plan *kitPlan, values map[string]string) error {
+func applyFlows(ctx context.Context, tx pgx.Tx, a *access, brand string, k playbooks.Kit, plan *kitPlan, values map[string]string, holdout int) error {
 	ws, p := a.WorkspaceID, &a.principal
 	ids := map[string]string{}
 	adding := map[string]bool{}
@@ -154,6 +217,90 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, brand string, k playb
 		}
 		return &a.ActorID
 	}()
+	for _, t := range flows.SignalTypes {
+		if !slices.ContainsFunc(plan.Items, func(it kitItem) bool { return it.Kind == "signal_type" && it.Key == t.Key && it.Action == kitAdd }) {
+			continue
+		}
+		var brandID string
+		if err := tx.QueryRow(ctx, `SELECT `+kitBrandSQL("$1", "$2")+`::text`, ws, brand).Scan(&brandID); err != nil {
+			return err
+		}
+		if err := signals.EnsureTypes(ctx, tx, ws, brandID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO signal_types (workspace_id, brand_id, key, label, description, events, due_days)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`, ws, brandID, t.Key, t.Label, t.Description, t.Events, t.DueDays); err != nil {
+			return err
+		}
+		if err := record(ctx, tx, p, ws, "signal_type.created", "signal_type", "", map[string]any{"key": t.Key, "brand_id": brandID, "kit_id": k.ID}); err != nil {
+			return err
+		}
+	}
+	addsPart := func(kind, key string) bool {
+		return slices.ContainsFunc(plan.Items, func(it kitItem) bool { return it.Kind == kind && it.Key == key && it.Action == kitAdd })
+	}
+	if len(flows.Metrics)+len(flows.Scores) > 0 {
+		var brandID string
+		if err := tx.QueryRow(ctx, `SELECT `+kitBrandSQL("$1", "$2")+`::text`, ws, brand).Scan(&brandID); err != nil {
+			return err
+		}
+		var metricsOn bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM metric_settings WHERE brand_id = $1 AND workspace_id = $2 AND enabled_at IS NOT NULL)`,
+			brandID, ws).Scan(&metricsOn); err != nil {
+			return err
+		}
+		for _, d := range flows.Metrics {
+			if !addsPart("metric", d.Key) {
+				continue
+			}
+			id, err := recmetrics.Insert(ctx, tx, ws, brandID, d)
+			if err != nil {
+				return err
+			}
+			// Counted from stored events when the brand has metrics on;
+			// otherwise it starts counting when they are turned on.
+			if metricsOn {
+				if _, err := tx.Exec(ctx, `UPDATE metric_definitions SET backfilling = true WHERE id = $1`, id); err != nil {
+					return err
+				}
+				if err := recmetrics.EnqueueBackfill(ctx, tx, ws, id, 1); err != nil {
+					return err
+				}
+			}
+			if err := record(ctx, tx, p, ws, "metric.created", "brand", brandID,
+				map[string]any{"metric_id": id, "aggregate": d.Aggregate, "window_days": d.WindowDays, "kit_id": k.ID}); err != nil {
+				return err
+			}
+		}
+		for _, d := range flows.Scores {
+			if !addsPart("score", d.Key) {
+				continue
+			}
+			factors, err := json.Marshal(d.Factors)
+			if err != nil {
+				return err
+			}
+			parts, err := json.Marshal(d.Parts)
+			if err != nil {
+				return err
+			}
+			var id string
+			if err := tx.QueryRow(ctx, `INSERT INTO score_definitions (workspace_id, brand_id, key, label, description, record_type, base, factors, high_from, low_below, watch_fields,
+					nature, parts, higher_is_better, needs)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id::text`,
+				ws, brandID, d.Key, d.Label, d.Description, d.RecordType, d.Base, factors, d.HighFrom, d.LowBelow, scores.WatchFields(d),
+				d.Nature, parts, d.HigherIsBetter, d.Needs).Scan(&id); err != nil {
+				return err
+			}
+			if err := scores.EnqueuePass(ctx, tx, ws, brandID, d.RecordType, id, 1); err != nil {
+				return err
+			}
+			if err := record(ctx, tx, p, ws, "score.created", "brand", brandID,
+				map[string]any{"score_id": id, "record_type": d.RecordType, "factors": len(d.Factors), "version": 1, "kit_id": k.ID}); err != nil {
+				return err
+			}
+		}
+	}
 	for _, l := range flows.Lists {
 		if !adding["smart_list."+l.Key] {
 			continue
@@ -207,14 +354,19 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, brand string, k playb
 			return err
 		}
 		filter, _ := json.Marshal(j.TriggerFilter)
+		// Hold some back, when asked, so the journey can be measured.
+		j.Steps = journeys.WithHoldout(j.Steps, holdout)
+		if msg := journeys.CheckFor(j.RecordType, j.Steps); msg != "" {
+			return errInvalid("the journey " + j.Key + " can't hold some back: " + msg)
+		}
 		steps, _ := json.Marshal(j.Steps)
 		exitConds, _ := json.Marshal(j.ExitConditions)
 		id := ids["journey."+j.Key]
 		if _, err := tx.Exec(ctx, `INSERT INTO journeys (id, workspace_id, brand_id, name, description, trigger_kind, trigger_event, trigger_filter,
-			entry, goal_event, steps, created_by, exit_events, exit_conditions, kit_id, kit_key)
-			VALUES ($1, $2, `+kitBrandSQL("$2", "$16")+`, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+			entry, goal_event, steps, created_by, exit_events, exit_conditions, kit_id, kit_key, record_type)
+			VALUES ($1, $2, `+kitBrandSQL("$2", "$16")+`, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $17)`,
 			id, ws, j.Name, j.Description, j.TriggerKind, j.TriggerEvent, filter, j.Entry, j.GoalEvent, steps, createdBy, j.ExitEvents, exitConds,
-			k.ID, j.Key, brand); err != nil {
+			k.ID, j.Key, brand, j.RecordType); err != nil {
 			return err
 		}
 		if err := record(ctx, tx, p, ws, "journey.created", "journey", id,

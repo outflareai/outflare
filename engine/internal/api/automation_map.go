@@ -699,6 +699,7 @@ var sourceNames = map[string]string{
 	"conversions": "Conversions", "stripe": "Stripe", "paddle": "Paddle", "chargebee": "Chargebee", "lemonsqueezy": "Lemon Squeezy",
 	"segment": "Segment", "rudderstack": "RudderStack", "journey": "Journeys", "replies": "Cold email replies",
 	"meetings": "Meetings", "reviews": "Review requests",
+	"deals": "Deals", "support": "Support", "tasks": "Tasks",
 }
 
 // mapSources adds where the map's events came from in the last 30 days:

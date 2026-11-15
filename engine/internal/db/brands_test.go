@@ -47,6 +47,28 @@ func knownTables(t *testing.T) map[string]bool {
 	return known
 }
 
+var madeConstraint = regexp.MustCompile(`(?i)ADD\s+CONSTRAINT\s+"?([a-z0-9_]+)"?`)
+
+// knownConstraints are the constraints this version's migrations add.
+func knownConstraints(t *testing.T) map[string]bool {
+	t.Helper()
+	names, err := fs.Glob(migrationFiles, "migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ours := map[string]bool{}
+	for _, name := range names {
+		b, err := migrationFiles.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range madeConstraint.FindAllStringSubmatch(string(b), -1) {
+			ours[strings.ToLower(m[1])] = true
+		}
+	}
+	return ours
+}
+
 func tableList(t *testing.T, name string) []string {
 	t.Helper()
 	f, err := brandTables.Open("brandtables/" + name)
@@ -115,10 +137,11 @@ func TestBrandIsRequired(t *testing.T) {
 	pool := testPool(t)
 	shared := tableList(t, "shared.txt")
 	known := knownTables(t)
+	ours := knownConstraints(t)
 	rows, err := pool.Query(context.Background(), `
-		SELECT c.table_name, c.is_nullable = 'NO' OR EXISTS (SELECT 1 FROM pg_constraint k
+		SELECT c.table_name, c.is_nullable = 'NO', coalesce((SELECT array_agg(k.conname::text) FROM pg_constraint k
 			WHERE k.conrelid = format('%I.%I', c.table_schema, c.table_name)::regclass AND k.contype = 'c'
-			AND pg_get_constraintdef(k.oid) ILIKE '%brand_id IS NOT NULL%')
+			AND pg_get_constraintdef(k.oid) ILIKE '%brand_id IS NOT NULL%'), '{}')
 		FROM information_schema.columns c
 		JOIN information_schema.tables x ON x.table_schema = c.table_schema AND x.table_name = c.table_name AND x.table_type = 'BASE TABLE'
 		WHERE c.table_schema = 'public' AND c.column_name = 'brand_id' ORDER BY 1`)
@@ -128,18 +151,28 @@ func TestBrandIsRequired(t *testing.T) {
 	defer rows.Close()
 	for rows.Next() {
 		var name string
-		var required bool
-		if err := rows.Scan(&name, &required); err != nil {
+		var notNull bool
+		var checks []string
+		if err := rows.Scan(&name, &notNull, &checks); err != nil {
 			t.Fatal(err)
 		}
 		if !known[name] {
 			continue // made by a newer version (see knownTables)
 		}
+		required := notNull || len(checks) > 0
+		// A listed table only has to come off shared.txt when this version
+		// made it require a brand. This test also runs the previous version
+		// against a newer schema (CI's migrations job), where the next step
+		// has added checks for tables the previous list still names.
+		requiredHere := notNull
+		for _, c := range checks {
+			requiredHere = requiredHere || ours[strings.ToLower(c)]
+		}
 		if !required && !slices.Contains(shared, name) {
 			t.Errorf("%s.brand_id may be empty: make it NOT NULL (brand data belongs to a brand), "+
 				"or list the table in engine/internal/db/brandtables/shared.txt if a row can belong to the whole workspace", name)
 		}
-		if required && slices.Contains(shared, name) {
+		if requiredHere && slices.Contains(shared, name) {
 			t.Errorf("%s requires a brand now: take it off engine/internal/db/brandtables/shared.txt", name)
 		}
 	}

@@ -1,3 +1,4 @@
+import { AttributionLabel } from "../sales-reporting/AgentPerformance";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Schemas } from "@outflare/sdk";
 import {
@@ -171,6 +172,11 @@ export function SalesFloor({
     };
   }, [loadLeads, me]);
   const nav = (s: string) => {
+    if (s === "reporting") {
+      go("sales-reporting");
+      track("ui.sales_section_opened", { section: "reporting" });
+      return;
+    }
     if (s.startsWith("lead:") && section !== "lead") setReturnQueue(section);
     setOpen(`sales:${s}`);
     track("ui.sales_section_opened", { section: s.split(":")[0] });
@@ -200,6 +206,7 @@ export function SalesFloor({
     ...(manager
       ? [
           ...(representative ? [["all", "All leads"]] : []),
+          ["reporting", "Reporting"],
           ["team", "Team"],
           ["settings", "Sales settings"],
         ]
@@ -209,7 +216,7 @@ export function SalesFloor({
     <div className="flex min-h-[75vh] flex-col gap-8 lg:flex-row">
       <aside className="w-full shrink-0 space-y-6 lg:w-48">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Sales</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Sales conversations</h1>
           <p className="mt-1 text-xs text-muted-foreground">
             {me?.name} ·{" "}
             {me?.role === "ae"
@@ -240,35 +247,21 @@ export function SalesFloor({
           ))}
         </nav>
         {manager && !representative && (
-          <details
-            className="text-sm text-muted-foreground"
-            onToggle={(e) => {
-              if (e.currentTarget.open)
-                track("ui.sales_personal_settings_opened");
-            }}
-          >
-            <summary className="cursor-pointer px-3 py-2">
-              Personal settings
-            </summary>
-            <div className="mt-1 flex flex-col gap-1">
+          <div className="text-sm text-muted-foreground">
+            <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-wider">Your own settings</div>
+            <div className="flex flex-wrap gap-1 lg:flex-col">
               {["templates", "introduction", "email"].map((key) => (
                 <button
                   key={key}
-                  className="rounded-lg px-5 py-2 text-left hover:bg-muted/50"
+                  className={`rounded-lg px-3 py-2 text-left ${section === key ? "bg-muted font-medium text-foreground" : "hover:bg-muted/50"}`}
                   onClick={() => nav(key)}
                 >
                   {salesSections[key]}
                 </button>
               ))}
             </div>
-          </details>
+          </div>
         )}
-        <button
-          className="text-xs text-muted-foreground hover:underline"
-          onClick={() => setOpen("person")}
-        >
-          People, companies & CRM
-        </button>
       </aside>
       <main className="min-w-0 flex-1 space-y-5">
         <ErrorText>{error}</ErrorText>
@@ -1268,7 +1261,17 @@ function SalesLeadPage({
         </summary>
         <div className="mt-4 space-y-4">
           <div>
-            <h3 className="text-xs text-muted-foreground">Shared note</h3>
+            <h3 className="text-xs text-muted-foreground">Original source</h3>
+            <p className="mt-2 text-sm">
+              <AttributionLabel value={l.attribution} /> ·{" "}
+              {l.source === "leads_portal" ? "Lead Portal" : l.source}
+            </p>
+            {l.attribution?.submitted_at && (
+              <p className="text-xs text-muted-foreground">
+                Submitted {date(l.attribution.submitted_at)}
+              </p>
+            )}
+            <h3 className="mt-4 text-xs text-muted-foreground">Shared note</h3>
             <p className="mt-2 whitespace-pre-wrap text-sm">
               {l.note || "No shared note yet."}
             </p>

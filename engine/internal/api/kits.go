@@ -274,10 +274,17 @@ func (e errKitConflict) Error() string { return string(e) }
 // stops with errKitConflict when anything conflicts, errDenied when the
 // kit adds what the caller may not manage, and errInvalid for inputs that
 // don't fit.
-func applyKit(ctx context.Context, tx pgx.Tx, a *access, brand string, k playbooks.Kit, inputs map[string]string, source string) (*kitPlan, error) {
+//
+// holdout is the percent of whoever enters each journey the kit adds to
+// hold back at random (0 for none), so what the kit's journeys changed
+// can be measured against them (playbook_lift.go).
+func applyKit(ctx context.Context, tx pgx.Tx, a *access, brand string, k playbooks.Kit, inputs map[string]string, source string, holdout int) (*kitPlan, error) {
 	values, err := k.CheckInputs(inputs)
 	if err != nil {
 		return nil, errInvalid(err.Error())
+	}
+	if holdout < 0 || holdout > maxKitHoldout {
+		return nil, errInvalid("holdout_percent is 0 to 50: the share of whoever enters each journey to hold back")
 	}
 	// One kit at a time per workspace, so two people applying the same
 	// kit don't both add it.
@@ -392,7 +399,7 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, brand string, k playboo
 			return nil, err
 		}
 	}
-	if err := applyFlows(ctx, tx, a, brand, k, plan, values); err != nil {
+	if err := applyFlows(ctx, tx, a, brand, k, plan, values, holdout); err != nil {
 		return nil, err
 	}
 	count := map[string]int{}
@@ -442,16 +449,20 @@ func (s *Server) previewKit(w http.ResponseWriter, r *http.Request) {
 
 // kitFile is a kit file sent in a request, and values for its inputs.
 type kitFile struct {
-	YAML   string            `json:"yaml"`
-	Inputs map[string]string `json:"inputs"`
+	YAML    string            `json:"yaml"`
+	Inputs  map[string]string `json:"inputs"`
+	Holdout int               `json:"holdout_percent"`
 }
+
+// maxKitHoldout is the most a kit's journeys hold back, in percent.
+const maxKitHoldout = 50
 
 // readKitFile reads and checks a kit file from the request body, as CI
 // checks a shipped kit, or writes a 400.
-func readKitFile(w http.ResponseWriter, r *http.Request) (playbooks.Kit, map[string]string, bool) {
+func readKitFile(w http.ResponseWriter, r *http.Request) (playbooks.Kit, kitFile, bool) {
 	var in kitFile
 	if !decode(w, r, &in) {
-		return playbooks.Kit{}, nil, false
+		return playbooks.Kit{}, in, false
 	}
 	var k playbooks.Kit
 	err := errors.New("yaml is required")
@@ -462,9 +473,9 @@ func readKitFile(w http.ResponseWriter, r *http.Request) (playbooks.Kit, map[str
 	}
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "the kit file: "+err.Error())
-		return playbooks.Kit{}, nil, false
+		return playbooks.Kit{}, in, false
 	}
-	return k, in.Inputs, true
+	return k, in, true
 }
 
 func (s *Server) previewKitFile(w http.ResponseWriter, r *http.Request) {
@@ -476,11 +487,11 @@ func (s *Server) previewKitFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) applyKitFile(w http.ResponseWriter, r *http.Request) {
-	k, inputs, ok := readKitFile(w, r)
+	k, in, ok := readKitFile(w, r)
 	if !ok {
 		return
 	}
-	s.writeKitApply(w, r, k, inputs, kitFromFile)
+	s.writeKitApply(w, r, k, in.Inputs, kitFromFile, in.Holdout)
 }
 
 func (s *Server) writeKitPreview(w http.ResponseWriter, r *http.Request, k playbooks.Kit) {
@@ -505,21 +516,22 @@ func (s *Server) applyKitHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Inputs map[string]string `json:"inputs"`
+		Inputs  map[string]string `json:"inputs"`
+		Holdout int               `json:"holdout_percent"`
 	}
 	if !decodeOptional(w, r, &in) {
 		return
 	}
-	s.writeKitApply(w, r, k, in.Inputs, kitFromCatalog)
+	s.writeKitApply(w, r, k, in.Inputs, kitFromCatalog, in.Holdout)
 }
 
-func (s *Server) writeKitApply(w http.ResponseWriter, r *http.Request, k playbooks.Kit, inputs map[string]string, source string) {
+func (s *Server) writeKitApply(w http.ResponseWriter, r *http.Request, k playbooks.Kit, inputs map[string]string, source string, holdout int) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
 	var plan *kitPlan
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		plan, err = applyKit(ctx, tx, a, a.Brand, k, inputs, source)
+		plan, err = applyKit(ctx, tx, a, a.Brand, k, inputs, source, holdout)
 		return err
 	})
 	if s.kitError(w, r, err) {

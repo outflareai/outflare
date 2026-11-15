@@ -8,6 +8,7 @@ import { ago, listTime, stamp } from "../format";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
 import { useBrand, pickedBrandId } from "@/lib/brand";
+import { FlagButton } from "./Signals";
 import type { Tab } from "../App";
 import { SupportForwarding } from "@/components/support-forwarding";
 import { SupportSLA } from "@/components/support-sla";
@@ -758,8 +759,9 @@ function Details({
           </div>
         </div>
         {conv.record_id && (
-          <button type="button" className="text-xs text-muted-foreground underline hover:text-foreground" onClick={() => go("people")}>Open in People</button>
+          <button type="button" className="text-xs text-muted-foreground underline hover:text-foreground" onClick={() => go("crm")}>Open in People</button>
         )}
+        {conv.record_id && canManage && <FlagButton brandId={pickedBrandId()} recordId={conv.record_id} conversation={{ channel: "support", ref: conv.id }} />}
       </section>
 
       <section className="space-y-3">

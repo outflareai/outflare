@@ -1,9 +1,9 @@
 # Sales workflow
 
 Sales is a brand-scoped workflow over canonical customer records. The existing
-Sales workspace opens the queues and full-page conversation; its directory,
-collections, reports and settings remain reachable through “People, companies &
-CRM”. SDRs and AEs share New leads. Taking reserves an owner and queues the
+Sales conversations page (CRM, Sales conversations) opens the queues and full-page
+conversation; the CRM's people, companies and deals, with their lists, reports and
+settings, are their own links in the sidebar's CRM group. SDRs and AEs share New leads. Taking reserves an owner and queues the
 original EmailBison introduction in the same transaction. Handoffs transfer
 ownership only after the personal sender's provider accepts the introduction.
 Customer confirmation and optional value are independent of payments.
@@ -20,7 +20,7 @@ and taking remain disabled until personal consent is complete.
 Managers enter at **All leads**, with status and teammate filters, the latest
 message, ownership and recorded activity. They can also review **New leads**
 and open full conversations without taking ownership or assuming a rep's role.
-Personal settings are secondary; **My email** explains why a manager does not
+A manager's own settings (templates, introduction, email) are listed under the queues; **My email** explains why a manager does not
 need a sending connection to review work. Workspace administration and a
 person's assigned Sales role remain separate, so an administrator assigned as
 an SDR or account manager retains that role's working queues.

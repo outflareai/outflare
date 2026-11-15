@@ -54,6 +54,7 @@ const platforms: { id: string; name: string }[] = [
   { id: "amazon_ads", name: "Amazon Ads" },
   { id: "pinterest_ads", name: "Pinterest Ads" },
   { id: "chatgpt_ads", name: "ChatGPT Ads" },
+  { id: "zeropark_ads", name: "Zeropark" },
 ];
 export const platformName = (id: string) => platforms.find((p) => p.id === id)?.name ?? id;
 

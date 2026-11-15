@@ -144,6 +144,10 @@ func setup(t *testing.T) *env {
 		if err := tx.QueryRow(ctx, `INSERT INTO workspaces (name, slug) VALUES ('Acme', 'acme') RETURNING id::text`).Scan(&e.ws); err != nil {
 			return err
 		}
+		// Every ad account belongs to a brand: synced ones take the first.
+		if _, err := tx.Exec(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Acme', 'acme')`, e.ws); err != nil {
+			return err
+		}
 		i, err := store.Insert(ctx, tx, e.ws, "fake_ads", connectors.AuthAPIKey, "Fake Ads", connectors.Creds{"api_key": "k"}, connectors.Account{Email: "ana@acme.example"}, "")
 		e.integration = i.ID
 		return err
@@ -454,7 +458,7 @@ func TestAlerts(t *testing.T) {
 	}
 	// The account belongs to the Acme brand.
 	var brand string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Acme', 'acme') RETURNING id`, e.ws).Scan(&brand); err != nil {
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)`, e.ws).Scan(&brand); err != nil {
 		t.Fatal(err)
 	}
 	e.exec(t, `UPDATE ad_accounts SET brand_id = $2 WHERE workspace_id = $1`, e.ws, brand)
@@ -717,7 +721,7 @@ func TestAlertsFirstParty(t *testing.T) {
 	}
 	// The ledger's rows belong to a brand and a person.
 	var brand, record string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Acme', 'acme') RETURNING id`, e.ws).Scan(&brand); err != nil {
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)`, e.ws).Scan(&brand); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.pool.QueryRow(ctx, `INSERT INTO records (workspace_id, brand_id, record_type, name) VALUES ($1, $2, 'person', 'Ana') RETURNING id`, e.ws, brand).Scan(&record); err != nil {

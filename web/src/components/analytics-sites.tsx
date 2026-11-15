@@ -19,8 +19,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 type Source = { id: string; name: string; connector: string };
 
-// A row as the person is setting it: brand is a brand's handle, "none" for
-// shared by every brand, or "" for not chosen yet. why says where a guess
+// A row as the person is setting it: brand is a brand's handle, or "" for
+// not chosen yet (the site counts for the first brand until someone picks). why says where a guess
 // came from, shown beside it until the person picks.
 type Draft = { sync: boolean; brand: string; domain: string; why: string; filters: boolean };
 
@@ -92,7 +92,8 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
   // to, or nothing.
   const current = (s: AnalyticsSitePlan): string => {
     const m = mapped[s.id];
-    if (m?.source === "set") return m.brand_id ? (brands.find((b) => b.id === m.brand_id)?.handle ?? "") : "none";
+    if (m?.source === "default") return "";
+    if (m?.source === "set") return brands.find((b) => b.id === m.brand_id)?.handle ?? "";
     if (m?.brand_id) return brands.find((b) => b.id === m.brand_id)?.handle ?? "";
     return brands.find((b) => belongs(s.host, b))?.handle ?? "";
   };
@@ -106,7 +107,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
       const g = !now && brands.length > 0 ? guess(s, brands) : undefined;
       const fresh = !now && !s.host;
       // A brand found by the site's domain says so too.
-      const byDomain = now && now !== "none" && mapped[s.id]?.source !== "set" && s.host ? `Matches ${s.host}` : "";
+      const byDomain = now && mapped[s.id]?.source !== "set" && s.host ? `Matches ${s.host}` : "";
       return [s.id, { sync: fresh && testCopy.test(s.name) ? false : s.sync, brand: now || g?.brand.handle || "", domain: "", why: g?.why ?? byDomain, filters: s.filter_test_accounts }];
     })));
   }, [sites, mapped, brandKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -219,7 +220,6 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
                             }}>
                             {!d.brand && <option value="">Choose a brand…</option>}
                             {brands.map((x) => <option key={x.id} value={x.handle}>{x.name}</option>)}
-                            <option value="none">Shared by all brands</option>
                             <option value={skipOption}>Don't import</option>
                             <option value={newOption}>New brand from this site…</option>
                           </select>
@@ -245,7 +245,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
           </tbody>
         </table>
       </div>
-      {others > 0 && focus && <p className="text-[12px] text-muted-foreground">{others === 1 ? "1 other site belongs" : `${others} other sites belong`} to other brands or to every brand. Switch brand in the sidebar to see them.</p>}
+      {others > 0 && focus && <p className="text-[12px] text-muted-foreground">{others === 1 ? "1 other site belongs" : `${others} other sites belong`} to other brands. Switch brand in the sidebar to see them.</p>}
       <div className={`flex flex-wrap items-center gap-3 ${compact ? "justify-end" : "justify-between"}`}>
         {!compact && (
           <p className="text-[12px] text-muted-foreground">
@@ -256,7 +256,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
         <div className="flex gap-2">
           {onCancel && <Button variant="ghost" onClick={onCancel} disabled={busy}>Later</Button>}
           {canManage && (onCancel || changed.length > 0) && (
-            <Button onClick={save} disabled={busy || changed.length === 0 || missing > 0} title={missing > 0 ? "Choose a brand, Shared by all brands or Don't import for every site" : undefined}>
+            <Button onClick={save} disabled={busy || changed.length === 0 || missing > 0} title={missing > 0 ? "Choose a brand or Don't import for every site" : undefined}>
               {busy ? "Saving…" : missing > 0 ? `${missing === 1 ? "1 site needs" : `${missing} sites need`} a choice` : changed.length ? `Save ${changed.length === 1 ? "1 site" : `${changed.length} sites`}` : "Saved"}
             </Button>
           )}

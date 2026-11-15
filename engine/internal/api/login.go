@@ -194,7 +194,7 @@ func linkIdentity(ctx context.Context, tx pgx.Tx, id *oauth.Identity) (string, e
 		FROM users u WHERE i.provider = 'google' AND i.subject = $1 AND u.id = i.user_id AND u.disabled_at IS NULL
 		RETURNING i.user_id`, id.Subject, id.Email).Scan(&userID)
 	if err == nil {
-		return userID, markVerified(ctx, tx, userID, id.Email)
+		return userID, googleSignedIn(ctx, tx, userID, id)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", err
@@ -235,7 +235,7 @@ func linkIdentity(ctx context.Context, tx pgx.Tx, id *oauth.Identity) (string, e
 	if err != nil {
 		return "", err
 	}
-	return userID, markVerified(ctx, tx, userID, id.Email)
+	return userID, googleSignedIn(ctx, tx, userID, id)
 }
 
 type sealedIdentity struct {
@@ -271,4 +271,16 @@ func openIdentity(box *secrets.Box, token string) (*oauth.Identity, error) {
 		return nil, errBadIdentity
 	}
 	return &si.Identity, nil
+}
+
+// googleSignedIn records what a Google sign-in proves about its user: the
+// email address is theirs, and the account's photo is their profile photo
+// (kept as it was when the account has none).
+func googleSignedIn(ctx context.Context, tx pgx.Tx, userID string, id *oauth.Identity) error {
+	if id.Picture != "" {
+		if _, err := tx.Exec(ctx, `UPDATE users SET avatar_url = $2 WHERE id = $1 AND avatar_url <> $2`, userID, id.Picture); err != nil {
+			return err
+		}
+	}
+	return markVerified(ctx, tx, userID, id.Email)
 }

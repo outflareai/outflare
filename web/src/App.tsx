@@ -49,6 +49,8 @@ import { Topics } from "./pages/EmailTopics";
 import { Broadcasts } from "./pages/EmailBroadcasts";
 import { Journeys } from "./pages/Journeys";
 import { Rules } from "./pages/Rules";
+import { Signals } from "./pages/Signals";
+import { Revenue } from "./pages/Revenue";
 import { AutomationMap } from "./pages/AutomationMap";
 import { Overview } from "./pages/Overview";
 import { GetStarted } from "./pages/GetStarted";
@@ -143,6 +145,7 @@ import { SharedAIVisibility } from "./pages/SharedAIVisibility";
 import { setBrand, useBrand, pickedBrandId } from "@/lib/brand";
 
 const CRMWorkspace = lazy(() => import("./pages/crm/Workspace").then((m) => ({ default: m.CRMWorkspace })));
+const SalesReporting = lazy(() => import("./pages/sales-reporting/LiveSalesReporting").then((m) => ({ default: m.SalesReporting })));
 
 type Me = { user: { id?: string; name?: string; email?: string; email_verified?: boolean; has_password?: boolean; email_resend_after?: number }; workspaces: Workspace[]; menu_links?: MenuLink[]; support_view?: { expires_at: string } | null };
 type State =
@@ -561,7 +564,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     }
   }, [agentOpen]);
 
-  const go = useCallback((t: Tab) => setTab(t), [setTab]);
+  const go = useCallback((t: Tab, it?: string) => setTab(t, it), [setTab]);
 
   // A new workspace of this person's own, from the sidebar switcher or the
   // palette. The server makes them its owner; the app then reloads the
@@ -647,6 +650,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   }
 
   const AgentMailPage = pageExtension("agent-mail");
+  const OutreachMailboxesPage = pageExtension("outreach-mailboxes");
 
   return (
     <SidebarProvider style={{ "--sidebar-width": "15rem" } as React.CSSProperties}>
@@ -660,6 +664,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         onWorkspace={(id) => { setWsId(id); setItem(undefined); }}
         onCreateWorkspace={createWorkspace}
         tab={tab}
+        item={item}
         onTab={go}
         unread={unread}
         counts={{ "link-building": pitchesWaiting, agents: actionsWaiting }}
@@ -755,11 +760,13 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "broadcasts" && <Broadcasts key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "journeys" && <Journeys key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "rules" && <Rules key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
+        {ready && ws && tab === "revenue" && <Revenue key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
+        {ready && ws && tab === "signals" && <Signals key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "automations" && <AutomationMap key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "topics" && <Topics key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "providers" && <Providers key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "inbox" && <Inbox key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} onRead={() => setUnread((n) => Math.max(0, n - 1))} />}
-        {ready && ws && tab === "playbooks" && <Playbooks key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
+        {ready && ws && tab === "playbooks" && <Playbooks key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "agents" && <Agents key={ws.id} ws={ws.id} brandAgent={BrandAgentPage ? <BrandAgentPage key={`${ws.id}:${brandState.brand?.id ?? "all"}`} workspace={ws} brandId={brandState.brand?.id} /> : undefined} canApprove={can("actions.approve")} canManage={can("actions.manage")} canTokens={can("tokens.manage")} canRun={can("agents.run")} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "outcomes" && <Outcomes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
@@ -785,6 +792,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "senders" && <Senders key={ws.id} ws={ws.id} canManage={writer} canManageTeams={isAdmin} />}
         {ready && ws && tab === "servers" && <Servers key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "crm" && <Suspense fallback={<Loading />}><CRMWorkspace canManageMailPolicy={can("members.manage")} ws={ws.id} canManage={canEditRecords} canConfigure={can("catalog.manage")} myId={me.user.id} open={item} setOpen={setItem} go={setTab} /></Suspense>}
+        {ready && ws && tab === "sales-reporting" && <Suspense fallback={<Loading />}><SalesReporting key={`${ws.id}:${pickedBrand ?? "all"}`} ws={ws.id} go={setTab} /></Suspense>}
         {ready && ws && tab === "people" && <People key={ws.id} ws={ws.id} canManage={canEditRecords} canConfigure={can("catalog.manage")} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
         {ready && ws && tab === "query" && <Query key={ws.id} ws={ws.id} canManage={can("customers.manage")} canPublish={ws.role === "owner" || ws.role === "admin"} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} />}
         {ready && ws && tab === "leads" && <Leads key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
@@ -802,6 +810,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             {AgentMailPage ? <AgentMailPage key={`${ws.id}:${brandState.brand?.id ?? "all"}`} workspace={ws} brandId={brandState.brand?.id} /> : <CloudLocked feature={cloudFeature("agent-mail")!} />}
           </CloudPage>
         )}
+        {ready && ws && tab === "outreach-mailboxes" && OutreachMailboxesPage && <OutreachMailboxesPage key={`${ws.id}:${brandState.brand?.id ?? "all"}`} workspace={ws} brandId={brandState.brand?.id} />}
         {ready && ws && tab === "support" && <Support key={ws.id} ws={ws.id} canManage={writer} canSetUp={can("mailboxes.manage")} myId={me.user.id ?? ""} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "knowledge" && <Knowledge key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "help-centre" && <HelpCentre key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}

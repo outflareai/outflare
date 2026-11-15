@@ -24,7 +24,9 @@
     "test:partner-review": "node tests/partner-review.mjs",
     "test:link-orders": "node tests/link-orders.mjs",
     "test:api-panel": "node tests/api-panel.mjs",
-    "test:lead-import": "node tests/lead-import.mjs"
+    "test:lead-import": "node tests/lead-import.mjs",
+    "test:sales-reporting-results": "node --test tests/sales-reporting-results.mjs",
+    "test:sales-reporting": "node tests/sales-reporting.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.4",

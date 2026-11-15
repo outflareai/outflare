@@ -9,9 +9,9 @@ import (
 )
 
 // TestConnectionKinds: a connection is one brand's, split by account or a
-// shared tool. A brand connection with no brand, and a site nobody
-// assigned, are listed as unassigned and their data shows in no brand,
-// until someone assigns them.
+// shared tool. A brand connection with no brand is listed as unassigned
+// until someone assigns it. A site nobody assigned counts for the
+// workspace's first brand, with its domain only suggesting another.
 func TestConnectionKinds(t *testing.T) {
 	got := track.Capture(t)
 	e := freshEnv(t)
@@ -35,7 +35,8 @@ func TestConnectionKinds(t *testing.T) {
 		t.Fatalf("one brand, nothing unassigned: %v", u)
 	}
 
-	// A second brand: the split connection's sites need assigning.
+	// A second brand: the split connection's sites count for the first
+	// brand until someone assigns them.
 	north := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})["id"].(string)
 	zb := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "zerobounce", "credentials": map[string]string{"api_key": "good-key"}})
 	if zb["brand_kind"] != "shared" || zb["brand_id"] != nil {
@@ -49,7 +50,7 @@ func TestConnectionKinds(t *testing.T) {
 	owner.must(400, "POST", base+"/integrations", map[string]any{"connector": "plausible", "name": "Bad", "brand_kind": "everyone", "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}})
 
 	u := owner.must(200, "GET", base+"/connections/unassigned", nil)
-	if u["connections"] != 1.0 || u["accounts"] != 2.0 {
+	if u["connections"] != 1.0 || u["accounts"] != 0.0 {
 		t.Fatalf("unassigned: %v", u)
 	}
 	whole := func() map[string]any {
@@ -92,7 +93,7 @@ func TestConnectionKinds(t *testing.T) {
 	accts := owner.must(200, "GET", base+"/integrations/"+ga+"/accounts", nil)["data"].([]any)
 	for _, a := range accts {
 		a := a.(map[string]any)
-		if a["source"] != "none" || a["brand_id"] != nil {
+		if a["source"] != "first_brand" || a["brand_id"] != first {
 			t.Fatalf("a domain only suggests: %v", a)
 		}
 		if a["account"] == "s/north" && a["suggested_brand_id"] != north {
@@ -101,8 +102,8 @@ func TestConnectionKinds(t *testing.T) {
 	}
 
 	// Assigning a site moves it and its data.
-	if _, err := e.pool.Exec(ctx, `INSERT INTO search_completeness (workspace_id, integration_id, site, day, clicks, impressions, visible_clicks, visible_impressions, rows_read, row_limit, capped)
-		VALUES ($1, $2, 's/north', current_date, 1, 1, 1, 1, 1, 1, false)`, ws, ga); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO search_completeness (workspace_id, brand_id, integration_id, site, day, clicks, impressions, visible_clicks, visible_impressions, rows_read, row_limit, capped)
+		VALUES ($1, outflare_site_brand_or_first($2, 's/north'), $2, 's/north', current_date, 1, 1, 1, 1, 1, 1, false)`, ws, ga); err != nil {
 		t.Fatal(err)
 	}
 	a := owner.must(200, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("s/north"), map[string]any{"brand_id": "northpeak"})
@@ -117,11 +118,11 @@ func TestConnectionKinds(t *testing.T) {
 	owner.must(400, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("s/acme"), map[string]any{"brand_id": "nope"})
 	owner.must(200, "PATCH", base+"/integrations/"+loose["id"].(string), map[string]any{"brand_id": "northpeak"})
 	u = owner.must(200, "GET", base+"/connections/unassigned", nil)
-	if u["connections"] != 0.0 || u["accounts"] != 1.0 {
+	if u["connections"] != 0.0 || u["accounts"] != 0.0 {
 		t.Fatalf("after assigning: %v", u)
 	}
-	// Taking the assignment away leaves it with no brand again.
-	if a := owner.must(200, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("s/north"), map[string]any{"brand_id": nil}); a["source"] != "none" {
+	// Taking the assignment away puts it back in the first brand.
+	if a := owner.must(200, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("s/north"), map[string]any{"brand_id": nil}); a["source"] != "first_brand" || a["brand_id"] != first {
 		t.Fatalf("unassigned again: %v", a)
 	}
 	// A new kind clears what doesn't suit it.

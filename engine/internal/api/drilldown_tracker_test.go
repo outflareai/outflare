@@ -65,9 +65,10 @@ func TestDrilldownTrackerSource(t *testing.T) {
 		rows[row.(map[string]any)["keys"].([]any)[0].(string)] = row.(map[string]any)["metrics"]
 	}
 	// US: two clicks (the bot left out), one conversion (the declined one
-	// left out), 2.5 revenue, 0.2 cost; DE: one click, a pending conversion.
+	// left out), 2.5 revenue, 0.3 cost (the bot's click counts: the network
+	// charged for it); DE: one click, a pending conversion.
 	us, de := rows["US"], rows["DE"]
-	if metric(us, "visits") != float64(2) || metric(us, "conversions") != float64(1) || metric(us, "revenue") != 2.5 || metric(us, "cost") != 0.2 || metric(us, "profit") != 2.3 {
+	if metric(us, "visits") != float64(2) || metric(us, "conversions") != float64(1) || metric(us, "revenue") != 2.5 || metric(us, "cost") != 0.3 || metric(us, "profit") != 2.2 {
 		t.Fatalf("US: %v", us)
 	}
 	if metric(de, "visits") != float64(1) || metric(de, "conversions") != float64(1) || metric(de, "revenue") != float64(1) || metric(de, "cost") != float64(0) {

@@ -44,6 +44,10 @@ var (
 		Namespace: namespace, Subsystem: "http", Name: "rate_limited_total",
 		Help: "Requests refused with 429 by a rate limit, by limit name.",
 	}, []string{"limit"})
+	cspReports = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "http", Name: "csp_reports_total",
+		Help: "Things browsers say the web app's script policy would have blocked, by directive and source (inline, eval, data, blob, external, self, extension, other).",
+	}, []string{"directive", "source"})
 	httpInFlight = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "http", Name: "requests_in_flight",
 		Help: "HTTP requests being served right now.",
@@ -151,6 +155,14 @@ var (
 		Namespace: namespace, Subsystem: "tracker", Name: "ip_lookup_oldest_seconds",
 		Help: "Age of the oldest click address waiting for its IP lookup, as last counted by a worker; 0 when none waits.",
 	})
+	trackerNetworkCostSyncs = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "network_cost_syncs_total",
+		Help: "Network cost reconciliations (a network's spend per campaign, target and day shared out over the tracker's clicks), by network (zeropark) and outcome: synced (one campaign day), not_connected (a traffic source from the network's template with no connection to read it), no_campaign_token (its campaign URL carries no {campaign_id}), or failed_auth, failed_quota, failed_unavailable or failed_invalid (the connector's error kind).",
+	}, []string{"network", "outcome"})
+	trackerNetworkCostMicros = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "network_cost_micros_total",
+		Help: "Network spend shared out by reconciliations, in millionths of the network's currency, by network and kind: matched (onto the clicks of the target that spent it), spread (evenly over clicks that named no reported target) or unattributed (no click to put it on). Each pass re-reads recent days, so this counts the same spend again: compare kinds, not totals.",
+	}, []string{"network", "kind"})
 	trackerHoneypot = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "honeypot_hits_total",
 		Help: "Hits on the lander script's hidden link (/hp), which only bots follow, by outcome: flagged (its click now carries the honeypot fraud reason), already (flagged before), unknown_click, wrong_domain or error.",
@@ -705,6 +717,72 @@ var (
 		Help: "Meetings tied to a person whose latest status isn't recorded as an event yet, as of this process's last round.",
 	})
 
+	// Deals, support conversations and tasks on timelines
+	// (recordevents.Run).
+	recordEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "record_events", Name: "total",
+		Help: "Customer events recorded from other modules, by module (deals, support, tasks) and event name (deal.won, task.completed and so on).",
+	}, []string{"module", "event"})
+	recordEventsPending = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "record_events", Name: "pending",
+		Help: "Deals, support conversations and tasks whose latest state isn't recorded as an event yet, by module, as of this process's last round.",
+	}, []string{"module"})
+
+	// Signals (engine/internal/signals).
+	signalsRaised = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "signals", Name: "raised_total",
+		Help: "Signals asked for, by source (event, journey, manual, agent, api) and outcome (raised, duplicate, capped, no_record, skipped).",
+	}, []string{"source", "outcome"})
+	signalsEscalated = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "signals", Name: "escalated_total",
+		Help: "Open signals handed to owners and admins because nobody accepted them two days past their due date.",
+	})
+	signalsOpen = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "signals", Name: "open",
+		Help: "Signals waiting for their owner, by state (on_time, late), as of this process's last round.",
+	}, []string{"state"})
+
+	// Scores (engine/internal/scores).
+	scoresComputed = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "scores", Name: "computed_total",
+		Help: "Records scored, by trigger (change: a field a score reads changed; pass: the quiet pass after a score was added or changed; daily: the daily pass) and outcome (changed, unchanged, no_record).",
+	}, []string{"trigger", "outcome"})
+	scoresScoring = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "scores", Name: "scoring",
+		Help: "Scores waiting for, or in, a pass over every record, as of this process's last round.",
+	})
+	scoresScoringOldest = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "scores", Name: "scoring_oldest_seconds",
+		Help: "How long the score that has waited longest for its pass over every record has waited, in seconds, as of this process's last round.",
+	})
+
+	// Routing (engine/internal/routing).
+	recordsRouted = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "routing", Name: "records_total",
+		Help: "Records the routing rules looked at, by outcome (assigned, kept, no_rule, no_member, no_record, error).",
+	}, []string{"outcome"})
+	routingBehind = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "routing", Name: "brands_behind",
+		Help: "Brands that still had records with no owner waiting to be routed after this process's last round.",
+	})
+	conversationReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "conversations", Name: "reads_total",
+		Help: "Conversations queued for a read for signals, by channel (support, telegram, email, call) and outcome (raised, nothing, unchanged, nothing_to_read, off, no_ai, budget, failed).",
+	}, []string{"channel", "outcome"})
+	conversationSentiments = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "conversations", Name: "sentiments_total",
+		Help: "Conversation reads that found how the customer sounds, by label (positive, mixed, negative). Reads that found no feeling either way aren't counted.",
+	}, []string{"label"})
+	// Revenue (engine/internal/revenue).
+	revenueCounts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "revenue", Name: "counts_total",
+		Help: "Counts of a brand's recurring revenue, by outcome (counted, error).",
+	}, []string{"outcome"})
+	revenueRoundSeconds = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "revenue", Name: "round_seconds",
+		Help: "How long this process's last round of counting every brand's recurring revenue took, in seconds.",
+	})
+
 	// Reviews: reading brands' review pages through the workspace's own
 	// page reader.
 	reviewReads = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -1146,9 +1224,9 @@ var (
 // own are the metrics this package keeps itself; Postgres is registered
 // separately because it needs the pool.
 var own = []prometheus.Collector{
-	httpRequests, httpDuration, httpInFlight, httpRateLimited,
+	httpRequests, httpDuration, httpInFlight, httpRateLimited, cspReports,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerHoneypot, trackerIPLookups, trackerIPLookupSeconds, trackerIPLookupsDue, trackerIPLookupOldest, trackerSourcePostbacks, trackerFraudFlags, trackerWeightSuggestions, reportDrilldown, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
+	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerHoneypot, trackerNetworkCostSyncs, trackerNetworkCostMicros, trackerIPLookups, trackerIPLookupSeconds, trackerIPLookupsDue, trackerIPLookupOldest, trackerSourcePostbacks, trackerFraudFlags, trackerWeightSuggestions, reportDrilldown, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -1170,13 +1248,17 @@ var own = []prometheus.Collector{
 	paidAdsLedgerEvents, paidAdsLedgerLag, paidAdsAcquisitions,
 	adsFeedSends, adsFeedBatches, adsPayersListMembers,
 	meetingEvents, meetingEventsPending,
+	recordEvents, recordEventsPending,
+	signalsRaised, signalsEscalated, signalsOpen,
+	scoresComputed, scoresScoring, scoresScoringOldest,
+	revenueCounts, revenueRoundSeconds, recordsRouted, routingBehind, conversationReads, conversationSentiments,
 	reviewReads, reviewsFound, pricingReads, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkAutoSends, linkReplies, linkLiveChecks, webSearches, aiAnswers, aiDemandReads, aiStanceReads, aiPromptDrafts,
 	socialPublishes,
 	redditSends,
 	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerFlags, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
 	mailPrivacyChecks, crmMailSends, eventNameChecks,
-	salesSendResults, salesStoredMessages,
+	salesSendResults, salesStoredMessages, salesReportingReads,
 	coverageChecks, coverageReviews, coverageFound, coverageSearches, competitorScans, competitorFound, competitorSuggest, opportunities, newsRuns, newsFound, newsReads, storyAIRuns,
 	quoteApprovalEmails, quoteApprovalPages, quoteApprovalDecisions,
 	automationRuns, automationLag,
@@ -1239,6 +1321,10 @@ func RequestStarted() func(route string, status int, d time.Duration) {
 
 // RateLimited counts a request a rate limit refused, by the limit's name.
 func RateLimited(limit string) { httpRateLimited.WithLabelValues(limit).Inc() }
+
+// CSPReport counts one thing a browser said the web app's script policy
+// would have blocked.
+func CSPReport(directive, source string) { cspReports.WithLabelValues(directive, source).Inc() }
 
 func statusClass(status int) string {
 	if status < 100 || status > 599 {
@@ -1328,6 +1414,18 @@ func TrackerLanderClick(outcome string) { trackerLanderClicks.WithLabelValues(ou
 // TrackerHoneypot counts a hit on the lander script's hidden link by
 // outcome.
 func TrackerHoneypot(outcome string) { trackerHoneypot.WithLabelValues(outcome).Inc() }
+
+// TrackerNetworkCostSync counts one network cost reconciliation step.
+func TrackerNetworkCostSync(network, outcome string) {
+	trackerNetworkCostSyncs.WithLabelValues(network, outcome).Inc()
+}
+
+// TrackerNetworkCostMicros counts network spend shared out, by kind.
+func TrackerNetworkCostMicros(network, kind string, micros int64) {
+	if micros > 0 {
+		trackerNetworkCostMicros.WithLabelValues(network, kind).Add(float64(micros))
+	}
+}
 
 // TrackerIPLookup counts one click address's IP lookup by outcome.
 func TrackerIPLookup(outcome string) { trackerIPLookups.WithLabelValues(outcome).Inc() }
@@ -2046,6 +2144,62 @@ func PaidAdsAcquisition(connector, kind string) {
 func MeetingEventsRecorded(status string, n int) {
 	meetingEvents.WithLabelValues(status).Add(float64(n))
 }
+
+// RecordEventsRecorded counts events a module's rows put on timelines.
+func RecordEventsRecorded(module, event string, n int) {
+	recordEvents.WithLabelValues(module, event).Add(float64(n))
+}
+
+// SetRecordEventsPending sets how many of a module's rows wait for their
+// event.
+func SetRecordEventsPending(module string, n int) {
+	recordEventsPending.WithLabelValues(module).Set(float64(n))
+}
+
+// SignalRaised counts one request to raise a signal.
+func SignalRaised(source, outcome string) { signalsRaised.WithLabelValues(source, outcome).Inc() }
+
+// SignalEscalated counts one signal handed up.
+func SignalEscalated() { signalsEscalated.Inc() }
+
+// SetSignalsOpen sets how many signals wait for their owner, and how many
+// of those are past their due date.
+func SetSignalsOpen(open, late int) {
+	signalsOpen.WithLabelValues("on_time").Set(float64(open - late))
+	signalsOpen.WithLabelValues("late").Set(float64(late))
+}
+
+// ScoreComputed counts one record scored.
+func ScoreComputed(trigger, outcome string) { scoresComputed.WithLabelValues(trigger, outcome).Inc() }
+
+// SetScoresScoring sets how many scores wait for a pass over every record,
+// and how long the oldest has waited.
+func SetScoresScoring(n int, oldestSeconds float64) {
+	scoresScoring.Set(float64(n))
+	scoresScoringOldest.Set(oldestSeconds)
+}
+
+// RecordRouted counts one record the routing rules looked at.
+func RecordRouted(outcome string) { recordsRouted.WithLabelValues(outcome).Inc() }
+
+// SetRoutingBehind sets how many brands had more records waiting to be
+// routed than one round takes.
+func SetRoutingBehind(n int) { routingBehind.Set(float64(n)) }
+
+// ConversationRead counts one conversation queued for a read for signals.
+func ConversationRead(channel, outcome string) {
+	conversationReads.WithLabelValues(channel, outcome).Inc()
+}
+
+// SentimentRead counts one conversation read that found how the customer
+// sounds.
+func SentimentRead(label string) { conversationSentiments.WithLabelValues(label).Inc() }
+
+// RevenueCounted counts one count of a brand's recurring revenue.
+func RevenueCounted(outcome string) { revenueCounts.WithLabelValues(outcome).Inc() }
+
+// SetRevenueRound sets how long the last round of revenue counts took.
+func SetRevenueRound(seconds float64) { revenueRoundSeconds.Set(seconds) }
 
 // SetMeetingEventsPending sets how many meetings wait for their event.
 func SetMeetingEventsPending(n int) { meetingEventsPending.Set(float64(n)) }

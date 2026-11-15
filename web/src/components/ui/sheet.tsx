@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { XIcon } from "lucide-react"
+import { ArrowLeftIcon, XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
@@ -41,16 +41,61 @@ function SheetOverlay({
   )
 }
 
+// pageWidth keeps a wide sheet's own width and gives every narrower one
+// the same readable column, so full pages line up across the app.
+function pageWidth(className?: string) {
+  const wide = className?.match(/\bsm:max-w-(3xl|4xl|5xl|6xl|7xl)\b/)?.[0]
+  const rest = (className ?? "")
+    .split(/\s+/)
+    .filter((c) => c && !/^(sm:)?max-w-/.test(c) && !/^w-/.test(c) && !/^shadow/.test(c))
+    .join(" ")
+  return cn(rest, wide ? wide.replace("sm:", "") : "max-w-2xl")
+}
+
+// SheetContent opens as a full page over the app (variant "page", the
+// default for content that used to slide in from the right): a Back bar
+// on top and the content in a centred column. Navigation drawers and
+// inspectors that sit beside what they edit pass variant "panel".
 function SheetContent({
   className,
   children,
   side = "right",
+  variant,
   showCloseButton = true,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
+  variant?: "page" | "panel"
   showCloseButton?: boolean
 }) {
+  if ((variant ?? (side === "right" ? "page" : "panel")) === "page") {
+    const column = pageWidth(className)
+    const width = column.split(" ").find((c) => c.startsWith("max-w-"))
+    return (
+      <SheetPortal>
+        <SheetPrimitive.Content
+          data-slot="sheet-content"
+          data-variant="page"
+          className="fixed inset-0 z-50 flex flex-col bg-background data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-200"
+          {...props}
+        >
+          {showCloseButton && (
+            <div className="shrink-0 border-b">
+              <div className={cn("mx-auto flex h-11 w-full items-center px-2", width)}>
+                <SheetPrimitive.Close className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden">
+                  <ArrowLeftIcon className="size-4" />
+                  Back
+                </SheetPrimitive.Close>
+              </div>
+            </div>
+          )}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className={cn("mx-auto flex min-h-full w-full flex-col gap-4", column)}>{children}</div>
+          </div>
+        </SheetPrimitive.Content>
+      </SheetPortal>
+    )
+  }
   return (
     <SheetPortal>
       <SheetOverlay />

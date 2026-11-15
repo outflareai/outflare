@@ -33,6 +33,7 @@ var aliases = map[string]string{
 	"slack_knowledge":          "slack",
 	"outlook_mail":             "outlook_calendar", // the Outlook mark
 	"google_workspace":         "google_mail",
+	"google_workspace_mail":    "google_mail",
 	"linkedin_ads":             "linkedin",
 	"reddit_ads":               "reddit",
 	"x_ads":                    "x",

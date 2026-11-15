@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/journeys"
 	"github.com/outflareai/outflare/engine/internal/missions"
 )
 
@@ -149,6 +150,12 @@ func (s *Server) CallAsAgent(ctx context.Context, tokenID, method, path string, 
 	if err != nil {
 		return 0, nil, err
 	}
+	return s.callAs(ctx, p, method, path, body, reason, "")
+}
+
+// callAs makes one API call in process as p, with an Idempotency-Key when
+// key is set.
+func (s *Server) callAs(ctx context.Context, p *principal, method, path string, body json.RawMessage, reason, key string) (int, []byte, error) {
 	var rd io.Reader = http.NoBody
 	if len(body) > 0 && method != http.MethodGet && string(body) != "null" {
 		rd = bytes.NewReader(body)
@@ -163,9 +170,35 @@ func (s *Server) CallAsAgent(ctx context.Context, tokenID, method, path string, 
 	if reason = strings.TrimSpace(reason); reason != "" {
 		req.Header.Set(missions.ReasonHeader, strings.ReplaceAll(reason, "\n", " "))
 	}
+	if key != "" {
+		req.Header.Set(idempotencyHeader, key)
+	}
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	return rec.Code, rec.Body.Bytes(), nil
+}
+
+// ActAsAgent makes one change in a brand as one of the workspace's
+// agents, for a journey's outflare_action step (journeys.AgentCaller).
+// The agent is an API token of the workspace whose changes go through the
+// action layer, kept to that brand or to none, so its grants decide what
+// runs, what waits for a person and what is refused. path is the part
+// after /v1/brands/{brand}/.
+func (s *Server) ActAsAgent(ctx context.Context, ws, brand, agentID, method, path string, body json.RawMessage, reason, key string) (int, []byte, error) {
+	if !validUUID(brand) || strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
+		return 0, nil, errors.New("path must be a brand's API path")
+	}
+	p, err := s.agentPrincipal(ctx, agentID)
+	if errors.Is(err, ErrAgentGone) {
+		return 0, nil, journeys.ErrNoAgent
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	if p.TokenWorkspaceID != ws || !p.TokenActionGate || (p.TokenBrandID != nil && *p.TokenBrandID != brand) {
+		return 0, nil, journeys.ErrNoAgent
+	}
+	return s.callAs(ctx, p, method, "/v1/brands/"+brand+"/"+path, body, reason, key)
 }
 
 // RevokeAgentToken revokes a loop's token in tx, on the say-so of the

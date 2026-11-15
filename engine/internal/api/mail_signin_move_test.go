@@ -53,9 +53,9 @@ func legacyMailbox(t *testing.T, e *env, ws, email, provider, refresh string, co
 		smtp, imap, port = "smtp.office365.com", "outlook.office365.com", 587
 	}
 	var id string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO mailboxes (workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username,
+	if err := e.pool.QueryRow(ctx, `INSERT INTO mailboxes (brand_id, workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username,
 			imap_host, imap_port, imap_username, credentials, status, auth_method, oauth_connection_id)
-		VALUES ($1, $2, 'Old Sign-in', $3, $4, $5, $2, $6, 993, $2, '\x00', 'active', 'oauth', $7) RETURNING id::text`,
+		VALUES (outflare_first_brand($1), $1, $2, 'Old Sign-in', $3, $4, $5, $2, $6, 993, $2, '\x00', 'active', 'oauth', $7) RETURNING id::text`,
 		ws, email, provider, smtp, port, imap, conn).Scan(&id); err != nil {
 		t.Fatal(err)
 	}

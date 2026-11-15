@@ -303,3 +303,32 @@ tbody tr {
   height: 0;
   pointer-events: none;
 }
+
+/* Toast close button: a clear X inside the toast on the right, always shown,
+   instead of sonner's small corner badge. */
+[data-sonner-toaster] [data-sonner-toast][data-sonner-toast][data-styled="true"] {
+  padding-right: 2.75rem;
+}
+[data-sonner-toaster] [data-sonner-toast][data-sonner-toast][data-styled="true"] [data-close-button] {
+  left: auto;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+[data-sonner-toaster] [data-sonner-toast][data-sonner-toast][data-styled="true"] [data-close-button] svg {
+  width: 14px;
+  height: 14px;
+}
+[data-sonner-toaster] [data-sonner-toast][data-sonner-toast][data-styled="true"] [data-close-button]:hover,
+[data-sonner-toaster] [data-sonner-toast][data-sonner-toast][data-styled="true"]:hover [data-close-button]:hover {
+  background: var(--muted);
+  color: var(--foreground);
+  border: 0;
+}

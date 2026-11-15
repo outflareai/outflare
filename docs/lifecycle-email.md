@@ -209,7 +209,7 @@ topic to stop new sends naming it.
 A broadcast sends one published lifecycle template to many people on
 customer records at once, such as a newsletter or a launch
 (`.../email-broadcasts`, MCP `create_email_broadcast` and
-`send_email_broadcast`, the Broadcasts page under Lifecycle). It is a draft
+`send_email_broadcast`, the Broadcasts page under Email). It is a draft
 until it is sent, now or at `send_at` (within 30 days).
 
 - **Audience.** `{"kind": "topic"}` (the default) is every person record
@@ -283,7 +283,33 @@ A journey is an if-this-then-that flow for people on customer records,
 such as onboarding or win-back (`.../journeys`, MCP `create_journey` and
 `activate_journey`). It is a draft until it is activated.
 
-In the app, Lifecycle → Journeys draws each journey as a flow from the top
+**Journeys about companies.** Set `record_type` to `account` ("Who goes
+through it: Each company" when you create one) and each company goes
+through the journey instead of each person. It starts on an event on the
+company (such as one a [rule](rules.md) about companies emits) or on an
+event one of its people does, once per company, whoever set it off. Goal,
+exit and wait events count when anyone at the company does them, and so do
+"did this event" checks. Its steps act on the company's record: `wait`,
+`wait_until`, `branch`, `exit`, `create_task`, `set_field`, `add_tag`,
+`remove_tag`, `assign_owner`, `open_renewal_deal`, `alert`, `raise_signal`, `slack`, `webhook`,
+`ai`, `outflare_action`, `enter_journey` and `exit_journey` (the step catalog marks them
+`companies: true`). Steps that send to or enroll a person (email,
+sequences, consent, reviews, ad audiences) belong in a journey about
+people. Who a journey is about can't change once it has run.
+
+**Journeys about deals.** Set `record_type` to `deal` ("Who goes through
+it: each deal") and each deal goes through the journey on its own. It
+starts on the deal's own events (`deal.created`, `deal.stage_changed`,
+`deal.won`, `deal.lost`, `deal.reopened`), wherever they sit: on the
+deal's person, its company or the deal itself. Its conditions read the
+deal's fields (`stage`, `close_date`, `value`), its goal and exit events
+are that deal's events, so a journey that chases a proposal ends when the
+deal is won, and its steps act on the deal: tasks, fields, owners,
+alerts, signals, Slack, webhooks and Outflare actions. Deals have no
+tags, so the tag steps are left out; email steps need a journey about
+people.
+
+In the app, Automations → Rules and journeys → Journeys draws each journey as a flow from the top
 down: the trigger card first, then the steps, with a check's Yes and No
 side by side and End where a path finishes. Press **+** on any link to
 add a step there from the searchable step picker, and select a step (or
@@ -339,8 +365,9 @@ with the rule's dry run. On a phone the flow is read-only.
     - `add_tag` and `remove_tag` put a tag on the person or take it off.
     - `add_to_list` and `remove_from_list` move them in or out of a static list ([lists.md](lists.md#static-lists)).
     - `set_consent` records that they agreed to (`granted`) or declined (`withdrawn`) an email `topic`, or all marketing email when it's empty. The run is the evidence. Use it when they opted in somewhere Outflare doesn't see, such as a checkbox your app reports in an event.
-    - `assign_owner` makes a member their owner. With `owner_id` it's one member. With `members` it's whichever of them owns the fewest active records now, so people are spread evenly. Someone who already has an owner keeps them, unless `replace_owner` is on.
+    - `assign_owner` makes a member their owner. With `owner_id` it's one member. With `members` it's whichever of them owns the fewest active records now, so people are spread evenly. With `routing: true` the brand's [routing rules](routing.md) pick. Someone who already has an owner keeps them, unless `replace_owner` is on.
     - `move_deal` moves their newest open deal forward to `deal.stage`, or opens a deal there when they have none. It follows the same rules as reply rules: only forward, never over a stage a person set, never out of a `deal.closed` stage. `deal.type` and `deal.field` are the deal record type and its status field, such as `deal` and `stage`.
+    - `open_renewal_deal` (journeys about companies) opens a deal for each renewal the company has within `within_days` (90 by default) that has had none: its value, closing on the renewal date and linked to the company, at `stage` or the first stage. See [renewal deals](revenue.md#renewal-deals).
   - **Other campaigns.**
     - `enter_journey` starts another journey.
     - `exit_journey` ends their run in another journey (`scope` `journey`) or in every other journey (`others`).
@@ -351,9 +378,11 @@ with the rule's dry run. On a phone the flow is read-only.
   - **Messaging.** `transactional_email` sends a published transactional `template`, such as an account notice. Marketing consent, topics and the frequency cap don't apply to it, but the suppression list and the policy check do. Use the `email` step for marketing.
   - **Notify.**
     - `alert` raises an alert (`title`, `text`) to the record's `owner` or to the owners and admins. It is emailed or sent to Slack as alert settings say.
+    - `raise_signal` puts them in the [Needs attention](signals.md) queue with a signal of `signal_type` (`title`, `text` optional). Skipped when they already have an open signal of that type, or five open signals.
     - `slack` posts `text` (with an optional bold `title`) to a `channel` in the workspace's own Slack connection (the first one, or `connection_id`). It is tried again for about a minute when Slack is busy.
   - **Integrations.**
     - `webhook` calls any URL: your own system, Zapier, n8n or another tool's API. See [Webhook steps](#webhook-steps).
+    - `outflare_action` does anything Outflare's API can do in the journey's brand, so a flow can reach every module: pause an ad, add a note, open a task somewhere else. See [Outflare actions](#outflare-actions).
     - `push_to_sequencer` adds them to the Smartlead, Instantly or EmailBison campaign a sequence (`sequence_id`) is linked to, through the workspace's own connection, and the sequencer sends from there. It sends their verified email, name, company and company domain, plus the campaign's own `variables` by their name there (`{"plan": "{{person.plan}}"}`; EmailBison needs them made there first). Suppressed people, people the sequence's exclusion leaves out (see [Exclusions](#exclusions)), people without a verified email, people already in the campaign and people the sequencer leaves out (in another of its campaigns, unless `allow_elsewhere` is on, or unsubscribed or blocked there) are `skipped` with why. It is tried again for about 40 minutes when the sequencer is busy; a refused key fails the step. A sequence that sends through Outflare itself takes `enroll_in_sequence` instead, and one linked to a sequencer takes this step. Each person added records `sequence.lead_pushed`.
     - `push_to_crm` creates the person in the workspace's own HubSpot, or updates the contact with their verified email: their name, company and website, plus HubSpot `properties` by their internal names, filled in like templates (`{"lifecyclestage": "lead", "plan": "{{person.plan}}"}`). It uses the workspace's first connection that can create contacts, or `connection_id`. Deals aren't touched. Someone without a verified email is skipped; a property HubSpot doesn't have, or a refused key, fails the step. It is tried again for about 40 minutes when HubSpot is busy. With `save_as`, the contact's `{id, created}` is kept for later steps. Each push records `crm.contact_pushed`.
     - `sync_audience` adds the person to a customer list audience on one of the workspace's ad accounts (`ad_account_id`, from Paid ads), or takes them out with `change: remove`: a Meta custom audience made from a customer list, or a Google Ads Customer Match list (`audience_id`, from `GET .../ads/audiences`, MCP `list_ad_audiences`). The platform gets only their SHA-256 hashed emails and phone numbers, and matches them on its side. Adding follows the workspace's ad consent setting (Paid ads, Settings) for both ad data and ad personalisation: in the EEA, the UK and Switzerland, or where their country is unknown, only people who granted both are added, and a withdrawal always stops it. Removing never needs consent. Someone without consent, or without an email or phone number, is `skipped` with why. Meta needs a token with `ads_management` and its Custom Audience terms accepted in the ad account; a refused token, or an audience the platform won't fill, fails the step. It is tried again for about 40 minutes when the platform is busy. Each change records `ads.audience_synced`.
@@ -471,6 +500,22 @@ A `webhook` step makes one HTTP call per person:
 - **Where it can call.** Only public `https` addresses, unless the server sets `WEBHOOKS_ALLOW_PRIVATE` (self-hosted receivers on the same network).
 
 The run's history shows each call as `calling`, then `done` with the status and time (`200 in 184 ms`), or `failed` with why.
+
+### Outflare actions
+
+An `outflare_action` step makes one call to Outflare's own API in the journey's brand, so a flow can do what any module can: add a note or a task, pause something, start work somewhere else.
+
+- **Who it runs as.** One of your agents (`agent_id`): an API token of the brand whose changes go through approvals (`action_gate`), made under Agents. The call is that agent's in every way: its scopes, its [grants](actions.md), every limit and the audit log apply. A change its grants let it make on its own runs; anything else waits for a person in Agents, and the journey goes on; a change its grants refuse fails the step.
+- **The call.** `method` (POST by default, or PUT, PATCH, DELETE), `path` (the part after `/v1/brands/{brand}/`, such as `crm/activities`) and a JSON `body`. `{{person.x}}`, `{{event.x}}` and `{{vars.x}}` fill in the path (escaped) and body strings; `{{person.id}}` is the record the run is about, a company in a journey about companies. A step can't call the routes that approve changes or set grants.
+- **Pick an action.** In the builder, **What to do** lists the common calls by name: add a note, give an owner by the routing rules, refresh a smart list, pause or resume an ad campaign, pause every campaign, pause another journey or a rule, check competitors again. Picking one fills in the method, path and body, and where the call is about one thing (a campaign, a journey, a rule, a list) you choose it by name. Everything stays editable, and **Something else** is a call of your own. The step catalog lists them as `x-outflare-presets` in the step's settings schema.
+- **Retries and the answer.** A 429 or 5xx answer is tried again a few times with the same `Idempotency-Key`, so nothing is done twice. With `save_as`, the answer is kept as `vars.<save_as>`: `{status, body}`.
+- **Kits.** A step names one workspace's agent, so it can't go in a [kit](playbooks.md).
+
+```json
+{"id": "note", "kind": "outflare_action", "agent_id": "00000000-0000-4000-8000-000000000001",
+ "path": "crm/activities",
+ "body": {"record_id": "{{person.id}}", "kind": "note", "title": "Usage dropped: check in this week"}}
+```
 
 ### Flow control
 

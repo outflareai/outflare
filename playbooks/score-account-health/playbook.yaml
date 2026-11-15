@@ -1,0 +1,62 @@
+id: score-account-health
+version: 1
+title: Score account health and catch usage drops
+summary: Give every company a health score from how often it uses the product, and flag the ones whose usage falls for their owner.
+description: |
+  Most teams find out a customer is unhappy when the cancellation
+  arrives. This playbook sets up the early warning: two metrics that
+  count the days a company did your key action, a health score built on
+  them that anyone can read ("Why?" on the company's page), a rule that
+  spots usage falling by two fifths, and a journey that puts the company
+  in Needs attention with a task for its owner. The score shows on every
+  company, in Revenue as revenue at risk, and in lists and rules. The
+  rule and the journey arrive as drafts, and you can change the score's
+  factors and points at any time.
+tier: obvious
+goals: [retention, revenue]
+publisher: outflare
+author: { github: outflareai }
+kit: usage-health
+needs:
+  data:
+    - { check: records, label: Companies in the CRM with their owners }
+    - { check: customer_events, label: Product usage events sent to Outflare }
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: usage_event
+    label: The event that shows someone is using the product
+    example: project_updated
+steps:
+  - say: Check the usage event the brand receives and whether metrics are on for the brand; ask a person to turn them on if not.
+    tools: [listBrandEventDefinitions, listBrandCustomerEvents, listMetrics]
+  - say: Check what the setup kit would add, then add it with that event. A health score the brand already has stays as it is.
+    tools: [previewKit, applyKit]
+  - say: Once the records are scored, show how many companies are in each band and explain the score of two of them.
+    tools: [listScores, listBrandRecords, getRecordScores]
+  - say: Dry-run the rule to see how many companies it would have caught, and test the journey with one company.
+    tools: [simulateBrandRule, getBrandJourney, testBrandJourney]
+  - say: Ask a person to turn the rule and the journey on, then show what is waiting in Needs attention.
+    tools: [listSignals]
+guardrails:
+  - The rule and the journey are turned on only after a person approves them.
+  - Signals and tasks go to the team; nothing is sent to a customer.
+  - A score the brand already keeps is never changed by the playbook.
+measure:
+  - metric: Revenue at risk
+    how: "Recurring revenue of companies with a low health score, on the Revenue page."
+  - metric: Usage drops picked up in time
+    how: "Share of churn risk signals accepted before their due date."
+prompt: |
+  Run the "Score account health and catch usage drops" playbook for
+  {{brand}}. Usage arrives as {{usage_event}}. Check that event and that
+  metrics are on, then preview and apply the usage-health setup kit.
+  When the records are scored, show how many companies are high, medium
+  and low, and explain two of them. Dry-run the "Usage dropped" rule over
+  the last 30 days and test the journey with one company. Don't turn
+  anything on: show me the dry run and the test first.
+example: |
+  For Northpeak, 41 companies score high, 22 medium and 9 low. "Usage
+  dropped" would have caught five companies in the last 30 days; two of
+  them renew within 60 days.

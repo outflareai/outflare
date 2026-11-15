@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/journeys"
+	"github.com/outflareai/outflare/engine/internal/routing"
 )
 
 // testJourney takes one person through a journey's live or draft version
@@ -59,7 +60,7 @@ func (s *Server) testJourney(w http.ResponseWriter, r *http.Request) {
 	// A journey not yet activated is edited in place, so its draft is the
 	// journey itself.
 	draft := req.Version == "draft" && cur.Status != "draft"
-	svc := &journeys.Service{Pool: s.pool, Emails: s.emails, Log: s.log, Fields: s, Deals: s, AI: s.JourneyAI()}
+	svc := &journeys.Service{Pool: s.pool, Emails: s.emails, Log: s.log, Fields: s, Deals: s, AI: s.JourneyAI(), Router: routing.Router{}}
 	res, err := svc.Test(r.Context(), a.WorkspaceID, cur.ID, journeys.TestInput{RecordID: req.RecordID, Draft: draft, Event: req.Event, Paths: req.Paths})
 	var pathErr *journeys.PathError
 	switch {

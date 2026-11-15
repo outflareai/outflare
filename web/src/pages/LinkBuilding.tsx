@@ -567,10 +567,23 @@ function PitchSection({ ws, prospect: p, canManage, onChanged }: { ws: string; p
   }, [ws, p.id, p.stage, canManage]);
   const start = async () => {
     setBusy(true);
-    const { error } = await api.POST("/v1/brands/{brand}/link-prospects/{prospect}/pitches", {
-      params: { path: { brand: pickedBrandId(), prospect: p.id } },
-      body: { sequence_id: seq, ...(contact ? { record_id: contact } : {}) },
-    });
+    const send = (confirm_claimed: boolean) =>
+      api.POST("/v1/brands/{brand}/link-prospects/{prospect}/pitches", {
+        params: { path: { brand: pickedBrandId(), prospect: p.id } },
+        body: { sequence_id: seq, ...(contact ? { record_id: contact } : {}), ...(confirm_claimed ? { confirm_claimed } : {}) },
+      });
+    let { error } = await send(false);
+    // A teammate is managing this site: say who, and go ahead only if asked.
+    const claimed = (error as { error?: { code?: string; message?: string } } | undefined)?.error;
+    if (claimed?.code === "site_claimed") {
+      const ok = await confirmAction(
+        "A teammate is managing this site",
+        <>{claimed.message?.replace(/ Check with them first.*$/, "")} Pitching it too could mean you both reach out. Check with them first.</>,
+        "Pitch anyway",
+      );
+      if (!ok) return setBusy(false);
+      ({ error } = await send(true));
+    }
     setBusy(false);
     if (error) return setError(errorMessage(error));
     const s = seqs?.find((x) => x.sequence_id === seq);

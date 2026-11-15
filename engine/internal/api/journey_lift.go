@@ -67,15 +67,22 @@ func liftQuery(w http.ResponseWriter, r *http.Request) (days int, event string, 
 // SELECT of (run_id text, outcome text, at timestamptz, record_id uuid),
 // one row per person per exposure, whose $1 is the workspace; paths are
 // the groups in order, with whether each is a holdout. A conversion counts
-// for a row when it comes after at and within days.
+// for a row when it comes after at and within days; for a row about a
+// company, the conversions of its people count too.
 func (s *Server) liftPaths(ctx context.Context, taken string, args []any, days int, event string,
 	paths []journeys.Path, control string) ([]*liftPath, error) {
 	n := len(args)
 	args = append(args, days, event)
 	cte := `WITH taken AS (` + taken + `),
+		-- A company's conversions are its own and its people's.
+		who AS (
+			SELECT run_id, outcome, at, record_id FROM taken
+			UNION
+			SELECT t.run_id, t.outcome, t.at, l.from_id FROM taken t JOIN record_relationships l
+				ON l.workspace_id = $1 AND l.to_id = t.record_id AND l.kind = 'companies' AND l.valid_to IS NULL),
 		won AS (
 			SELECT t.run_id, t.outcome, c.currency, c.value_minor, c.name
-			FROM taken t JOIN attribution_conversions c ON c.workspace_id = $1 AND c.record_id = t.record_id
+			FROM who t JOIN attribution_conversions c ON c.workspace_id = $1 AND c.record_id = t.record_id
 				AND c.occurred_at > t.at AND c.occurred_at <= t.at + make_interval(days => $` + strconv.Itoa(n+1) + `)
 				AND ($` + strconv.Itoa(n+2) + ` = '' OR c.name = $` + strconv.Itoa(n+2) + ` OR c.name = 'payment.refunded'))`
 	byID := map[string]*liftPath{}

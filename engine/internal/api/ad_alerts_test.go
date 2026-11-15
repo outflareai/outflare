@@ -130,12 +130,11 @@ func TestAdAlertsAndPlatformChanges(t *testing.T) {
 	if err := e.pool.QueryRow(ctx, `SELECT external_id FROM ad_entities WHERE id = $1`, active).Scan(&ext); err != nil {
 		t.Fatal(err)
 	}
-	exec(`INSERT INTO ad_change_events (workspace_id, ad_account_id, external_id, changed_at, actor, source, resource_type, operation, campaign_external_id, summary, detail)
-		VALUES ($1, $2, 'ev-1', now() - interval '2 hours', 'google', 'recommendation_auto_apply', 'ad_group_criterion', 'create', $3, 'created ad group criterion', '{"changed_fields": []}'),
-		       ($1, $2, 'ev-2', now() - interval '1 hour', 'outflare', 'api', 'campaign', 'update', $3, 'updated campaign: status', '{"changed_fields": ["campaign.status"]}'),
-		       ($1, $2, 'ev-3', now() - interval '30 minutes', 'a1b2c3', 'web', 'campaign_budget', 'update', '', 'updated campaign budget: amount_micros', '{}')`, ws, acct, ext)
+	exec(`INSERT INTO ad_change_events (workspace_id, brand_id, ad_account_id, external_id, changed_at, actor, source, resource_type, operation, campaign_external_id, summary, detail)
+		VALUES ($1, (SELECT brand_id FROM ad_accounts WHERE id = $2), $2, 'ev-1', now() - interval '2 hours', 'google', 'recommendation_auto_apply', 'ad_group_criterion', 'create', $3, 'created ad group criterion', '{"changed_fields": []}'),
+		       ($1, (SELECT brand_id FROM ad_accounts WHERE id = $2), $2, 'ev-2', now() - interval '1 hour', 'outflare', 'api', 'campaign', 'update', $3, 'updated campaign: status', '{"changed_fields": ["campaign.status"]}'),
+		       ($1, (SELECT brand_id FROM ad_accounts WHERE id = $2), $2, 'ev-3', now() - interval '30 minutes', 'a1b2c3', 'web', 'campaign_budget', 'update', '', 'updated campaign budget: amount_micros', '{}')`, ws, acct, ext)
 	// The sync stores each with its account's brand.
-	exec(`UPDATE ad_change_events c SET brand_id = a.brand_id FROM ad_accounts a WHERE a.id = c.ad_account_id AND c.workspace_id = $1`, ws)
 	all := owner.must(200, "GET", brandBase+"/ads/platform-changes", nil)
 	data := all["data"].([]any)
 	if len(data) != 3 || all["next_cursor"] != nil {

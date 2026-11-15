@@ -142,9 +142,24 @@ export function fieldLabelValue(
       ? plural(list.length, "company", "companies")
       : plural(list.length, "record");
   }
+  // A currency field's value is { amount_minor, currency }.
+  const amount = (x: unknown): string | undefined => {
+    const c = x as { amount_minor?: unknown; currency?: unknown } | null;
+    if (!c || typeof c !== "object" || typeof c.amount_minor !== "number" || typeof c.currency !== "string") return undefined;
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: c.currency,
+        maximumFractionDigits: c.amount_minor % 100 === 0 ? 0 : 2,
+      }).format(c.amount_minor / 100);
+    } catch {
+      return `${(c.amount_minor / 100).toFixed(2)} ${c.currency}`;
+    }
+  };
   const one = (x: unknown) =>
     opts?.get(String(x)) ??
     names[String(x)] ??
+    amount(x) ??
     (typeof x === "object" ? JSON.stringify(x) : String(x));
   return list.map(one).join(", ");
 }

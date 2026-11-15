@@ -1,0 +1,54 @@
+id: agreements
+version: 1
+title: Agreements and renewals
+summary: A record for what a customer has agreed to (a subscription, a contract, a spend commitment or a retainer) with its value and renewal date, so renewals show on the account and in a pipeline.
+
+option_sets:
+  - key: agreement_stage
+    name: Agreement stage
+    options:
+      - { key: proposed, label: Proposed }
+      - { key: active, label: Active }
+      - { key: renewal_due, label: Renewal due }
+      - { key: renewed, label: Renewed }
+      - { key: ended, label: Ended }
+  - key: agreement_kind
+    name: Agreement kind
+    options:
+      - { key: subscription, label: Subscription }
+      - { key: commitment, label: Spend commitment }
+      - { key: contract, label: Contract }
+      - { key: retainer, label: Retainer }
+      - { key: other, label: Other }
+  - key: agreement_term
+    name: Agreement term
+    options:
+      - { key: monthly, label: Monthly }
+      - { key: quarterly, label: Quarterly }
+      - { key: yearly, label: Yearly }
+      - { key: multi_year, label: Multi-year }
+      - { key: one_off, label: One-off }
+
+record_types:
+  - key: agreement
+    name: Agreement
+    plural: Agreements
+    description: |
+      What a customer has agreed to pay or commit to, and when it renews:
+      a subscription, a contract, a spend commitment or a retainer. It
+      shows on the company's page, and a renewal date in the next 60 days
+      is flagged there.
+    stage: stage
+    fields:
+      - { key: stage, label: Stage, value_type: status, option_set: agreement_stage, filterable: true }
+      - { key: company, label: Company, value_type: record_reference, target_type: account, filterable: true, description: "The company the agreement is with." }
+      - { key: contact, label: Contact, value_type: record_reference, target_type: person, description: "Who signs or renews it." }
+      - { key: owner, label: Owner, value_type: actor_reference, filterable: true }
+      - { key: kind, label: Kind, value_type: select, option_set: agreement_kind, filterable: true }
+      - { key: term, label: Term, value_type: select, option_set: agreement_term, filterable: true }
+      - { key: value, label: Value per term, value_type: currency, description: "What they pay or commit to for each term." }
+      - { key: starts_on, label: Start date, value_type: date, filterable: true }
+      - { key: renews_on, label: Renewal date, value_type: date, filterable: true, description: "When it renews or ends. The company's page flags it 60 days ahead." }
+      - { key: notice_days, label: Notice period (days), value_type: number, description: "How many days before the renewal date they must give notice." }
+      - { key: auto_renews, label: Renews by itself, value_type: checkbox }
+      - { key: next_step, label: Next step, value_type: text }

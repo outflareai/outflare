@@ -1,0 +1,60 @@
+id: grow-share-of-wallet
+version: 1
+title: Grow your share of each customer's spend
+summary: Work out how much of each customer's yearly spend on what you sell is yours, and flag the ones with the most room left for their owners.
+description: |
+  A customer who pays you a little may spend ten times that with someone
+  else. This playbook adds four fields to companies: what each spends a
+  year on your category with every supplier, how sure that number is,
+  where it came from and who else they buy from. Each company's page
+  then shows your share of its wallet, and a parent company's page adds
+  up the whole group. The agent fills in estimates only from what the
+  CRM already holds or what a person tells it, marks each one as told,
+  estimated or a guess, and puts the customers with the most room left
+  in Needs attention for their owners. It contacts nobody.
+tier: obvious
+goals: [revenue, retention]
+publisher: outflare
+author: { github: outflareai }
+kit: share-of-wallet
+needs:
+  data:
+    - { check: records, label: Companies in the CRM with their owners }
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: category
+    label: What you sell, in a few words
+    example: project management software
+steps:
+  - say: Check what the setup kit would add, then add its fields and the "Room to grow" signal type.
+    tools: [previewKit, applyKit]
+  - say: List the paying companies, biggest first, and read each one's summary and group for what it pays, its size, its notes and its parent.
+    tools: [listBrandRecords, getRecordSummary, getRecordGroup]
+  - say: Write an estimate only where the record or a person gives a basis for one, with how sure it is and where it came from. Leave the rest empty and list them for the owner to ask.
+    tools: [updateBrandRecord]
+  - say: Raise "Room to grow" for the companies whose share is lowest and whose health is good, with the numbers in the note, and show the list.
+    tools: [raiseSignal, listSignals]
+guardrails:
+  - An estimate is never invented. Each one says where it came from and how sure it is.
+  - Signals go to the team; nothing is sent to a customer.
+measure:
+  - metric: Companies with an estimate
+    how: "Share of paying companies with a yearly spend filled in."
+  - metric: Share of wallet
+    how: "Paid in the last 12 months over the estimates, for companies that have one."
+prompt: |
+  Run the "Grow your share of each customer's spend" playbook for
+  {{brand}}. We sell {{category}}. Preview and apply the share-of-wallet
+  setup kit. Then go through our paying companies, biggest first: read
+  each summary and group, and fill in the yearly spend only where the
+  record gives a basis, saying where it came from and how sure it is.
+  List the companies you couldn't estimate so their owners can ask.
+  Raise "Room to grow" for the healthy companies with the lowest share
+  and show me the list. Don't contact anyone.
+example: |
+  For Northpeak, 14 of 31 paying companies now have an estimate. Kestrel
+  Mobility pays $18,000 a year of an estimated $120,000 (15%), is in good
+  health and buys the rest from two other suppliers, so it is flagged
+  for its owner; 17 companies need a question on the next call.

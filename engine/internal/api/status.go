@@ -445,28 +445,28 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 			Fix: statusFix{Tool: "list_inbox", Page: page("inbox"), Who: "agent"}})
 	}
 
-	// Analytics: sites that count for no brand (no website, in a workspace
-	// without brands), and brands no analytics tool reads.
+	// Analytics: sites nobody placed (counted for the first brand until
+	// someone picks; no website, in a workspace without brands), and brands
+	// no analytics tool reads.
 	unmapped, nUnmapped, err := s.statusItems(ctx, `
 		WITH b AS (SELECT EXISTS (SELECT 1 FROM brands WHERE workspace_id = $1 AND status = 'active') AS any)
 		SELECT s.integration_id::text, COALESCE(NULLIF(s.site_name, ''), s.site), i.name, count(*) OVER ()::int
 		FROM analytics_syncs s JOIN integrations i ON i.id = s.integration_id, b
 		WHERE s.workspace_id = $1 AND s.site <> '' AND i.status <> 'error' AND $2::uuid IS NULL
-		  AND CASE WHEN b.any THEN outflare_site_brand(s.integration_id, s.site) IS NULL
-		        AND NOT EXISTS (SELECT 1 FROM analytics_site_brands o WHERE o.integration_id = s.integration_id AND o.site = s.site)
+		  AND CASE WHEN b.any THEN outflare_site_brand_chosen(s.integration_id, s.site) IS NULL
 		      ELSE s.host = '' END
 		ORDER BY i.name, 2 LIMIT 5`, ws, brandArg)
 	if err != nil {
 		return v, err
 	}
 	if nUnmapped > 0 {
-		add(statusBlocker{Code: "analytics_site_unmapped", Severity: "info", Area: "analytics", Title: countOf(nUnmapped, "analytics site has", "analytics sites have") + " no brand yet",
-			Detail: "Their numbers count for no brand and don't line up with the brand's other tools. update_analytics_site with the brand's website as domain, or set_analytics_site_brand, maps each; a site that is a test copy can be switched off with sync false.", Count: nUnmapped, Items: unmapped,
+		add(statusBlocker{Code: "analytics_site_unmapped", Severity: "info", Area: "analytics", Title: countOf(nUnmapped, "analytics site needs", "analytics sites need") + " a brand picked",
+			Detail: "Until someone picks, their numbers count for the workspace's first brand and may not line up with the brand's other tools. update_analytics_site with the brand's website as domain, or set_analytics_site_brand, maps each; a site that is a test copy can be switched off with sync false.", Count: nUnmapped, Items: unmapped,
 			Fix: statusFix{Tool: "update_analytics_site", Page: page("analytics"), Who: "person"}})
 	}
 	// Records in no brand, in a workspace with brands: they show under
-	// no brand, so someone should put each in its brand (Brands → Not in a
-	// brand).
+	// no brand, so someone should put each in its brand. New ones always
+	// get one, so this only finds what slipped through.
 	if sel.all() {
 		loose, nLoose, err := s.statusItems(ctx, `
 			WITH loose AS (
@@ -482,7 +482,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 		}
 		if nLoose > 0 {
 			add(statusBlocker{Code: "records_unassigned", Severity: "info", Area: "brands", Title: countOf(nLoose, "record is", "records are") + " in no brand",
-				Detail: "They count for no brand, so they don't show when one brand is picked. Put each in its brand on the Brands page (Not in a brand), or with add_to_brand.", Count: nLoose, Items: loose,
+				Detail: "They count for no brand, so they don't show when one brand is picked. Put each in its brand with add_to_brand, or move it on the Brands page.", Count: nLoose, Items: loose,
 				Fix: statusFix{Tool: "add_to_brand", Page: page("brands"), Who: "person"}})
 		}
 	}
@@ -491,7 +491,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 		WHERE b.workspace_id = $1 AND b.status = 'active' AND b.website <> '' AND ($2::uuid IS NULL OR b.id = $2::uuid)
 		  AND EXISTS (SELECT 1 FROM analytics_syncs a WHERE a.workspace_id = $1 AND a.site <> '')
 		  AND NOT EXISTS (SELECT 1 FROM analytics_syncs s WHERE s.workspace_id = $1 AND s.site <> ''
-		      AND outflare_site_brand(s.integration_id, s.site) = b.id)
+		      AND outflare_site_brand_or_first(s.integration_id, s.site) = b.id)
 		ORDER BY b.created_at LIMIT 5`, ws, brandArg)
 	if err != nil {
 		return v, err

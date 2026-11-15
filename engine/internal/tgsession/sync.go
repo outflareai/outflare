@@ -14,6 +14,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/signals"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -520,6 +521,11 @@ func (r *syncRun) store(ctx context.Context, c *chatState, msgs []Message) error
 		}
 		if added == 0 {
 			return nil
+		}
+		// A chat linked to a person or company is read for signals, when
+		// its brand has that on.
+		if err := signals.EnqueueConversation(ctx, tx, r.p.WorkspaceID, r.brand, "telegram", c.id); err != nil {
+			return err
 		}
 		return Waiting(ctx, tx, r.p.WorkspaceID, c.id)
 	})

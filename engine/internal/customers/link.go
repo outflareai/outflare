@@ -3,6 +3,7 @@ package customers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -363,7 +364,7 @@ var Follows = []Ref{
 	// Tracker conversions are revenue to the brand, like transactions.
 	{"tracker_conversions", "record_id"},
 	{"partner_proposals", "record_id"},
-	{"crm_activities", "record_id"},
+	{"crm_activities", "record_id"}, {"signals", "record_id"}, {"conversation_transcripts", "record_id"}, {"conversation_sentiments", "record_id"},
 	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_calendar_events", "record_id"}, {"crm_mail_sharing", "record_id"}, {"crm_mail_sends", "record_id"},
 	{"telegram_chats", "record_id"}, {"telegram_chats", "suggested_record_id"},
 	{"review_requests", "record_id"},
@@ -371,7 +372,7 @@ var Follows = []Ref{
 	{"partner_audiences", "record_id"}, {"partner_task_submissions", "record_id"},
 	{"customer_events", "record_id"}, {"customer_events", "account_id"}, {"consents", "record_id"}, {"event_inbox", "record_id"},
 	{"leads", "record_id"}, {"messages", "record_id"}, {"inbound_messages", "record_id"},
-	{"meetings", "record_id"}, {"deals", "record_id"}, {"emails", "record_id"},
+	{"meetings", "record_id"}, {"deals", "record_id"}, {"deals", "renewal_of"}, {"emails", "record_id"},
 	{"support_conversations", "record_id"}, {"support_messages", "record_id"},
 	{"email_broadcast_recipients", "record_id"}, {"suppressions", "record_id"},
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
@@ -414,6 +415,9 @@ var Owned = []Ref{
 	// An alert was about the record it was sent for.
 	{"visitor_alerts", "record_id"},
 	{"alerts", "record_id"},
+	// A score's history is of the record it was worked out on; the record
+	// kept has its own.
+	{"score_history", "record_id"},
 	// The next refresh drops the merged record and adds the one kept, if
 	// it matches.
 	{"smart_list_members", "record_id"},
@@ -437,6 +441,10 @@ var Owned = []Ref{
 	// too: the record kept counts its own, and moving them would add one
 	// record's totals to another's twice.
 	{"metric_buckets", "record_id"}, {"metric_values", "record_id"},
+	// What a paying record brought in a month at the last revenue count:
+	// the next count moves it to the record kept by itself
+	// (engine/internal/revenue).
+	{"revenue_customers", "record_id"},
 	// What was deleted from the record and can be restored for 7 days
 	// (the recovery window): it stays the record's. Erasing the record
 	// deletes it (ON DELETE CASCADE); a privacy export includes it.
@@ -594,4 +602,22 @@ func follow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string, 
 		}
 	}
 	return moved, rows, nil
+}
+
+// CompanyOf is the company what a person does counts for: account when
+// the event named one, else the first company the person is on, in the
+// person's brand. It returns "" when there is none.
+func CompanyOf(ctx context.Context, q jobs.Querier, ws, person string, account *string) (string, error) {
+	var id string
+	err := q.QueryRow(ctx, `SELECT c.id::text FROM records p JOIN records c ON c.workspace_id = p.workspace_id
+			AND c.brand_id IS NOT DISTINCT FROM p.brand_id AND c.record_type <> 'person' AND c.merged_into IS NULL AND c.archived_at IS NULL
+		WHERE p.workspace_id = $1 AND p.id = $2 AND c.id = COALESCE($3::uuid, (
+			SELECT l.to_id FROM record_relationships l JOIN records t ON t.id = l.to_id
+			WHERE l.workspace_id = $1 AND l.from_id = $2 AND l.kind = 'companies' AND l.valid_to IS NULL
+			  AND t.brand_id IS NOT DISTINCT FROM p.brand_id AND t.merged_into IS NULL AND t.archived_at IS NULL
+			ORDER BY l.valid_from, l.id LIMIT 1))`, ws, person, account).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
 }

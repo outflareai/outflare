@@ -1,0 +1,61 @@
+id: account-signals
+version: 1
+title: Account signals
+summary: Rules that spot a company going quiet and a renewal coming up, and journeys that put each in Needs attention with a task for its owner.
+
+inputs:
+  - name: usage_event
+    label: The event that shows someone is using the product
+    help: Something active customers do every week, such as project_updated. It counts for the company whoever there does it.
+    kind: event
+    example: project_updated
+
+fields:
+  account:
+    - { key: renews_on, label: Renews on, description: The day the company's agreement renews., value_type: date, filterable: true }
+
+signal_types:
+  - key: went_quiet
+    label: Went quiet
+    description: Nobody at the company has used the product for a while.
+    due_days: 3
+
+rules:
+  - key: company_went_quiet
+    name: Company went quiet
+    description: Fires when nobody at a company has used the product for 14 days since they last did, at most once a month.
+    record_type: account
+    trigger: { kind: absence, event: "{{usage_event}}", within_seconds: 1209600 }
+    emit_event: account.went_quiet
+    cooldown_seconds: 2592000
+  - key: renewal_coming_up
+    name: Renewal coming up
+    description: Fires when a company's renewal date comes within 60 days. Checked once a day.
+    record_type: account
+    trigger: { kind: change }
+    conditions:
+      - { attribute: renews_on, op: lt, value: "+60d" }
+      - { attribute: renews_on, op: gt, value: today }
+    emit_event: account.renewal_due
+
+journeys:
+  - key: flag_quiet_companies
+    name: Flag companies that went quiet
+    description: Puts the company in Needs attention and tags it at risk. Ends as soon as someone there uses the product again.
+    record_type: account
+    trigger: { kind: event, event: account.went_quiet }
+    entry: again
+    goal_event: "{{usage_event}}"
+    steps:
+      - { id: flag, kind: raise_signal, signal_type: went_quiet, title: No usage for 14 days, next: tag }
+      - { id: tag, kind: add_tag, tag: at-risk }
+  - key: prepare_renewals
+    name: Prepare renewals
+    description: Puts the company in Needs attention 60 days before it renews, with a task for its owner and a renewal deal in the pipeline.
+    record_type: account
+    trigger: { kind: event, event: account.renewal_due }
+    entry: again
+    steps:
+      - { id: flag, kind: raise_signal, signal_type: renewal, title: Renews within 60 days, next: task }
+      - { id: task, kind: create_task, title: Prepare the renewal, text: "Check usage, open issues and who signs, then book the renewal call.", due_after_seconds: 1209600, next: deal }
+      - { id: deal, kind: open_renewal_deal, within_days: 60 }

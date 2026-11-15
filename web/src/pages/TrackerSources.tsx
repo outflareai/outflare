@@ -24,6 +24,14 @@ type Param = Schemas["TrafficSourceParameter"];
 type Send = Schemas["TrafficSourcePostbackSend"];
 type Network = Schemas["PostbackSource"];
 type NetworkTemplate = Schemas["AffiliateNetworkTemplate"];
+type CostDay = Schemas["NetworkCostDay"];
+
+// Networks whose spend per campaign and target Outflare reads and shares
+// out over each click (plans/ad-tracker.md, Z2), by traffic-source
+// template, with the connector that reads it.
+export const networkCost: Record<string, { connector: string; name: string }> = {
+  zeropark: { connector: "zeropark_ads", name: "Zeropark" },
+};
 
 type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
 
@@ -185,6 +193,7 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
                 <tr className="text-left text-xs text-muted-foreground">
                   <th className="py-2 pr-3 font-medium">Traffic source</th>
                   <th className="px-3 py-2 font-medium">Template</th>
+                  <th className="px-3 py-2 font-medium">Cost</th>
                   <th className="px-3 py-2 font-medium">Conversions back</th>
                   <th className="px-3 py-2 text-right font-medium">Campaigns</th>
                 </tr>
@@ -194,6 +203,7 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
                   <tr key={s.id} className="cursor-pointer border-t hover:bg-muted/40" onClick={() => setOpen({ source: s, template: templates.find((t) => t.id === s.template) ?? null })}>
                     <td className="py-2 pr-3 font-medium">{s.name}</td>
                     <td className="px-3 py-2">{templateName(s.template)}</td>
+                    <td className="px-3 py-2"><CostBadge template={s.template} connected={connected} /></td>
                     <td className="px-3 py-2">{s.postback.url ? <Badge tone="green">Postback</Badge> : <span className="text-muted-foreground">None</span>}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{s.campaigns}</td>
                   </tr>
@@ -226,6 +236,7 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
               source={open.source}
               template={open.template}
               connected={!!open.template?.connector && connected.has(open.template.connector)}
+              costConnected={!!networkCost[open.source?.template ?? open.template?.id ?? ""] && connected.has(networkCost[open.source?.template ?? open.template?.id ?? ""].connector)}
               canManage={canManage}
               go={go}
               onSaved={() => {
@@ -242,12 +253,83 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
 
 const blankParam: Schemas["TrafficSourceParam"] = { param: "", token: "" };
 
-function SourceForm({ source, template, connected, canManage, go, onSaved }: {
+// CostBadge says where a source's cost comes from: exact from the
+// network once its connection reads it, else each click's cost token.
+function CostBadge({ template, connected }: { template: string; connected: Set<string> }) {
+  const n = networkCost[template];
+  if (!n) return <span className="text-muted-foreground">From the cost token</span>;
+  return connected.has(n.connector) ? <Badge tone="green">Exact from {n.name}</Badge> : <Badge tone="amber">Connect {n.name}</Badge>;
+}
+
+// NetworkCostSection is a network source's cost: whether its connection
+// reads the spend, and how the last days' spend was shared out.
+function NetworkCostSection({ source, templateID, connected, go }: { source: Source | null; templateID: string; connected: boolean; go: (tab: Tab, item?: string) => void }) {
+  const n = networkCost[templateID];
+  const [days, setDays] = useState<CostDay[] | null>(null);
+  useEffect(() => {
+    if (!n || !source || !connected) return;
+    api.GET("/v1/brands/{brand}/network-costs", { params: { path: { brand: pickedBrandId() }, query: { source_id: source.id } } }).then(({ data }) => setDays((data?.data ?? []) as CostDay[]));
+  }, [n, source, connected]);
+  if (!n) return null;
+  const money = (v: string, cur: string) => `${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${cur}`;
+  return (
+    <section className="space-y-2" data-testid="network-cost">
+      <h3 className="text-sm font-medium">Cost</h3>
+      {!connected ? (
+        <p className="text-xs text-muted-foreground">
+          Connect {n.name} with your own API token and every click&apos;s cost becomes exact: each day, {n.name}&apos;s spend per campaign and target is shared out over
+          the clicks it sent, by their own cost, so reports add up to what {n.name} charged. Until then, cost comes from the cost token.{" "}
+          <button type="button" className="underline" onClick={() => go("connectors", n.connector)}>Connect {n.name}</button>
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Exact: every 15 minutes, {n.name}&apos;s spend per campaign and target for the last three days is shared out over the clicks it sent, by their own cost.
+            Keep <code>{"{campaign_id}"}</code> and <code>{"{target}"}</code> in the parameters, or spend can&apos;t be matched to clicks.
+          </p>
+          {days === null ? null : days.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Nothing reconciled yet: it starts with this source&apos;s first clicks.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs" data-testid="network-cost-days">
+                <thead className="text-left text-muted-foreground">
+                  <tr>
+                    <th className="py-1 pr-2 font-normal">Day</th>
+                    <th className="py-1 pr-2 font-normal">Campaign</th>
+                    <th className="py-1 pr-2 text-right font-normal">Spend</th>
+                    <th className="py-1 pr-2 text-right font-normal">On its targets</th>
+                    <th className="py-1 pr-2 text-right font-normal">Spread</th>
+                    <th className="py-1 text-right font-normal">Unattributed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {days.slice(0, 10).map((d) => (
+                    <tr key={d.day + d.campaign_ref} className="border-t">
+                      <td className="py-1 pr-2">{d.day}</td>
+                      <td className="max-w-40 truncate py-1 pr-2 font-mono" title={d.campaign_ref}>{d.campaign_ref}</td>
+                      <td className="py-1 pr-2 text-right tabular-nums">{money(d.spend, d.currency)}</td>
+                      <td className="py-1 pr-2 text-right tabular-nums">{money(d.matched, d.currency)}</td>
+                      <td className="py-1 pr-2 text-right tabular-nums">{money(d.spread, d.currency)}</td>
+                      <td className={`py-1 text-right tabular-nums ${Number(d.unattributed) > 0 ? "text-amber-600" : ""}`}>{money(d.unattributed, d.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function SourceForm({ source, template, connected, costConnected, canManage, go, onSaved }: {
   source: Source | null;
   template: Template | null;
   connected: boolean;
+  costConnected: boolean;
   canManage: boolean;
-  go: (tab: Tab) => void;
+  go: (tab: Tab, item?: string) => void;
   onSaved: () => void;
 }) {
   const from = source ?? template;
@@ -370,6 +452,7 @@ function SourceForm({ source, template, connected, canManage, go, onSaved }: {
         <div className="text-xs text-muted-foreground">A campaign on this source links to</div>
         <div className="break-all rounded-md border bg-muted/40 p-2 font-mono text-xs" data-testid="url-preview">{preview}</div>
       </section>
+      <NetworkCostSection source={source} templateID={source?.template ?? template?.id ?? ""} connected={costConnected} go={go} />
       <section className="space-y-2">
         <h3 className="text-sm font-medium">Conversions back to the network</h3>
         {template?.connector && (

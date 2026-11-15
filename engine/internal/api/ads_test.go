@@ -552,7 +552,7 @@ func TestAdsSyncAndReports(t *testing.T) {
 		t.Fatalf("empty: %v", got)
 	}
 	cat := owner.must(200, "GET", base+"/connectors?category=ads", nil)["data"].([]any)
-	if len(cat) != 14 {
+	if len(cat) != 15 {
 		t.Fatalf("ads catalog: %d", len(cat))
 	}
 
@@ -701,7 +701,8 @@ func TestAdsSyncAndReports(t *testing.T) {
 	}
 	owner.must(400, "PATCH", base+"/ads/accounts/"+acctID, map[string]any{"brand": "nope"})
 	owner.must(404, "PATCH", base+"/ads/accounts/00000000-0000-0000-0000-000000000000", map[string]any{"sync_on": false})
-	if got := owner.must(200, "PATCH", base+"/ads/accounts/"+acctID, map[string]any{"sync_on": false, "brand": "none"}); got["sync_on"] != false || got["brand_id"] != nil {
+	owner.must(400, "PATCH", base+"/ads/accounts/"+acctID, map[string]any{"brand": "none"}) // every ad account belongs to a brand
+	if got := owner.must(200, "PATCH", base+"/ads/accounts/"+acctID, map[string]any{"sync_on": false}); got["sync_on"] != false || got["brand_id"] == nil {
 		t.Fatalf("switch off: %v", got)
 	}
 	if res, err := e.ads.SyncOnce(ctx, ws, id); err != nil || res.Accounts != 0 {
@@ -837,18 +838,9 @@ func TestAdAccountTakesItsConnectionsBrand(t *testing.T) {
 		t.Fatalf("another brand sees the account: %v", a)
 	}
 
-	// An account saved before this, with no brand, takes it on the next
-	// sync; one moved to another brand by hand keeps that.
+	// An account moved to another brand by hand keeps that on the next
+	// sync.
 	acc := a[0].(map[string]any)["id"].(string)
-	if _, err := e.pool.Exec(ctx, `UPDATE ad_accounts SET brand_id = NULL WHERE id = $1`, acc); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.ads.SyncOnce(ctx, ws, id); err != nil {
-		t.Fatal(err)
-	}
-	if a := owner.must(200, "GET", base+"/ads/accounts?brand="+geo, nil)["data"].([]any); len(a) != 1 {
-		t.Fatalf("backfilled brand: %v", a)
-	}
 	owner.must(200, "PATCH", base+"/ads/accounts/"+acc, map[string]any{"brand": other})
 	if _, err := e.ads.SyncOnce(ctx, ws, id); err != nil {
 		t.Fatal(err)

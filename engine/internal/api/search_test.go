@@ -27,8 +27,8 @@ func TestSearch(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 	var mb string
-	if err := db.QueryRow(context.Background(), `INSERT INTO mailboxes (workspace_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials, status)
-		VALUES ($1, 'sam@acme.example', 'google', 'smtp.gmail.com', 587, 'sam@acme.example', 'imap.gmail.com', 993, 'sam@acme.example', '\x00', 'active') RETURNING id::text`, ws).Scan(&mb); err != nil {
+	if err := db.QueryRow(context.Background(), `INSERT INTO mailboxes (brand_id, workspace_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials, status)
+		VALUES (outflare_first_brand($1), $1, 'sam@acme.example', 'google', 'smtp.gmail.com', 587, 'sam@acme.example', 'imap.gmail.com', 993, 'sam@acme.example', '\x00', 'active') RETURNING id::text`, ws).Scan(&mb); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(context.Background(), `INSERT INTO inbound_messages (workspace_id, mailbox_id, uidvalidity, uid, from_email, subject, body, record_id, received_at, kind)

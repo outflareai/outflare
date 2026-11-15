@@ -1,0 +1,25 @@
+id: share-of-wallet
+version: 1
+title: Share of wallet
+summary: Fields on companies for what each spends a year on what you sell, with every supplier, so its page shows how much of that is yours and how much room is left.
+
+option_sets:
+  - key: wallet_confidence
+    name: Wallet confidence
+    options:
+      - { key: told_us, label: They told us }
+      - { key: estimated, label: Estimated }
+      - { key: guess, label: A guess }
+
+fields:
+  account:
+    - { key: wallet_estimate, label: Yearly spend on this category, description: "What the company spends a year on what you sell, with every supplier, yours included.", value_type: currency, filterable: true }
+    - { key: wallet_confidence, label: How sure, description: How sure the estimate is., value_type: select, option_set: wallet_confidence, filterable: true }
+    - { key: wallet_source, label: Where the estimate comes from, description: "Who said it or how it was worked out, such as a call, their job ads or their size.", value_type: text }
+    - { key: suppliers, label: Other suppliers, description: Who else the company buys this from., value_type: text }
+
+signal_types:
+  - key: room_to_grow
+    label: Room to grow
+    description: The company spends much more on this with others than with you.
+    due_days: 14

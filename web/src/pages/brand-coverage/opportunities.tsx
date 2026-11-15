@@ -1,7 +1,8 @@
 // Presence opportunities: the places worth the team's effort, highest
 // leverage first. Leverage is SEO (the site's domain rating and traffic)
 // and AI answers (how often they cite the site) together, plus how many
-// competitors are there. Picking one contacts nobody. The table sorts by
+// competitors are there. Picking one contacts nobody. Assigning a site
+// says who on the team is managing it, so nobody else reaches out. The table sorts by
 // any number, groups pages by site, can hide competitors' own sites, and
 // loads more as you scroll.
 import { useState } from "react";
@@ -10,6 +11,7 @@ import { api, errorMessage } from "../../api";
 import { Badge, Button, ErrorText, field, toast } from "../../ui";
 import { label } from "./client";
 import { AccessBadge, AccessSelect } from "./linkvalue";
+import { OwnerSelect, SiteAssignee, useAssignees, type OwnerFilter } from "./site-owner";
 import { MoreOnScroll, Th, Toggle, num, useInfinite, usePref } from "./table";
 
 type Opportunity = components["schemas"]["PlacementOpportunity"];
@@ -34,7 +36,8 @@ const parts: [string, string][] = [
   ["relationship", "Relationship"],
 ];
 
-export function Opportunities({ brand, manage, myId }: { brand: string; manage: boolean; myId: string }) {
+export function Opportunities({ ws, brand, manage, myId }: { ws: string; brand: string; manage: boolean; myId: string }) {
+  const assignees = useAssignees(ws, brand);
   const [state, setState] = useState<State>("open"),
     [reason, setReason] = useState<Reason | "">(""),
     [access, setAccess] = useState<NonNullable<Query["access"]> | "">(""),
@@ -43,6 +46,7 @@ export function Opportunities({ brand, manage, myId }: { brand: string; manage: 
     [minDR, setMinDR] = usePref<string>("opportunities.min_dr", ""),
     [bySite, setBySite] = usePref<boolean>("opportunities.by_site", false),
     [noRivals, setNoRivals] = usePref<boolean>("opportunities.no_rivals", true),
+    [owner, setOwner] = usePref<OwnerFilter>("opportunities.owner", ""),
     [open, setOpen] = useState<Record<string, Opportunity[] | "loading">>({}),
     [busy, setBusy] = useState(false),
     [actError, setActError] = useState("");
@@ -55,6 +59,7 @@ export function Opportunities({ brand, manage, myId }: { brand: string; manage: 
     ...(q.trim() ? { q: q.trim() } : {}),
     ...(minDR ? { min_domain_rating: Number(minDR) } : {}),
     ...(noRivals ? { exclude_competitors: true } : {}),
+    ...(owner ? { owner } : {}),
     ...extra,
   });
   const list = useInfinite<Opportunity, List>(
@@ -62,7 +67,7 @@ export function Opportunities({ brand, manage, myId }: { brand: string; manage: 
       api.GET("/v1/brands/{brand}/coverage/opportunities", {
         params: { path: { brand }, query: query({ ...(bySite ? { group: "domain" } : {}), ...(cursor ? { cursor } : {}) }) },
       }),
-    [brand, state, reason, access, q, sort, minDR, bySite, noRivals],
+    [brand, state, reason, access, q, sort, minDR, bySite, noRivals, owner],
     errorMessage,
   );
   const expand = async (host: string) => {
@@ -132,6 +137,23 @@ export function Opportunities({ brand, manage, myId }: { brand: string; manage: 
         <td className="px-3 py-2 text-right tabular-nums">{num(f.domain_traffic)}</td>
         <td className="px-3 py-2 text-right tabular-nums">{num(f.ai_citations ?? 0)}</td>
         <td className="px-3 py-2 text-right tabular-nums">{num(f.competitors ?? 0)}</td>
+        <td className="px-3 py-2">
+          {!nested && (
+            <SiteAssignee
+              brand={brand}
+              host={o.host}
+              owner={{ owner_id: o.site_owner_id, owner_name: o.site_owner_name, owner_avatar_url: o.site_owner_avatar_url }}
+              members={assignees}
+              myId={myId}
+              manage={manage}
+              setError={setActError}
+              onChanged={() => {
+                setOpen({});
+                list.reload();
+              }}
+            />
+          )}
+        </td>
         <td className="hidden px-3 py-2 text-xs text-muted-foreground xl:table-cell">
           {parts
             .filter(([k]) => points[k])
@@ -141,11 +163,6 @@ export function Opportunities({ brand, manage, myId }: { brand: string; manage: 
         {manage && (
           <td className="px-3 py-2">
             <div className="flex justify-end gap-1">
-              {o.state !== "picked" && o.state !== "won" && (
-                <Button variant="ghost" disabled={busy} onClick={() => update(o.id, { state: "picked", owner_id: myId }, "Picked: it's yours")}>
-                  Pick
-                </Button>
-              )}
               {o.state !== "won" && (
                 <Button variant="ghost" disabled={busy} onClick={() => update(o.id, { state: "won" }, "Marked won")}>
                   Won
@@ -194,6 +211,7 @@ export function Opportunities({ brand, manage, myId }: { brand: string; manage: 
             </option>
           ))}
         </select>
+        <OwnerSelect className={`${field} !w-auto`} value={owner} onChange={setOwner} />
         <AccessSelect className={`${field} !w-auto`} value={access} onChange={setAccess} />
         <select className={`${field} !w-auto`} aria-label="Domain rating" value={minDR} onChange={(e) => setMinDR(e.target.value)}>
           <option value="">Any domain rating</option>
@@ -247,6 +265,9 @@ export function Opportunities({ brand, manage, myId }: { brand: string; manage: 
               </Th>
               <Th sort="competitors" by={sort} onSort={setSort} className="text-right" title="How many of your competitors are there">
                 Competitors
+              </Th>
+              <Th by={sort} onSort={setSort} className="text-right" title="Who on the team is managing the site. Assign it to whoever is talking to them, so nobody else reaches out.">
+                Assigned to
               </Th>
               <Th by={sort} onSort={setSort} className="hidden xl:table-cell">
                 Score parts

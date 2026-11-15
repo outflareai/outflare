@@ -11,7 +11,6 @@ import { ago, plural } from "../format";
 import { cn } from "@/lib/utils";
 import { setBrand, useBrand } from "@/lib/brand";
 import type { Tab } from "../App";
-import { NotInABrand } from "@/components/unassigned";
 import { parsePath } from "@/lib/paths";
 
 // Brands: the businesses one company markets from a single workspace, such
@@ -125,7 +124,6 @@ export function Brands({ ws, canManage, canEdit, canDelete, open, setOpen, go, l
           )}
         </div>
       )}
-      {active.length > 0 && <NotInABrand ws={ws} brands={active} canEdit={canEdit} onMoved={reload} />}
       {active.length >= 2 && <ContactRuleCard ws={ws} canManage={canManage} />}
       {archived.length > 0 && (
         <Card title="Archived" description="Hidden from the sidebar and pickers. Their records are kept.">
@@ -640,7 +638,7 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
                   return row(
                     `d:${d.domain}`,
                     <span className="font-mono">{d.domain}</span>,
-                    other ? `In ${other}` : d.brand_id ? `${plural(d.mailboxes, "mailbox", "mailboxes")}` : "Not in a brand",
+                    other ? `In ${other}` : plural(d.mailboxes, "mailbox", "mailboxes"),
                     d.brand_id === b.id,
                     d.brand_id === b.id ? `In ${b.name}` : undefined,
                     () => move(`d:${d.domain}`, { domains: [d.domain] }),

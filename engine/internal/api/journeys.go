@@ -70,14 +70,16 @@ type journeyStats struct {
 }
 
 type journeyView struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Status      string         `json:"status"`
-	BrandID     *string        `json:"brand_id"`
-	Trigger     journeyTrigger `json:"trigger"`
-	Entry       string         `json:"entry"`
-	GoalEvent   *string        `json:"goal_event"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Status      string  `json:"status"`
+	BrandID     *string `json:"brand_id"`
+	// The kind of record it is about: person or account.
+	RecordType string         `json:"record_type"`
+	Trigger    journeyTrigger `json:"trigger"`
+	Entry      string         `json:"entry"`
+	GoalEvent  *string        `json:"goal_event"`
 	// Exit criteria: these events end a run at once; these conditions (any
 	// of them) end it before its next step, and keep people who already
 	// meet them from starting.
@@ -116,7 +118,7 @@ const journeySelect = `
 	       j.exit_events, j.exit_conditions, j.entry_limit, j.entry_limit_per, j.reentry_after_seconds, j.exclude, j.steps, j.version, j.activated_at,
 	       COALESCE(st.entered, 0), COALESCE(st.active, 0), COALESCE(st.completed, 0), COALESCE(st.exited, 0), COALESCE(st.failed, 0),
 	       j.created_at, j.updated_at,
-	       (SELECT d.updated_at FROM journey_versions d WHERE d.journey_id = j.id AND d.status = 'draft'), j.kit_id, j.kit_key
+	       (SELECT d.updated_at FROM journey_versions d WHERE d.journey_id = j.id AND d.status = 'draft'), j.kit_id, j.kit_key, j.record_type
 	FROM journeys j
 	LEFT JOIN LATERAL (
 		SELECT count(*)::int AS entered,
@@ -135,7 +137,7 @@ func scanJourney(row pgx.Row) (journeyView, error) {
 	var kitID, kitKey *string
 	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Status, &v.BrandID, &v.Trigger.Kind, &v.Trigger.Event, &filter, &v.Entry, &v.GoalEvent,
 		&v.ExitEvents, &exitConds, &limit, &per, &v.ReentryAfterSeconds, &exclude, &steps, &v.Version, &v.ActivatedAt, &v.Stats.Entered, &v.Stats.Active, &v.Stats.Completed, &v.Stats.Exited, &v.Stats.Failed,
-		&v.CreatedAt, &v.UpdatedAt, &v.DraftUpdatedAt, &kitID, &kitKey)
+		&v.CreatedAt, &v.UpdatedAt, &v.DraftUpdatedAt, &kitID, &kitKey, &v.RecordType)
 	if err != nil {
 		return v, err
 	}
@@ -302,6 +304,7 @@ type journeyFields struct {
 	Name           *string                     `json:"name"`
 	Description    *string                     `json:"description"`
 	BrandID        optional[string]            `json:"brand_id"`
+	RecordType     *string                     `json:"record_type"`
 	Trigger        *journeyTrigger             `json:"trigger"`
 	Entry          *string                     `json:"entry"`
 	GoalEvent      optional[string]            `json:"goal_event"`
@@ -316,7 +319,7 @@ type journeyFields struct {
 // onlyLabels reports whether f changes nothing but the name and
 // description, which can change while a journey runs.
 func (f journeyFields) onlyLabels() bool {
-	return !f.BrandID.Set && f.Trigger == nil && f.Entry == nil && !f.GoalEvent.Set && f.Steps == nil && f.ExitEvents == nil && f.ExitConditions == nil &&
+	return !f.BrandID.Set && f.RecordType == nil && f.Trigger == nil && f.Entry == nil && !f.GoalEvent.Set && f.Steps == nil && f.ExitEvents == nil && f.ExitConditions == nil &&
 		!f.EntryLimit.Set && !f.ReentryAfter.Set && f.Exclude == nil
 }
 
@@ -329,6 +332,23 @@ func (s *Server) applyJourney(r *http.Request, ws string, f journeyFields, v *jo
 		return err
 	}
 	v.BrandID = brand
+	if v.RecordType == "" {
+		v.RecordType = journeys.TypePerson
+	}
+	if f.RecordType != nil && *f.RecordType != v.RecordType {
+		switch {
+		case !journeys.ValidType(*f.RecordType):
+			return errInvalid("record_type is person, account or deal: who or what the journey is about")
+		case v.Stats.Entered > 0:
+			return errInvalid("this journey has already run, so who it is about can't change: make a new one")
+		}
+		v.RecordType = *f.RecordType
+		if f.Steps == nil {
+			if msg := journeys.CheckFor(v.RecordType, v.Steps); msg != "" {
+				return errInvalid(msg)
+			}
+		}
+	}
 	if f.Name != nil {
 		if n := strings.TrimSpace(*f.Name); n == "" || len(n) > 200 {
 			return errInvalid("name must be 1 to 200 characters")
@@ -412,7 +432,7 @@ func (s *Server) applyJourney(r *http.Request, ws string, f journeyFields, v *jo
 		v.Exclude = x
 	}
 	if f.Steps != nil {
-		if msg := journeys.Check(*f.Steps); msg != "" {
+		if msg := journeys.CheckFor(v.RecordType, *f.Steps); msg != "" {
 			return errInvalid(msg)
 		}
 		if err := s.checkJourneyTemplates(r, ws, v.BrandID, *f.Steps, false); err != nil {
@@ -478,10 +498,10 @@ func (s *Server) createJourney(w http.ResponseWriter, r *http.Request) {
 		exitConds, _ := json.Marshal(v.ExitConditions)
 		limit, per := v.EntryLimit.columns()
 		if err := tx.QueryRow(ctx, `INSERT INTO journeys (workspace_id, brand_id, name, description, trigger_kind, trigger_event, trigger_filter,
-			entry, goal_event, steps, created_by, exit_events, exit_conditions, entry_limit, entry_limit_per, reentry_after_seconds, exclude)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
+			entry, goal_event, steps, created_by, exit_events, exit_conditions, entry_limit, entry_limit_per, reentry_after_seconds, exclude, record_type)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
 			a.WorkspaceID, v.BrandID, v.Name, v.Description, v.Trigger.Kind, v.Trigger.Event, filter, v.Entry, v.GoalEvent, steps, createdBy,
-			v.ExitEvents, exitConds, limit, per, v.ReentryAfterSeconds, v.Exclude).Scan(&id); err != nil {
+			v.ExitEvents, exitConds, limit, per, v.ReentryAfterSeconds, v.Exclude, v.RecordType).Scan(&id); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "journey.created", "journey", id,
@@ -550,9 +570,9 @@ func (s *Server) updateJourney(w http.ResponseWriter, r *http.Request) {
 		limit, per := v.EntryLimit.columns()
 		if _, err := tx.Exec(ctx, `UPDATE journeys SET brand_id = $3, name = $4, description = $5, trigger_kind = $6, trigger_event = $7,
 			trigger_filter = $8, entry = $9, goal_event = $10, steps = $11, version = version + $12, exit_events = $13, exit_conditions = $14,
-			entry_limit = $15, entry_limit_per = $16, reentry_after_seconds = $17, exclude = $18,
+			entry_limit = $15, entry_limit_per = $16, reentry_after_seconds = $17, exclude = $18, record_type = $19,
 			updated_at = now() WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID, v.BrandID, v.Name, v.Description, v.Trigger.Kind, v.Trigger.Event,
-			filter, v.Entry, v.GoalEvent, steps, bump, v.ExitEvents, exitConds, limit, per, v.ReentryAfterSeconds, v.Exclude); err != nil {
+			filter, v.Entry, v.GoalEvent, steps, bump, v.ExitEvents, exitConds, limit, per, v.ReentryAfterSeconds, v.Exclude, v.RecordType); err != nil {
 			return err
 		}
 		if bump == 1 && cur.Status == "paused" {

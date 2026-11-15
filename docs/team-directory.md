@@ -8,6 +8,8 @@ Each person has a name, an optional work email (stored in lower case, one per pe
 
 A person is `active`, `leaving` (their handover has started) or `left`. Someone who has left is kept for history. Someone added by mistake can be removed, unless they have held a company account: then mark them left instead, so the account's history stays whole.
 
+The **Org chart** view lays people out under their managers. A brand's [sales team and commission](sales-team.md) follow these reporting lines and job titles.
+
 Departments have a name and a head. A team (Settings, Teams) can sit in a department and have a lead. Deleting a department keeps its people and teams; they just have no department.
 
 ## Company accounts

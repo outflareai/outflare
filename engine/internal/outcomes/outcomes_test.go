@@ -55,8 +55,8 @@ func setup(t *testing.T, pool *pgxpool.Pool) fixture {
 	q(`INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Agencies AU', 'agencies-au') RETURNING id`, []any{f.ws}, &f.brand)
 	q(`INSERT INTO sequences (workspace_id, name, brand_id) VALUES ($1, 'A', $2) RETURNING id`, []any{f.ws, f.brand}, &f.seqA)
 	q(`INSERT INTO sequences (workspace_id, name, brand_id) VALUES ($1, 'B', $2) RETURNING id`, []any{f.ws, f.brand}, &f.seqB)
-	q(`INSERT INTO mailboxes (workspace_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials)
-		VALUES ($1, 'jo@send.test', 'other', 'smtp', 587, 'jo', 'imap', 993, 'jo', '\x00') RETURNING id`, []any{f.ws}, &f.mailbox)
+	q(`INSERT INTO mailboxes (brand_id, workspace_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials)
+		VALUES (outflare_first_brand($1), $1, 'jo@send.test', 'other', 'smtp', 587, 'jo', 'imap', 993, 'jo', '\x00') RETURNING id`, []any{f.ws}, &f.mailbox)
 	q(`INSERT INTO leads (workspace_id, email) VALUES ($1, 'sam@acme.test') RETURNING id`, []any{f.ws}, &f.lead)
 	q(`INSERT INTO leads (workspace_id, email) VALUES ($1, 'kim@other.test') RETURNING id`, []any{f.ws}, &f.lead2)
 	send := func(seq, lead, to string, n int) {

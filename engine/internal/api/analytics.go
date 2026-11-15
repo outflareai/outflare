@@ -123,7 +123,7 @@ func (s *Server) siteInBrand(ctx context.Context, ws, integration, site string, 
 		return true, nil
 	}
 	var brand *string
-	err := s.pool.QueryRow(ctx, `SELECT outflare_site_brand($1, $2)::text`, integration, site).Scan(&brand)
+	err := s.pool.QueryRow(ctx, `SELECT outflare_site_brand_or_first($1, $2)::text`, integration, site).Scan(&brand)
 	return sel.matches(brand), err
 }
 

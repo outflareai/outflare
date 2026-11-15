@@ -179,6 +179,7 @@ var errorCodes = []errorCode{
 	{"reddit_limit_reached", []int{409}, "The action would pass one of the brand's Reddit limits: actions per subreddit a day, or upvotes on one item. The message says which.", false},
 
 	// Customer records.
+	{"site_claimed", []int{409}, "A teammate is managing this site (its company's owner), so reaching out or claiming it would overlap with them. The message names them. Check with them first; a person can go ahead with confirm_claimed: true (reaching out) or take_over: true (claiming). Agents never do.", false},
 	{"identity_taken", []int{409}, "Another record already holds this verified identity, such as a verified email. The message names it when you can see it: change that record, or add the identity unverified.", false},
 	{"merge_refused", []int{409}, "Both records have their own user id, so they are two accounts in your product and are never merged. Link them as the same human instead (POST .../records/duplicates/{candidate}/link).", false},
 	{"not_a_hand_edit", []int{409}, "Only a value someone set by hand can be pinned or unpinned. Set the value by hand first (Use this), then pin it.", false},

@@ -1,0 +1,55 @@
+id: hand-over-won-customers
+version: 1
+title: Hand every won deal over to the people who look after it
+summary: Put each newly won customer in Needs attention with a kick-off task for their owner, and tell the owner when a closed support conversation comes back.
+description: |
+  The gap between "deal won" and the first useful week is where new
+  customers are lost, because sales has moved on and nobody else was
+  told. This playbook adds two signal types and one journey, the journey
+  as a draft. A won deal lands in Needs attention as "New customer to
+  onboard" with a due date, and the journey gives the customer's owner a
+  task to book the kick-off call. A support conversation that was closed
+  and comes back lands there too, as "Support trouble", so the owner
+  hears of it before the next call. Customers with no owner are listed,
+  so routing or a person can give them one. Nothing is sent to a
+  customer, and the journey goes live only when a person turns it on.
+tier: obvious
+goals: [customers, retention]
+publisher: outflare
+author: { github: outflareai }
+kit: customer-handover
+needs:
+  data:
+    - { check: records, label: Deals in the CRM with the person or company they are with }
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+steps:
+  - say: Check that deals are tracked and how many won deals in the last 90 days are with a person or company that has no owner.
+    tools: [listBrandRecords, listBrandCustomerEvents]
+  - say: Check what the setup kit would add, then add it. Its journey arrives as a draft.
+    tools: [previewKit, applyKit]
+  - say: Test the journey with one recently won customer, and show the routing rules if customers have no owner.
+    tools: [getBrandJourney, testBrandJourney, getRouting]
+  - say: Ask a person to turn the journey on, then show what is waiting in Needs attention.
+    tools: [listSignalTypes, listSignals]
+guardrails:
+  - The journey is turned on only after a person approves it.
+  - Signals and tasks go to the team; nothing is sent to a customer.
+  - Owners are given by the brand's routing rules or a person, never picked by the agent.
+measure:
+  - metric: New customers picked up in time
+    how: "Share of 'New customer to onboard' signals accepted before their due date."
+  - metric: Support trouble acted on
+    how: "Share of 'Support trouble' signals closed as won or no change, not left to run late."
+prompt: |
+  Run the "Hand over won customers" playbook for {{brand}}. Check that
+  deals are tracked and how many recently won customers have no owner,
+  then preview and apply the customer-handover setup kit. Test its
+  journey with one recently won customer. Don't turn anything on: show
+  me the test and the customers with no owner first.
+example: |
+  For Northpeak, seven deals were won in the last 90 days; two of those
+  customers have no owner. The kick-off journey would have given the
+  other five owners a task within a minute of the deal closing.

@@ -23,6 +23,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/hubspot"
 	"github.com/outflareai/outflare/engine/internal/connectors/inboxkit"
 	"github.com/outflareai/outflare/engine/internal/connectors/instantly"
+	"github.com/outflareai/outflare/engine/internal/connectors/leadportal"
 	"github.com/outflareai/outflare/engine/internal/connectors/linkedin"
 	"github.com/outflareai/outflare/engine/internal/connectors/mailsignin"
 	"github.com/outflareai/outflare/engine/internal/connectors/manifest"
@@ -44,6 +45,7 @@ import (
 // Available returns every connector that can be connected.
 func Available() []c.Connector {
 	var out []c.Connector
+	out = append(out, leadportal.Connector{})
 	out = append(out, verifiers.All()...)
 	out = append(out, data.All()...)
 	out = append(out, emailbison.EmailBison{}, instantly.Instantly{}, smartlead.Smartlead{}, cheapinboxes.Connector{}, inboxkit.Connector{})

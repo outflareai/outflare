@@ -15,6 +15,7 @@ type claims struct {
 	EmailVerified     bool   `json:"email_verified"`
 	PreferredUsername string `json:"preferred_username"`
 	Name              string `json:"name"`
+	Picture           string `json:"picture"`
 }
 
 // idClaims reads an ID token. It comes straight from the token endpoint
@@ -52,6 +53,9 @@ type Identity struct {
 	Subject string // Google's stable account id
 	Email   string
 	Name    string
+	// Picture is the account's profile photo, an https URL Google serves,
+	// or "".
+	Picture string `json:",omitempty"`
 }
 
 // ExchangeLogin trades a sign-in code for the Google account behind it. The
@@ -74,5 +78,18 @@ func (t *Tokens) ExchangeLogin(ctx context.Context, code, redirectURI string) (*
 	if !c.EmailVerified {
 		return nil, errors.New("Google has not verified this account's email address")
 	}
-	return &Identity{Subject: c.Subject, Email: strings.ToLower(c.Email), Name: c.Name}, nil
+	return &Identity{Subject: c.Subject, Email: strings.ToLower(c.Email), Name: c.Name, Picture: profilePhoto(c.Picture)}, nil
+}
+
+// profilePhoto is a Google profile photo URL, kept only when Google serves
+// it over https from its own photo host; anything else is "".
+func profilePhoto(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || len(raw) > 2000 {
+		return ""
+	}
+	if h := strings.ToLower(u.Hostname()); h != "googleusercontent.com" && !strings.HasSuffix(h, ".googleusercontent.com") {
+		return ""
+	}
+	return u.String()
 }

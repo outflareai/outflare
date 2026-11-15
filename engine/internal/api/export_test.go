@@ -157,3 +157,8 @@ func (s *Server) RunWorkspaceCalendar(ctx context.Context, ws, connection string
 func (s *Server) RunCRMMailSend(ctx context.Context, ws, send string) error {
 	return s.crmMailSendJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"send_id":"` + send + `"}`)})
 }
+
+// RunConversationRead reads one conversation for signals once.
+func (s *Server) RunConversationRead(ctx context.Context, ws, brand, channel, ref string) error {
+	return s.conversationJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"brand_id":"` + brand + `","channel":"` + channel + `","ref":"` + ref + `"}`)})
+}

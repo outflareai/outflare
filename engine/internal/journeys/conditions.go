@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -54,8 +55,10 @@ func test(ctx context.Context, q jobs.Querier, s subject, c Condition) (bool, er
 		return compare(v, ok, c.Op, c.Value), nil
 	case c.Event != "":
 		var did bool
-		err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM customer_events WHERE workspace_id = $1 AND record_id = $2 AND name = $3 AND occurred_at >= $4
-				AND source <> 'browser')`,
+		// For a company, what its people did counts.
+		err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM customer_events WHERE workspace_id = $1 AND name = $3 AND occurred_at >= $4
+				AND source <> 'browser' AND (record_id = $2 OR account_id = $2 OR record_id IN (
+					SELECT from_id FROM record_relationships WHERE to_id = $2 AND kind = 'companies' AND valid_to IS NULL AND workspace_id = $1)))`,
 			s.ws, s.recordID, c.Event, s.entered).Scan(&did)
 		return did == (c.Op == "exists"), err
 	case c.Email != "":
@@ -111,6 +114,23 @@ func text(v any) string {
 	return fmt.Sprint(v)
 }
 
+var relativeDateRE = regexp.MustCompile(`^(today|[+-]\d{1,4}d)$`)
+
+// RelativeDate reads a condition value that is a date relative to today:
+// "today", "+60d" (60 days from now) or "-14d" (14 days ago). It returns
+// that day as YYYY-MM-DD in UTC.
+func RelativeDate(want any, now time.Time) (string, bool) {
+	s, isText := want.(string)
+	if !isText || !relativeDateRE.MatchString(s) {
+		return "", false
+	}
+	days := 0
+	if s != "today" {
+		days, _ = strconv.Atoi(strings.TrimSuffix(s, "d"))
+	}
+	return now.UTC().AddDate(0, 0, days).Format("2006-01-02"), true
+}
+
 // compare applies op to a value that may be missing (ok false).
 func compare(v any, ok bool, op string, want any) bool {
 	switch op {
@@ -121,6 +141,16 @@ func compare(v any, ok bool, op string, want any) bool {
 	}
 	if !ok {
 		return op == "neq"
+	}
+	// A relative date compares with the value's day: a date, or the day of
+	// a time. A value that is no date never matches.
+	if day, relative := RelativeDate(want, time.Now()); relative {
+		got := text(v)
+		if len(got) < 10 || got[4] != '-' || got[7] != '-' {
+			return op == "neq"
+		}
+		c := strings.Compare(got[:10], day)
+		return (op == "eq" && c == 0) || (op == "neq" && c != 0) || (op == "gt" && c > 0) || (op == "lt" && c < 0)
 	}
 	switch op {
 	case "eq", "neq":
@@ -181,3 +211,7 @@ func Holds(attributes, properties map[string]any, conds []Condition, match strin
 	}
 	return match != "any"
 }
+
+// Lookup reads a dotted path such as metrics.usage_7d from a record's
+// fields, and whether it is set.
+func Lookup(m map[string]any, path string) (any, bool) { return lookup(m, path) }

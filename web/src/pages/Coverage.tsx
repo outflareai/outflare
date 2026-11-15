@@ -346,7 +346,7 @@ function CoverageBrand({
           openRecord={(id) => go("people", id)}
         />
       ) : section === "opportunities" ? (
-        <Opportunities brand={brand} manage={can("coverage.manage")} myId={myId} />
+        <Opportunities ws={ws} brand={brand} manage={can("coverage.manage")} myId={myId} />
       ) : section === "competitors" ? (
         <CompetitorPresence ws={ws} brand={brand} manage={can("coverage.manage")} />
       ) : section === "reports" ? (
@@ -2005,7 +2005,7 @@ function CoverageDetail({
                     Open linked CRM record
                   </a>
                 ) : (
-                  <Button variant="ghost" onClick={() => go("people")}>
+                  <Button variant="ghost" onClick={() => go("crm", "person")}>
                     Find a contact in CRM
                   </Button>
                 )}

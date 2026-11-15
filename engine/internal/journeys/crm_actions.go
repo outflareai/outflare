@@ -32,6 +32,16 @@ type DealMove struct {
 // there; ref is the run, for the audit data.
 type DealMover interface {
 	MoveDeal(ctx context.Context, tx pgx.Tx, ws, recordID string, d DealMove, ref string) (outcome, detail string, err error)
+	// OpenRenewalDeals opens a deal for each renewal the company has
+	// within the next days that has had none, at stage (the first stage
+	// when empty).
+	OpenRenewalDeals(ctx context.Context, tx pgx.Tx, ws, recordID, stage string, within int, ref string) (outcome, detail string, err error)
+}
+
+// RecordRouter is the brand's routing rules (engine/internal/routing):
+// it makes the member the first matching rule picks the record's owner.
+type RecordRouter interface {
+	RouteRecord(ctx context.Context, tx pgx.Tx, ws, recordID string, replace bool) (outcome, detail string, err error)
 }
 
 func checkTransactional(st Step) string {
@@ -131,12 +141,16 @@ func setConsent(ctx context.Context, x *act) (string, string, error) {
 
 func checkOwner(st Step) string {
 	switch {
+	case st.Routing && (st.OwnerID != "" || len(st.Members) > 0):
+		return "with routing on, the brand's routing rules pick the owner: leave owner_id and members out"
+	case st.Routing:
+		return ""
 	case st.OwnerID != "" && len(st.Members) > 0:
 		return "give owner_id (one member) or members (spread evenly), not both"
 	case st.OwnerID != "" && !uuidRE.MatchString(st.OwnerID):
 		return "owner_id is a workspace member's user id"
 	case st.OwnerID == "" && len(st.Members) < 2:
-		return "give owner_id, or at least two members to spread people between"
+		return "give owner_id, at least two members to spread people between, or routing: true to use the brand's routing rules"
 	case len(st.Members) > 50:
 		return "at most 50 members"
 	}
@@ -152,6 +166,12 @@ func checkOwner(st Step) string {
 // who owns the fewest active records now, so new people are spread evenly.
 // A record that has an owner keeps it unless replace_owner is set.
 func assignOwner(ctx context.Context, x *act) (string, string, error) {
+	if x.st.Routing {
+		if x.s.Router == nil {
+			return "failed", "routing rules can't be used here", nil
+		}
+		return x.s.Router.RouteRecord(ctx, x.tx, x.ws, x.r.recordID, x.st.ReplaceOwner)
+	}
 	var current *string
 	if err := x.tx.QueryRow(ctx, `SELECT attributes->>'owner' FROM records WHERE workspace_id = $1 AND id = $2`, x.ws, x.r.recordID).Scan(&current); err != nil {
 		return "", "", err
@@ -192,6 +212,28 @@ func checkDealMove(st Step) string {
 		return "at most 20 closed stages"
 	}
 	return ""
+}
+
+func checkRenewalDeal(st Step) string {
+	switch {
+	case st.Stage != "" && !topicRE.MatchString(st.Stage):
+		return "stage is one of the deal stages' keys, such as qualified; leave it out for the first stage"
+	case st.WithinDays < 0 || st.WithinDays > 365:
+		return "within_days is 1 to 365; 90 when left out"
+	}
+	return ""
+}
+
+// openRenewalDeal opens a deal for each renewal the company has coming up.
+func openRenewalDeal(ctx context.Context, x *act) (string, string, error) {
+	if x.s.Deals == nil {
+		return "failed", "deals can't be opened here", nil
+	}
+	within := x.st.WithinDays
+	if within == 0 {
+		within = 90
+	}
+	return x.s.Deals.OpenRenewalDeals(ctx, x.tx, x.ws, x.r.recordID, x.st.Stage, within, x.r.id)
 }
 
 // moveDeal moves the person's open deal forward to the stage, or opens

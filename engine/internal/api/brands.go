@@ -433,7 +433,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "live", "page-speed", "tracking", "links", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-pages", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "workspace-brands", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail", "telegram"}
+var pageNames = []string{"crm", "sales-reporting", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "live", "page-speed", "tracking", "links", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-pages", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "signals", "revenue", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "workspace-brands", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail", "outreach-mailboxes", "telegram"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".
@@ -1182,11 +1182,10 @@ func (s *Server) addToBrand(w http.ResponseWriter, r *http.Request) {
 	s.moveBrandMembers(w, r, true)
 }
 
-// removeFromBrand takes missions out of a brand, so they are for every
-// brand. Brands share nothing else: sending domains, mailboxes, lead lists
-// and sequences move to another brand with addToBrand instead.
+// removeFromBrand is always refused: brands share nothing, so every record
+// belongs to a brand. Records move to another brand with addToBrand.
 func (s *Server) removeFromBrand(w http.ResponseWriter, r *http.Request) {
-	s.moveBrandMembers(w, r, false)
+	s.allocError(w, r, errInvalid("brands share nothing: every record belongs to a brand; move it to another brand with POST .../brands/{brand}/add"))
 }
 
 // moveBrandMembers sets brand_id on the named records: to the brand when
@@ -1403,7 +1402,7 @@ func (s *Server) needHostInBrand(w http.ResponseWriter, r *http.Request, ws, hos
 	if err == nil {
 		args := []any{ws, host}
 		err = s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM analytics_syncs a WHERE a.workspace_id = $1 AND a.host = $2`+
-			sel.sql(`outflare_site_brand(a.integration_id, a.site)`, &args)+`)`, args...).Scan(&mapped)
+			sel.sql(`outflare_site_brand_or_first(a.integration_id, a.site)`, &args)+`)`, args...).Scan(&mapped)
 	}
 	if err != nil {
 		s.internal(w, r, err)

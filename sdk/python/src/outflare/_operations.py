@@ -1530,6 +1530,35 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_transcript(
+        self,
+        record: str,
+        *,
+        brand: str | None = None,
+        occurred_at: str | None = None,
+        text: str,
+        title: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Send a call or meeting transcript to be read for signals.
+
+        Scope: customers.manage. Outflare records no calls: send the transcript your own recorder made, with the
+        person or company the call was with. The brand's AI reads it for signals. The text is kept sealed and removed
+        once read. 409 while reading calls is off for the brand (PUT conversation-signals).
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/transcripts
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/transcripts",
+            path={"record": record, "brand": brand},
+            body={"occurred_at": occurred_at, "text": text, "title": title},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_visitor_company(
         self,
         *,
@@ -1640,6 +1669,7 @@ class Operations(_Mixin):
         id: str,
         *,
         brand: str | None = None,
+        holdout_percent: int | None = None,
         inputs: dict[str, Any] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -1662,7 +1692,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/kits/{id}/apply",
             path={"id": id, "brand": brand},
-            body={"inputs": inputs},
+            body={"holdout_percent": holdout_percent, "inputs": inputs},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -1672,6 +1702,7 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
+        holdout_percent: int | None = None,
         inputs: dict[str, Any] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -1705,7 +1736,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/kits/{id}/apply",
             path={"id": id, "ws": ws},
-            body={"inputs": inputs},
+            body={"holdout_percent": holdout_percent, "inputs": inputs},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -1714,6 +1745,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        holdout_percent: int | None = None,
         inputs: dict[str, Any] | None = None,
         yaml: str,
         extra_body: dict[str, Any] | None = None,
@@ -1736,7 +1768,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/kits/apply",
             path={"ws": ws},
-            body={"inputs": inputs, "yaml": yaml},
+            body={"holdout_percent": holdout_percent, "inputs": inputs, "yaml": yaml},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -2553,6 +2585,48 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/queries/{saved_query}/archive",
             path={"saved_query": saved_query, "brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
+    def archive_score(
+        self,
+        score: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Archive a score.
+
+        Scope: catalog.manage. It leaves every record's attributes.scores, quietly, and its key is free for a new score.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/scores/{score}/archive
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/scores/{score}/archive",
+            path={"score": score, "brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
+    def archive_signal_type(
+        self,
+        key: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Take a signal type off the list.
+
+        Scope: customers.manage. The type's signals stay. Putting the key again brings it back.
+
+        Needs: the customers.manage scope.
+        DELETE /v1/brands/{brand}/signal-types/{key}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/signal-types/{key}",
+            path={"key": key, "brand": brand},
             idempotency_key=idempotency_key,
         )
 
@@ -3862,6 +3936,32 @@ class Operations(_Mixin):
             query={"slug": slug},
         )
 
+    def claim_coverage_site(
+        self,
+        *,
+        brand: str | None = None,
+        host: str,
+        owner_id: str | None = None,
+        take_over: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Claim a site, hand it over or release it.
+
+        Says who on the team is managing a site the brand wants a link or placement from, so nobody else reaches out to it at the same time. It sets the owner of the site's company record (adding the company when the brand has none), so it shows in the CRM and the relationship check, and the change is in the company's history. The site's open and picked opportunities take that owner (their state stays as it was). owner_id defaults to you; null releases the site. A site a teammate manages is refused with site_claimed (naming them) unless take_over is true, which agents can't send. It contacts nobody.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/sites/claim
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/sites/claim",
+            path={"brand": brand},
+            body={"host": host, "owner_id": owner_id, "take_over": take_over},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def claim_desktop_token(
         self,
         *,
@@ -5078,6 +5178,53 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/click-filters",
             path={"brand": brand},
             body={"kind": kind, "note": note, "value": value},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_commission_plan(
+        self,
+        *,
+        brand: str | None = None,
+        lapse_days: int | None = None,
+        name: str | None = None,
+        positions: list[str] | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        staff_ids: list[str] | None = None,
+        status: Literal["draft", "active", "archived"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a commission plan.
+
+        Scope: catalog.manage. A plan says who it covers (job titles from the team directory, roles on the sales desk
+        written role:sdr, role:ae or role:manager, or people by id) and holds an ordered list of rules. For each deal
+        won or payment, the first rule that applies pays, and so does any later rule marked stack. A rule says what it
+        pays on (any deal won, new business, expansion, a renewal, or money collected), the conditions the deal or
+        payment must meet (its fields, amount in whole units, deal_kind, stage, product for a payment, and the
+        company's fields under company., such as company.country), whether it is inbound or outbound, whether the
+        customer is new or reactivated, for a payment how many days after the customer started paying it was made (so
+        the first 30 days can pay one rate and days 31 to 100 a lower one), who gets it (the owner, the company's owner, whoever
+        sourced the deal, or the owner's manager) and how much: a percent, a flat amount, or percent tiers by share of
+        quota reached in the quarter, with an optional cap a month. A payment rule with clawback takes the commission
+        back when the payment is refunded. A new plan is a draft until its status is active. Outflare works commission
+        out and never pays anyone.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/commission-plans
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/commission-plans",
+            path={"brand": brand},
+            body={
+                "lapse_days": lapse_days,
+                "name": name,
+                "positions": positions,
+                "rules": rules,
+                "staff_ids": staff_ids,
+                "status": status,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -6959,6 +7106,7 @@ class Operations(_Mixin):
         exit_events: list[str] | None = None,
         goal_event: str | None = None,
         name: str | None = None,
+        record_type: Literal["person", "account", "deal"] | None = None,
         reentry_after_seconds: int | None = None,
         steps: list[dict[str, Any]] | None = None,
         trigger: dict[str, Any] | None = None,
@@ -6988,6 +7136,7 @@ class Operations(_Mixin):
                 "exit_events": exit_events,
                 "goal_event": goal_event,
                 "name": name,
+                "record_type": record_type,
                 "reentry_after_seconds": reentry_after_seconds,
                 "steps": steps,
                 "trigger": trigger,
@@ -7508,7 +7657,7 @@ class Operations(_Mixin):
         self,
         *,
         brand: str | None = None,
-        aggregate: Literal["count", "sum", "min", "max", "days", "last"] | None = None,
+        aggregate: Literal["count", "sum", "min", "max", "days", "last", "latest"] | None = None,
         description: str | None = None,
         events: list[str] | None = None,
         key: str | None = None,
@@ -7696,6 +7845,33 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/catalog/option-sets",
             path={"brand": brand},
             body={"key": key, "name": name, "options": options},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_own_playbook(
+        self,
+        *,
+        brand: str | None = None,
+        parts: list[dict[str, Any]] | None = None,
+        summary: str | None = None,
+        title: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make a playbook of the brand's own.
+
+        Scope: catalog.manage. Groups rules, journeys, lists and signal types the brand has under a title. It changes
+        none of them and nothing runs because of it. A brand keeps at most 50.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/own-playbooks
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/own-playbooks",
+            path={"brand": brand},
+            body={"parts": parts, "summary": summary, "title": title},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -8813,6 +8989,58 @@ class Operations(_Mixin):
                 "note": note,
                 "sql": sql,
                 "visibility": visibility,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_score(
+        self,
+        *,
+        brand: str | None = None,
+        base: int | None = None,
+        description: str | None = None,
+        factors: list[dict[str, Any]] | None = None,
+        high_from: int | None = None,
+        higher_is_better: bool | None = None,
+        key: str | None = None,
+        label: str | None = None,
+        low_below: int | None = None,
+        nature: Literal["measured", "ai", "predicted"] | None = None,
+        needs: str | None = None,
+        parts: list[dict[str, Any]] | None = None,
+        record_type: Literal["account", "person", "deal"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a score.
+
+        Scope: catalog.manage. A score starts every record at base and adds each factor's points when its conditions hold,
+        kept between 0 and 100. The value is written to the record's attributes.scores.<key>, with <key>_band (high,
+        medium or low), where rules, journeys, smart lists and Query read it. Every record of its type is scored
+        straight away, quietly: nothing fires for where records already stand. After that a record is scored again when
+        a field its factors read changes, and once a day. A brand keeps at most 20 scores.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/scores
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/scores",
+            path={"brand": brand},
+            body={
+                "base": base,
+                "description": description,
+                "factors": factors,
+                "high_from": high_from,
+                "higher_is_better": higher_is_better,
+                "key": key,
+                "label": label,
+                "low_below": low_below,
+                "nature": nature,
+                "needs": needs,
+                "parts": parts,
+                "record_type": record_type,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -10096,6 +10324,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_commission_plan(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a commission plan.
+
+        Scope: catalog.manage. Approved months keep their amounts. To stop a plan and keep it, set its status to archived.
+
+        Needs: the catalog.manage scope.
+        DELETE /v1/brands/{brand}/commission-plans/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/commission-plans/{id}",
+            path={"id": id, "brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
     def delete_coverage_parties(
         self,
         id: str,
@@ -10803,6 +11052,27 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/brands/{brand}/news-searches/{search}",
             path={"search": search, "brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_own_playbook(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove one of the brand's own playbooks.
+
+        Scope: catalog.manage. Removes the playbook only: every rule, journey, list and signal type it grouped stays as it is.
+
+        Needs: the catalog.manage scope.
+        DELETE /v1/brands/{brand}/own-playbooks/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/own-playbooks/{id}",
+            path={"id": id, "brand": brand},
             idempotency_key=idempotency_key,
         )
 
@@ -14723,6 +14993,34 @@ class Operations(_Mixin):
             query={"archived": archived},
         )
 
+    def get_commissions(
+        self,
+        *,
+        brand: str | None = None,
+        month: str | None = None,
+        format: Literal["json", "csv"] | None = None,
+    ) -> Any:
+        """What each person earns in a month.
+
+        Scope: customers.read. A statement for everyone an active commission plan covers: one line for each deal won
+        or payment a rule paid them for, naming the plan and the rule, the rate and the amount, in the brand's
+        currency. An open month is worked out when it is read, so it follows the deals, the payments and the rules as
+        they are now; an approved or paid month reads as it was approved. Share of quota is what the person has won in
+        the month's quarter over their quota. With catalog.manage the caller sees everyone; otherwise only themselves
+        and the people who report to them. A deal with a second owner (its co_owner field) is split between the two
+        by co_owner_percent, half each when empty: rules that pay the owner, or the owner's manager, pay each on their
+        share. format=csv gives the same lines as a file, one row a line, for payroll.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/commissions
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/commissions",
+            path={"brand": brand},
+            query={"month": month, "format": format},
+        )
+
     def get_competition(
         self,
         *,
@@ -14957,6 +15255,26 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/context",
             path={"ws": ws},
             query={"brand": brand},
+        )
+
+    def get_conversation_signals(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Whether the brand's AI reads conversations for signals.
+
+        Scope: customers.read. Conversation signals are off until a brand switches them on. When on, the workspace's own
+        AI reads what customers say in support, company Telegram chats, email the team shares and call transcripts,
+        and raises a signal when a customer says something sales should act on.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/conversation-signals
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/conversation-signals",
+            path={"brand": brand},
         )
 
     def get_conversion_definition(
@@ -17756,6 +18074,25 @@ class Operations(_Mixin):
             path={"ws": ws},
         )
 
+    def get_own_playbook(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get one of the brand's own playbooks.
+
+        Scope: customers.read. The playbook with its parts as they are now and the signals they raised.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/own-playbooks/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/own-playbooks/{id}",
+            path={"id": id, "brand": brand},
+        )
+
     def get_page_speed(
         self,
         *,
@@ -17967,6 +18304,55 @@ class Operations(_Mixin):
             path={"id": id},
         )
 
+    def get_playbook_home(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get what a playbook set up in the brand and what it has done.
+
+        Scope: customers.read. What the playbook's setup kit put in this brand (rules, journeys, lists and signal
+        types), whether each is on and what it has done, and the signals it raised with how they ended. A playbook
+        with no kit, or one not set up here yet, answers with no parts.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/playbooks/{id}/home
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/playbooks/{id}/home",
+            path={"id": id, "brand": brand},
+        )
+
+    def get_playbook_lift(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        event: str | None = None,
+        days: int | None = None,
+    ) -> Any:
+        """Get what a playbook changed, against the ones it held back.
+
+        Scope: analytics.read. Did the playbook work? Each journey its setup kit added to the brand that holds some
+        people or companies back at random (a random split with a holdout path, which setting the kit up with
+        holdout_percent adds) is compared with the ones it held back: how many had a conversion within days after
+        entering, and what they paid, as `getBrandJourneyLift` counts them. For a journey about companies the
+        conversions of the company's people count too. `ran` carries the lift, the verdict (better, worse,
+        no_clear_change, or too_early under min_people in either group) and the incremental revenue. A journey that
+        holds nobody back has measured false and no numbers: nothing says what would have happened without it.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/playbooks/{id}/lift
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/playbooks/{id}/lift",
+            path={"id": id, "brand": brand},
+            query={"event": event, "days": days},
+        )
+
     def get_postback_source(
         self,
         id: str,
@@ -18113,6 +18499,34 @@ class Operations(_Mixin):
             path={"record": record, "brand": brand},
         )
 
+    def get_record_group(
+        self,
+        record: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """A company's group and its share of wallet.
+
+        Scope: customers.read. The companies a company belongs with: its parent (the parent_company field), the top of
+        the group and every company under it, a parent before its children, up to 6 levels and 200 companies. Each line
+        has what the company's subscriptions bring in a month, what it and its people paid in the last 12 months, its
+        health score, its open signals and its people; totals adds them up, so a parent's page shows the whole group.
+        wallet is the company's share of wallet: what it paid in 12 months against wallet_estimate, the yearly amount it
+        spends with every supplier on what the brand sells. It is null until the company has an estimate (the Share of
+        wallet setup kit adds the fields). Amounts are in the brand's currency; an estimate in another currency is shown
+        without a share and left out of the group's total. A person, or a company with no parent and no children, gets
+        just itself. It reads stored data and decides nothing. 404 for a record that is not a person or company of this
+        brand.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/group
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/group",
+            path={"record": record, "brand": brand},
+        )
+
     def get_record_history(
         self,
         record: str,
@@ -18197,6 +18611,53 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/brands/{brand}/records/{record}/relationship",
+            path={"record": record, "brand": brand},
+        )
+
+    def get_record_scores(
+        self,
+        record: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """A company's or person's scores, and why.
+
+        Scope: customers.read. Each of the brand's scores for this record, worked out from the record as it is now, with
+        every factor, its points and whether it holds, so the score explains itself.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/scores
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/scores",
+            path={"record": record, "brand": brand},
+        )
+
+    def get_record_summary(
+        self,
+        record: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Everything about one person or company, in one call.
+
+        Scope: customers.read. The account summary behind a person's or company's page: the lifecycle stage and what last
+        changed it, the owner, the account plan (goal, next step, hesitations, limits), billing and payments in the last
+        30 days against the 30 before, products and their stage, metrics with the window before for an up-or-down trend,
+        the company's people and their roles, deals and other pipeline records that point here, support conversations,
+        who spoke last on any channel, website visits and where they first came from, open tasks, the journeys and
+        sequences that hold them, alerts raised about them, and what needs attention now. A company's summary counts its
+        people too. It reads stored data and decides nothing; a part is empty when the brand has no such data, so a page
+        shows only the cards that have something to say. Personal email counts only where the caller may see it; API
+        tokens don't get it. 404 for a record that is not a person or company of this brand.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/summary
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/summary",
             path={"record": record, "brand": brand},
         )
 
@@ -18439,6 +18900,86 @@ class Operations(_Mixin):
             path={"id": id, "brand": brand},
         )
 
+    def get_revenue(
+        self,
+        *,
+        brand: str | None = None,
+        days: int | None = None,
+    ) -> Any:
+        """The brand's revenue report.
+
+        Scope: customers.read. Recurring revenue from the brand's subscriptions and how it moved over the last days
+        (90 when left out): new, expansion, reactivation, contraction and churned, with net and gross revenue retention
+        against where the period started. Also what was collected (payments less refunds), the renewals from a month
+        late to 90 days out, the paying customers whose health score is low, and how many records are in each band of
+        each score. Money is in the brand's currency, in its minor unit. Periods are days up to 31 days, weeks (from
+        Monday) up to 180, months beyond. A part the brand has no data for is null or empty.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/revenue
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/revenue",
+            path={"brand": brand},
+            query={"days": days},
+        )
+
+    def get_revenue_forecast(
+        self,
+        *,
+        brand: str | None = None,
+        quarter: str | None = None,
+    ) -> Any:
+        """What the brand can expect to book in a quarter.
+
+        Scope: customers.read. The forecast for this quarter or one of the next four: the deals already won, plus every
+        renewal due in the quarter weighted by the health band of the company it belongs to, plus every open deal
+        weighted by its stage, against the target the brand set. A renewal is any record with a renews_on date in the
+        quarter (and, for the current quarter, up to 30 days late); its value is the record's value field, or twelve
+        times the company's monthly recurring revenue when it has none. An open deal counts when its close date falls
+        in the quarter; the current quarter also takes deals with no close date or one that has passed. A deal with
+        someone who already pays is expansion, the rest new business. Every line carries its weight and what it adds,
+        so the total can be checked by hand. Nothing is predicted by a model and nothing is stored but the target and
+        the weights. Amounts are in the brand's currency; what has no amount or no exchange rate is counted in skipped.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/revenue/forecast
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/revenue/forecast",
+            path={"brand": brand},
+            query={"quarter": quarter},
+        )
+
+    def get_revenue_team(
+        self,
+        *,
+        brand: str | None = None,
+        quarter: str | None = None,
+    ) -> Any:
+        """The sales team's quarter, person by person.
+
+        Scope: customers.read. Everyone on the brand's sales team for this quarter or one of the next four, with their
+        quota, what they have won, what they are forecast to win (won plus the weighted renewals and open deals they
+        own, as in the forecast), their best case, their open lines and their percent of quota. Someone with people
+        under them in the team directory also carries team: the same numbers for them and everyone below. On the team
+        is anyone in the directory who has a quota this quarter, owns something in the forecast, has a role on the
+        sales desk or is covered by an active commission plan, and their managers. A deal counts for its owner field,
+        then the owner of its person, then of its company. With catalog.manage the caller sees everyone, the total and
+        what has no owner on the team; otherwise only themselves and the people who report to them.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/revenue/team
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/revenue/team",
+            path={"brand": brand},
+            query={"quarter": quarter},
+        )
+
     def get_review(
         self,
         id: str,
@@ -18519,6 +19060,25 @@ class Operations(_Mixin):
             query={"weeks": weeks},
         )
 
+    def get_routing(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """The brand's routing rules.
+
+        Scope: customers.read. The rules that say which teammate gets a person or company with no owner, in the order
+        they are tried, and how many people and companies have no owner now.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/routing
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/routing",
+            path={"brand": brand},
+        )
+
     def get_rule(
         self,
         id: str,
@@ -18571,6 +19131,70 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def get_sales_reporting(
+        self,
+        *,
+        brand: str | None = None,
+        period: Literal["24h", "48h", "7d", "30d", "365d"] | None = None,
+        integration: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        stages: str | None = None,
+        offset: int | None = None,
+    ) -> Any:
+        """Read Sales throughput, costs and capacity.
+
+        Sales managers and workspace owners only. Pipeline evidence uses a brand-owned Lead Portal connection; SDR pickup and customer confirmations use Outflare Sales. Archived records are not counted as lost deals. Payments are not recorded by this report.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/sales/reporting
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/sales/reporting",
+            path={"brand": brand},
+            query={
+                "period": period,
+                "integration": integration,
+                "from": from_,
+                "to": to,
+                "stages": stages,
+                "offset": offset,
+            },
+        )
+
+    def get_sales_reporting_leads(
+        self,
+        *,
+        brand: str | None = None,
+        period: Literal["24h", "48h", "7d", "30d", "365d"] | None = None,
+        integration: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        stages: str | None = None,
+        offset: int | None = None,
+    ) -> Any:
+        """Inspect the leads behind selected Sales milestones.
+
+        Sales managers and workspace owners only. Pipeline evidence uses a brand-owned Lead Portal connection; SDR pickup and customer confirmations use Outflare Sales. Archived records are not counted as lost deals. Payments are not recorded by this report.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/sales/reporting/leads
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/sales/reporting/leads",
+            path={"brand": brand},
+            query={
+                "period": period,
+                "integration": integration,
+                "from": from_,
+                "to": to,
+                "stages": stages,
+                "offset": offset,
+            },
+        )
+
     def get_saved_query(
         self,
         saved_query: str,
@@ -18609,6 +19233,30 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/queries/{saved_query}/versions/{version}",
             path={"saved_query": saved_query, "version": version, "brand": brand},
+        )
+
+    def get_score_track_record(
+        self,
+        score: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Check a score against what really happened.
+
+        Scope: customers.read. So a prediction is never only a number. For a deal's score: of the brand's deals closed
+        in the last 365 days, how many in each band (as they stood the day before they closed) were won. For a
+        company's or person's score where high is bad news (higher_is_better false), such as churn risk: of the
+        records in each band 90 days ago, how many canceled their subscription or were marked churned since. Other
+        scores have nothing to be checked against, and outcome is null. It fills in as score history builds up;
+        enough is false until 20 records count.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/scores/{score}/track-record
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/scores/{score}/track-record",
+            path={"score": score, "brand": brand},
         )
 
     def get_search_insights(
@@ -19082,6 +19730,28 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/setup",
+        )
+
+    def get_signal_credit(
+        self,
+        *,
+        brand: str | None = None,
+        days: int | None = None,
+    ) -> Any:
+        """Whose signals turned into revenue.
+
+        Scope: customers.read. Signals raised in the last `days` days: by the person who flagged them, and by where
+        they came from. A signal closed as won is credited with what the account (the record, or the people on a
+        company) paid in the 90 days after it was raised, in the brand's currency.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/signal-credit
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/signal-credit",
+            path={"brand": brand},
+            query={"days": days},
         )
 
     def get_site_analytics(
@@ -22456,9 +23126,10 @@ class Operations(_Mixin):
         """Which brand each analytics site reports for.
 
         Scope: analytics.read. Every site with stored history or a brand
-        picked for it. A site reports for the brand whose domains include
-        its domain (`source: domain`) unless someone picked a brand or made
-        it shared (`source: set`). Sites no brand has are `source: none`.
+        picked for it. Every site reports for one brand: the one someone
+        picked (`source: set`), else its connection's brand (`source:
+        domain`), else the workspace's first brand until someone picks one
+        (`source: default`). A domain only suggests a brand.
         Analytics history, overview and compare take `brand` to read one
         brand's sites.
 
@@ -23136,6 +23807,25 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/brands/{brand}/click-filters",
+            path={"brand": brand},
+        )
+
+    def list_commission_plans(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """The brand's commission plans.
+
+        Scope: customers.read. Every commission plan of the brand with its rules in order. Only an active plan earns
+        anything.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/commission-plans
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/commission-plans",
             path={"brand": brand},
         )
 
@@ -23854,6 +24544,7 @@ class Operations(_Mixin):
         host: str | None = None,
         min_domain_rating: float | None = None,
         access: Literal["cant_buy", "earned", "paid", "free", "unknown"] | None = None,
+        owner: Literal["me", "none", "others"] | None = None,
         exclude_competitors: bool | None = None,
         group: Literal["domain"] | None = None,
         sort: Literal["score", "domain_rating", "traffic", "ai_citations", "competitors", "recent"] | None = None,
@@ -23882,6 +24573,7 @@ class Operations(_Mixin):
                 "host": host,
                 "min_domain_rating": min_domain_rating,
                 "access": access,
+                "owner": owner,
                 "exclude_competitors": exclude_competitors,
                 "group": group,
                 "sort": sort,
@@ -24201,6 +24893,26 @@ class Operations(_Mixin):
             },
         )
 
+    def list_coverage_sites(
+        self,
+        *,
+        brand: str | None = None,
+        host: list[str],
+    ) -> Any:
+        """Who manages each site.
+
+        For each site asked for, the teammate managing it for the brand: the owner of the site's company record (its built-in owner field), or null when nobody has claimed it. record_id is null when the brand has no company record for the site yet. Check before reaching out, so two teammates never contact one site.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/sites
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/sites",
+            path={"brand": brand},
+            query={"host": host},
+        )
+
     def list_coverage_tasks(
         self,
         *,
@@ -24475,6 +25187,7 @@ class Operations(_Mixin):
         brand: str | None = None,
         name: str | None = None,
         kind: Literal["track", "identify", "page", "screen", "group", "alias"] | None = None,
+        source: str | None = None,
         user_id: str | None = None,
         anonymous_id: str | None = None,
         matched: Literal["true", "false", "all"] | None = None,
@@ -24497,6 +25210,7 @@ class Operations(_Mixin):
             query={
                 "name": name,
                 "kind": kind,
+                "source": source,
                 "user_id": user_id,
                 "anonymous_id": anonymous_id,
                 "matched": matched,
@@ -26949,6 +27663,33 @@ class Operations(_Mixin):
             query={"brand": brand, "status": status},
         )
 
+    def list_network_costs(
+        self,
+        *,
+        brand: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        source_id: str | None = None,
+    ) -> Any:
+        """List what networks reported spending and how it was shared out.
+
+        Scope: analytics.read. For each traffic source made from a network template whose network reports spend per
+        target (Zeropark, on the workspace's own connection), each campaign and day (in the network account's time
+        zone): what the network reported (spend), how much went onto the clicks of the target that spent it (matched),
+        evenly over the campaign's clicks that named no reported target (spread), and on no click at all
+        (unattributed). spend = matched + spread + unattributed, to the micro. Recent days are re-read every 15
+        minutes until final. Newest first, at most 1,000 rows.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/network-costs
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/network-costs",
+            path={"brand": brand},
+            query={"from": from_, "to": to, "source_id": source_id},
+        )
+
     def list_news_articles(
         self,
         *,
@@ -27062,6 +27803,27 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/outcomes/syncs",
             path={"ws": ws},
+        )
+
+    def list_own_playbooks(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List the brand's own playbooks.
+
+        Scope: customers.read. A playbook of the brand's own is a name and a purpose around rules, journeys, lists and
+        signal types the brand already has, so the things that work together are found, switched on and measured
+        together. Each comes with its parts as they are now (whether each is on and what it has done) and the signals
+        they raised with how they ended, like a community playbook's home. Oldest first.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/own-playbooks
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/own-playbooks",
+            path={"brand": brand},
         )
 
     def list_page_targets(
@@ -28515,6 +29277,28 @@ class Operations(_Mixin):
             path={"saved_query": saved_query, "brand": brand},
         )
 
+    def list_scores(
+        self,
+        *,
+        brand: str | None = None,
+        archived: bool | None = None,
+    ) -> Any:
+        """List the brand's scores.
+
+        Scope: customers.read. Each score: a number from 0 to 100 kept on every company or person, such as a health score
+        or a lead score, with its factors and how many records are in each band. starters are scores to start from.
+        Archived ones with archived=true.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/scores
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/scores",
+            path={"brand": brand},
+            query={"archived": archived},
+        )
+
     def list_search_groups(
         self,
         site: str,
@@ -28779,6 +29563,51 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/sequences",
             path={"brand": brand},
+        )
+
+    def list_signal_types(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List the brand's signal types.
+
+        Scope: customers.read. The brand's own list of signal types, starting from churn_risk, upsell, cross_sell,
+        renewal, billing and other, each with the events that raise it, how long its owner has, and how its signals
+        ended in the last 90 days.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/signal-types
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/signal-types",
+            path={"brand": brand},
+        )
+
+    def list_signals(
+        self,
+        *,
+        brand: str | None = None,
+        status: Literal["open", "snoozed", "closed", "all"] | None = None,
+        owner: str | None = None,
+        record: str | None = None,
+        type: str | None = None,
+    ) -> Any:
+        """List signals, the brand's "Needs attention" queue.
+
+        Scope: customers.read. Signals are what someone should act on about a person or company: churn risk, an upsell,
+        a renewal coming up. By default the open ones (open and accepted, not snoozed), soonest due first. counts are the
+        brand's open signals whatever the filters.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/signals
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/signals",
+            path={"brand": brand},
+            query={"status": status, "owner": owner, "record": record, "type": type},
         )
 
     def list_site_cookies(
@@ -31492,6 +32321,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        holdout_percent: int | None = None,
         inputs: dict[str, Any] | None = None,
         yaml: str,
         extra_body: dict[str, Any] | None = None,
@@ -31512,7 +32342,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/kits/preview",
             path={"ws": ws},
-            body={"inputs": inputs, "yaml": yaml},
+            body={"holdout_percent": holdout_percent, "inputs": inputs, "yaml": yaml},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -31541,6 +32371,26 @@ class Operations(_Mixin):
             body={"filters": filters, "profile_id": profile_id, "search_integration_id": search_integration_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
+        )
+
+    def preview_record_routing(
+        self,
+        record: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Who the routing rules would give a record to.
+
+        Scope: customers.read. The rule that matches the person or company and the member it would pick, as if the
+        record had no owner. Nothing changes.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/routing
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/routing",
+            path={"record": record, "brand": brand},
         )
 
     def preview_review_request_campaign(
@@ -31958,6 +32808,36 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def put_signal_type(
+        self,
+        key: str,
+        *,
+        brand: str | None = None,
+        description: str | None = None,
+        due_days: int | None = None,
+        events: list[str] | None = None,
+        label: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add or change a signal type.
+
+        Scope: customers.manage. Adds a signal type (label required) or changes one. events are the event names that
+        raise a signal of this type on the record they are about, such as the event a rule emits: a rule that emits
+        account.churn_risk then raises a Churn risk signal. Fields left out keep their value.
+
+        Needs: the customers.manage scope.
+        PUT /v1/brands/{brand}/signal-types/{key}
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/signal-types/{key}",
+            path={"key": key, "brand": brand},
+            body={"description": description, "due_days": due_days, "events": events, "label": label},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def put_support_assistant_setting(
         self,
         scope: str,
@@ -32074,6 +32954,47 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/link-orders/{id}/quote",
             path={"id": id, "brand": brand},
             body={"amount_minor": amount_minor, "currency": currency, "invoice_date": invoice_date},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def raise_signal(
+        self,
+        *,
+        brand: str | None = None,
+        conversation: dict[str, Any] | None = None,
+        detail: str | None = None,
+        due_at: str | None = None,
+        owner_id: str | None = None,
+        record_id: str,
+        title: str | None = None,
+        type: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Raise a signal about a person or company.
+
+        Scope: customers.manage. Flags a person or company for someone to act on. The owner defaults to the record's
+        owner and the due date to the signal type's days. A record has one open signal per type and at most 5 open at
+        once: 409 otherwise. The owner is told through alerts. Signals are also raised by events a signal type listens
+        to (PUT .../signal-types/{key}).
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/signals
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/signals",
+            path={"brand": brand},
+            body={
+                "conversation": conversation,
+                "detail": detail,
+                "due_at": due_at,
+                "owner_id": owner_id,
+                "record_id": record_id,
+                "title": title,
+                "type": type,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -33245,9 +34166,9 @@ class Operations(_Mixin):
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Take missions out of a brand.
+        """Take records out of a brand (refused).
 
-        Scope: profiles.manage, plus missions.run. Makes the named missions in this brand ones for every brand. Brands share nothing else: sending domains, mailboxes, lead lists and sequences are refused (400); move them to another brand with addToBrand.
+        Scope: profiles.manage. Brands share nothing, so every record belongs to a brand and this is always refused (400). Move domains, mailboxes, lead lists, sequences or missions to another brand with addToBrand.
 
         Needs: the profiles.manage scope.
         POST /v1/workspaces/{ws}/brands/{brand}/remove
@@ -33657,6 +34578,33 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approved",
             path={"id": id, "ws": ws},
             body={"error": error, "provider": provider},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def report_script_policy_violation(
+        self,
+        *,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Take a browser's report of a script the web app's policy would block.
+
+        Public, no key needed: browsers send it by themselves. The web app's
+        pages carry a report-only Content Security Policy that allows
+        scripts only from the server itself. When a browser sees any other
+        script run, it posts a violation report here, where it is counted
+        and logged; nothing is stored. Both shapes browsers send are taken:
+        `{"csp-report": {...}}` (`application/csp-report`) and the Reporting
+        API's batch (`application/reports+json`). Each network may send 60
+        a minute, and a report may be at most 32 KB.
+
+        POST /v1/csp-reports
+        """
+        return self._call(
+            "POST",
+            "/v1/csp-reports",
+            body={},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -34713,6 +35661,32 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/webhooks/{id}/rotate-secret",
             path={"id": id, "brand": brand},
             body={"expire_now": expire_now},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def route_record(
+        self,
+        record: str,
+        *,
+        brand: str | None = None,
+        replace: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Route a record now.
+
+        Scope: customers.manage. Makes the member the routing rules pick the person's or company's owner. A record
+        that has an owner keeps them unless replace is true. The change is in the record's history.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/routing
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/routing",
+            path={"record": record, "brand": brand},
+            body={"replace": replace},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -36440,9 +37414,11 @@ class Operations(_Mixin):
 
         Scope: integrations.manage. For a site whose domain is not one of
         the brand's (a GA4 property named for an app, a PostHog project for
-        a game), or to make a site shared. `auto` goes back to matching by
-        domain. Someone kept to some brands places a site that is theirs or
-        no brand's yet, in one of their brands only (403 otherwise).
+        a game). Every site belongs to a brand: there is no shared site.
+        `auto` goes back to the connection's brand, else the first brand.
+        Someone kept to some brands
+        places a site that is theirs or nobody picked yet (`source:
+        default`), in one of their brands only (403 otherwise).
 
         Needs: the integrations.manage scope.
         PUT /v1/workspaces/{ws}/analytics/{id}/site-brand
@@ -36452,6 +37428,34 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/analytics/{id}/site-brand",
             path={"id": id, "ws": ws},
             body={"brand": brand, "site": site},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_commission_statement(
+        self,
+        staff: str,
+        *,
+        brand: str | None = None,
+        month: str,
+        status: Literal["open", "approved", "paid"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a person's month, mark it paid, or reopen it.
+
+        Scope: catalog.manage. approved keeps the month's lines and total as they are worked out now, so later changes
+        to deals, payments or rules no longer move it. paid records that it was paid: Outflare never pays anyone. open
+        drops what was kept, and the month is worked out again.
+
+        Needs: the catalog.manage scope.
+        PUT /v1/brands/{brand}/commissions/{staff}
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/commissions/{staff}",
+            path={"staff": staff, "brand": brand},
+            body={"month": month, "status": status},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -36477,6 +37481,35 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/integrations/{id}/hook/signing-secret",
             path={"id": id, "ws": ws},
             body={"secret": secret},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_conversation_signals(
+        self,
+        *,
+        brand: str | None = None,
+        channels: list[Literal["support", "telegram", "email", "call"]] | None = None,
+        enabled: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Switch reading conversations for signals on or off.
+
+        Scope: customers.manage. Every read is a call on the workspace's own AI (Settings, AI, task Conversation
+        signals), so nothing is read until this is on and an AI model is connected. A conversation is read ten minutes
+        after the customer last wrote, at most once per half hour, and only when they said something new. Signals go to
+        the person's company when they have one. Email is read only when the brand's team sharing is on, the privacy
+        check found it to be about work and its owner shares the contact with the brand; anything private is never read.
+
+        Needs: the customers.manage scope.
+        PUT /v1/brands/{brand}/conversation-signals
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/conversation-signals",
+            path={"brand": brand},
+            body={"channels": channels, "enabled": enabled},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -36841,6 +37874,96 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/reply-rules",
             path={"ws": ws},
             body={"rules": rules, "sequence_id": sequence_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_revenue_forecast(
+        self,
+        *,
+        brand: str | None = None,
+        quarter: str | None = None,
+        renewal_weights: dict[str, Any] | None = None,
+        stage_weights: dict[str, Any] | None = None,
+        target_minor: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a quarter's target and the forecast's weights.
+
+        Scope: catalog.manage. Saves the target for one quarter and, when given, the weights: the percent of a
+        renewal's value counted for each health band (high, medium, low, and none for a company with no score) and the
+        percent of an open deal's value counted at each stage. Only what is sent changes. A null target removes it; a
+        null weight goes back to its default (renewals 95, 80, 50 and 85; stages spread evenly in their order, so four
+        stages count 20, 40, 60 and 80). Returns the quarter's forecast with the new settings.
+
+        Needs: the catalog.manage scope.
+        PUT /v1/brands/{brand}/revenue/forecast
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/revenue/forecast",
+            path={"brand": brand},
+            body={
+                "quarter": quarter,
+                "renewal_weights": renewal_weights,
+                "stage_weights": stage_weights,
+                "target_minor": target_minor,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_routing(
+        self,
+        *,
+        brand: str | None = None,
+        rules: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Replace the brand's routing rules.
+
+        Scope: catalog.manage. Sends the whole list in the order the rules are tried: the first rule whose conditions
+        hold for a record with no owner gives it to the member of its pool who owns the fewest of the brand's records.
+        A rule with no conditions takes every record of its type, so put it last. A rule sent with its id keeps its
+        count; one left out is removed. Every record with no owner is then looked at again within a minute or two.
+
+        Needs: the catalog.manage scope.
+        PUT /v1/brands/{brand}/routing
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/routing",
+            path={"brand": brand},
+            body={"rules": rules},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_sales_quotas(
+        self,
+        *,
+        brand: str | None = None,
+        quarter: str,
+        quotas: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set people's quotas for a quarter.
+
+        Scope: catalog.manage. Sets what each person named is asked to win in the quarter, in the brand's currency.
+        Only the people sent change; a null target takes that person's quota away. A person is someone in the
+        workspace's team directory.
+
+        Needs: the catalog.manage scope.
+        PUT /v1/brands/{brand}/revenue/team/quotas
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/revenue/team/quotas",
+            path={"brand": brand},
+            body={"quarter": quarter, "quotas": quotas},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -37807,6 +38930,7 @@ class Operations(_Mixin):
         prospect: str,
         *,
         brand: str | None = None,
+        confirm_claimed: bool | None = None,
         record_id: str | None = None,
         sequence_id: str,
         extra_body: dict[str, Any] | None = None,
@@ -37832,7 +38956,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/link-prospects/{prospect}/pitches",
             path={"prospect": prospect, "brand": brand},
-            body={"record_id": record_id, "sequence_id": sequence_id},
+            body={"confirm_claimed": confirm_claimed, "record_id": record_id, "sequence_id": sequence_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -40345,6 +41469,44 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_commission_plan(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        lapse_days: int | None = None,
+        name: str | None = None,
+        positions: list[str] | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        staff_ids: list[str] | None = None,
+        status: Literal["draft", "active", "archived"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a commission plan.
+
+        Scope: catalog.manage. Changes only what is sent; rules, positions and staff_ids are replaced whole. Months
+        already approved keep the amounts they were approved with; open months are worked out under the new rules.
+
+        Needs: the catalog.manage scope.
+        PATCH /v1/brands/{brand}/commission-plans/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/commission-plans/{id}",
+            path={"id": id, "brand": brand},
+            body={
+                "lapse_days": lapse_days,
+                "name": name,
+                "positions": positions,
+                "rules": rules,
+                "staff_ids": staff_ids,
+                "status": status,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_connection_limits(
         self,
         id: str,
@@ -41523,6 +42685,7 @@ class Operations(_Mixin):
         brand: str | None = None,
         allowed_user_ids: list[str],
         enabled: bool,
+        excluded_emails: list[str] | None = None,
         excluded_user_ids: list[str],
         history_days: int | None = None,
         version: int,
@@ -41542,6 +42705,7 @@ class Operations(_Mixin):
             body={
                 "allowed_user_ids": allowed_user_ids,
                 "enabled": enabled,
+                "excluded_emails": excluded_emails,
                 "excluded_user_ids": excluded_user_ids,
                 "history_days": history_days,
                 "version": version,
@@ -42650,6 +43814,7 @@ class Operations(_Mixin):
         exit_events: list[str] | None = None,
         goal_event: str | None = None,
         name: str | None = None,
+        record_type: Literal["person", "account", "deal"] | None = None,
         reentry_after_seconds: int | None = None,
         steps: list[dict[str, Any]] | None = None,
         trigger: dict[str, Any] | None = None,
@@ -42679,6 +43844,7 @@ class Operations(_Mixin):
                 "exit_events": exit_events,
                 "goal_event": goal_event,
                 "name": name,
+                "record_type": record_type,
                 "reentry_after_seconds": reentry_after_seconds,
                 "steps": steps,
                 "trigger": trigger,
@@ -43407,7 +44573,7 @@ class Operations(_Mixin):
         metric: str,
         *,
         brand: str | None = None,
-        aggregate: Literal["count", "sum", "min", "max", "days", "last"] | None = None,
+        aggregate: Literal["count", "sum", "min", "max", "days", "last", "latest"] | None = None,
         description: str | None = None,
         events: list[str] | None = None,
         key: str | None = None,
@@ -43755,6 +44921,33 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/catalog/option-sets/{set}",
             path={"set": set, "brand": brand},
             body={"key": key, "name": name, "options": options},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_own_playbook(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        parts: list[dict[str, Any]] | None = None,
+        summary: str | None = None,
+        title: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change one of the brand's own playbooks.
+
+        Scope: catalog.manage. Only what is sent changes; parts replaces the whole list.
+
+        Needs: the catalog.manage scope.
+        PATCH /v1/brands/{brand}/own-playbooks/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/own-playbooks/{id}",
+            path={"id": id, "brand": brand},
+            body={"parts": parts, "summary": summary, "title": title},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -44744,6 +45937,56 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_score(
+        self,
+        score: str,
+        *,
+        brand: str | None = None,
+        base: int | None = None,
+        description: str | None = None,
+        factors: list[dict[str, Any]] | None = None,
+        high_from: int | None = None,
+        higher_is_better: bool | None = None,
+        key: str | None = None,
+        label: str | None = None,
+        low_below: int | None = None,
+        nature: Literal["measured", "ai", "predicted"] | None = None,
+        needs: str | None = None,
+        parts: list[dict[str, Any]] | None = None,
+        record_type: Literal["account", "person", "deal"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a score.
+
+        Scope: catalog.manage. The key and record_type never change. A change to the base, the factors or the bands makes
+        a new version, and every record is scored again, quietly.
+
+        Needs: the catalog.manage scope.
+        PATCH /v1/brands/{brand}/scores/{score}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/scores/{score}",
+            path={"score": score, "brand": brand},
+            body={
+                "base": base,
+                "description": description,
+                "factors": factors,
+                "high_from": high_from,
+                "higher_is_better": higher_is_better,
+                "key": key,
+                "label": label,
+                "low_below": low_below,
+                "nature": nature,
+                "needs": needs,
+                "parts": parts,
+                "record_type": record_type,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_semantic_search(
         self,
         *,
@@ -45052,6 +46295,48 @@ class Operations(_Mixin):
                 "track_clicks": track_clicks,
                 "unsubscribe_header": unsubscribe_header,
                 "status": status,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_signal(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        detail: str | None = None,
+        due_at: str | None = None,
+        outcome: Literal["won", "no_change", "not_useful", "duplicate"] | None = None,
+        owner_id: str | None = None,
+        snoozed_until: str | None = None,
+        status: Literal["open", "accepted", "done", "dismissed"] | None = None,
+        title: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Accept, reassign, snooze, close or reopen a signal.
+
+        Scope: customers.manage. status accepted says its owner is on it (accepting a signal nobody owns makes it the
+        caller's). done and dismissed close it with an outcome: won, no_change, not_useful or duplicate (default no_change
+        for done, not_useful for dismissed). open reopens it. owner_id hands it over (null for nobody), due_at moves the
+        date, snoozed_until hides it from the queue until then (null to bring it back).
+
+        Needs: the customers.manage scope.
+        PATCH /v1/brands/{brand}/signals/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/signals/{id}",
+            path={"id": id, "brand": brand},
+            body={
+                "detail": detail,
+                "due_at": due_at,
+                "outcome": outcome,
+                "owner_id": owner_id,
+                "snoozed_until": snoozed_until,
+                "status": status,
+                "title": title,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,

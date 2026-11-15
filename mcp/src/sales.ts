@@ -14,8 +14,63 @@ export function registerSalesTools(
   readOnly: boolean,
   call: Call,
 ) {
-  if (readOnly) return;
   const onBrand = brandCaller(client, workspace);
+  const reportInput = {
+    brand: brandRef,
+    period: z.enum(["24h", "48h", "7d", "30d", "365d"]).optional(),
+    integration: z.string().uuid().optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+  };
+  server.registerTool(
+    "get_sales_reporting",
+    {
+      title: "Read Sales reporting",
+      description:
+        "Compare Sales milestones, original uploader performance, submission quality, costs and capacity. Requires a Sales manager or workspace owner. Portal data requires a brand-owned Lead Portal connection; native outcomes come from Outflare.",
+      inputSchema: reportInput,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: true,
+      },
+    },
+    ({ brand, ...query }) =>
+      call(() =>
+        onBrand(brand, (id) =>
+          client.GET("/v1/brands/{brand}/sales/reporting", {
+            params: { path: { brand: id }, query },
+          }),
+        ),
+      ),
+  );
+  server.registerTool(
+    "get_sales_reporting_leads",
+    {
+      title: "Inspect Sales milestones",
+      description:
+        "List the companies behind selected milestones in a bounded interval. Each stage has its own count and 50-row page, including original uploader attribution when recorded. Comma-separated stages: discovered, researched, verified, emailed, replied, sdr, closed.",
+      inputSchema: {
+        ...reportInput,
+        stages: z.string().min(1),
+        offset: z.number().int().min(0).max(1000000).optional(),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: true,
+      },
+    },
+    ({ brand, ...query }) =>
+      call(() =>
+        onBrand(brand, (id) =>
+          client.GET("/v1/brands/{brand}/sales/reporting/leads", {
+            params: { path: { brand: id }, query },
+          }),
+        ),
+      ),
+  );
+  if (readOnly) return;
   server.registerTool(
     "import_sales_lead",
     {

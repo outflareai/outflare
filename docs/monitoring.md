@@ -43,6 +43,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_http_request_duration_seconds` | `route` | Request time histogram. `GET /mcp` is the hosted MCP server's event stream and stays open, so leave it out of latency. |
 | `outflare_http_requests_in_flight` | | Requests being served now. |
 | `outflare_http_rate_limited_total` | `limit` (`api`, `session`, `register`, `site_ip`, `site_key`, `site_visitor`, `site_flags`, `site_consent`) | Requests a rate limit refused with 429. |
+| `outflare_http_csp_reports_total` | `directive` (`script-src`, `script-src-elem`, `script-src-attr`, `object-src`, `base-uri`, `other`), `source` (`inline`, `eval`, `data`, `blob`, `external`, `self`, `extension`, `other`) | Things browsers say the web app's report-only script policy would have blocked ([api-conventions.md](api-conventions.md)). |
 | `outflare_jobs_processed_total` | `kind`, `outcome` (`succeeded`, `retried`, `dead`, `interrupted`, `released`) | Jobs this server ran. `interrupted` stopped for a shutdown and went back in the queue at once; `released` was still running when the shutdown grace ended and was handed back (its handler ignores cancellation). |
 | `outflare_jobs_duration_seconds`, `outflare_jobs_wait_seconds` | `kind` | How long a job ran, and how long it waited after it was due before a worker took it. |
 | `outflare_jobs_reaped_total` | `kind` | Running jobs put back in the queue because their worker stopped holding them (a crash, or a job longer than the lease). Such a job may run twice. |
@@ -58,6 +59,8 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_tracker_postbacks_total` | `outcome` (`accepted`, `duplicate`, `updated`, `unknown_source`, `wrong_domain`, `ip_refused`, `invalid`, `unknown_click`, `expired_click`, `rate_limited`, `error`) | Tracker conversion postbacks from brands' networks, by what happened. |
 | `outflare_tracker_source_postbacks_total` | `outcome` (`queued`, `filtered`, `suspect`, `awaiting_lookup`, `sent`, `retried`, `rejected`, `unreachable`, `invalid`) | Tracker conversions sent back to traffic sources' postback URLs, by what happened. |
 | `outflare_tracker_fraud_flags_total` | `subject` (`click`, `conversion`), `reason` (`datacenter_network`, `repeat_click`, `fast_conversion`, `filter_list`, `honeypot`, `ip_reputation`) | Tracker clicks and conversions a fraud signal flagged. |
+| `outflare_tracker_network_cost_syncs_total` | `network` (`zeropark`), `outcome` (`synced`, `not_connected`, `no_campaign_token`, `failed_auth`, `failed_quota`, `failed_unavailable`, `failed_invalid`) | Network cost reconciliations: a campaign day's spend shared out over the tracker's clicks. |
+| `outflare_tracker_network_cost_micros_total` | `network`, `kind` (`matched`, `spread`, `unattributed`) | Network spend shared out, in millionths of the network's currency; each pass re-reads recent days, so compare kinds, not totals. |
 | `outflare_tracker_ip_lookups_total` | `outcome` (`scored`, `flagged`, `capped`, `off`, `retried`, `failed_auth`, `failed_quota`, `failed_unavailable`, `failed_invalid`) | Tracker click addresses looked up on brands' own IP reputation connections, by what happened. |
 | `outflare_tracker_ip_lookup_seconds` | | Time one IP lookup took at the brand's provider. |
 | `outflare_tracker_ip_lookups_due`, `outflare_tracker_ip_lookup_oldest_seconds` | | Click addresses waiting for an IP lookup, and how long the oldest has waited. |
@@ -125,6 +128,20 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_ads_payers_list_members` | | People on every account's Outflare paying customers list, added together, as of the last refresh. |
 | `outflare_meeting_events_total` | `status` (`booked`, `held`, `no_show`, `canceled`) | Meeting events recorded on people's timelines ([customers.md](customers.md#meetings-as-events)). |
 | `outflare_meeting_events_pending` | | Meetings tied to a person whose latest status isn't recorded as an event yet. |
+| `outflare_record_events_total` | `module` (`deals`, `support`, `tasks`), `event` (`deal.won`, `task.completed` and so on) | Customer events recorded from deals, support conversations and CRM tasks ([rules.md](rules.md#events-from-the-rest-of-outflare)). |
+| `outflare_record_events_pending` | `module` | Deals, support conversations and tasks whose latest state isn't recorded as an event yet. |
+| `outflare_signals_raised_total` | `source` (`event`, `journey`, `manual`, `agent`, `api`), `outcome` (`raised`, `duplicate`, `capped`, `no_record`, `skipped`) | Signals raised, or not, for the Needs attention queue ([signals.md](signals.md)). |
+| `outflare_signals_escalated_total` | | Open signals handed to owners and admins because nobody accepted them two days past their due date. |
+| `outflare_signals_open` | `state` (`on_time`, `late`) | Signals waiting for their owner. |
+| `outflare_scores_computed_total` | `trigger` (`change`, `pass`, `daily`), `outcome` (`changed`, `unchanged`, `no_record`) | Records scored ([scores.md](scores.md)). |
+| `outflare_scores_scoring` | | Scores waiting for, or in, a pass over every record. |
+| `outflare_scores_scoring_oldest_seconds` | | How long the score that has waited longest for its pass has waited. |
+| `outflare_conversations_reads_total` | `channel` (`support`, `telegram`, `email`, `call`), `outcome` (`raised`, `nothing`, `unchanged`, `nothing_to_read`, `off`, `no_ai`, `budget`, `failed`) | Conversations queued for a read for signals on the workspace's own AI ([signals.md](signals.md)). |
+| `outflare_conversations_sentiments_total` | `label` (`positive`, `mixed`, `negative`) | Conversation reads that found how the customer sounds ([scores.md](scores.md), "Sentiment"). A read that found no feeling either way isn't counted. |
+| `outflare_routing_records_total` | `outcome` (`assigned`, `kept`, `no_rule`, `no_member`, `no_record`, `error`) | Records the routing rules looked at ([routing.md](routing.md)). |
+| `outflare_routing_brands_behind` | | Brands with more records waiting to be routed than one round takes. |
+| `outflare_revenue_counts_total` | `outcome` (`counted`, `error`) | Counts of a brand's recurring revenue ([revenue.md](revenue.md)). |
+| `outflare_revenue_round_seconds` | | How long the last round of counting every brand's recurring revenue took. |
 | `outflare_event_inbox_received_total` | | Product events sent to `POST /v1/brands/{brand}/events` and saved in the event inbox ([customers.md](customers.md#product-events)). |
 | `outflare_event_inbox_processed_total` | `outcome` (`accepted`, `duplicate`, `rejected`, `held`) | Product events the `events.process` job finished. |
 | `outflare_event_inbox_rejected_total` | `code` | Product events rejected, by the code the Events page shows (`missing_id`, `invalid_timestamp`, `property_type`, `other_brand`, `internal`, ...). |
@@ -253,6 +270,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 
 ## Alerts
 
+- `OutflareScriptPolicyReports` (info): browsers reported over 20 scripts in an hour that the web app didn't ship (not counting browser extensions).
 - `OutflareTxRetriesGaveUp` (warning): a request's write (a transaction or a customer events batch) lost a deadlock three times in a row and answered 500.
 - `OutflareRedirectClicksNotWritten` (warning): redirect link clicks have failed to be written for 10 minutes; people are still sent on.
 - `OutflareRedirectClickBacklog` (warning): over 20,000 redirect clicks have waited in one process for 5 minutes.
@@ -265,6 +283,8 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareDrilldownReportFailing` (warning): the drill-down report failed for 15 minutes.
 - `OutflareTrackerIPLookupBacklog` (warning): a tracker click address has waited over 15 minutes for its IP lookup, so converting clicks' postbacks are held up.
 - `OutflareTrackerIPLookupsUnreachable` (info): every IP lookup for 30 minutes was given up because the provider couldn't be reached.
+- `OutflareTrackerNetworkCostsFailing` (warning): network cost reconciliation (Zeropark) has failed for 2 hours with nothing synced.
+- `OutflareTrackerNetworkCostUnattributed` (info): over a fifth of the network spend reconciled in 6 hours had no tracker click to go on.
 - `OutflareTrackerHoneypotFailing` (info): hits on the landers' hidden link (`/hp`) have failed to flag their clicks for 15 minutes, so bots crawling landers aren't being flagged.
 - `OutflareTrackerLanderClicksFailing` (warning): lander clicks (`/click`) have failed for 10 minutes, so visitors on landers reach the fallback page instead of an offer.
 - `OutflareGeoFilesStale` (warning): a server's DB-IP city or network file is over 40 days old, so new visits and clicks get older city and network data.
@@ -369,6 +389,14 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - refunds sent to an ad platform as conversion adjustments failing on every try
 - a conversion waiting over 30 minutes to be sent
 - over 500 meetings waiting 30 minutes for their meeting event on people's timelines
+- over 1,000 deals, support conversations or tasks waiting 30 minutes for their timeline event
+- more than 50 open signals past their due date for six hours, outnumbering the ones on time (`OutflareSignalsLate`, info)
+- a score waiting over an hour for its pass over every record (`OutflareScoresPassStuck`, warning)
+- most reads of conversations for signals failing (`OutflareConversationReadsFailing`, warning)
+- routing records to their owners failing (`OutflareRoutingFailing`, warning)
+- a brand with records waiting to be routed for over an hour (`OutflareRoutingBehind`, info)
+- counting a brand's recurring revenue failing more than three times in an hour (`OutflareRevenueCountFailing`, warning)
+- a round of revenue counts taking over 10 minutes (`OutflareRevenueRoundSlow`, info)
 - a partner reward waiting over 30 minutes past its hold to be approved
 - over 200 partner fraud flags raised in an hour (info: a partner gaming a program, or a check misfiring; flagged rewards wait for a person, so they never count as overdue)
 - partner conversions failing with server errors
@@ -495,3 +523,8 @@ have accepted the message; it must be reconciled before any retry.
 - `OutflareSalesSendUncertain`: a provider outcome remains uncertain for ten minutes.
 - `OutflareSalesSendsFailed`: a definitely failed send needs repair after thirty minutes.
 - `OutflareSalesJobsSlow`: Sales jobs sustain a 95th-percentile runtime over two minutes.
+
+Sales reporting source reads export `outflare_sales_reporting_read_seconds` by read type (`summary`, `leads`, `origins`, `check`) and outcome (`success`, `error`). The Sales reporting row shows request rates and 95th-percentile latency; counts include failed schema checks. Unknown uploader evidence is not a failed request.
+
+- `OutflareSalesReportingFailing` (warning): more than half of at least five source reads fail over fifteen minutes.
+- `OutflareSalesReportingSlow` (info): source reads repeatedly take over five seconds at the 95th percentile.

@@ -46,7 +46,7 @@ func TestAdTrackingHealthReport(t *testing.T) {
 
 	// Two synced Meta campaigns spent: 111 has visits, 999 has none.
 	integ := exec(`INSERT INTO integrations (workspace_id, connector, name, credentials) VALUES ($1, 'meta_ads', 'Meta Ads', '\x00') RETURNING id::text`, ws)
-	acct := exec(`INSERT INTO ad_accounts (workspace_id, integration_id, connector, external_id, name, currency) VALUES ($1, $2, 'meta_ads', '4455', 'Northpeak', 'USD') RETURNING id::text`, ws, integ)
+	acct := exec(`INSERT INTO ad_accounts (workspace_id, brand_id, integration_id, connector, external_id, name, currency) VALUES ($1, outflare_first_brand($1), $2, 'meta_ads', '4455', 'Northpeak', 'USD') RETURNING id::text`, ws, integ)
 	for _, c := range []string{"111", "999"} {
 		ent := exec(`INSERT INTO ad_entities (workspace_id, ad_account_id, external_id, name, status) VALUES ($1, $2, $3, $4, 'active') RETURNING id::text`, ws, acct, c, "Campaign "+c)
 		exec(`INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros) VALUES ($1, current_date, $2, 'USD', 7000000) RETURNING 'x'`, ent, ws)

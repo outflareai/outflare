@@ -64,6 +64,43 @@ const reachedText: Record<NonNullable<MapNode["reached"]>, string> = {
 };
 type EdgeData = { label?: string; lit: boolean; dim: boolean };
 
+// tidy keeps the first column readable: when more than a few sources send
+// the same events, they become one card that says how many there are.
+const sourcesShown = 3;
+function tidy(m: Map): Map {
+  const groups: Record<string, MapNode[]> = {};
+  for (const n of m.nodes) {
+    if (n.kind !== "source") continue;
+    const key = m.edges.filter((e) => e.from === n.id).map((e) => e.to).sort().join("|");
+    (groups[key] ??= []).push(n);
+  }
+  const into: Record<string, string> = {};
+  const merged: MapNode[] = [];
+  for (const [key, list] of Object.entries(groups)) {
+    if (list.length <= sourcesShown) continue;
+    const id = `sources:${key}`;
+    const names = list.slice(0, 2).map((n) => n.label);
+    merged.push({ ...list[0], id, label: `${list.length} sources`, detail: `${names.join(", ")} and ${list.length - names.length} more`, volume: null, reached: list.find((n) => n.reached)?.reached });
+    for (const n of list) into[n.id] = id;
+  }
+  if (!merged.length) return m;
+  const seen = new Set<string>();
+  const edges = m.edges
+    .map((e) => ({ ...e, from: into[e.from] ?? e.from, to: into[e.to] ?? e.to }))
+    .filter((e) => {
+      const k = `${e.from}>${e.kind}>${e.to}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  return {
+    ...m,
+    nodes: [...m.nodes.filter((n) => !into[n.id]), ...merged],
+    edges,
+    flags: m.flags.map((f) => ({ ...f, nodes: [...new Set(f.nodes.map((id) => into[id] ?? id))] })),
+  };
+}
+
 // Layout: left to right, so causes read before effects.
 function layout(m: Map, shown: Set<string>, lit: Set<string> | null, flagged: Set<string>, selected: string, pick: (id: string) => void) {
   const g = new dagre.graphlib.Graph();
@@ -215,7 +252,7 @@ function AutomationMapPage({ ws, go }: { ws: string; go: (tab: Tab, item?: strin
     const { data, error } = await api.GET("/v1/brands/{brand}/automation-map", { params: { path: { brand: brandId }, query: person ? { record: person.id } : {} } });
     if (error || !data) return setError(errorMessage(error));
     setError("");
-    setMap(data);
+    setMap(tidy(data));
   }, [brandId, person]);
   useEffect(() => {
     load();

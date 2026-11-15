@@ -33,6 +33,8 @@ import { FieldInput, RecordDialog, editable } from "../RecordEdit";
 import { Activities } from "./Activities";
 import { RecordMail } from "./Mail";
 import { RelationshipCheck } from "./Relationship";
+import { AccountSummary } from "./AccountSummary";
+import { RecordScores } from "@/components/record-scores";
 import { pickedBrandId } from "@/lib/brand";
 
 type Rec = Schemas["Record"];
@@ -199,21 +201,48 @@ export function RecordPreview({
           {!record && !error && <Loading />}
           {record && section === "overview" && (
             <div className="space-y-6">
-              <RelationshipCheck
-                id={record.id}
-                brand={record.brand_id}
-                myId={myId}
-                typeName={(key) =>
-                  cat.catalog?.types.find((t) => t.key === key)?.name ?? key
-                }
-                onOpen={onOpen}
-              />
+              {record.type === "person" || record.type === "account" ? (
+                <AccountSummary
+                  ws={ws}
+                  record={record}
+                  cat={cat}
+                  canManage={canManage}
+                  myId={myId}
+                  names={names}
+                  onOpen={onOpen}
+                  onChanged={changed}
+                  onSection={setSection}
+                  compact
+                />
+              ) : (
+                <>
+                {record.brand_id && <RecordScores brand={record.brand_id} record={record.id} version={record.version} />}
+                <RelationshipCheck
+                  id={record.id}
+                  brand={record.brand_id}
+                  myId={myId}
+                  typeName={(key) =>
+                    cat.catalog?.types.find((t) => t.key === key)?.name ?? key
+                  }
+                  onOpen={onOpen}
+                />
+                </>
+              )}
               <div>
                 <h3 className="mb-3 text-xs font-semibold text-muted-foreground">
                   PROPERTIES
                 </h3>
                 <div className="divide-y rounded-xl border">
                   {fields
+                    .filter(
+                      (f) =>
+                        // The summary above holds the stage and the plan.
+                        !(
+                          (record.type === "person" ||
+                            record.type === "account") &&
+                          ["lifecycle_stage", "goal", "next_step", "hesitations", "limits"].includes(f.key)
+                        ),
+                    )
                     .filter(
                       (f) =>
                         showEmpty ||

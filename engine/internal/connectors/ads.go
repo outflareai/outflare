@@ -120,6 +120,30 @@ type AdsReader interface {
 	AdDays(ctx context.Context, c *Client, creds Creds, acct AdAccount, from, to string) ([]AdDay, error)
 }
 
+// CapAdsTargets marks a connector that implements AdTargetReader.
+const CapAdsTargets = "ads.targets"
+
+// AdTargetDay is what one target of a campaign (a placement: a site, an
+// app or a feed's zone) spent and got in one day. Keys are every value a
+// click can carry for it in the network's target token (Zeropark's
+// target, its address and its id), so a click matches whichever the
+// campaign URL passed.
+type AdTargetDay struct {
+	CampaignID  string   `json:"campaign_id"`
+	Date        string   `json:"date"` // YYYY-MM-DD in the account's time zone
+	Keys        []string `json:"keys"`
+	Source      string   `json:"source,omitempty"`
+	SpendMicros int64    `json:"spend_micros"`
+	Clicks      int64    `json:"clicks"`
+}
+
+// AdTargetReader reads a campaign's spend per target for one day
+// (Zeropark), for the tracker to share it out over the clicks each target
+// sent. It must not change anything.
+type AdTargetReader interface {
+	AdTargetDays(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID, day string) ([]AdTargetDay, error)
+}
+
 // Levels below a campaign: an ad group (Meta's ad set, Google's ad group)
 // and an ad.
 const (

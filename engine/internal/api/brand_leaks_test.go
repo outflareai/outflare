@@ -441,7 +441,7 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 	}
 	// Columns whose checks are patterns rather than lists.
 	switch tbl + "." + c.name {
-	case "attribution_model_pins.module", "conversion_definitions.event_name":
+	case "attribution_model_pins.module", "conversion_definitions.event_name", "signal_types.key", "score_definitions.key":
 		return cast, "bravo"
 	case "ad_conversion_rules.event_name":
 		return cast, "bravo.converted"
@@ -449,10 +449,16 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 		return cast, `{"base": "linear"}`
 	case "tracking_link_clicks.click_key", "tracking_click_claims.click_key":
 		return cast, "bravo00000000000"
+	case "sales_quotas.period":
+		return cast, "2026-Q4"
+	case "commission_statements.month":
+		return cast, "2026-11"
 	case "visitor_alerts.kind":
 		return cast, "hot"
 	case "partner_flags.signal":
 		return cast, "fast_conversion"
+	case "tracker_network_costs.network":
+		return cast, "zeropark"
 	case "support_chat_widgets.key":
 		return cast, "ofw_bravobravobravobravobrav"
 	}

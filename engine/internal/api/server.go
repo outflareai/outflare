@@ -159,7 +159,9 @@ type Server struct {
 	quoteApprovalLimit *rateLimiter
 	// The free public tools (tools.go), per network, and their short cache.
 	toolsIPLimit *rateLimiter
-	domainChecks domainCheckCache
+	// cspReportLimit caps script policy reports per network.
+	cspReportLimit *rateLimiter
+	domainChecks   domainCheckCache
 	// Live chat: requests per visitor's network, new chats per network an
 	// hour, and messages per visitor and per network.
 	chatIPLimit, chatStartLimit, chatSendLimit, chatNetSendLimit *rateLimiter
@@ -410,6 +412,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		postbackLimit:    &rateLimiter{name: "tracker_postback", limit: 6000, window: time.Minute},
 		helpIPLimit:      &rateLimiter{name: "help_ip", limit: 300, window: time.Minute},
 		toolsIPLimit:     &rateLimiter{name: "tools_ip", limit: 20, window: time.Minute},
+		cspReportLimit:   &rateLimiter{name: "csp_report", who: "network", limit: 60, window: time.Minute},
 		helpWriteLimit:   &rateLimiter{name: "help_write", limit: 30, window: time.Hour},
 		portalLimit:      &rateLimiter{name: "partner_portal", limit: 20, window: time.Minute},
 		chatIPLimit:      &rateLimiter{name: "chat_ip", limit: 240, window: time.Minute},
@@ -595,6 +598,10 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesProducts(mux)
 	s.routesLifecycle(mux)
 	s.routesRecordMetrics(mux)
+	s.routesScores(mux)
+	s.routesRevenue(mux)
+	s.routesRouting(mux)
+	s.routesRevenueTeam(mux)
 	s.routesSequences(mux)
 	s.routesInbox(mux)
 	s.routesInboxTags(mux)
@@ -694,6 +701,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesTrackerClickLog(mux)
 	s.routesTrackerClickFilters(mux)
 	s.routesTrackerIPLookups(mux)
+	s.routesNetworkCosts(mux)
 	s.routesTrackerOffers(mux)
 	s.routesTrackerLanders(mux)
 	s.routesTrackerFlows(mux)
@@ -728,7 +736,11 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAgentRuns(mux)
 	s.routesActions(mux)
 	s.routesPlaybooks(mux)
+	s.routesPlaybookHome(mux)
+	s.routesPlaybookLift(mux)
+	s.routesOwnPlaybooks(mux)
 	s.routesTools(mux)
+	mux.HandleFunc("POST "+cspReportPath, s.reportCSP)
 	s.routesPlaybookAutomations(mux)
 	s.routesLinkAssets(mux)
 	s.routesKits(mux)
@@ -860,6 +872,8 @@ func serveWebEntry(w http.ResponseWriter, r *http.Request, path string) {
 	sum := sha256.Sum256(page)
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:16])+`"`)
+	// Report-only: nothing is blocked, browsers only say what would be (csp.go).
+	w.Header().Set("Content-Security-Policy-Report-Only", scriptPolicy(page))
 	http.ServeContent(w, r, path, time.Time{}, bytes.NewReader(page))
 }
 

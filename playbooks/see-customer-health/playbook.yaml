@@ -1,0 +1,68 @@
+id: see-customer-health
+version: 1
+title: See customer health, churn risk and who is ready to grow
+summary: Score every company on usage, billing and engagement, roll that into one health score, read how it sounds, and predict who may leave and who may buy more.
+description: |
+  One health number hides what is going on: a customer can use the
+  product every day and still be angry about an invoice. This playbook
+  sets up the full picture. Three measured scores (usage trend, billing
+  and engagement) roll up into a health score, and each stays visible
+  under it. Sentiment, which your own AI reads from conversations, sits
+  beside it, so a judgement never moves a measured number. Two
+  predictions are built on both: churn risk and expansion
+  potential, each showing the points behind it. Every score says whether
+  it is measured, AI-read or predicted, keeps its history so you can see
+  where it is heading, and can be used in lists, rules, journeys and
+  routing. Two rules and two journeys arrive as drafts: they put a
+  company in Needs attention when its churn risk or its expansion
+  potential turns high. Sentiment needs conversation reading switched on,
+  which runs on your own AI connection; without it every other score
+  works and nobody has a sentiment score.
+tier: obvious
+goals: [retention, revenue]
+publisher: outflare
+author: { github: outflareai }
+kit: customer-health
+needs:
+  data:
+    - { check: records, label: Companies in the CRM with their owners }
+    - { check: customer_events, label: Product usage events sent to Outflare }
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+steps:
+  - say: Check that metrics are on for the brand and whether conversation reading is on; ask a person to turn them on if not, and say sentiment stays empty without reading.
+    tools: [listMetrics, getConversationSignals]
+  - say: Check what the setup kit would add, then add it. A score the brand already has under the same key stays as it is.
+    tools: [previewKit, applyKit]
+  - say: Once the records are scored, show how many companies are in each band of health, churn risk and expansion potential, and explain two companies with the scores under their health.
+    tools: [listScores, listBrandRecords, getRecordScores]
+  - say: Dry-run both rules to see how many companies they would have caught, and test each journey with one company.
+    tools: [simulateBrandRule, getBrandJourney, testBrandJourney]
+  - say: Ask a person to turn the rules and the journeys on, then show what is waiting in Needs attention. Later, check the predictions against what happened.
+    tools: [listSignals, getScoreTrackRecord]
+guardrails:
+  - The rules and the journeys are turned on only after a person approves them.
+  - Signals and tasks go to the team; nothing is sent to a customer.
+  - A score the brand already keeps is never changed by the playbook.
+  - A prediction is quoted with its track record once there is one, never as a certainty.
+measure:
+  - metric: Revenue at risk
+    how: "Recurring revenue of companies with a low health score, on the Revenue page."
+  - metric: Churn risk that was right
+    how: "Share of companies with high churn risk 90 days ago that left since, under the score on the Scores page."
+prompt: |
+  Run the "See customer health, churn risk and who is ready to grow"
+  playbook for {{brand}}. Check that metrics are on and whether
+  conversation reading is on, then preview and apply the customer-health
+  setup kit. When the records are scored, show how many companies are
+  high, medium and low for health, churn risk and expansion potential,
+  and explain two of them, with the scores under their health. Dry-run
+  both rules over the last 30 days and test each journey with one
+  company. Don't turn anything on: show me the dry runs and the tests
+  first.
+example: |
+  For Northpeak, 38 companies are healthy, 25 in the middle and 9 low.
+  Six have high churn risk: four because usage fell and two because they
+  sound unhappy about billing. Eleven look ready to grow.

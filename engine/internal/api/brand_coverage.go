@@ -58,6 +58,12 @@ func (s *Server) routesBrandCoverage(mux *http.ServeMux) {
 	s.routesPresenceFound(mux)
 	s.routesPartnerships(mux)
 	s.routesRelationship(mux)
+	s.routesRecordSummary(mux)
+	s.routesSignals(mux)
+	s.routesConversationSignals(mux)
+	s.routesRecordGroup(mux)
+	s.routesRevenueForecast(mux)
+	s.routesCoverageSites(mux)
 }
 
 func coverageVisible(name string, a *access) (string, []any) {

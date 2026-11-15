@@ -6,8 +6,9 @@ import (
 )
 
 // TestBrandLimitedPlacesSites: someone kept to one brand puts a site in
-// their brand when it is theirs or nobody's yet, and never touches another
-// brand's site or a shared one.
+// their brand when it is theirs or nobody has placed it yet (it counts for
+// the first brand meanwhile), and never touches another brand's site.
+// There is no shared site.
 func TestBrandLimitedPlacesSites(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
@@ -21,7 +22,7 @@ func TestBrandLimitedPlacesSites(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "s/shared", "brand": "none"})
+	owner.must(400, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "s/shared", "brand": "none"})
 	// A domain only suggests a brand: Repocket's site is Repocket's once
 	// someone assigns it.
 	owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "s/rp", "brand": "repocket"})
@@ -38,13 +39,20 @@ func TestBrandLimitedPlacesSites(t *testing.T) {
 	}
 	put(200, "s/geo", "geonode")
 	put(403, "s/new", "repocket") // not their brand
-	put(403, "s/new", "none")     // shared changes every brand
+	put(400, "s/new", "none")     // no site is shared
 	put(403, "s/geo", "auto")
 	put(403, "s/rp", "geonode")                                                                       // another brand's site
-	put(403, "s/shared", "geonode")                                                                   // a shared site
-	if n := len(agent.must(200, "GET", base+"/analytics/site-brands", nil)["data"].([]any)); n != 3 { // theirs and the shared one
+	if n := len(agent.must(200, "GET", base+"/analytics/site-brands", nil)["data"].([]any)); n != 2 { // theirs only: the others are Repocket's or the first brand's
 		t.Fatalf("geonode sites: %d", n)
 	}
+	// A site that counts for the first brand only by default is still
+	// nobody's pick: someone kept to another brand may place it.
+	rtok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": []string{"integrations.manage", "analytics.read"}, "brand": "repocket"})["token"].(string)
+	ragent := &client{t: t, h: e.h, bearer: rtok}
+	if sb := ragent.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "s/shared", "brand": "repocket"}); sb["source"] != "set" {
+		t.Fatalf("placed by default: %v", sb)
+	}
+	ragent.must(403, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "s/new", "brand": "repocket"}) // Geonode placed it
 
 	// A brand's own connection to another brand is out of reach.
 	own := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "plausible", "name": "Repocket Plausible", "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}, "brand_id": "repocket"})["id"].(string)

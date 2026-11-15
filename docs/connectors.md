@@ -358,7 +358,7 @@ A supplier connector that implements `connectors.PushVendor` (Cheap Inboxes does
 
 ## Google Workspace (team email into the CRM)
 
-`google_workspace` reads the team's work mail into the CRM with the company's own Google Cloud service account, so nobody has to sign in one by one. Connect it with the service account's JSON key and an address in the Workspace to test with; in the Google Admin console (Security, API controls, Domain-wide delegation) give the service account's client id `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/calendar.readonly`. Outflare tests it by reading only that user's mailbox address, and records which scopes Google lets it use (`account.details.scopes`): delegate `https://www.googleapis.com/auth/gmail.send` too for people to send from their own address through Outflare. Every module uses this one connection ([ADR 15](adr/0015-google-layer.md)). An admin then chooses it in the brand's CRM email rollout ([customers.md](customers.md#email-with-your-contacts)); it never sends or changes anything in Google.
+`google_workspace_mail` (Google Workspace email and calendar) reads the team's work mail and calendars into the CRM with the company's own Google Cloud service account, so nobody has to sign in one by one. Connect it with the service account's JSON key and an address in the Workspace to test with; in the Google Admin console (Security, API controls, Domain-wide delegation) give the service account's client id `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/calendar.readonly`. Outflare tests it by reading only that user's mailbox address, and records which scopes Google lets it use (`account.details.scopes`): delegate `https://www.googleapis.com/auth/gmail.send` too for people to send from their own address through Outflare. Every module uses this one connection ([ADR 15](adr/0015-google-layer.md)). An admin then chooses it in the brand's CRM email rollout ([customers.md](customers.md#email-with-your-contacts)); it never sends or changes anything in Google.
 
 ## Calendars and CRMs (outcomes)
 
@@ -404,14 +404,19 @@ never receive its credentials. Reads must run in a job.
 
 #### Profile changes
 
-To let Outflare change existing users' names, photos and Gmail signatures, set
-the connection's **Allow profile changes** to `yes`. Then also authorize the
-service account for `https://www.googleapis.com/auth/admin.directory.user` and
-`https://www.googleapis.com/auth/gmail.settings.basic`. Names and photos are
-changed as the delegated administrator. A signature is changed as the mailbox
-itself, through the same delegation. Before any change, the user is checked to
+To let Outflare change existing users' names, photos, Gmail signatures,
+recovery email and forwarding, set the connection's **Allow profile changes**
+to `yes`. Then also authorize the service account for
+`https://www.googleapis.com/auth/admin.directory.user`,
+`https://www.googleapis.com/auth/gmail.settings.basic` and (for forwarding)
+`https://www.googleapis.com/auth/gmail.settings.sharing`. Names, photos and the
+recovery email are changed as the delegated administrator. A signature and
+forwarding are changed as the mailbox itself, through the same delegation.
+Forwarding keeps a copy in the inbox; Google first sends the forwarding address
+a confirmation email, and until it is confirmed the forwarding part reports
+`pending` and nothing is forwarded. Before any change, the user is checked to
 belong to the connection's own customer ID. The `workspace.manage_users`
-capability (`UpdateWorkspaceUser`) reports each part as `updated` or `failed`,
-so one refused part doesn't hide the others. It never creates, deletes or
+capability (`UpdateWorkspaceUser`) reports each part as `updated`, `failed` or
+(forwarding) `pending`, so one refused part doesn't hide the others. It never creates, deletes or
 suspends users, and never reads or sets passwords. A connection left read-only
 returns `workspace_writes_off`.

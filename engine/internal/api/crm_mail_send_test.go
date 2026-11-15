@@ -85,7 +85,7 @@ func TestCRMMailSendAsMember(t *testing.T) {
 	e.oauth.Endpoints.GoogleMail = fake.URL + "/gmail"
 
 	// The connection says what Google lets it do: not sending yet.
-	conn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "google_workspace", "credentials": map[string]string{"service_account_json": newServiceAccount(t), "admin_email": ownerEmail}})
+	conn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "google_workspace_mail", "credentials": map[string]string{"service_account_json": newServiceAccount(t), "admin_email": ownerEmail}})
 	if scopes := conn["account"].(map[string]any)["details"].(map[string]any)["scopes"].(string); strings.Contains(scopes, "gmail.send") || !strings.Contains(scopes, "gmail.readonly") {
 		t.Fatalf("scopes %q", scopes)
 	}

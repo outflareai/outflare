@@ -32,6 +32,23 @@ export type SettingsSchema = {
   // What the field picks from, when the builder has a picker for it
   // (ad_account, ad_audience); others are typed.
   "x-outflare-picker"?: string;
+  // Ready-made calls for the step (outflare_action): picking one fills in
+  // its method, path and body.
+  "x-outflare-presets"?: ActionPreset[];
+};
+
+export type ActionPreset = {
+  id: string;
+  group: string;
+  label: string;
+  description: string;
+  operation_id: string;
+  method: string;
+  path: string;
+  body?: Record<string, unknown>;
+  // What the call acts on: the builder lists the brand's own and puts the
+  // chosen one's id in place of token in the path.
+  pick?: { token: string; label: string; from: string };
 };
 
 export type StepKind = {
@@ -49,6 +66,9 @@ export type StepKind = {
   // The field naming where a run goes when the step fails: stop, continue
   // or a step's id, drawn as a dashed error link.
   error_output?: string;
+  // Whether a journey about companies can take it.
+  companies?: boolean;
+  deals?: boolean;
 };
 
 export const groupText: Record<StepGroup, string> = {
@@ -65,17 +85,17 @@ export const builtinKinds: StepKind[] = [
     settings_schema: { type: "object", required: ["template"], properties: { template: { type: "string", title: "Template" } } },
   },
   {
-    kind: "wait", group: "flow", label: "Wait", description: "Wait a fixed time, from a minute to 90 days, before the next step.",
+    kind: "wait", companies: true, group: "flow", label: "Wait", description: "Wait a fixed time, from a minute to 90 days, before the next step.",
     requires: [], outputs: ["next"],
     settings_schema: { type: "object", required: ["wait_seconds"], properties: { wait_seconds: { type: "integer", title: "Seconds", minimum: 60, maximum: 7776000 } } },
   },
   {
-    kind: "branch", group: "flow", label: "Check", description: "Go one way or the other on their fields, the event's properties, what they did since they started, or an email's opens and clicks.",
+    kind: "branch", companies: true, group: "flow", label: "Check", description: "Go one way or the other on their fields, the event's properties, what they did since they started, or an email's opens and clicks.",
     requires: [], outputs: ["then", "else"],
     settings_schema: { type: "object", required: ["conditions"], properties: { conditions: { type: "array", title: "Conditions" }, match: { type: "string", enum: ["all", "any"] } } },
   },
   {
-    kind: "exit", group: "flow", label: "Exit", description: "End their run here.",
+    kind: "exit", companies: true, group: "flow", label: "Exit", description: "End their run here.",
     requires: [], outputs: [],
     settings_schema: { type: "object", properties: {} },
   },

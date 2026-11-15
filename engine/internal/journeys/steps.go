@@ -73,6 +73,14 @@ type Step struct {
 	Title           string `json:"title,omitempty"`
 	Text            string `json:"text,omitempty"`
 	To              string `json:"to,omitempty"`
+	// raise_signal: the brand's signal type, such as churn_risk.
+	SignalType string `json:"signal_type,omitempty"`
+	// outflare_action: one API call in the journey's brand, made as one
+	// of the workspace's agents, so the agent's grants decide whether it
+	// runs, waits for a person or is refused. Path is the part after
+	// /v1/brands/{brand}/; method and body are as for a webhook.
+	AgentID string `json:"agent_id,omitempty"`
+	Path    string `json:"path,omitempty"`
 	// webhook: the call, with {{person.x}}, {{event.x}} and {{vars.x}}
 	// filled in the URL, header values and body; how it proves who may
 	// call (the key itself is set apart, never in the steps); and where
@@ -123,9 +131,15 @@ type Step struct {
 	OwnerID      string   `json:"owner_id,omitempty"`
 	Members      []string `json:"members,omitempty"`
 	ReplaceOwner bool     `json:"replace_owner,omitempty"`
+	// Routing has the brand's routing rules pick the owner.
+	Routing bool `json:"routing,omitempty"`
 	// move_deal: the deal to move or open.
-	Deal    *DealMove `json:"deal,omitempty"`
-	OnError string    `json:"on_error,omitempty"`
+	Deal *DealMove `json:"deal,omitempty"`
+	// open_renewal_deal: the stage the deal opens at (the first when
+	// empty) and how many days ahead a renewal counts (90 when 0).
+	Stage      string `json:"stage,omitempty"`
+	WithinDays int    `json:"within_days,omitempty"`
+	OnError    string `json:"on_error,omitempty"`
 }
 
 // Path is one way on from a wait_until or split step. Its id names it in
@@ -194,6 +208,101 @@ const MaxSteps = 100
 // ValidEventName reports whether name is a customer event name, as the
 // catalog writes them (order_completed, email.opened).
 func ValidEventName(name string) bool { return eventNameRE.MatchString(name) && len(name) <= 100 }
+
+// The kinds of record a journey can be about.
+const (
+	TypePerson  = "person"
+	TypeAccount = "account"
+	TypeDeal    = "deal"
+)
+
+// HoldoutStep is the id of the split WithHoldout adds.
+const HoldoutStep = "measure"
+
+// Holdout finds a journey's first random split that holds some back: the
+// step's id, its holdout path's id and the percent held back.
+func Holdout(steps []Step) (step, path string, percent int, ok bool) {
+	for _, st := range steps {
+		if st.Kind != KindSplit || st.SplitBy != "random" {
+			continue
+		}
+		total := 0
+		for _, p := range st.Paths {
+			total += p.Weight
+		}
+		for _, p := range st.Paths {
+			if p.Holdout && total > 0 {
+				return st.ID, p.ID, int(float64(p.Weight)*100/float64(total) + 0.5), true
+			}
+		}
+	}
+	return "", "", 0, false
+}
+
+// WithHoldout puts a random split in front of a journey's steps that
+// holds percent of whoever enters back, so what the journey changed can
+// be measured against them. Steps that already hold some back, or have
+// no steps, come back as they are.
+func WithHoldout(steps []Step, percent int) []Step {
+	if len(steps) == 0 || percent <= 0 || percent >= 100 {
+		return steps
+	}
+	if _, _, _, ok := Holdout(steps); ok {
+		return steps
+	}
+	id := HoldoutStep
+	for taken := true; taken; {
+		taken = false
+		for _, st := range steps {
+			if st.ID == id {
+				id, taken = id+"_", true
+			}
+		}
+	}
+	split := Step{ID: id, Kind: KindSplit, SplitBy: "random", Paths: []Path{
+		{ID: "run", Name: "Goes through", Weight: 100 - percent, Next: steps[0].ID},
+		{ID: "held_back", Name: "Held back", Weight: percent, Holdout: true},
+	}}
+	return append([]Step{split}, steps...)
+}
+
+// ValidType reports whether a journey can be about recordType.
+func ValidType(recordType string) bool {
+	return recordType == TypePerson || recordType == TypeAccount || recordType == TypeDeal
+}
+
+// companySteps are the steps a journey about a company can take: the ones
+// that act on a record. The rest need a person to send to or enroll.
+var companySteps = map[string]bool{"wait": true, "wait_until": true, "branch": true, "split": true, "exit": true, "create_task": true, "set_field": true,
+	"add_tag": true, "remove_tag": true, "assign_owner": true, "alert": true, "raise_signal": true, "slack": true, "webhook": true, "ai": true, "outflare_action": true,
+	"enter_journey": true, "exit_journey": true, "open_renewal_deal": true}
+
+// dealStep reports whether a journey about deals can take a step: what a
+// company journey takes, except tags, which deals don't have.
+func dealStep(kind string) bool {
+	return companySteps[kind] && kind != "add_tag" && kind != "remove_tag" && kind != "open_renewal_deal"
+}
+
+// CheckFor is Check for a journey about recordType: a journey about a
+// company or a deal takes only the steps that act on a record.
+func CheckFor(recordType string, steps []Step) string {
+	if msg := Check(steps); msg != "" {
+		return msg
+	}
+	for _, st := range steps {
+		switch {
+		case st.Kind == "open_renewal_deal" && recordType != TypeAccount:
+			return "step " + st.ID + ": open_renewal_deal is for a journey about companies: a renewal belongs to a company"
+		case recordType == TypeAccount && !companySteps[st.Kind]:
+			return "step " + st.ID + ": a journey about companies can't use " + st.Kind + ", which needs a person to send to or enroll"
+		case recordType == TypeDeal && (st.Kind == "add_tag" || st.Kind == "remove_tag"):
+			return "step " + st.ID + ": a journey about deals can't use " + st.Kind + ": deals have no tags; set a field instead"
+		case recordType == TypeDeal && !dealStep(st.Kind):
+			return "step " + st.ID + ": a journey about deals can't use " + st.Kind + ", which needs a person to send to or enroll"
+		}
+	}
+	return ""
+}
 
 // Check reports what is wrong with a journey's steps, or "": unique ids,
 // known kinds, what each kind needs, links to steps that exist, and no

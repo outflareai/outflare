@@ -232,6 +232,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/sales/reporting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read Sales throughput, costs and capacity
+         * @description Sales managers and workspace owners only. Pipeline evidence uses a brand-owned Lead Portal connection; SDR pickup and customer confirmations use Outflare Sales. Archived records are not counted as lost deals. Payments are not recorded by this report.
+         */
+        get: operations["getSalesReporting"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/sales/reporting/leads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Inspect the leads behind selected Sales milestones
+         * @description Sales managers and workspace owners only. Pipeline evidence uses a brand-owned Lead Portal connection; SDR pickup and customer confirmations use Outflare Sales. Archived records are not counted as lost deals. Payments are not recorded by this report.
+         */
+        get: operations["getSalesReportingLeads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/sales/bridge": {
         parameters: {
             query?: never;
@@ -5527,6 +5571,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/network-costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List what networks reported spending and how it was shared out
+         * @description Scope: analytics.read. For each traffic source made from a network template whose network reports spend per
+         *     target (Zeropark, on the workspace's own connection), each campaign and day (in the network account's time
+         *     zone): what the network reported (spend), how much went onto the clicks of the target that spent it (matched),
+         *     evenly over the campaign's clicks that named no reported target (spread), and on no click at all
+         *     (unattributed). spend = matched + spread + unattributed, to the micro. Recent days are re-read every 15
+         *     minutes until final. Newest first, at most 1,000 rows.
+         */
+        get: operations["listBrandNetworkCosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/ip-lookups": {
         parameters: {
             query?: never;
@@ -6760,9 +6832,10 @@ export interface paths {
         /**
          * Which brand each analytics site reports for
          * @description Scope: analytics.read. Every site with stored history or a brand
-         *     picked for it. A site reports for the brand whose domains include
-         *     its domain (`source: domain`) unless someone picked a brand or made
-         *     it shared (`source: set`). Sites no brand has are `source: none`.
+         *     picked for it. Every site reports for one brand: the one someone
+         *     picked (`source: set`), else its connection's brand (`source:
+         *     domain`), else the workspace's first brand until someone picks one
+         *     (`source: default`). A domain only suggests a brand.
          *     Analytics history, overview and compare take `brand` to read one
          *     brand's sites.
          */
@@ -6791,9 +6864,11 @@ export interface paths {
          * Pick the brand an analytics site reports for
          * @description Scope: integrations.manage. For a site whose domain is not one of
          *     the brand's (a GA4 property named for an app, a PostHog project for
-         *     a game), or to make a site shared. `auto` goes back to matching by
-         *     domain. Someone kept to some brands places a site that is theirs or
-         *     no brand's yet, in one of their brands only (403 otherwise).
+         *     a game). Every site belongs to a brand: there is no shared site.
+         *     `auto` goes back to the connection's brand, else the first brand.
+         *     Someone kept to some brands
+         *     places a site that is theirs or nobody picked yet (`source:
+         *     default`), in one of their brands only (403 otherwise).
          */
         put: operations["setAnalyticsSiteBrand"];
         post?: never;
@@ -17679,6 +17754,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/csp-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a browser's report of a script the web app's policy would block
+         * @description Public, no key needed: browsers send it by themselves. The web app's
+         *     pages carry a report-only Content Security Policy that allows
+         *     scripts only from the server itself. When a browser sees any other
+         *     script run, it posts a violation report here, where it is counted
+         *     and logged; nothing is stored. Both shapes browsers send are taken:
+         *     `{"csp-report": {...}}` (`application/csp-report`) and the Reporting
+         *     API's batch (`application/reports+json`). Each network may send 60
+         *     a minute, and a report may be at most 32 KB.
+         */
+        post: operations["reportScriptPolicyViolation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/playbooks": {
         parameters: {
             query?: never;
@@ -17728,6 +17830,127 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/playbooks/{id}/home": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @example flag-renewals-and-quiet-accounts */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get what a playbook set up in the brand and what it has done
+         * @description Scope: customers.read. What the playbook's setup kit put in this brand (rules, journeys, lists and signal
+         *     types), whether each is on and what it has done, and the signals it raised with how they ended. A playbook
+         *     with no kit, or one not set up here yet, answers with no parts.
+         */
+        get: operations["getPlaybookHome"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/playbooks/{id}/lift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @example flag-renewals-and-quiet-accounts */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get what a playbook changed, against the ones it held back
+         * @description Scope: analytics.read. Did the playbook work? Each journey its setup kit added to the brand that holds some
+         *     people or companies back at random (a random split with a holdout path, which setting the kit up with
+         *     holdout_percent adds) is compared with the ones it held back: how many had a conversion within days after
+         *     entering, and what they paid, as `getBrandJourneyLift` counts them. For a journey about companies the
+         *     conversions of the company's people count too. `ran` carries the lift, the verdict (better, worse,
+         *     no_clear_change, or too_early under min_people in either group) and the incremental revenue. A journey that
+         *     holds nobody back has measured false and no numbers: nothing says what would have happened without it.
+         */
+        get: operations["getPlaybookLift"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/own-playbooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the brand's own playbooks
+         * @description Scope: customers.read. A playbook of the brand's own is a name and a purpose around rules, journeys, lists and
+         *     signal types the brand already has, so the things that work together are found, switched on and measured
+         *     together. Each comes with its parts as they are now (whether each is on and what it has done) and the signals
+         *     they raised with how they ended, like a community playbook's home. Oldest first.
+         */
+        get: operations["listOwnPlaybooks"];
+        put?: never;
+        /**
+         * Make a playbook of the brand's own
+         * @description Scope: catalog.manage. Groups rules, journeys, lists and signal types the brand has under a title. It changes
+         *     none of them and nothing runs because of it. A brand keeps at most 50.
+         */
+        post: operations["createOwnPlaybook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/own-playbooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get one of the brand's own playbooks
+         * @description Scope: customers.read. The playbook with its parts as they are now and the signals they raised.
+         */
+        get: operations["getOwnPlaybook"];
+        put?: never;
+        post?: never;
+        /**
+         * Remove one of the brand's own playbooks
+         * @description Scope: catalog.manage. Removes the playbook only: every rule, journey, list and signal type it grouped stays as it is.
+         */
+        delete: operations["deleteOwnPlaybook"];
+        options?: never;
+        head?: never;
+        /**
+         * Change one of the brand's own playbooks
+         * @description Scope: catalog.manage. Only what is sent changes; parts replaces the whole list.
+         */
+        patch: operations["updateOwnPlaybook"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/playbooks/{id}/runs": {
@@ -27347,8 +27570,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Take missions out of a brand
-         * @description Scope: profiles.manage, plus missions.run. Makes the named missions in this brand ones for every brand. Brands share nothing else: sending domains, mailboxes, lead lists and sequences are refused (400); move them to another brand with addToBrand.
+         * Take records out of a brand (refused)
+         * @description Scope: profiles.manage. Brands share nothing, so every record belongs to a brand and this is always refused (400). Move domains, mailboxes, lead lists, sequences or missions to another brand with addToBrand.
          */
         post: operations["removeFromBrand"];
         delete?: never;
@@ -29789,6 +30012,269 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/records/{record}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Everything about one person or company, in one call
+         * @description Scope: customers.read. The account summary behind a person's or company's page: the lifecycle stage and what last
+         *     changed it, the owner, the account plan (goal, next step, hesitations, limits), billing and payments in the last
+         *     30 days against the 30 before, products and their stage, metrics with the window before for an up-or-down trend,
+         *     the company's people and their roles, deals and other pipeline records that point here, support conversations,
+         *     who spoke last on any channel, website visits and where they first came from, open tasks, the journeys and
+         *     sequences that hold them, alerts raised about them, and what needs attention now. A company's summary counts its
+         *     people too. It reads stored data and decides nothing; a part is empty when the brand has no such data, so a page
+         *     shows only the cards that have something to say. Personal email counts only where the caller may see it; API
+         *     tokens don't get it. 404 for a record that is not a person or company of this brand.
+         */
+        get: operations["getRecordSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * A company's group and its share of wallet
+         * @description Scope: customers.read. The companies a company belongs with: its parent (the parent_company field), the top of
+         *     the group and every company under it, a parent before its children, up to 6 levels and 200 companies. Each line
+         *     has what the company's subscriptions bring in a month, what it and its people paid in the last 12 months, its
+         *     health score, its open signals and its people; totals adds them up, so a parent's page shows the whole group.
+         *     wallet is the company's share of wallet: what it paid in 12 months against wallet_estimate, the yearly amount it
+         *     spends with every supplier on what the brand sells. It is null until the company has an estimate (the Share of
+         *     wallet setup kit adds the fields). Amounts are in the brand's currency; an estimate in another currency is shown
+         *     without a share and left out of the group's total. A person, or a company with no parent and no children, gets
+         *     just itself. It reads stored data and decides nothing. 404 for a record that is not a person or company of this
+         *     brand.
+         */
+        get: operations["getRecordGroup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/signals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List signals, the brand's "Needs attention" queue
+         * @description Scope: customers.read. Signals are what someone should act on about a person or company: churn risk, an upsell,
+         *     a renewal coming up. By default the open ones (open and accepted, not snoozed), soonest due first. counts are the
+         *     brand's open signals whatever the filters.
+         */
+        get: operations["listSignals"];
+        put?: never;
+        /**
+         * Raise a signal about a person or company
+         * @description Scope: customers.manage. Flags a person or company for someone to act on. The owner defaults to the record's
+         *     owner and the due date to the signal type's days. A record has one open signal per type and at most 5 open at
+         *     once: 409 otherwise. The owner is told through alerts. Signals are also raised by events a signal type listens
+         *     to (PUT .../signal-types/{key}).
+         */
+        post: operations["raiseSignal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/signals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Accept, reassign, snooze, close or reopen a signal
+         * @description Scope: customers.manage. status accepted says its owner is on it (accepting a signal nobody owns makes it the
+         *     caller's). done and dismissed close it with an outcome: won, no_change, not_useful or duplicate (default no_change
+         *     for done, not_useful for dismissed). open reopens it. owner_id hands it over (null for nobody), due_at moves the
+         *     date, snoozed_until hides it from the queue until then (null to bring it back).
+         */
+        patch: operations["updateSignal"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/conversation-signals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Whether the brand's AI reads conversations for signals
+         * @description Scope: customers.read. Conversation signals are off until a brand switches them on. When on, the workspace's own
+         *     AI reads what customers say in support, company Telegram chats, email the team shares and call transcripts,
+         *     and raises a signal when a customer says something sales should act on.
+         */
+        get: operations["getConversationSignals"];
+        /**
+         * Switch reading conversations for signals on or off
+         * @description Scope: customers.manage. Every read is a call on the workspace's own AI (Settings, AI, task Conversation
+         *     signals), so nothing is read until this is on and an AI model is connected. A conversation is read ten minutes
+         *     after the customer last wrote, at most once per half hour, and only when they said something new. Signals go to
+         *     the person's company when they have one. Email is read only when the brand's team sharing is on, the privacy
+         *     check found it to be about work and its owner shares the contact with the brand; anything private is never read.
+         */
+        put: operations["setConversationSignals"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/signal-credit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Whose signals turned into revenue
+         * @description Scope: customers.read. Signals raised in the last `days` days: by the person who flagged them, and by where
+         *     they came from. A signal closed as won is credited with what the account (the record, or the people on a
+         *     company) paid in the 90 days after it was raised, in the brand's currency.
+         */
+        get: operations["getSignalCredit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/transcripts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a call or meeting transcript to be read for signals
+         * @description Scope: customers.manage. Outflare records no calls: send the transcript your own recorder made, with the
+         *     person or company the call was with. The brand's AI reads it for signals. The text is kept sealed and removed
+         *     once read. 409 while reading calls is off for the brand (PUT conversation-signals).
+         */
+        post: operations["addTranscript"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/signal-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the brand's signal types
+         * @description Scope: customers.read. The brand's own list of signal types, starting from churn_risk, upsell, cross_sell,
+         *     renewal, billing and other, each with the events that raise it, how long its owner has, and how its signals
+         *     ended in the last 90 days.
+         */
+        get: operations["listSignalTypes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/signal-types/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Add or change a signal type
+         * @description Scope: customers.manage. Adds a signal type (label required) or changes one. events are the event names that
+         *     raise a signal of this type on the record they are about, such as the event a rule emits: a rule that emits
+         *     account.churn_risk then raises a Churn risk signal. Fields left out keep their value.
+         */
+        put: operations["putSignalType"];
+        post?: never;
+        /**
+         * Take a signal type off the list
+         * @description Scope: customers.manage. The type's signals stay. Putting the key again brings it back.
+         */
+        delete: operations["archiveSignalType"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/metrics": {
         parameters: {
             query?: never;
@@ -29890,6 +30376,450 @@ export interface paths {
          * @description Scope: catalog.manage. Quietly, in the background: nothing fires for the past.
          */
         post: operations["backfillMetric"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/scores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the brand's scores
+         * @description Scope: customers.read. Each score: a number from 0 to 100 kept on every company or person, such as a health score
+         *     or a lead score, with its factors and how many records are in each band. starters are scores to start from.
+         *     Archived ones with archived=true.
+         */
+        get: operations["listScores"];
+        put?: never;
+        /**
+         * Add a score
+         * @description Scope: catalog.manage. A score starts every record at base and adds each factor's points when its conditions hold,
+         *     kept between 0 and 100. The value is written to the record's attributes.scores.<key>, with <key>_band (high,
+         *     medium or low), where rules, journeys, smart lists and Query read it. Every record of its type is scored
+         *     straight away, quietly: nothing fires for where records already stand. After that a record is scored again when
+         *     a field its factors read changes, and once a day. A brand keeps at most 20 scores.
+         */
+        post: operations["createScore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/scores/{score}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                score: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a score
+         * @description Scope: catalog.manage. The key and record_type never change. A change to the base, the factors or the bands makes
+         *     a new version, and every record is scored again, quietly.
+         */
+        patch: operations["updateScore"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/scores/{score}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                score: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a score
+         * @description Scope: catalog.manage. It leaves every record's attributes.scores, quietly, and its key is free for a new score.
+         */
+        post: operations["archiveScore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/scores/{score}/track-record": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                score: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Check a score against what really happened
+         * @description Scope: customers.read. So a prediction is never only a number. For a deal's score: of the brand's deals closed
+         *     in the last 365 days, how many in each band (as they stood the day before they closed) were won. For a
+         *     company's or person's score where high is bad news (higher_is_better false), such as churn risk: of the
+         *     records in each band 90 days ago, how many canceled their subscription or were marked churned since. Other
+         *     scores have nothing to be checked against, and outcome is null. It fills in as score history builds up;
+         *     enough is false until 20 records count.
+         */
+        get: operations["getScoreTrackRecord"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/revenue/forecast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * What the brand can expect to book in a quarter
+         * @description Scope: customers.read. The forecast for this quarter or one of the next four: the deals already won, plus every
+         *     renewal due in the quarter weighted by the health band of the company it belongs to, plus every open deal
+         *     weighted by its stage, against the target the brand set. A renewal is any record with a renews_on date in the
+         *     quarter (and, for the current quarter, up to 30 days late); its value is the record's value field, or twelve
+         *     times the company's monthly recurring revenue when it has none. An open deal counts when its close date falls
+         *     in the quarter; the current quarter also takes deals with no close date or one that has passed. A deal with
+         *     someone who already pays is expansion, the rest new business. Every line carries its weight and what it adds,
+         *     so the total can be checked by hand. Nothing is predicted by a model and nothing is stored but the target and
+         *     the weights. Amounts are in the brand's currency; what has no amount or no exchange rate is counted in skipped.
+         */
+        get: operations["getRevenueForecast"];
+        /**
+         * Set a quarter's target and the forecast's weights
+         * @description Scope: catalog.manage. Saves the target for one quarter and, when given, the weights: the percent of a
+         *     renewal's value counted for each health band (high, medium, low, and none for a company with no score) and the
+         *     percent of an open deal's value counted at each stage. Only what is sent changes. A null target removes it; a
+         *     null weight goes back to its default (renewals 95, 80, 50 and 85; stages spread evenly in their order, so four
+         *     stages count 20, 40, 60 and 80). Returns the quarter's forecast with the new settings.
+         */
+        put: operations["setRevenueForecast"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/revenue/team": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The sales team's quarter, person by person
+         * @description Scope: customers.read. Everyone on the brand's sales team for this quarter or one of the next four, with their
+         *     quota, what they have won, what they are forecast to win (won plus the weighted renewals and open deals they
+         *     own, as in the forecast), their best case, their open lines and their percent of quota. Someone with people
+         *     under them in the team directory also carries team: the same numbers for them and everyone below. On the team
+         *     is anyone in the directory who has a quota this quarter, owns something in the forecast, has a role on the
+         *     sales desk or is covered by an active commission plan, and their managers. A deal counts for its owner field,
+         *     then the owner of its person, then of its company. With catalog.manage the caller sees everyone, the total and
+         *     what has no owner on the team; otherwise only themselves and the people who report to them.
+         */
+        get: operations["getRevenueTeam"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/revenue/team/quotas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set people's quotas for a quarter
+         * @description Scope: catalog.manage. Sets what each person named is asked to win in the quarter, in the brand's currency.
+         *     Only the people sent change; a null target takes that person's quota away. A person is someone in the
+         *     workspace's team directory.
+         */
+        put: operations["setSalesQuotas"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/commission-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The brand's commission plans
+         * @description Scope: customers.read. Every commission plan of the brand with its rules in order. Only an active plan earns
+         *     anything.
+         */
+        get: operations["listCommissionPlans"];
+        put?: never;
+        /**
+         * Add a commission plan
+         * @description Scope: catalog.manage. A plan says who it covers (job titles from the team directory, roles on the sales desk
+         *     written role:sdr, role:ae or role:manager, or people by id) and holds an ordered list of rules. For each deal
+         *     won or payment, the first rule that applies pays, and so does any later rule marked stack. A rule says what it
+         *     pays on (any deal won, new business, expansion, a renewal, or money collected), the conditions the deal or
+         *     payment must meet (its fields, amount in whole units, deal_kind, stage, product for a payment, and the
+         *     company's fields under company., such as company.country), whether it is inbound or outbound, whether the
+         *     customer is new or reactivated, for a payment how many days after the customer started paying it was made (so
+         *     the first 30 days can pay one rate and days 31 to 100 a lower one), who gets it (the owner, the company's owner, whoever
+         *     sourced the deal, or the owner's manager) and how much: a percent, a flat amount, or percent tiers by share of
+         *     quota reached in the quarter, with an optional cap a month. A payment rule with clawback takes the commission
+         *     back when the payment is refunded. A new plan is a draft until its status is active. Outflare works commission
+         *     out and never pays anyone.
+         */
+        post: operations["createCommissionPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/commission-plans/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a commission plan
+         * @description Scope: catalog.manage. Approved months keep their amounts. To stop a plan and keep it, set its status to archived.
+         */
+        delete: operations["deleteCommissionPlan"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a commission plan
+         * @description Scope: catalog.manage. Changes only what is sent; rules, positions and staff_ids are replaced whole. Months
+         *     already approved keep the amounts they were approved with; open months are worked out under the new rules.
+         */
+        patch: operations["updateCommissionPlan"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/commissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * What each person earns in a month
+         * @description Scope: customers.read. A statement for everyone an active commission plan covers: one line for each deal won
+         *     or payment a rule paid them for, naming the plan and the rule, the rate and the amount, in the brand's
+         *     currency. An open month is worked out when it is read, so it follows the deals, the payments and the rules as
+         *     they are now; an approved or paid month reads as it was approved. Share of quota is what the person has won in
+         *     the month's quarter over their quota. With catalog.manage the caller sees everyone; otherwise only themselves
+         *     and the people who report to them. A deal with a second owner (its co_owner field) is split between the two
+         *     by co_owner_percent, half each when empty: rules that pay the owner, or the owner's manager, pay each on their
+         *     share. format=csv gives the same lines as a file, one row a line, for payroll.
+         */
+        get: operations["getCommissions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/commissions/{staff}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A person in the team directory. */
+                staff: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Approve a person's month, mark it paid, or reopen it
+         * @description Scope: catalog.manage. approved keeps the month's lines and total as they are worked out now, so later changes
+         *     to deals, payments or rules no longer move it. paid records that it was paid: Outflare never pays anyone. open
+         *     drops what was kept, and the month is worked out again.
+         */
+        put: operations["setCommissionStatement"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/revenue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The brand's revenue report
+         * @description Scope: customers.read. Recurring revenue from the brand's subscriptions and how it moved over the last days
+         *     (90 when left out): new, expansion, reactivation, contraction and churned, with net and gross revenue retention
+         *     against where the period started. Also what was collected (payments less refunds), the renewals from a month
+         *     late to 90 days out, the paying customers whose health score is low, and how many records are in each band of
+         *     each score. Money is in the brand's currency, in its minor unit. Periods are days up to 31 days, weeks (from
+         *     Monday) up to 180, months beyond. A part the brand has no data for is null or empty.
+         */
+        get: operations["getRevenue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/routing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The brand's routing rules
+         * @description Scope: customers.read. The rules that say which teammate gets a person or company with no owner, in the order
+         *     they are tried, and how many people and companies have no owner now.
+         */
+        get: operations["getRouting"];
+        /**
+         * Replace the brand's routing rules
+         * @description Scope: catalog.manage. Sends the whole list in the order the rules are tried: the first rule whose conditions
+         *     hold for a record with no owner gives it to the member of its pool who owns the fewest of the brand's records.
+         *     A rule with no conditions takes every record of its type, so put it last. A rule sent with its id keeps its
+         *     count; one left out is removed. Every record with no owner is then looked at again within a minute or two.
+         */
+        put: operations["setRouting"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/routing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Who the routing rules would give a record to
+         * @description Scope: customers.read. The rule that matches the person or company and the member it would pick, as if the
+         *     record had no owner. Nothing changes.
+         */
+        get: operations["previewRecordRouting"];
+        put?: never;
+        /**
+         * Route a record now
+         * @description Scope: customers.manage. Makes the member the routing rules pick the person's or company's owner. A record
+         *     that has an owner keeps them unless replace is true. The change is in the record's history.
+         */
+        post: operations["routeRecord"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/scores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * A company's or person's scores, and why
+         * @description Scope: customers.read. Each of the brand's scores for this record, worked out from the record as it is now, with
+         *     every factor, its points and whether it holds, so the score explains itself.
+         */
+        get: operations["getRecordScores"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -33450,6 +34380,52 @@ export interface paths {
          * @description Reads now, on the brand's own SEO connection (Ahrefs first, else DataForSEO) and within its budget, one tracked competitor's numbers, top 100 keywords, top 100 linking sites and top 25 pages, instead of waiting for the weekly read (which reads keywords and linking sites for only 5 competitors a site). Reports the connection read in the last `competitor_read_days` (30 by default) are skipped (fresh), so asking again costs nothing more. estimate_only says what it would read and about what it costs first. 409 when the competitor isn't tracked, or (connector_needed) when the brand has no SEO connection.
          */
         post: operations["readCompetitorSearch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Who manages each site
+         * @description For each site asked for, the teammate managing it for the brand: the owner of the site's company record (its built-in owner field), or null when nobody has claimed it. record_id is null when the brand has no company record for the site yet. Check before reaching out, so two teammates never contact one site.
+         */
+        get: operations["listCoverageSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/sites/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim a site, hand it over or release it
+         * @description Says who on the team is managing a site the brand wants a link or placement from, so nobody else reaches out to it at the same time. It sets the owner of the site's company record (adding the company when the brand has none), so it shows in the CRM and the relationship check, and the change is in the company's history. The site's open and picked opportunities take that owner (their state stays as it was). owner_id defaults to you; null releases the site. A site a teammate manages is refused with site_claimed (naming them) unless take_over is true, which agents can't send. It contacts nobody.
+         */
+        post: operations["claimCoverageSite"];
         delete?: never;
         options?: never;
         head?: never;
@@ -38984,6 +39960,89 @@ export interface webhooks {
 }
 export interface components {
     schemas: {
+        /** @description Original uploader identity from authenticated submission evidence. Never includes credential values, hashes or prefixes. Research and Sales ownership do not change it. */
+        SalesAttribution: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            kind: "worker" | "api_key" | "sales_agent" | "manual" | "unknown";
+            /** @enum {string} */
+            status?: "known" | "unknown" | "unavailable";
+            /** Format: date-time */
+            submitted_at?: string | null;
+            event_id?: string | null;
+            revoked?: boolean;
+        };
+        SalesAgentPerformance: {
+            attribution: components["schemas"]["SalesAttribution"];
+            counts: {
+                [key: string]: number;
+            };
+            cohort?: {
+                [key: string]: unknown;
+            } | null;
+            intake?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** @description Versioned Sales reporting envelope. Summary responses contain buckets, totals, cohort, tools, capacity and result amounts; inspection responses contain independently paginated stage groups (50 per stage). Source status is always explicit. */
+        SalesReportingResponse: {
+            /** @constant */
+            schema_version: 1;
+            source: {
+                /** @enum {string} */
+                status: "connected" | "missing" | "choose";
+                integration_id?: string;
+                connections: {
+                    id: string;
+                    name: string;
+                }[];
+            };
+            /** Format: date-time */
+            generated_at?: string;
+            /** Format: date-time */
+            from?: string;
+            /** Format: date-time */
+            to?: string;
+            /** @enum {string} */
+            bucket?: "hour" | "day";
+            buckets?: {
+                /** Format: date-time */
+                at: string;
+                counts: {
+                    [key: string]: number;
+                };
+            }[];
+            totals?: {
+                [key: string]: number;
+            };
+            agents?: components["schemas"]["SalesAgentPerformance"][];
+            attribution_coverage?: {
+                native_milestones?: number;
+                known?: number;
+                unavailable?: number;
+            };
+            cohort?: {
+                [key: string]: unknown;
+            } | null;
+            tools?: {
+                [key: string]: unknown;
+            } | null;
+            capacity?: {
+                [key: string]: unknown;
+            } | null;
+            results?: {
+                [key: string]: unknown;
+            };
+            groups?: {
+                stage: string;
+                total: number;
+                offset: number;
+                leads: {
+                    [key: string]: unknown;
+                }[];
+            }[];
+        };
         SalesMember: {
             /** Format: uuid */
             user_id: string;
@@ -39066,6 +40125,7 @@ export interface components {
             occurred_at: string;
         };
         SalesLead: {
+            attribution?: components["schemas"]["SalesAttribution"];
             /** Format: uuid */
             id: string;
             /** Format: uuid */
@@ -40285,6 +41345,108 @@ export interface components {
             /** @description The playbooks that use it. */
             playbooks: string[];
         };
+        OwnPlaybookInput: {
+            /** @description Required when making one. */
+            title?: string;
+            /** @description What it is for. */
+            summary?: string;
+            /** @description The things it groups, in the order to show them. */
+            parts?: {
+                /** @enum {string} */
+                kind: "rule" | "journey" | "smart_list" | "signal_type";
+                /** @description The rule's, journey's or list's id, or the signal type's key. */
+                id: string;
+            }[];
+        };
+        /** @description A playbook of the brand's own, with what its parts have done. */
+        OwnPlaybook: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            summary: string;
+            /** @description The parts the brand still has, in the playbook's order. */
+            parts: {
+                /** @enum {string} */
+                kind: "rule" | "journey" | "smart_list" | "signal_type";
+                /** @description Its id, or a signal type's key: what to send back in parts. */
+                key: string;
+                /** @description Its id. A signal type has none: its key names it. */
+                id: string | null;
+                name: string;
+                /** @description A rule's or journey's status (draft, active, paused), a list's kind (smart, static), or active or archived for a signal type. */
+                status: string;
+                /** @description What it has done: a rule's firings in the last 30 days, the records now in a journey or on a list, a signal type's open signals. */
+                count: number;
+            }[];
+            /** @description The signals it raised: of its signal types, or raised by its journeys. Closed ones count for 90 days. */
+            signals: {
+                open: number;
+                late: number;
+                won: number;
+                no_change: number;
+                not_useful: number;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description What a playbook's journeys changed in a brand, against the people or companies they held back. */
+        PlaybookLift: {
+            playbook_id: string;
+            days: number;
+            /** @description The conversion counted; empty for any. */
+            event: string;
+            /** @description True when at least one of its journeys holds some back. */
+            measured: boolean;
+            /** @description The fewest in each group before a verdict. */
+            min_people: number;
+            journeys: {
+                /** Format: uuid */
+                journey_id: string;
+                name: string;
+                status: string;
+                /** @description True when the journey holds some back at random. */
+                measured: boolean;
+                /** @description The split step that holds them back. */
+                step: string | null;
+                /** @description The share it holds back. */
+                holdout_percent: number | null;
+                /** @description Everyone who went through, with the lift, verdict and incremental revenue against held_back. */
+                ran: null | components["schemas"]["LiftPath"];
+                /** @description The ones kept out. */
+                held_back: null | components["schemas"]["LiftPath"];
+            }[];
+        };
+        /** @description What a playbook set up in a brand and what it has done there. */
+        PlaybookHome: {
+            playbook_id: string;
+            /** @description The playbook's setup kit, or empty when it has none. */
+            kit_id: string;
+            /** @description The brand has at least one of the kit's parts. */
+            installed: boolean;
+            parts: {
+                /** @enum {string} */
+                kind: "rule" | "journey" | "smart_list" | "signal_type" | "metric" | "score";
+                /** @description Its key in the kit. */
+                key: string;
+                /** @description Its id. A signal type has none: its key names it. */
+                id: string | null;
+                name: string;
+                /** @description A rule's or journey's status (draft, active, paused), a list's kind (smart, static), or active or archived for a signal type. */
+                status: string;
+                /** @description What it has done: a rule's firings in the last 30 days, the records now in a journey or on a list, a signal type's open signals. */
+                count: number;
+            }[];
+            /** @description The signals it raised: of the kit's own types, or raised by its journeys. Closed ones count for 90 days. */
+            signals: {
+                open: number;
+                late: number;
+                won: number;
+                no_change: number;
+                not_useful: number;
+            };
+        };
         /** @description What a kit file holds (playbooks/README.md has the format). */
         KitFile: {
             /** @example creators-partnerships */
@@ -40331,6 +41493,68 @@ export interface components {
             rules: components["schemas"]["KitPart"][];
             /** @description Journeys, as POST .../journeys takes them, added as drafts. Their email steps send the kit's own email drafts. */
             journeys: components["schemas"]["KitPart"][];
+            /** @description Kinds of signal the kit's rules and journeys raise, added to the brand's list for Needs attention. A type the brand already has stays as it is. */
+            signal_types: {
+                /** @example usage_drop */
+                key: string;
+                label: string;
+                description?: string;
+                /** @description Events that raise a signal of this type. */
+                events?: string[];
+                /** @description Days its owner has before it shows as late. 2 when left out. */
+                due_days?: number;
+            }[];
+            /** @description Metrics the kit's rules, lists and scores read as metrics.<key>, as POST .../metrics takes them. One the brand already has under the same key stays as it is. */
+            metrics?: {
+                /** @example logins_30d */
+                key: string;
+                name: string;
+                description?: string;
+                /** @description Both when left out. */
+                levels?: ("company" | "person")[];
+                /** @enum {string} */
+                aggregate: "count" | "sum" | "min" | "max" | "days" | "last" | "latest";
+                /** @description The events it counts; an entry can be one of the kit's inputs. */
+                events: string[];
+                /** @description Counts every event the product sends. */
+                usage?: boolean;
+                /** @description The number property sum */
+                property?: string;
+                /** @description 30 when left out. */
+                window_days?: number;
+                /** @description Days back the window ends: a twin of another metric with an offset gives <key>_change. */
+                offset_days?: number;
+            }[];
+            /** @description Scores the kit adds, as POST .../scores takes them. One the brand already has under the same key stays as it is. */
+            scores?: {
+                /** @example health */
+                key: string;
+                label: string;
+                description?: string;
+                /** @enum {string} */
+                record_type: "account" | "person" | "deal";
+                /**
+                 * @description measured when left out.
+                 * @enum {string}
+                 */
+                nature?: "measured" | "ai" | "predicted";
+                /** @description For a headline score, in place of factors: the kit's (or the brand's) other scores it is the average of. */
+                parts?: components["schemas"]["ScorePart"][];
+                /** @description False for a score such as churn risk. True when left out. */
+                higher_is_better?: boolean;
+                /** @description A field that must be set for a record to get the score. */
+                needs?: string;
+                /** @description 50 when left out. */
+                base?: number;
+                /** @description 70 when left out. */
+                high_from?: number;
+                /** @description 40 when left out. */
+                low_below?: number;
+                /** @description Each a label, conditions on the record's fields, match (all or any) and the points it adds or takes. */
+                factors: {
+                    [key: string]: unknown;
+                }[];
+            }[];
         };
         /** @description A value a flow kit asks for when it is applied. */
         KitInput: {
@@ -40354,6 +41578,8 @@ export interface components {
             inputs?: {
                 [key: string]: string;
             };
+            /** @description On apply: hold this share of whoever enters each journey the kit adds back at random, so what they changed can be measured. Ignored by a preview. */
+            holdout_percent?: number;
         };
         /** @description Journeys written out as a flow kit, with what they use. */
         KitExport: {
@@ -40411,7 +41637,7 @@ export interface components {
             inputs: components["schemas"]["KitInput"][];
             items: {
                 /** @enum {string} */
-                kind: "option_set" | "record_type" | "field" | "email_template" | "smart_list" | "rule" | "journey";
+                kind: "option_set" | "record_type" | "field" | "email_template" | "smart_list" | "rule" | "journey" | "signal_type" | "metric" | "score";
                 /** @description A field's key is type.field. */
                 key: string;
                 label: string;
@@ -42929,6 +44155,26 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        NetworkCostDay: {
+            /** Format: uuid */
+            source_id: string;
+            /** @enum {string} */
+            network: "zeropark";
+            /** @description The network's campaign id, as the clicks carry it ({campaign_id}). */
+            campaign_ref: string;
+            /** Format: date */
+            day: string;
+            currency: string;
+            /** @description What the network reported, in the currency's main unit. */
+            spend: string;
+            matched: string;
+            spread: string;
+            unattributed: string;
+            clicks: number;
+            targets: number;
+            /** Format: date-time */
+            synced_at: string;
+        };
         IPLookupSettings: {
             /** Format: uuid */
             integration_id: string | null;
@@ -42983,6 +44229,8 @@ export interface components {
             source_click_id: string;
             /** @description The cost the traffic source reported, in its currency. */
             cost: string;
+            /** @description The click's share of what the network reported spending (Zeropark), reconciled each day per campaign and target in proportion to the click's own cost; null until reconciled. Reports use it before cost. */
+            network_cost: string | null;
             likely_bot: boolean;
             fraud_reasons: ("datacenter_network" | "repeat_click" | "fast_conversion" | "filter_list" | "honeypot" | "ip_reputation")[];
             /**
@@ -43631,7 +44879,7 @@ export interface components {
             property?: string;
             /** @enum {string} */
             op: "eq" | "neq" | "gt" | "lt" | "contains" | "exists" | "not_exists";
-            /** @description What eq, neq, gt, lt and contains compare with. */
+            /** @description What eq, neq, gt, lt and contains compare with. For a date field it can be a day relative to today: today, +60d (60 days from now) or -14d (14 days ago). */
             value?: unknown;
         };
         /**
@@ -43665,7 +44913,7 @@ export interface components {
             description?: string;
             /** @description The brand's id or handle: the rule acts on that brand's records only. Default (or null): the route's brand, or on the workspace route the workspace's first. */
             brand_id?: string | null;
-            /** @description What the rule is about (default person). Event, absence and audience rules are about people; a change rule can watch any record type. */
+            /** @description What the rule is about (default person). Event and absence rules are about people, or with account about companies (an event by anyone at the company counts); an audience rule is about its list's records; a change rule can watch any record type. */
             record_type?: string;
             trigger?: components["schemas"]["RuleTrigger"];
             conditions?: components["schemas"]["RuleCondition"][];
@@ -43878,7 +45126,470 @@ export interface components {
                 /** Format: date-time */
                 last_at: string;
             }[];
-            flags: ("already_customer" | "in_other_pipeline" | "open_deal" | "warm_intro" | "stale_thread")[];
+            /** @description The teammate managing the company (its owner field, the claim on a site in Presence), or null. */
+            owner: {
+                /** Format: uuid */
+                user_id: string;
+                name: string;
+            } | null;
+            /** @description claimed: a teammate other than you manages the company, so check with them before reaching out. */
+            flags: ("already_customer" | "in_other_pipeline" | "open_deal" | "warm_intro" | "stale_thread" | "claimed")[];
+        };
+        ConversationSignals: {
+            enabled: boolean;
+            channels: ("support" | "telegram" | "email" | "call")[];
+            /** @description The workspace has an AI model to read with. Without one nothing is read. */
+            ai_connected: boolean;
+            /** @description Conversations read in the last 30 days. */
+            read_30d: number;
+            /** @description Signals raised from them. */
+            raised_30d: number;
+        };
+        SignalCredit: {
+            days: number;
+            /** @description How long after a signal revenue still counts as its credit. */
+            credit_days: number;
+            currency: string;
+            /** @description Who flagged signals by hand, most revenue first. */
+            people: {
+                /** Format: uuid */
+                user_id: string;
+                name: string;
+                flagged: number;
+                /** @description Taken on by an owner */
+                confirmed: number;
+                won: number;
+                /** Format: int64 */
+                revenue_minor: number;
+            }[];
+            /** @description Where signals came from. */
+            sources: {
+                /** @description A conversation's channel (support, telegram, email, call), or event, journey, manual, api. */
+                source: string;
+                /** @description Found by the brand's AI rather than a person. */
+                ai: boolean;
+                raised: number;
+                confirmed: number;
+                won: number;
+                not_useful: number;
+                /** Format: int64 */
+                revenue_minor: number;
+            }[];
+        };
+        Signal: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            record_id: string;
+            record_type: string;
+            record_name: string;
+            type: string;
+            type_label: string;
+            title: string;
+            detail: string;
+            /** @enum {string} */
+            status: "open" | "accepted" | "done" | "dismissed";
+            /** @enum {string|null} */
+            outcome?: "won" | "no_change" | "not_useful" | "duplicate" | null;
+            /** Format: uuid */
+            owner_id?: string | null;
+            owner_name?: string | null;
+            /** Format: date-time */
+            due_at?: string | null;
+            /** Format: date-time */
+            snoozed_until?: string | null;
+            /**
+             * @description event: raised by an event its type listens to. journey: raised by a journey's raise_signal step. agent: found by the brand's own AI reading a conversation (data has channel, ref, quote and confidence). manual: raised by a person; flagged from a conversation, data has channel and ref.
+             * @enum {string}
+             */
+            source: "event" | "journey" | "manual" | "agent" | "api";
+            /** Format: uuid */
+            event_id?: string | null;
+            data: {
+                [key: string]: unknown;
+            };
+            /**
+             * Format: date-time
+             * @description When it went to the owners and admins because nobody accepted it in time.
+             */
+            escalated_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            closed_at?: string | null;
+            /** @description Open and past its due date. */
+            late: boolean;
+        };
+        SignalTypeList: {
+            data: {
+                key: string;
+                label: string;
+                description: string;
+                events: string[];
+                due_days: number;
+                open: number;
+                closed_90d: number;
+                won_90d: number;
+                not_useful_90d: number;
+            }[];
+        };
+        RecordGroup: {
+            /** Format: uuid */
+            record_id: string;
+            /** @description The brand's currency. Every amount here is in it unless it says otherwise. */
+            currency: string;
+            /** @description The company straight above this one; null at the top of a group. */
+            parent: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            } | null;
+            /**
+             * Format: uuid
+             * @description The top of the group; the record itself when it has no parent.
+             */
+            root_id: string;
+            /** @description The whole group from the top down, a parent before its children. Just the company itself when it has no group; empty for a person. */
+            companies: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                /** Format: uuid */
+                parent_id: string | null;
+                /** @description 0 for the top of the group. */
+                depth: number;
+                /**
+                 * Format: int64
+                 * @description What its subscriptions bring in a month at the last revenue count.
+                 */
+                mrr_minor: number;
+                /**
+                 * Format: int64
+                 * @description What it and its people paid in the last 12 months.
+                 */
+                paid_12m_minor: number;
+                /** @description Its health score */
+                health: number | null;
+                /** @description low, medium or high. */
+                health_band: string | null;
+                open_signals: number;
+                people: number;
+                /**
+                 * Format: int64
+                 * @description Its own wallet estimate
+                 */
+                wallet_minor: number | null;
+            }[];
+            totals: {
+                companies: number;
+                /** Format: int64 */
+                mrr_minor: number;
+                /** Format: int64 */
+                paid_12m_minor: number;
+                open_signals: number;
+                people: number;
+                /** @description How many companies are in the low health band. */
+                low_health: number;
+                /**
+                 * Format: int64
+                 * @description The group's wallet estimates added up; null with none.
+                 */
+                wallet_minor: number | null;
+                /** @description What the companies with an estimate paid in 12 months over wallet_minor, 0.25 for a quarter; null with no estimate. */
+                share: number | null;
+            };
+            /** @description True when the group has more than 200 companies and the rest are left out. */
+            truncated: boolean;
+            /** @description This company's share of wallet; null until it has a wallet estimate. */
+            wallet: {
+                /**
+                 * Format: int64
+                 * @description What the company spends a year on what the brand sells
+                 */
+                estimate_minor: number;
+                currency: string;
+                /** @description How sure the estimate is, from the wallet_confidence field. */
+                confidence: string | null;
+                /** @description Where the estimate came from. */
+                source: string | null;
+                /** @description Who else the company buys from. */
+                suppliers: string | null;
+                /** Format: int64 */
+                paid_12m_minor: number;
+                /** @description paid_12m_minor over estimate_minor; null when the estimate is in another currency than the brand's. */
+                share: number | null;
+            } | null;
+        };
+        RecordSummary: {
+            /** Format: uuid */
+            record_id: string;
+            /** @enum {string} */
+            type: "person" | "account";
+            name: string;
+            /** @description A person's company. */
+            company: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            } | null;
+            /** @description The member in the record's owner field. */
+            owner: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            } | null;
+            stage: {
+                /** @description The lifecycle_stage field. */
+                stage: string | null;
+                /**
+                 * Format: date-time
+                 * @description When the field last changed.
+                 */
+                since: string | null;
+                /** @description What changed it: a source such as manual, api, import or journey. */
+                by: string | null;
+                /** @description The product lifecycle's overall status */
+                status: string | null;
+                flags: string[];
+                active_products: number;
+                /** @description The latest product lifecycle move. */
+                last_move: {
+                    move: string;
+                    from_stage: string | null;
+                    to_stage: string;
+                    product_key: string | null;
+                    /** Format: date-time */
+                    at: string;
+                } | null;
+            };
+            /** @description The account plan the owner keeps: the goal, next_step, hesitations and limits fields that are filled in. */
+            plan: {
+                [key: string]: unknown;
+            };
+            /** @description Null when they have no plan, revenue or payments. Amounts are in the brand's currency, in minor units. */
+            billing: {
+                plan: unknown;
+                status: unknown;
+                mrr: unknown;
+                lifetime_revenue: unknown;
+                customer_since: unknown;
+                currency: string | null;
+                /**
+                 * Format: int64
+                 * @description Payments less refunds in the last 30 days.
+                 */
+                paid_30d: number;
+                /**
+                 * Format: int64
+                 * @description The same for the 30 days before.
+                 */
+                paid_prev_30d: number;
+                /** Format: date-time */
+                last_payment_at: string | null;
+                failed_payments_30d: number;
+            } | null;
+            products: {
+                /** Format: uuid */
+                product_id: string;
+                key: string;
+                name: string;
+                stage: string;
+                category: string | null;
+                /** Format: date-time */
+                entered_at: string;
+                /** Format: date-time */
+                last_used_at: string | null;
+            }[];
+            /** @description The record's live metrics (up to 100). */
+            metrics: {
+                key: string;
+                name: string;
+                product_key: string | null;
+                value: unknown;
+                /** @description The value of the brand's metric that measures the same thing over the window just before, or null when there is none. */
+                previous: unknown;
+                window_days: number;
+            }[];
+            /** @description A company's people, those with a role first (up to 10). */
+            people: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                job_title: string | null;
+                /** @description The link's role property, such as buyer or decision_maker. */
+                role: string | null;
+                kind: string;
+            }[];
+            people_total: number;
+            deals: {
+                open: number;
+                won: number;
+                lost: number;
+                /** @description Open deals first, then the latest closed (up to 10). */
+                latest: {
+                    /** Format: uuid */
+                    id: string;
+                    name: string;
+                    stage: string;
+                    /** @enum {string} */
+                    state: "open" | "won" | "lost";
+                    /** Format: int64 */
+                    amount_cents: number | null;
+                    currency: string | null;
+                    /** Format: date-time */
+                    opened_at: string | null;
+                    /** Format: date-time */
+                    closed_at: string | null;
+                    /** @description A lost deal's Lost reason field: a key of the brand's lost_reason list. */
+                    lost_reason: string | null;
+                    lost_note: string | null;
+                }[];
+            };
+            /** @description Records of other types that point here, such as CRM deals and partnerships, latest first (up to 10). */
+            pipelines: {
+                /** Format: uuid */
+                id: string;
+                type: string;
+                name: string;
+                stage: string | null;
+                value: unknown;
+                /**
+                 * Format: date
+                 * @description The record's renews_on date field, when its type has one, such as an agreement.
+                 */
+                renews_on: string | null;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
+            conversations: {
+                /** @description Support conversations that are not closed. */
+                open: number;
+                /** @description Open ones the customer wrote last in. */
+                waiting: number;
+                latest: {
+                    /** Format: uuid */
+                    id: string;
+                    subject: string;
+                    /** @enum {string} */
+                    channel: "email" | "chat";
+                    /** @enum {string} */
+                    status: "open" | "pending" | "closed";
+                    /** @enum {string|null} */
+                    last_from: "customer" | "team" | null;
+                    /** Format: date-time */
+                    last_message_at: string | null;
+                    /** Format: uuid */
+                    assignee_id: string | null;
+                    assignee_name: string | null;
+                    /** @description A reply or resolution target was missed. */
+                    breached: boolean;
+                }[];
+            };
+            contact: {
+                /** Format: date-time */
+                last_at: string | null;
+                /** @enum {string|null} */
+                last_channel: "outreach" | "inbox" | "meeting" | "support" | "email" | null;
+                /**
+                 * @description in when they wrote last, out when the brand did; null for a meeting or personal email.
+                 * @enum {string|null}
+                 */
+                last_direction: "in" | "out" | null;
+                /** Format: date-time */
+                last_in_at: string | null;
+                /** Format: date-time */
+                last_out_at: string | null;
+                /** @description A two-way conversation with nothing in the last 60 days. */
+                stale: boolean;
+            };
+            /** @description Members who emailed them from their own mailbox, where the caller may see it. */
+            team: {
+                /** Format: uuid */
+                user_id: string;
+                name: string;
+                messages: number;
+                /** Format: date-time */
+                last_at: string;
+            }[];
+            website: {
+                /** Format: date-time */
+                first_visit_at: string | null;
+                /** Format: date-time */
+                last_visit_at: string | null;
+                visits_30d: number;
+                last_path: string | null;
+            };
+            origin: {
+                /** @description How the record was made, such as import, api or form. */
+                origin: string;
+                acquired_via: string | null;
+                /** @description Where their first visit came from. */
+                source: string | null;
+                medium: string | null;
+                campaign: string | null;
+                referrer: string | null;
+                landing_path: string | null;
+                /** Format: date-time */
+                created_at: string;
+            };
+            tasks: {
+                open: number;
+                overdue: number;
+                next: {
+                    /** Format: uuid */
+                    id: string;
+                    title: string;
+                    /** @enum {string} */
+                    priority: "low" | "normal" | "high";
+                    /** Format: date-time */
+                    due_at: string | null;
+                    /** Format: uuid */
+                    assigned_to: string | null;
+                    assigned_name: string | null;
+                    /** Format: uuid */
+                    record_id: string;
+                }[];
+            };
+            /** @description Journeys and sequences they are in now, or left in the last 30 days (up to 10). */
+            automations: {
+                /** @enum {string} */
+                kind: "journey" | "sequence";
+                /** Format: uuid */
+                id: string;
+                name: string;
+                status: string;
+                /** Format: date-time */
+                since: string;
+                /** Format: date-time */
+                next_at: string | null;
+                /** @description Why it ended or stopped. */
+                reason: string | null;
+                /** Format: uuid */
+                record_id: string;
+            }[];
+            /** @description Alerts raised about them, latest first (up to 10). */
+            alerts: {
+                /** Format: uuid */
+                id: string;
+                kind: string;
+                /** Format: uuid */
+                owner_id: string | null;
+                owner_name: string | null;
+                /** Format: date-time */
+                created_at: string;
+            }[];
+            /** @description What to act on now, most pressing first. */
+            attention: {
+                /** @enum {string} */
+                kind: "signal" | "reply_overdue" | "conversation_waiting" | "task_overdue" | "payment_failed" | "billing_past_due" | "renewal_due" | "at_risk" | "came_back" | "no_owner";
+                count: number;
+                /** Format: date-time */
+                at: string | null;
+                /** Format: uuid */
+                id: string | null;
+            }[];
         };
         RecordProductLifecycle: {
             /** Format: uuid */
@@ -43931,10 +45642,10 @@ export interface components {
             /** @description Which records keep it; default both. */
             levels?: ("company" | "person")[];
             /**
-             * @description count events; sum, min or max of property; days with an event; last: when the latest happened.
+             * @description latest: the value of property in the latest event, such as a balance or a limit. count events; sum, min or max of property; days with an event; last: when the latest happened.
              * @enum {string}
              */
-            aggregate?: "count" | "sum" | "min" | "max" | "days" | "last";
+            aggregate?: "count" | "sum" | "min" | "max" | "days" | "last" | "latest";
             /** @description Event names it counts. */
             events?: string[];
             /** @description Also count usage: events the product sent through ingest. */
@@ -43956,7 +45667,7 @@ export interface components {
             description: string;
             levels: ("company" | "person")[];
             /** @enum {string} */
-            aggregate: "count" | "sum" | "min" | "max" | "days" | "last";
+            aggregate: "count" | "sum" | "min" | "max" | "days" | "last" | "latest";
             events: string[];
             usage: boolean;
             property?: string;
@@ -43999,6 +45710,837 @@ export interface components {
             value: unknown;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description Points added to the score (or taken, when negative) when the conditions hold on the record. */
+        ScoreFactor: {
+            /** @description What it means, in words people read on the record: Usage fell by a third. */
+            label: string;
+            /** @description Tests of the record's fields (attribute only), such as metrics.usage_7d_change lt -29 or renews_on lt +60d. To read another of the record's scores, test scores.<key> or scores.<key>_band (not a score that itself reads scores). A deal's score can also read deal.days_open, deal.days_in_stage, deal.days_quiet (days since anything was logged on the deal or who it is with), deal.days_to_close (negative when its close date has passed) and deal.contacts, and its company's fields under account, such as account.metrics.usage_7d or account.sentiment.label. */
+            conditions: components["schemas"]["RuleCondition"][];
+            /**
+             * @description all when left out.
+             * @enum {string}
+             */
+            match?: "all" | "any";
+            /** @description Not 0. */
+            points: number;
+        };
+        ScoreInput: {
+            /** @description Required to add a score, and never changes: the value is kept under attributes.scores.<key>. Can't end in _band. */
+            key?: string;
+            label?: string;
+            description?: string;
+            /**
+             * @description Required to add a score, and never changes: account for companies.
+             * @enum {string}
+             */
+            record_type?: "account" | "person" | "deal";
+            /** @description Where every record starts: 50 when left out. */
+            base?: number;
+            /** @description At least one, unless the score has parts. */
+            factors?: components["schemas"]["ScoreFactor"][];
+            /** @description The band is high from this value up: 70 when left out. */
+            high_from?: number;
+            /** @description The band is low under this value, and medium between the two: 40 when left out. */
+            low_below?: number;
+            /**
+             * @description What kind of number this is, shown beside it everywhere: measured (worked out from what happened; when left out), ai (read from conversations by the brand's own AI) or predicted (an estimate of what will happen, such as churn risk). A score that reads sentiment, or is made of or reads a score that isn't measured, can't be measured.
+             * @enum {string}
+             */
+            nature?: "measured" | "ai" | "predicted";
+            /** @description For a headline score, in place of factors: 2 to 6 of the brand's other scores for the same record type, which it is the weighted average of. A part can't itself have parts or read scores. A part the record has no value for is left out of the average. */
+            parts?: components["schemas"]["ScorePart"][];
+            /** @description False for a score such as churn risk, where the high band is the one to worry about: it changes the colour, never the number. True when left out. */
+            higher_is_better?: boolean;
+            /** @description A field that must be set for a record to get this score, such as sentiment.value: without it the record has no value, which is not a low one. */
+            needs?: string;
+        };
+        ScorePart: {
+            /** @description The key of another of the brand's scores for the same record type. */
+            key: string;
+            /** @description How much it counts beside the other parts: 2 counts double a 1. */
+            weight: number;
+        };
+        /** @description A score to start from, as createScore takes it. */
+        ScoreStarter: {
+            key: string;
+            label: string;
+            description: string;
+            /** @enum {string} */
+            record_type: "account" | "person" | "deal";
+            base: number;
+            factors: components["schemas"]["ScoreFactor"][];
+            high_from: number;
+            low_below: number;
+            /** @enum {string} */
+            nature: "measured" | "ai" | "predicted";
+            parts: components["schemas"]["ScorePart"][];
+            higher_is_better: boolean;
+            needs: string;
+        };
+        Score: {
+            /** Format: uuid */
+            id: string;
+            key: string;
+            label: string;
+            description: string;
+            /** @enum {string} */
+            record_type: "account" | "person" | "deal";
+            base: number;
+            factors: components["schemas"]["ScoreFactor"][];
+            high_from: number;
+            low_below: number;
+            version: number;
+            /** @enum {string} */
+            nature: "measured" | "ai" | "predicted";
+            parts: components["schemas"]["ScorePart"][];
+            higher_is_better: boolean;
+            needs: string;
+            /** @enum {string} */
+            status: "active" | "archived";
+            /** @description Every record is being scored again in the background. */
+            scoring: boolean;
+            /**
+             * Format: date-time
+             * @description When every record was last scored in one pass.
+             */
+            scored_at: string | null;
+            /** @description How many records are in each band now. */
+            counts: {
+                high: number;
+                medium: number;
+                low: number;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        RoutingRuleInput: {
+            /**
+             * Format: uuid
+             * @description The rule's id, to keep it; left out for a new rule.
+             */
+            id?: string;
+            /** @description Such as Enterprise or Europe. */
+            name: string;
+            /**
+             * @description account for companies.
+             * @enum {string}
+             */
+            record_type: "account" | "person";
+            /** @description Tests of the record's fields (attribute only), such as company_size gt 200 or country eq DE. None takes every record of the type. */
+            conditions?: components["schemas"]["RuleCondition"][];
+            /**
+             * @description all when left out.
+             * @enum {string}
+             */
+            match?: "all" | "any";
+            /** @description The pool as a list: workspace members' user ids. The one who owns the fewest of the brand's records gets the next; on a tie, the one listed first. Send members or team_id, not both. */
+            members?: string[];
+            /**
+             * Format: uuid
+             * @description The pool as a team (listTeams): whoever is in the team when a record is routed shares it, so a new teammate joins by being added to the team.
+             */
+            team_id?: string | null;
+            /** @description The rule's territory: two-letter country codes, such as DE. The rule takes only records whose country field is one of them; none means anywhere. */
+            countries?: string[];
+            /**
+             * @description active when left out. A paused rule is skipped.
+             * @enum {string}
+             */
+            status?: "active" | "paused";
+        };
+        RoutingRule: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            record_type: "account" | "person";
+            conditions: components["schemas"]["RuleCondition"][];
+            /** @enum {string} */
+            match: "all" | "any";
+            /** @description The pool as a list; empty when the pool is a team. */
+            members: string[];
+            /**
+             * Format: uuid
+             * @description The team that is the pool, when it is one.
+             */
+            team_id: string | null;
+            /** @description The rule's territory as two-letter country codes; empty means anywhere. */
+            countries: string[];
+            /** @enum {string} */
+            status: "active" | "paused";
+            /**
+             * Format: int64
+             * @description How many records it has given an owner.
+             */
+            assigned: number;
+        };
+        Routing: {
+            /** @description In the order they are tried. */
+            data: components["schemas"]["RoutingRule"][];
+            /** @description People and companies in the brand with no owner now. */
+            unowned: {
+                person: number;
+                account: number;
+            };
+        };
+        RoutingResult: {
+            /**
+             * @description assigned: the member got it (or would, in a preview). kept: it has an owner, or the pick is its owner already. no_rule: no rule matches. no_member: nobody in the matching rule's pool is in the workspace (its members left, or its team is empty or gone).
+             * @enum {string}
+             */
+            outcome: "assigned" | "kept" | "no_rule" | "no_member" | "no_record";
+            /** Format: uuid */
+            rule_id: string | null;
+            rule_name: string | null;
+            /** @description The member picked, or the owner kept. */
+            owner_id: string | null;
+        };
+        RevenueMover: {
+            /** Format: uuid */
+            record_id: string;
+            type: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description Paid in this period.
+             */
+            paid_minor: number;
+            /**
+             * Format: int64
+             * @description Paid in the same number of days before.
+             */
+            previous_paid_minor: number;
+        };
+        RevenueForecastSum: {
+            count: number;
+            /**
+             * Format: int64
+             * @description Every line in full.
+             */
+            total_minor: number;
+            /**
+             * Format: int64
+             * @description Every line at its weight.
+             */
+            expected_minor: number;
+        };
+        RevenueTeamSum: {
+            /** Format: int64 */
+            quota_minor: number;
+            /** Format: int64 */
+            won_minor: number;
+            /**
+             * Format: int64
+             * @description Won plus the weighted renewals and open deals.
+             */
+            forecast_minor: number;
+            /**
+             * Format: int64
+             * @description Won plus every renewal and open deal in full.
+             */
+            best_case_minor: number;
+            /** @description Renewals and open deals counted. */
+            open: number;
+            /** @description Percent of quota won. null with no quota. */
+            attainment: number | null;
+        };
+        RevenueTeamMember: components["schemas"]["RevenueTeamSum"] & {
+            /** Format: uuid */
+            staff_id: string;
+            name: string;
+            title: string;
+            /** @description Their role on the brand's sales desk: sdr, ae, manager, or empty. */
+            role: string;
+            /** Format: uuid */
+            manager_id: string | null;
+            /**
+             * Format: uuid
+             * @description Their sign-in, when they have one.
+             */
+            user_id: string | null;
+            has_quota: boolean;
+            /** @description How they handle the signals given to them. Signals go to people with a sign-in, so it is all zero for someone without one. */
+            signals: {
+                /** @description Waiting on them now: open or accepted. */
+                open: number;
+                /** @description Of those, open and past their due time. */
+                late: number;
+                /** @description Closed in the quarter, done or dismissed. */
+                handled: number;
+                /** @description Closed in the quarter with the outcome won. */
+                won: number;
+                /** @description The usual time, in hours, from a signal being raised to its being closed, for those handled in the quarter. null with none. */
+                median_hours: number | null;
+            };
+            /** @description People under them on the team, however deep. */
+            reports: number;
+            /** @description Them and everyone under them. null for someone with no reports. */
+            team: components["schemas"]["RevenueTeamSum"] | null;
+        };
+        RevenueTeam: {
+            quarter: string;
+            /** Format: date */
+            starts_on: string;
+            /** Format: date */
+            ends_on: string;
+            days_left: number;
+            currency: string;
+            members: components["schemas"]["RevenueTeamMember"][];
+            /** @description The whole team. null for a caller who sees only their own numbers. */
+            total: components["schemas"]["RevenueTeamSum"] | null;
+            /** @description What has no owner, or an owner who is not in the team directory. */
+            unassigned: components["schemas"]["RevenueTeamSum"] | null;
+            /** @description The caller may set quotas. */
+            can_manage: boolean;
+        };
+        CommissionRule: {
+            /** @description Unique in the plan. Statement lines name it. */
+            id: string;
+            name: string;
+            /**
+             * @description Any deal won; a won deal with someone who did not pay before; with someone who already pays; a renewal deal; or money collected.
+             * @enum {string}
+             */
+            pays_on: "deal_won" | "new_business" | "expansion" | "renewal" | "payment";
+            /** @enum {string} */
+            match?: "all" | "any";
+            /** @description What the deal or payment must meet: its fields, amount (whole units of the brand's currency), deal_kind, stage, product (a payment's product key) and the company's fields under company. */
+            conditions?: components["schemas"]["JourneyCondition"][];
+            /**
+             * @description Only deals and payments that came in by themselves, or only those from outreach. A deal's lead_source field says which; empty, a deal tied to outreach is outbound and any other inbound. A payment takes its customer's lead_source, then their latest won deal's, then inbound.
+             * @enum {string}
+             */
+            source?: "inbound" | "outbound";
+            /**
+             * @description Only someone paying for the first time, or only someone who pays again after the plan's lapse_days without a payment.
+             * @enum {string}
+             */
+            customer?: "new" | "reactivated";
+            /** @description For pays_on payment: only payments made at least this many days after the customer started paying (or started again after a lapse). */
+            days_from?: number;
+            /** @description For pays_on payment: only payments made at most this many days after the customer started paying. 30 is their first month. */
+            days_to?: number;
+            /**
+             * @description The deal's owner (for a payment, the customer's); the company's owner; whoever sourced the deal; or the owner's manager in the team directory.
+             * @enum {string}
+             */
+            who: "owner" | "company_owner" | "sourced_by" | "manager";
+            percent?: number;
+            /**
+             * Format: int64
+             * @description A flat amount for each deal or payment, in place of a percent.
+             */
+            flat_minor?: number;
+            /** @description Rates that replace percent once the person has reached a share of quota in the quarter. In rising order. */
+            tiers?: {
+                /** @description Percent of quota from which the rate applies. */
+                from_attainment: number;
+                percent: number;
+            }[];
+            /**
+             * Format: int64
+             * @description The most the rule pays one person in a month.
+             */
+            cap_minor?: number | null;
+            /** @description For pays_on payment: a refund takes the commission back. */
+            clawback?: boolean;
+            /** @description Pays even when an earlier rule of the plan already paid the person for the same deal or payment. */
+            stack?: boolean;
+        };
+        CommissionPlanInput: {
+            name?: string;
+            /** @enum {string} */
+            status?: "draft" | "active" | "archived";
+            /** @description Job titles from the team directory, or role:sdr, role:ae, role:manager for a role on the sales desk. */
+            positions?: string[];
+            /** @description People in the team directory, by id. */
+            staff_ids?: string[];
+            /** @description Days without a payment after which paying again makes someone a reactivated customer, and restarts the count of days since they started paying. 90 when left out; use more than a year for customers who pay yearly. */
+            lapse_days?: number;
+            rules?: components["schemas"]["CommissionRule"][];
+        };
+        CommissionPlan: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            status: "draft" | "active" | "archived";
+            positions: string[];
+            staff_ids: string[];
+            lapse_days: number;
+            rules: components["schemas"]["CommissionRule"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CommissionLine: {
+            event: {
+                /** @enum {string} */
+                kind: "deal" | "payment" | "refund";
+                id: string;
+                name: string;
+                /** Format: date */
+                on: string;
+                /**
+                 * Format: int64
+                 * @description The deal's or payment's amount in the brand's currency.
+                 */
+                amount_minor: number;
+                /** @enum {string} */
+                deal_kind?: "new" | "expansion" | "renewal";
+                record_id?: string;
+                record_name?: string;
+                /** @enum {string} */
+                source?: "inbound" | "outbound";
+                /**
+                 * @description For a deal, existing is someone paying now. For a payment, new is their first run of payments and reactivated a run after a lapse.
+                 * @enum {string}
+                 */
+                customer?: "new" | "reactivated" | "existing";
+                /** @description For a payment: days since the customer started paying, or started again. */
+                customer_days?: number;
+            };
+            plan_id: string;
+            plan_name: string;
+            rule_id: string;
+            rule_name: string;
+            /** @enum {string} */
+            who: "owner" | "company_owner" | "sourced_by" | "manager";
+            percent?: number;
+            /** @description The share of quota the rate applies from, when a tier set it. */
+            tier_from?: number;
+            /** @description This person's share of a deal with two owners (the deal's co_owner and co_owner_percent). Left out when the whole deal is theirs. */
+            split_percent?: number;
+            /**
+             * Format: int64
+             * @description What the line pays. Negative for a refund taken back.
+             */
+            amount_minor: number;
+            /** @description The rule's monthly cap cut the line short. */
+            capped?: boolean;
+        };
+        CommissionStatement: {
+            /** Format: uuid */
+            staff_id: string;
+            name: string;
+            title: string;
+            /**
+             * @description open is worked out now; approved and paid read as they were approved.
+             * @enum {string}
+             */
+            status: "open" | "approved" | "paid";
+            /** Format: int64 */
+            total_minor: number;
+            lines: components["schemas"]["CommissionLine"][];
+            /** Format: int64 */
+            quota_minor: number | null;
+            /** @description Percent of the quarter's quota won. */
+            attainment: number | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            paid_at: string | null;
+        };
+        RevenueForecast: {
+            /** @description Such as 2026-Q4. */
+            quarter: string;
+            /** Format: date */
+            starts_on: string;
+            /** Format: date */
+            ends_on: string;
+            /** @description Days left in the quarter */
+            days_left: number;
+            currency: string;
+            /** Format: int64 */
+            target_minor: number | null;
+            /** @description The deals won in the quarter so far. */
+            won: components["schemas"]["RevenueForecastSum"];
+            /**
+             * Format: int64
+             * @description Payments less refunds in the quarter so far, for comparison. Not part of the forecast.
+             */
+            collected_minor: number;
+            renewals: components["schemas"]["RevenueForecastSum"];
+            /** @description Open deals with someone who doesn't pay yet. */
+            new_business: components["schemas"]["RevenueForecastSum"];
+            /** @description Open deals with someone who already pays. */
+            expansion: components["schemas"]["RevenueForecastSum"];
+            /**
+             * Format: int64
+             * @description Won plus everything expected.
+             */
+            forecast_minor: number;
+            /**
+             * Format: int64
+             * @description Won plus every renewal and open deal in full.
+             */
+            best_case_minor: number;
+            /**
+             * Format: int64
+             * @description The target less the forecast
+             */
+            gap_minor: number | null;
+            /** @description The forecast over the target, 0.8 for 80 percent; null with no target. */
+            attainment: number | null;
+            /** @description The renewals, soonest first, at most 200. */
+            renewal_lines: {
+                /** @description The record's owner, or its company's. */
+                owner_id: string | null;
+                /** Format: uuid */
+                record_id: string;
+                /** @description The record's type: account, agreement or a type of the brand's own. */
+                type: string;
+                name: string;
+                /** Format: uuid */
+                company_id: string | null;
+                company_name: string | null;
+                /** Format: date */
+                renews_on: string;
+                /** @description True when the date has passed and the record still carries it. */
+                late: boolean;
+                /** Format: int64 */
+                value_minor: number;
+                health_band: string | null;
+                /** @description Percent of the value counted. */
+                weight: number;
+                /** Format: int64 */
+                expected_minor: number;
+            }[];
+            /** @description The forecast split by who owns each deal and renewal, the biggest first, with what nobody owns last. It adds up to forecast_minor and best_case_minor. */
+            owners: {
+                /** @description A workspace member's user id; null for everything nobody owns. */
+                owner_id: string | null;
+                /** Format: int64 */
+                won_minor: number;
+                /** Format: int64 */
+                renewals_expected_minor: number;
+                /** Format: int64 */
+                deals_expected_minor: number;
+                /** Format: int64 */
+                forecast_minor: number;
+                /** Format: int64 */
+                best_case_minor: number;
+                /** @description The renewals and open deals behind the numbers. */
+                open: number;
+            }[];
+            /** @description The open deals, the most expected first, at most 200. */
+            deal_lines: {
+                /** @description The deal's owner, or the owner of who it is with. */
+                owner_id: string | null;
+                /** @description The deal's second owner, when it has one. The deal counts under each owner by their share. */
+                co_owner_id?: string | null;
+                /** @description The second owner's share of the deal, in percent. */
+                co_owner_percent?: number | null;
+                /** Format: uuid */
+                deal_id: string;
+                name: string;
+                /**
+                 * Format: uuid
+                 * @description The person or company the deal is with.
+                 */
+                record_id: string | null;
+                record_name: string | null;
+                /**
+                 * @description renewal: a deal opened for a renewal; it stands in for the renewal's own line and is summed under renewals. expansion: with someone who already pays.
+                 * @enum {string}
+                 */
+                kind: "new" | "expansion" | "renewal";
+                stage: string;
+                /** Format: date */
+                close_date: string | null;
+                /** Format: int64 */
+                amount_minor: number;
+                /** @description The percent of the deal's value counted: its win likelihood when the brand scores deals, else its stage's weight. */
+                weight: number;
+                /**
+                 * @description score when the weight is the deal's win likelihood: a deal score with the key win. health for a renewal deal: the renewal weight of the company's health band.
+                 * @enum {string}
+                 */
+                weight_from: "stage" | "score" | "health";
+                /** Format: int64 */
+                expected_minor: number;
+            }[];
+            /** @description What could not be valued and is left out. */
+            skipped: {
+                /** @description Open deals with no amount */
+                deals: number;
+                /** @description Renewals with no value and no recurring revenue */
+                renewals: number;
+            };
+            weights: {
+                /** @description Percent by health band: high, medium, low, none. */
+                renewal: {
+                    [key: string]: number;
+                };
+                /** @description The brand's open deal stages in order. */
+                stages: {
+                    key: string;
+                    label: string;
+                    weight: number;
+                    /** @description True when the brand set this weight itself. */
+                    custom: boolean;
+                }[];
+            };
+        };
+        RevenueReport: {
+            /** @description The brand's currency, which every amount is in. */
+            currency: string;
+            /** @description What was collected, split by the product each payment names, the biggest first (at most 50). Empty when no payment names a product. */
+            products: {
+                /**
+                 * Format: uuid
+                 * @description Null for payments that name no product.
+                 */
+                product_id: string | null;
+                key: string | null;
+                name: string | null;
+                /**
+                 * Format: int64
+                 * @description Paid in this period.
+                 */
+                paid_minor: number;
+                /** Format: int64 */
+                refunded_minor: number;
+                /**
+                 * Format: int64
+                 * @description Paid in the same number of days before.
+                 */
+                previous_paid_minor: number;
+                /** @description People and companies who paid for it in this period. */
+                customers: number;
+            }[];
+            days: number;
+            /**
+             * @description How periods are grouped.
+             * @enum {string}
+             */
+            group: "day" | "week" | "month";
+            /** @description Null until the brand has subscriptions that were counted. */
+            recurring: null | {
+                /**
+                 * Format: int64
+                 * @description Monthly recurring revenue now.
+                 */
+                mrr_minor: number;
+                /**
+                 * Format: int64
+                 * @description mrr_minor times 12.
+                 */
+                arr_minor: number;
+                /** @description People and companies with a paying subscription. */
+                customers: number;
+                /**
+                 * Format: int64
+                 * @description Recurring revenue of customers whose health score is low.
+                 */
+                at_risk_minor: number;
+                at_risk_customers: number;
+                /**
+                 * Format: int64
+                 * @description Monthly recurring revenue when the period started.
+                 */
+                start_mrr_minor: number;
+                /** Format: int64 */
+                new_minor: number;
+                /** Format: int64 */
+                expansion_minor: number;
+                /** Format: int64 */
+                reactivation_minor: number;
+                /** Format: int64 */
+                contraction_minor: number;
+                /** Format: int64 */
+                churned_minor: number;
+                new_customers: number;
+                churned_customers: number;
+                /** @description Revenue kept from the customers at the start, with expansion: 1.05 is 105%. Null when the period started at zero. */
+                net_retention: number | null;
+                /** @description The same without expansion, so never above 1. */
+                gross_retention: number | null;
+                /**
+                 * Format: date
+                 * @description The first day revenue was counted; movements exist only from then.
+                 */
+                counted_since: string;
+            };
+            /** @description Oldest first. Empty without recurring revenue. */
+            periods: {
+                /**
+                 * Format: date
+                 * @description The period's first day.
+                 */
+                period: string;
+                /**
+                 * Format: int64
+                 * @description Where the period ended.
+                 */
+                mrr_minor: number;
+                customers: number;
+                /** Format: int64 */
+                new_minor: number;
+                /** Format: int64 */
+                expansion_minor: number;
+                /** Format: int64 */
+                reactivation_minor: number;
+                /** Format: int64 */
+                contraction_minor: number;
+                /** Format: int64 */
+                churned_minor: number;
+            }[];
+            /** @description Null when the brand has no payments in this period or the one before. */
+            collected: null | {
+                /** Format: int64 */
+                paid_minor: number;
+                /**
+                 * Format: int64
+                 * @description Refunds and chargebacks.
+                 */
+                refunded_minor: number;
+                /**
+                 * Format: int64
+                 * @description Paid in the same number of days before.
+                 */
+                previous_paid_minor: number;
+                periods: {
+                    /** Format: date */
+                    period: string;
+                    /** Format: int64 */
+                    paid_minor: number;
+                    /** Format: int64 */
+                    refunded_minor: number;
+                }[];
+            };
+            /** @description Records with a "Renews on" date (renews_on), soonest first: companies, agreements or any other type that has one. */
+            renewals: {
+                /** Format: uuid */
+                record_id: string;
+                type: string;
+                name: string;
+                /** Format: date */
+                renews_on: string;
+                /** @description The record's value field as stored, or null. */
+                value: unknown;
+                /**
+                 * Format: uuid
+                 * @description The company it belongs to, when it isn't one itself.
+                 */
+                company_id: string | null;
+                company_name: string | null;
+                /**
+                 * Format: int64
+                 * @description What the company pays a month now.
+                 */
+                mrr_minor: number | null;
+                /** @enum {string|null} */
+                health_band: "high" | "medium" | "low" | null;
+                owner_id: string | null;
+            }[];
+            /** @description Paying customers whose health score is low, the biggest first (up to 20). */
+            at_risk: {
+                /** Format: uuid */
+                record_id: string;
+                type: string;
+                name: string;
+                /** Format: int64 */
+                mrr_minor: number;
+                health: number | null;
+                owner_id: string | null;
+            }[];
+            /** @description The people and companies whose payments moved most between this period and the same number of days before, up to 10 each way. It works for any way of paying, with or without subscriptions. */
+            spending: {
+                up: components["schemas"]["RevenueMover"][];
+                down: components["schemas"]["RevenueMover"][];
+            };
+            /** @description Records in each band of each score, by the score's key, as last counted. */
+            bands: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+        };
+        ScoreTrackRecord: {
+            /**
+             * @description What the score is checked against; null when there is nothing to check it against.
+             * @enum {string|null}
+             */
+            outcome: "won" | "churned" | null;
+            /** @description How far back it looks: 365 for deals, 90 for churn. */
+            days: number;
+            /** @description How many deals or records count. */
+            records: number;
+            /** @description False under 20 records: too few to read much into. */
+            enough: boolean;
+            /** @description High, medium and low, in that order. */
+            bands: {
+                /** @enum {string} */
+                band: "high" | "medium" | "low";
+                records: number;
+                /** @description How many of them were won */
+                happened: number;
+                /** @description The percent it happened to; null with no records in the band. */
+                rate: number | null;
+            }[];
+        };
+        ScoreList: {
+            data: components["schemas"]["Score"][];
+            starters: components["schemas"]["ScoreStarter"][];
+        };
+        RecordScore: {
+            /** Format: uuid */
+            score_id: string;
+            key: string;
+            label: string;
+            description: string;
+            /**
+             * @description What kind of number this is: measured from what happened, read by the brand's AI, or a prediction.
+             * @enum {string}
+             */
+            nature: "measured" | "ai" | "predicted";
+            /** @description False for a score such as churn risk, where high is the band to worry about. */
+            higher_is_better: boolean;
+            /** @description For a headline score, the scores it is made of, with this record's value for each. */
+            parts: {
+                key: string;
+                label: string;
+                weight: number;
+                /** @description Null when the record has no value for it; it is then left out of the average. */
+                value: number | null;
+                /** @enum {string|null} */
+                band: "high" | "medium" | "low" | null;
+            }[];
+            /** @description The key of the headline score this one is a part of. */
+            part_of: string | null;
+            /** @description The value on each day it changed in the last 90 days, oldest first. */
+            history: {
+                /** Format: date */
+                day: string;
+                value: number;
+            }[];
+            /** @description How far the value moved in the last 30 days; null when the score is newer than that on this record. */
+            change: number | null;
+            /** @description For a score that reads sentiment: the customer's own words from the last conversations the brand's AI read, newest first (at most 3). */
+            evidence: {
+                /** @enum {string} */
+                label: "positive" | "mixed" | "negative";
+                quote: string;
+                /** @enum {string} */
+                channel: "support" | "telegram" | "email" | "call";
+                /** Format: date-time */
+                read_at: string;
+            }[];
+            value: number;
+            /** @enum {string} */
+            band: "high" | "medium" | "low";
+            base: number;
+            factors: {
+                label: string;
+                points: number;
+                /** @description Whether its conditions hold on the record now. */
+                holds: boolean;
+            }[];
         };
         Rule: {
             /** Format: uuid */
@@ -44100,6 +46642,10 @@ export interface components {
             outputs: string[];
             /** @description The field naming the step to go to when it fails (on_error), for steps that can fail. */
             error_output?: string;
+            /** @description Whether a journey about companies (record_type account) can take it. */
+            companies?: boolean;
+            /** @description Whether a journey about deals (record_type deal) can take it: the steps a company journey takes, except tags. */
+            deals?: boolean;
         };
         /** @enum {string} */
         JourneyStatus: "draft" | "active" | "paused" | "archived";
@@ -44123,7 +46669,7 @@ export interface components {
             step?: string;
             /** @enum {string} */
             op: "eq" | "neq" | "gt" | "lt" | "contains" | "exists" | "not_exists";
-            /** @description What eq, neq, gt, lt and contains compare with. */
+            /** @description What eq, neq, gt, lt and contains compare with. For a date field it can be a day relative to today: today, +60d (60 days from now) or -14d (14 days ago). */
             value?: unknown;
         };
         /**
@@ -44139,7 +46685,7 @@ export interface components {
             review_campaign_id?: string;
             id: string;
             /** @enum {string} */
-            kind: "request_review" | "email" | "wait" | "branch" | "exit" | "create_task" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "push_to_crm" | "sync_audience" | "ai" | "wait_until" | "split";
+            kind: "request_review" | "email" | "wait" | "branch" | "exit" | "create_task" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "raise_signal" | "outflare_action" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "open_renewal_deal" | "slack" | "webhook" | "push_to_sequencer" | "push_to_crm" | "sync_audience" | "ai" | "wait_until" | "split";
             name?: string;
             /** @description email: a lifecycle template's handle or id. transactional_email: a transactional one's. */
             template?: string;
@@ -44224,8 +46770,17 @@ export interface components {
             target?: "email" | "domain";
             /** @description unsubscribe_topic: an email topic's key; empty for all marketing email. */
             topic?: string;
-            /** @description alert: what it says. slack: a bold line above the message (optional). */
+            /** @description alert: what it says, up to 120 characters. slack: a bold line above the message (optional). raise_signal: what to act on (default: the type's name). */
             title?: string;
+            /**
+             * Format: uuid
+             * @description outflare_action: the agent the call runs as, an API token of the journey's brand with action_gate on. Its grants decide whether the change runs, waits for a person or is refused.
+             */
+            agent_id?: string;
+            /** @description outflare_action: the API path to call, after /v1/brands/{brand}/, such as records/{{person.id}}/notes; method (POST, PUT, PATCH or DELETE) and body are as for a webhook. {{person.x}}, {{event.x}} and {{vars.x}} fill in the path and body. A step can't call the routes that approve changes or set grants. */
+            path?: string;
+            /** @description raise_signal: the key of one of the brand's signal types, such as churn_risk. text is why, up to 2,000 characters. */
+            signal_type?: string;
             /** @description alert: a line of detail, up to 500 characters. slack: the message, with {{person.x}}, {{event.x}} and {{vars.x}} filled in. */
             text?: string;
             /**
@@ -44245,8 +46800,14 @@ export interface components {
             owner_id?: string;
             /** @description assign_owner: members to spread people between; the one who owns the fewest active records gets the next. */
             members?: string[];
+            /** @description assign_owner: let the brand's routing rules pick the owner, instead of owner_id or members. */
+            routing?: boolean;
             /** @description assign_owner: change an owner already set. Off by default: someone with an owner keeps them. */
             replace_owner?: boolean;
+            /** @description open_renewal_deal: the deal stage the renewal deal opens at, one of the deal stages' keys. The first stage when left out. */
+            stage?: string;
+            /** @description open_renewal_deal: how many days ahead a renewal counts. 90 when left out. */
+            within_days?: number;
             /** @description move_deal: move the person's newest open deal forward to stage, or open one there, as reply rules do. */
             deal?: {
                 /** @description The record type of deals, such as deal. */
@@ -44378,6 +46939,11 @@ export interface components {
         JourneyInput: {
             name?: string;
             description?: string;
+            /**
+             * @description Who the journey is about. person (the default): each person goes through it. account: each company goes through it; it starts on the company's events and on events its people do, and takes only the steps that act on a record (wait, wait_until, branch, exit, create_task, set_field, add_tag, remove_tag, assign_owner, alert, raise_signal, slack, webhook, ai, outflare_action, enter_journey, exit_journey). deal: each deal goes through it; it starts on the deal's own events (deal.created, deal.stage_changed, deal.won, deal.lost, deal.reopened), its conditions read the deal's fields, and it takes the same steps as a journey about companies except add_tag and remove_tag, acting on the deal. It can't change once the journey has run.
+             * @enum {string}
+             */
+            record_type?: "person" | "account" | "deal";
             /** @description The brand's id or handle; it uses that brand's templates and people only. Default (or null): the route's brand, or on the workspace route the workspace's first. */
             brand_id?: string | null;
             trigger?: components["schemas"]["JourneyTrigger"];
@@ -44408,6 +46974,11 @@ export interface components {
             status: components["schemas"]["JourneyStatus"];
             /** Format: uuid */
             brand_id: string | null;
+            /**
+             * @description Who or what it is about: each person, each company or each deal.
+             * @enum {string}
+             */
+            record_type: "person" | "account" | "deal";
             trigger: {
                 /** @enum {string} */
                 kind: "event" | "manual";
@@ -45131,10 +47702,10 @@ export interface components {
              */
             brand_id: string | null;
             /**
-             * @description assigned: someone picked the brand. connection: the connection's own brand. only_brand: the workspace has one brand. none: unassigned, so its data shows in no brand.
+             * @description assigned: someone picked the brand. connection: the connection's own brand. only_brand: the workspace has one brand. first_brand: a site nobody placed, counted for the workspace's first brand until someone picks one. none: unassigned, so its data shows in no brand.
              * @enum {string}
              */
-            source: "assigned" | "connection" | "only_brand" | "none";
+            source: "assigned" | "connection" | "only_brand" | "first_brand" | "none";
             /**
              * Format: uuid
              * @description For an unassigned site, a brand whose domains include its domain. Only a suggestion.
@@ -53793,7 +56364,7 @@ export interface components {
             /** @description Each task the AI model does and the model it uses now. */
             tasks: {
                 /** @enum {string} */
-                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers" | "support_replies" | "coverage_review" | "journeys" | "pr_stories" | "brand_knowledge" | "telegram_matching" | "telegram_summaries" | "mail_privacy" | "event_names";
+                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers" | "support_replies" | "coverage_review" | "journeys" | "pr_stories" | "brand_knowledge" | "telegram_matching" | "telegram_summaries" | "mail_privacy" | "event_names" | "conversation_signals";
                 name: string;
                 description: string;
                 /** @description Null when no model can run yet. */
@@ -54709,6 +57280,8 @@ export interface components {
             user_id?: string;
             email?: string;
             name?: string;
+            /** @description Their profile photo (the picture on the Google account they sign in with), or empty for none: show their initials. */
+            avatar_url?: string;
             /** @description The role they are on: its id as GET /roles lists it (a starting role's key, or the id of one of the workspace's own roles). */
             role?: string;
             /** @description Their role's name as the workspace shows it. */
@@ -59525,6 +62098,13 @@ export interface components {
                 /** @description Events sent with the name it looks like. */
                 looks_like_events: number;
             }[];
+            /** @description Every event the brand stored in the last 7 days by when it happened, by source (browser for the website script, api, or the source a sender named, such as segment), most first. Unlike the counts above, this covers events from every route: the events API, the workspace route and the website script. */
+            sources: {
+                /** @example browser */
+                source: string;
+                last_24h: number;
+                last_7d: number;
+            }[];
             /** @description Days each status is kept. */
             retention_days: {
                 [key: string]: number;
@@ -59987,11 +62567,11 @@ export interface components {
              * @description Stable; new kinds may be added.
              * @enum {string}
              */
-            kind: "event" | "attribute_change" | "identity" | "identified" | "consent" | "message" | "meeting" | "deal" | "visit" | "opt_out" | "journey" | "list";
+            kind: "event" | "attribute_change" | "identity" | "identified" | "consent" | "message" | "meeting" | "deal" | "visit" | "opt_out" | "journey" | "list" | "support" | "task" | "note";
             id: string;
             /** Format: date-time */
             at: string;
-            /** @description The event's name, the field that changed, the identity's namespace (anonymous_visitor for identified), the consent's channel, the email's subject, the meeting's or deal's name, the visit's landing page, the opt-out's reason or the journey's name. */
+            /** @description The event's name, the field that changed, the identity's namespace (anonymous_visitor for identified), the consent's channel, the email's subject, the meeting's or deal's name, the visit's landing page, the opt-out's reason, the journey's name, the support conversation's subject, or the task's or note's title. */
             title: string;
             detail: {
                 [key: string]: unknown;
@@ -60133,14 +62713,14 @@ export interface components {
             host: string;
             /**
              * Format: uuid
-             * @description The brand it reports for; null when shared.
+             * @description The brand it reports for. Always set; null only from servers before every site had a brand.
              */
             brand_id: string | null;
             /**
-             * @description set: someone picked it; domain: the brand's domains include the site's; none: no brand has it.
+             * @description set: someone picked it; domain: its connection's brand; default: the workspace's first brand, until someone picks one; none: only from servers before every site had a brand.
              * @enum {string}
              */
-            source: "set" | "domain" | "none";
+            source: "set" | "domain" | "default" | "none";
             /**
              * Format: date-time
              * @description When someone last picked it.
@@ -63604,6 +66184,22 @@ export interface components {
             /** @default true */
             enabled: boolean;
         };
+        CoverageSite: {
+            host: string;
+            /**
+             * Format: uuid
+             * @description The site's company record for the brand, or null when it has none yet.
+             */
+            record_id: string | null;
+            /**
+             * Format: uuid
+             * @description The teammate managing the site, or null.
+             */
+            owner_id: string | null;
+            owner_name: string | null;
+            /** @description That teammate's profile photo, or null. */
+            owner_avatar_url: string | null;
+        };
         PlacementOpportunity: {
             /** Format: uuid */
             id: string;
@@ -63639,6 +66235,15 @@ export interface components {
              * @description The brand's publisher on this site, when it has one.
              */
             publisher_id?: string | null;
+            /**
+             * Format: uuid
+             * @description In a list, the teammate managing the site (the owner of its company record), or null when nobody has claimed it.
+             */
+            site_owner_id?: string | null;
+            /** @description In a list, that teammate's name. */
+            site_owner_name?: string | null;
+            /** @description In a list, that teammate's profile photo, or null. */
+            site_owner_avatar_url?: string | null;
             /** @description In a list, how many opportunities (matching its filters) the site has. */
             site_opportunities?: number;
             /** @description In a list, whether the site is one of the brand's tracked competitors. */
@@ -64178,6 +66783,8 @@ export interface components {
             enabled: boolean;
             allowed_user_ids: string[];
             excluded_user_ids: string[];
+            /** @description People always left out by email address, including those without an Outflare account yet. Whoever joins with one of these addresses is excluded from the start, and a mailbox already read is removed. */
+            excluded_emails?: string[];
             /**
              * Format: uuid
              * @description A Google Workspace connection (the company's own service account with domain-wide delegation for gmail.readonly). With it, every enabled person's mailbox is read without them signing in; anyone who connected Gmail themselves keeps their own connection. Null stops it and removes those mailboxes.
@@ -64745,6 +67352,68 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getSalesReporting: {
+        parameters: {
+            query?: {
+                period?: "24h" | "48h" | "7d" | "30d" | "365d";
+                integration?: string;
+                from?: string;
+                to?: string;
+                /** @description Comma-separated discovered, researched, verified, emailed, replied, sdr, closed. Required for lead inspection. */
+                stages?: string;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read-only report. Counts are first milestones per identity. Missing source data stays unavailable. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesReportingResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSalesReportingLeads: {
+        parameters: {
+            query?: {
+                period?: "24h" | "48h" | "7d" | "30d" | "365d";
+                integration?: string;
+                from?: string;
+                to?: string;
+                /** @description Comma-separated discovered, researched, verified, emailed, replied, sdr, closed. Required for lead inspection. */
+                stages?: string;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read-only report. Counts are first milestones per identity. Missing source data stays unavailable. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesReportingResponse"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -65924,6 +68593,8 @@ export interface operations {
                             id?: string;
                             email?: string;
                             name?: string;
+                            /** @description Their profile photo (the picture on the Google account they sign in with), or empty for none. */
+                            avatar_url?: string;
                             /** @description The person opened a confirmation or reset link sent to this address, or Google vouched for it. */
                             email_verified?: boolean;
                             /** @description False for accounts made with Google, until they set a password with a reset link. */
@@ -74933,6 +77604,37 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandNetworkCosts: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                source_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Campaign days. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["NetworkCostDay"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getIPLookups: {
         parameters: {
             query?: never;
@@ -77286,7 +79988,7 @@ export interface operations {
                      */
                     site: string;
                     /**
-                     * @description A brand's handle or id, none for shared, or auto to follow the domain.
+                     * @description A brand's handle or id, or auto to follow the connection (else the first brand).
                      * @example repocket
                      */
                     brand: string;
@@ -77525,7 +80227,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /**
-                     * @description A brand's handle or id, or none for shared.
+                     * @description A brand's handle or id. Every ad account belongs to a brand.
                      * @example repocket
                      */
                     brand?: string;
@@ -85849,6 +88551,8 @@ export interface operations {
                      * @description One of the prospect's contacts.
                      */
                     record_id?: string;
+                    /** @description Pitch anyway when a teammate is managing the site (its company's owner). Without it the pitch is refused with site_claimed, naming them. Agents can't confirm: they leave claimed sites to their owner. */
+                    confirm_claimed?: boolean;
                 };
             };
         };
@@ -96123,6 +98827,38 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    reportScriptPolicyViolation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/csp-report": {
+                    [key: string]: unknown;
+                };
+                "application/reports+json": {
+                    [key: string]: unknown;
+                }[];
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            /** @description Counted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listPlaybooks: {
         parameters: {
             query?: never;
@@ -96172,6 +98908,210 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspacePlaybook"];
                 };
             };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPlaybookHome: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @example flag-renewals-and-quiet-accounts */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The playbook's home. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybookHome"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPlaybookLift: {
+        parameters: {
+            query?: {
+                /** @description Only this conversion, such as payment.succeeded; any conversion by default. */
+                event?: string;
+                /** @description How long after entering a conversion counts. */
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @example flag-renewals-and-quiet-accounts */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Each of the playbook's journeys against what it held back. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybookLift"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listOwnPlaybooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The playbooks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OwnPlaybook"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createOwnPlaybook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnPlaybookInput"];
+            };
+        };
+        responses: {
+            /** @description The playbook. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnPlaybook"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getOwnPlaybook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The playbook. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnPlaybook"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteOwnPlaybook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateOwnPlaybook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnPlaybookInput"];
+            };
+        };
+        responses: {
+            /** @description The playbook. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnPlaybook"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
@@ -96557,6 +99497,8 @@ export interface operations {
                     inputs?: {
                         [key: string]: string;
                     };
+                    /** @description Hold this share of whoever enters each journey the kit adds back at random, so what the journeys changed can be measured against them (getPlaybookLift). 0 or left out: nobody is held back. */
+                    holdout_percent?: number;
                 };
             };
         };
@@ -96623,6 +99565,8 @@ export interface operations {
                     inputs?: {
                         [key: string]: string;
                     };
+                    /** @description Hold this share of whoever enters each journey the kit adds back at random, so what the journeys changed can be measured against them (getPlaybookLift). 0 or left out: nobody is held back. */
+                    holdout_percent?: number;
                 };
             };
         };
@@ -110209,7 +113153,7 @@ export interface operations {
     getBrandRecordTimeline: {
         parameters: {
             query?: {
-                /** @description Comma-separated: event, attribute_change, identity, identified, consent, message, meeting, deal, visit, opt_out, journey, list. Default all. */
+                /** @description Comma-separated: event, attribute_change, identity, identified, consent, message, meeting, deal, visit, opt_out, journey, list, support, task, note. Default all. */
                 kinds?: string;
                 /** @description For a company, include its people's items (the default). false shows the company's own. */
                 people?: "true" | "false";
@@ -110323,6 +113267,8 @@ export interface operations {
                 /** @description A catalog name, such as order_completed or page.viewed. */
                 name?: string;
                 kind?: "track" | "identify" | "page" | "screen" | "group" | "alias";
+                /** @description Where events came from: browser for the website script, api, or the source a sender named, such as segment. */
+                source?: string;
                 user_id?: string;
                 anonymous_id?: string;
                 matched?: "true" | "false" | "all";
@@ -115797,6 +118743,425 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getRecordSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The summary. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordSummary"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRecordGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The group. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordGroup"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listSignals: {
+        parameters: {
+            query?: {
+                /** @description open (default): open and accepted, not snoozed. closed: done and dismissed, newest first. */
+                status?: "open" | "snoozed" | "closed" | "all";
+                /** @description me, none, or a user's id. */
+                owner?: string;
+                /** @description Only signals about this person or company. */
+                record?: string;
+                /** @description Only this signal type's key, such as churn_risk. */
+                type?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The signals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Signal"][];
+                        counts: {
+                            open: number;
+                            mine: number;
+                            late: number;
+                            no_owner: number;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    raiseSignal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    record_id: string;
+                    /** @description A signal type's key (default other). */
+                    type?: string;
+                    /** @description What it is, in a few words. */
+                    title?: string;
+                    /** @description Why */
+                    detail?: string;
+                    /** Format: uuid */
+                    owner_id?: string | null;
+                    /** Format: date-time */
+                    due_at?: string;
+                    /** @description The conversation it was flagged from ("Flag for sales"), kept on the signal's data so its owner can open it and the credit report can say where signals come from. */
+                    conversation?: {
+                        /** @enum {string} */
+                        channel: "support" | "telegram" | "email" | "call";
+                        /** @description The conversation's id: a support conversation, a Telegram chat, a transcript, or for email the person or company. */
+                        ref: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The signal. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Signal"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSignal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    status?: "open" | "accepted" | "done" | "dismissed";
+                    /** @enum {string} */
+                    outcome?: "won" | "no_change" | "not_useful" | "duplicate";
+                    /** Format: uuid */
+                    owner_id?: string | null;
+                    /** Format: date-time */
+                    due_at?: string;
+                    /** Format: date-time */
+                    snoozed_until?: string | null;
+                    title?: string;
+                    detail?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The signal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Signal"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getConversationSignals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The setting, and what the last 30 days came to. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSignals"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setConversationSignals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                    /** @description Which conversations are read. Left out, all four. */
+                    channels?: ("support" | "telegram" | "email" | "call")[];
+                };
+            };
+        };
+        responses: {
+            /** @description The setting. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSignals"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getSignalCredit: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The credit report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalCredit"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addTranscript: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title?: string;
+                    /** @description The transcript. */
+                    text: string;
+                    /**
+                     * Format: date-time
+                     * @description When the call was. Left out
+                     */
+                    occurred_at?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Kept, and queued to be read. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        /** Format: uuid */
+                        record_id: string;
+                        title: string;
+                        /** Format: date-time */
+                        occurred_at: string;
+                        queued: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listSignalTypes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The types. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalTypeList"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    putSignalType: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    label?: string;
+                    description?: string;
+                    events?: string[];
+                    due_days?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The brand's types. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalTypeList"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveSignalType: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The brand's types. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalTypeList"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listMetrics: {
         parameters: {
             query?: {
@@ -115985,6 +119350,695 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listScores: {
+        parameters: {
+            query?: {
+                archived?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The scores. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreList"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createScore: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoreInput"];
+            };
+        };
+        responses: {
+            /** @description The score. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Score"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateScore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                score: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoreInput"];
+            };
+        };
+        responses: {
+            /** @description The score. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Score"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveScore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                score: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The score. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Score"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getScoreTrackRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                score: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The track record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreTrackRecord"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRevenueForecast: {
+        parameters: {
+            query?: {
+                /** @description Such as 2026-Q4. This quarter when left out; this quarter or one of the next four. */
+                quarter?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The forecast. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevenueForecast"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setRevenueForecast: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Such as 2026-Q4. This quarter when left out. */
+                    quarter?: string;
+                    /**
+                     * Format: int64
+                     * @description The quarter's target in the brand's minor unit (cents). null removes it.
+                     */
+                    target_minor?: number | null;
+                    /** @description Percent by health band: high, medium, low, none. null goes back to the default. */
+                    renewal_weights?: {
+                        [key: string]: number | null;
+                    };
+                    /** @description Percent by the key of an open deal stage. null goes back to the default. */
+                    stage_weights?: {
+                        [key: string]: number | null;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The quarter's forecast. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevenueForecast"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRevenueTeam: {
+        parameters: {
+            query?: {
+                /** @description Such as 2026-Q4. This quarter when left out; this quarter or one of the next four. */
+                quarter?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The team. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevenueTeam"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setSalesQuotas: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Such as 2026-Q4. */
+                    quarter: string;
+                    quotas: {
+                        /**
+                         * Format: uuid
+                         * @description A person in the team directory.
+                         */
+                        staff_id: string;
+                        /**
+                         * Format: int64
+                         * @description The quota in the brand's minor unit (cents). null takes it away.
+                         */
+                        target_minor: number | null;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        quarter: string;
+                        updated: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCommissionPlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The plans. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CommissionPlan"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createCommissionPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommissionPlanInput"];
+            };
+        };
+        responses: {
+            /** @description The plan. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommissionPlan"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteCommissionPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCommissionPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommissionPlanInput"];
+            };
+        };
+        responses: {
+            /** @description The plan. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommissionPlan"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCommissions: {
+        parameters: {
+            query?: {
+                /** @description Such as 2026-11. This month when left out. */
+                month?: string;
+                /** @description csv downloads the month's statement lines as a file. json when left out. */
+                format?: "json" | "csv";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statements. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "application/json": {
+                        month: string;
+                        currency: string;
+                        /**
+                         * Format: int64
+                         * @description The statements shown, added up.
+                         */
+                        total_minor: number;
+                        statements: components["schemas"]["CommissionStatement"][];
+                        /** @description The caller may approve statements and change plans. */
+                        can_manage: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setCommissionStatement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A person in the team directory. */
+                staff: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    month: string;
+                    /** @enum {string} */
+                    status: "open" | "approved" | "paid";
+                };
+            };
+        };
+        responses: {
+            /** @description The statement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommissionStatement"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRevenue: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevenueReport"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRouting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Routing"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setRouting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    rules: components["schemas"]["RoutingRuleInput"][];
+                };
+            };
+        };
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Routing"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    previewRecordRouting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What routing would do. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingResult"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    routeRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Change an owner already set. Off when left out. */
+                    replace?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description What happened. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingResult"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRecordScores: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The scores. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordScore"][];
+                    };
+                };
+            };
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
@@ -123258,6 +127312,74 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listCoverageSites: {
+        parameters: {
+            query: {
+                /** @description A site such as example.com, repeated or comma-separated, up to 200. */
+                host: string[];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sites, in the order asked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageSite"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    claimCoverageSite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The site, such as example.com. A URL works too. */
+                    host: string;
+                    /**
+                     * Format: uuid
+                     * @description The member to manage it, you by default; null releases it.
+                     */
+                    owner_id?: string | null;
+                    /** @description Take the site over from the teammate managing it. */
+                    take_over?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The site */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageSite"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     listCoverageOpportunities: {
         parameters: {
             query?: {
@@ -123272,6 +127394,8 @@ export interface operations {
                 min_domain_rating?: number;
                 /** @description Only opportunities whose link is got this way (factors.access). */
                 access?: "cant_buy" | "earned" | "paid" | "free" | "unknown";
+                /** @description Whose sites: me (the ones you manage), none (nobody has claimed them) or others (a teammate manages them). */
+                owner?: "me" | "none" | "others";
                 /** @description Leave out the sites of the brand's tracked competitors, which rarely link to a rival. */
                 exclude_competitors?: boolean;
                 /** @description domain lists one row per site, its best opportunity; site_opportunities says how many the site has. */

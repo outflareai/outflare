@@ -236,7 +236,7 @@ func (s *Server) updateJourneyDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := journeyView{Trigger: d.Trigger, Entry: d.Entry, GoalEvent: d.GoalEvent, ExitEvents: d.ExitEvents, ExitConditions: d.ExitConditions,
-		EntryLimit: d.EntryLimit, ReentryAfterSeconds: d.ReentryAfterSeconds, Exclude: d.Exclude, Steps: d.Steps, BrandID: cur.BrandID}
+		EntryLimit: d.EntryLimit, ReentryAfterSeconds: d.ReentryAfterSeconds, Exclude: d.Exclude, Steps: d.Steps, BrandID: cur.BrandID, RecordType: cur.RecordType}
 	f := journeyFields{Trigger: in.Trigger, Entry: in.Entry, GoalEvent: in.GoalEvent, ExitEvents: in.ExitEvents, ExitConditions: in.ExitConditions,
 		EntryLimit: in.EntryLimit, ReentryAfter: in.ReentryAfter, Exclude: in.Exclude, Steps: in.Steps}
 	if !s.journeyApplied(w, r, s.applyJourney(r, a.WorkspaceID, f, &v)) {

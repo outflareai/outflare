@@ -43,6 +43,12 @@ type Kit struct {
 	SmartLists []KitSmartList `yaml:"smart_lists,omitempty" json:"smart_lists"`
 	Rules      []KitRule      `yaml:"rules,omitempty" json:"rules"`
 	Journeys   []KitJourney   `yaml:"journeys,omitempty" json:"journeys"`
+	// SignalTypes are kinds of signal its rules and journeys raise.
+	SignalTypes []KitSignalType `yaml:"signal_types,omitempty" json:"signal_types"`
+	// Metrics and Scores are live numbers on records its rules, lists and
+	// journeys read: metrics.<key> and scores.<key>.
+	Metrics []KitMetric `yaml:"metrics,omitempty" json:"metrics"`
+	Scores  []KitScore  `yaml:"scores,omitempty" json:"scores"`
 }
 
 // KitOptionSet is an option list, such as a pipeline's stages.
@@ -152,6 +158,30 @@ func ParseKit(b []byte) (Kit, error) {
 	if k.Journeys == nil {
 		k.Journeys = []KitJourney{}
 	}
+	if k.SignalTypes == nil {
+		k.SignalTypes = []KitSignalType{}
+	}
+	if k.Metrics == nil {
+		k.Metrics = []KitMetric{}
+	}
+	for i := range k.Metrics {
+		k.Metrics[i].Description = unwrap(k.Metrics[i].Description)
+		if k.Metrics[i].Events == nil {
+			k.Metrics[i].Events = []string{}
+		}
+	}
+	if k.Scores == nil {
+		k.Scores = []KitScore{}
+	}
+	for i := range k.Scores {
+		k.Scores[i].Description = unwrap(k.Scores[i].Description)
+		if k.Scores[i].Factors == nil {
+			k.Scores[i].Factors = []any{}
+		}
+	}
+	for i := range k.SignalTypes {
+		k.SignalTypes[i].Description = unwrap(k.SignalTypes[i].Description)
+	}
 	for i := range k.SmartLists {
 		k.SmartLists[i].Description = unwrap(k.SmartLists[i].Description)
 	}
@@ -183,7 +213,7 @@ func (k Kit) Validate() error {
 		bad("summary is required, at most 200 characters")
 	}
 	if len(k.OptionSets)+len(k.Types)+len(k.Fields)+len(k.Templates) == 0 && !k.HasFlows() {
-		bad("a kit adds at least one option list, record type, field, email template, smart list, rule or journey")
+		bad("a kit adds at least one option list, record type, field, email template, smart list, rule, journey, signal type, metric or score")
 	}
 	sets := map[string]bool{}
 	for _, s := range k.OptionSets {

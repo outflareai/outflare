@@ -3,6 +3,7 @@ import { ArrowRight, ExternalLink, Mail } from "lucide-react";
 import { Button, Empty, Loading, field } from "@/ui";
 import { salesExternalURL, salesSections } from "@/lib/sales";
 import { track } from "@/lib/analytics";
+import { AttributionLabel } from "../sales-reporting/AgentPerformance";
 
 type Lead = Schemas["SalesLead"];
 type Member = Schemas["SalesMember"];
@@ -289,6 +290,9 @@ export function SalesQueue({
                       <div className="mt-3">
                         <SalesSources lead={lead} />
                       </div>
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Uploaded by <AttributionLabel value={lead.attribution} />
+                      </p>
                     </td>
                     <td className="max-w-xl p-4">
                       {preview ? (

@@ -454,7 +454,7 @@ cost:
 
 | Model | Cost |
 | --- | --- |
-| `token` (default) | What the traffic source reported on each click with the `{cost}` token |
+| `token` (default) | The click's share of what the network reported spending, once reconciled (Network cost, below); until then, what the traffic source reported on each click with the `{cost}` token. Likely bots count: the network charged for them |
 | `cpc` | A fixed `amount` a click (likely bots left out) |
 | `cpa` | A fixed `amount` a conversion (declined ones left out) |
 | `revshare` | A `share` (percent) of each conversion's payout |
@@ -463,6 +463,36 @@ A fixed amount is in the campaign's `currency`, else its traffic source's,
 else the brand's; a revshare is in the payout's currency. The report shows
 it in the brand's currency at the latest rate. CPM waits for impressions,
 which come with ad syncing. Synced ad spend stays in the site report.
+
+### Network cost
+
+For a network whose API reports spend per target (Zeropark first), the
+tracker's cost is exact: connect the network under Paid ads with your own
+API token, and make the traffic source from its template, so each click
+carries `{campaign_id}`, `{target}` and its own `{visit_cost}`. Every 15
+minutes, for today and the two days before (in the network account's time
+zone, until the network settles them), Outflare reads each campaign's spend
+per target and day and shares it out over the tracker's clicks:
+
+- a target's spend goes on the clicks that named it, in proportion to the
+  cost each carried, or evenly when none carried one;
+- the spend of a target no click named goes over the campaign's clicks that
+  named no reported target, the same way;
+- what is left (a target's spend with no click to put it on) is
+  unattributed.
+
+The parts add up to the network's figure to the micro, so every report,
+whatever it is grouped by, shows cost and ROI, and its total matches the
+network. Campaigns match by the network campaign id each click carries, so
+there is nothing to pick. A click keeps its own cost (`cost` in the click
+log) beside its share (`network_cost`), which the reports use. What each
+network reported per campaign and day, and how it was shared out
+(`matched`, `spread`, `unattributed`), is in `GET /v1/brands/{brand}/network-costs`
+(MCP `list_network_costs`).
+In Tracker → Traffic sources, the Cost column says whether a source's cost is
+exact from its network or comes from the cost token, and a network source's
+form shows how its last days' spend was shared out, with a link to connect
+the network when it isn't yet.
 
 ### Suggested weights
 

@@ -17,6 +17,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/journeys"
 	"github.com/outflareai/outflare/engine/internal/playbooks"
 	"github.com/outflareai/outflare/engine/internal/rules"
+	"github.com/outflareai/outflare/engine/internal/signals"
 	"github.com/outflareai/outflare/engine/internal/smartlists"
 )
 
@@ -56,22 +57,23 @@ type kitExport struct {
 // exporter gathers what the chosen journeys use, in one read-only
 // transaction.
 type exporter struct {
-	ctx      context.Context
-	tx       pgx.Tx
-	a        *access
-	taken    map[string]map[string]bool // keys in use, by kind
-	journeys []*journeyView
-	jKeys    map[string]string // journey id → key
-	lists    []*smartListView
-	lKeys    map[string]string // list id → key
-	rules    []*ruleView
-	ruleSeen map[string]bool
-	tmpls    []playbooks.KitTemplate
-	handles  map[string]string // a step's template ref → handle
-	seqs     map[string]string // sequence id → input name
-	asked    map[string]string // a setting and its value → input name
-	inputs   []playbooks.KitInput
-	notes    []string
+	ctx         context.Context
+	tx          pgx.Tx
+	a           *access
+	taken       map[string]map[string]bool // keys in use, by kind
+	journeys    []*journeyView
+	signalTypes []playbooks.KitSignalType
+	jKeys       map[string]string // journey id → key
+	lists       []*smartListView
+	lKeys       map[string]string // list id → key
+	rules       []*ruleView
+	ruleSeen    map[string]bool
+	tmpls       []playbooks.KitTemplate
+	handles     map[string]string // a step's template ref → handle
+	seqs        map[string]string // sequence id → input name
+	asked       map[string]string // a setting and its value → input name
+	inputs      []playbooks.KitInput
+	notes       []string
 }
 
 func (s *Server) exportKit(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +239,12 @@ func (x *exporter) steps(j *journeyView) error {
 		switch {
 		case st.Kind == "assign_owner":
 			return errInvalid(where + " assigns workspace members as owners, which a kit can't carry: their ids belong to this workspace. Take the step out of a copy of the journey to export it")
+		case st.Kind == "outflare_action":
+			return errInvalid(where + " runs as one of this workspace's agents, which a kit can't carry. Take the step out of a copy of the journey to export it")
+		case st.Kind == "raise_signal":
+			if err := x.signalType(st.SignalType, deref(j.BrandID)); err != nil {
+				return err
+			}
 		case st.Kind == "move_deal" && st.Deal != nil:
 			x.note("The journey %s moves deals in the %s pipeline (%s); the workspace applying the kit needs a pipeline with the same keys.", j.Name, st.Deal.Type, st.Deal.Field)
 		case st.Kind == journeys.KindEmail || st.Kind == "transactional_email":
@@ -263,6 +271,25 @@ func (x *exporter) steps(j *journeyView) error {
 		}
 		x.ownSettings(st, j.Name)
 	}
+	return nil
+}
+
+// signalType brings a signal type of the brand's own into the kit; the
+// starter types are everywhere already.
+func (x *exporter) signalType(key, brand string) error {
+	if key == "" || signals.IsStarter(key) || slices.ContainsFunc(x.signalTypes, func(t playbooks.KitSignalType) bool { return t.Key == key }) {
+		return nil
+	}
+	t := playbooks.KitSignalType{Key: key}
+	err := x.tx.QueryRow(x.ctx, `SELECT label, description, events, due_days FROM signal_types WHERE workspace_id = $1 AND brand_id = NULLIF($2, '')::uuid AND key = $3`,
+		x.a.WorkspaceID, brand, key).Scan(&t.Label, &t.Description, &t.Events, &t.DueDays)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errInvalid("a Raise a signal step names the type " + key + ", which this brand doesn't have")
+	}
+	if err != nil {
+		return err
+	}
+	x.signalTypes = append(x.signalTypes, t)
 	return nil
 }
 
@@ -467,7 +494,7 @@ func (x *exporter) kit(in kitExportInput) (playbooks.Kit, error) {
 		if len(j.Trigger.Filter) > 0 {
 			trigger["filter"] = generic(j.Trigger.Filter)
 		}
-		kj := playbooks.KitJourney{Key: x.jKeys[j.ID], Name: j.Name, Description: j.Description, Trigger: trigger,
+		kj := playbooks.KitJourney{Key: x.jKeys[j.ID], Name: j.Name, Description: j.Description, RecordType: unlessDefault(j.RecordType, journeys.TypePerson), Trigger: trigger,
 			Entry: unlessDefault(j.Entry, "once"), ExitEvents: j.ExitEvents, Steps: generic(j.Steps).([]any)}
 		if j.GoalEvent != nil {
 			kj.GoalEvent = *j.GoalEvent
@@ -477,6 +504,7 @@ func (x *exporter) kit(in kitExportInput) (playbooks.Kit, error) {
 		}
 		k.Journeys = append(k.Journeys, kj)
 	}
+	k.SignalTypes = append(k.SignalTypes, x.signalTypes...)
 	return k, nil
 }
 
@@ -502,6 +530,11 @@ func (x *exporter) eventInputs(k *playbooks.Kit, wanted []string) ([]kitExportEv
 			r.Trigger = walkEvents(r.Trigger, false, swap).(map[string]any)
 			r.Conditions, _ = walkEvents(r.Conditions, false, swap).([]any)
 			r.EmitEvent = swap(r.EmitEvent)
+		}
+		for i := range k.SignalTypes {
+			for e := range k.SignalTypes[i].Events {
+				k.SignalTypes[i].Events[e] = swap(k.SignalTypes[i].Events[e])
+			}
 		}
 		for i := range k.Journeys {
 			j := &k.Journeys[i]

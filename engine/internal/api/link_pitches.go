@@ -144,6 +144,8 @@ func (s *Server) startLinkPitch(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		SequenceID string `json:"sequence_id"`
 		RecordID   string `json:"record_id"`
+		// A person goes ahead at a site a teammate manages.
+		ConfirmClaimed bool `json:"confirm_claimed"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -174,6 +176,21 @@ func (s *Server) startLinkPitch(w http.ResponseWriter, r *http.Request) {
 	if !a.writes(p.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
+	}
+	// A site a teammate manages: people confirm, agents leave it to them.
+	if !in.ConfirmClaimed || agentWrite(r) {
+		name, claimed, err := siteClaimedByOther(ctx, s.pool, a, p.RecordID)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if claimed {
+			if name == "" {
+				name = "Another teammate"
+			}
+			writeError(w, r, http.StatusConflict, "site_claimed", name+" is managing this site. Check with them first, or send confirm_claimed: true to pitch anyway.")
+			return
+		}
 	}
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {

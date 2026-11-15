@@ -1,0 +1,26 @@
+id: customer-handover
+version: 1
+title: Customer handover
+summary: Signal types that put every newly won customer and every reopened support conversation in Needs attention, and a journey that gives the new customer's owner a kick-off task.
+
+signal_types:
+  - key: new_customer
+    label: New customer to onboard
+    description: A deal was won. Someone should welcome the customer and book the kick-off.
+    events: [deal.won]
+    due_days: 2
+  - key: support_trouble
+    label: Support trouble
+    description: A support conversation that was closed came back. Their owner should know before the next call.
+    events: [support.conversation_reopened]
+    due_days: 1
+
+journeys:
+  - key: kick_off_new_customers
+    name: Kick off new customers
+    description: When a deal is won, tags the person as a new customer and gives their owner a task to book the kick-off call.
+    trigger: { kind: event, event: deal.won }
+    entry: again
+    steps:
+      - { id: tag, kind: add_tag, tag: new-customer, next: task }
+      - { id: task, kind: create_task, title: Book the kick-off call, text: "Read the deal's notes and what was promised, introduce yourself, and agree the first goal and a date for it.", due_after_seconds: 259200 }

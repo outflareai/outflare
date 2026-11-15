@@ -183,7 +183,7 @@ export function Stat({ label, value, sub, tone }: { label: ReactNode; value: Rea
 /** A row of Stat tiles joined by hairlines, like a terminal status bar. */
 export function Stats({ children, cols = 4 }: { children: ReactNode; cols?: 2 | 3 | 4 | 5 | 6 }) {
   const grid = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-3", 4: "sm:grid-cols-4", 5: "sm:grid-cols-5", 6: "sm:grid-cols-3 lg:grid-cols-6" }[cols];
-  return <div className={`grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border shadow-xs ${grid}`}>{children}</div>;
+  return <div className={`grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border shadow-xs max-sm:[&>*:last-child:nth-child(odd)]:col-span-2 ${grid}`}>{children}</div>;
 }
 
 export function Empty({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
@@ -315,14 +315,15 @@ export function DialogHost() {
   );
 }
 
-// Toasts confirm that something happened, without a blocking alert.
+// Toasts confirm that something happened, without a blocking alert. The same
+// message twice shows once (it restarts its timer instead of stacking).
 export function toast(text: string, tone: "ok" | "error" = "ok") {
-  if (tone === "error") sonner.error(text, { duration: 8000 });
-  else sonner.success(text, { duration: 4000 });
+  if (tone === "error") sonner.error(text, { id: `error:${text}`, duration: 8000 });
+  else sonner.success(text, { id: `ok:${text}`, duration: 4000 });
 }
 
 export function ToastHost() {
-  return <Toaster position="bottom-right" toastOptions={{ classNames: { toast: "text-[13px]" } }} />;
+  return <Toaster toastOptions={{ classNames: { toast: "text-[13px]" } }} />;
 }
 
 // A page that throws while rendering shows a way out instead of a blank

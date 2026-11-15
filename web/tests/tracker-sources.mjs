@@ -31,7 +31,7 @@ const templates = [
   { id: 'taboola', name: 'Taboola', category: 'native', currency: 'USD', click_id: { param: 'click_id', token: '{click_id}' }, cost: { param: '', token: '' }, parameters: [], postback: null },
 ];
 const rules = { share: 100, decimals: 2, min_payout: '0', types: [], statuses: ['approved'], resend: false };
-const source = { id: src, brand_id: brand, name: 'Zeropark', template: '', currency: 'USD', click_id: { param: 'cid', token: '{cid}' }, cost: { param: '', token: '' }, parameters: [],
+const source = { id: src, brand_id: brand, name: 'Zeropark', template: 'zeropark', currency: 'USD', click_id: { param: 'cid', token: '{cid}' }, cost: { param: '', token: '' }, parameters: [],
   postback: { url: 'https://postback.zeropark.example/?cid={source_click_id}', method: 'GET' }, postback_rules: rules, status: 'active', campaigns: 2, created_at: now, updated_at: now };
 const network = (extra = {}) => ({ id: net, brand_id: brand, name: 'Everflow', token_hint: 'ofp_ab', ip_allowlist: [], duplicate_policy: 'ignore', click_expiry_days: 30, currency: 'USD', status: 'active',
   network: 'everflow', click_id_param: 'sub1', postback_query: 'cid={sub1}&payout={payout}', conversions: 12, created_at: now, updated_at: now, needs_domain: false, ...extra });
@@ -51,13 +51,16 @@ try {
     const B = `/v1/brands/${brand}`;
     let status = 200, body = {};
     if (p === '/v1/workspaces/workspace-a/brands') body = { data: [{ id: brand, name: 'Acme', handle: 'acme', status: 'active', timezone: 'Europe/Berlin' }] };
-    else if (p === '/v1/workspaces/workspace-a/integrations') body = { data: [{ id: 'i1', connector: 'google_ads', status: 'connected' }] };
+    else if (p === '/v1/workspaces/workspace-a/integrations') body = { data: [{ id: 'i1', connector: 'google_ads', status: 'connected' }, { id: 'i2', connector: 'zeropark_ads', status: 'connected' }] };
     else if (p === `${B}/traffic-source-templates`) body = { data: templates };
     else if (p === `${B}/traffic-sources` && method === 'POST') { status = 201; body = { ...source, id: '40000000-0000-0000-0000-000000000002', name: b.name, template: b.template }; }
     else if (p === `${B}/traffic-sources`) body = { data: [source] };
     else if (p === `${B}/traffic-sources/${src}/postbacks`) body = { data: [{ id: 's1', conversion_id: 'c1', status: 'sent', payout: '1.20', url: 'https://postback.zeropark.example/?cid=abc', http_status: 200, error: '', attempts: 1, sent_at: now, created_at: now },
       { id: 's2', conversion_id: 'c2', status: 'failed', payout: '0.80', url: 'https://postback.zeropark.example/?cid=def', http_status: 500, error: 'the network answered 500', attempts: 5, sent_at: null, created_at: now }] };
     else if (p === `${B}/traffic-sources/${src}`) body = { ...source, ...b };
+    else if (p === `${B}/network-costs`) body = { data: u.searchParams.get('source_id') === src ? [
+      { source_id: src, network: 'zeropark', campaign_ref: '11111111-1111-4111-8111-111111111111', day: '2026-11-14', currency: 'USD', spend: '12.5', matched: '12', spread: '0.4', unattributed: '0.1', clicks: 4000, targets: 31, synced_at: now },
+    ] : [] };
     else if (p === `${B}/affiliate-network-templates`) body = { data: [{ id: 'everflow', name: 'Everflow', kind: 'platform', click_id_param: 'sub1', macros: { cid: '{sub1}' } }, { id: 'maxbounty', name: 'MaxBounty', kind: 'network', click_id_param: 's2', macros: {} }] };
     else if (p === `${B}/postback-sources` && method === 'POST') { status = 201; networks = [network({ name: b.name })]; body = network({ name: b.name, postback_url: 'https://go.acme.example/postback/ofp_ab12?cid={sub1}&payout={payout}' }); }
     else if (p === `${B}/postback-sources`) body = { data: networks };
@@ -111,8 +114,14 @@ try {
     assert.deepEqual(posted.parameters, [{ name: 'Zone', param: 'zone', token: '${zoneid}', field: 1 }, { name: 'Campaign', param: 'camp', token: '${campaignid}', field: 2 }]);
     assert.match(posted.postback.url, /aid=4242&/);
     assert.deepEqual([posted.postback_rules.share, posted.postback_rules.statuses], [80, ['approved', 'pending']]);
+    // A Zeropark source with its connection: cost is exact, and its form
+    // shows how the last days' spend was shared out.
+    assert.match(await page.getByRole('row', { name: /Zeropark/ }).innerText(), /Exact from Zeropark/);
     // An existing source: its recent postbacks, with the failure's reason.
     await page.getByRole('row', { name: /Zeropark/ }).click();
+    const costDays = page.getByTestId('network-cost-days');
+    await costDays.waitFor();
+    assert.match(await costDays.innerText(), /12\.50 USD[\s\S]*12\.00 USD[\s\S]*0\.40 USD[\s\S]*0\.10 USD/);
     await page.getByText('Recent postbacks').waitFor();
     await page.getByText('the network answered 500').waitFor();
     assert.deepEqual(errors, []);

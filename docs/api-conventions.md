@@ -139,6 +139,7 @@ Each API token may make `API_RATE_LIMIT` requests a minute (600 by default). Eve
 
 - Secrets are stored sealed (`secrets.Box`, keyed to the row) or hashed (API tokens), and shown once or behind a `*.manage` scope (`GET .../webhooks/{id}/secret`). They never go in audit data, event payloads, logs or error messages.
 - Every answer carries `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `frame-ancestors 'none'`, and HSTS once `PUBLIC_URL` is https. `/v1` answers are `Cache-Control: no-store` unless the handler opts in to caching (public logos).
+- The web app's pages also carry a report-only script policy (`Content-Security-Policy-Report-Only`): scripts may come only from the server itself, plus the inline scripts the page was built with, by hash. Nothing is blocked yet. Browsers post what it would have blocked to `POST /v1/csp-reports`, which counts it (`outflare_http_csp_reports_total`), logs the source and, for a script from another site, its host, and stores nothing. A self-hosted server that adds its own scripts to the app will see them reported; that is expected until the policy can list them.
 - Anything Outflare calls on a user's behalf goes through the SSRF guard (`webhooks.CheckURL` plus the dial-time check): public https only, no redirects, no credentials in URLs.
 - Inbound webhooks are verified by signature before anything is read, and deduplicated by event id; ids are kept 30 days.
 - Field values reach SQL only as parameters; cursors and other client strings are validated like any other input.

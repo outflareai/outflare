@@ -432,7 +432,10 @@ func checkReferences(ctx context.Context, tx pgx.Tx, c *catalog, ws string, f *f
 		err = tx.QueryRow(ctx, `SELECT count(*) FROM records WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND record_type = $3 AND merged_into IS NULL`,
 			ws, ids, deref(f.TargetType)).Scan(&n)
 	} else {
-		err = tx.QueryRow(ctx, `SELECT count(*) FROM memberships WHERE workspace_id = $1 AND user_id = ANY($2::uuid[])`, ws, ids).Scan(&n)
+		// A member by their user id, or someone in the team directory who
+		// has no sign-in by their directory id.
+		err = tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM memberships WHERE workspace_id = $1 AND user_id = ANY($2::uuid[]))
+			+ (SELECT count(*) FROM staff WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND user_id IS NULL AND status <> 'left')`, ws, ids).Scan(&n)
 	}
 	if err != nil {
 		return err
@@ -445,7 +448,7 @@ func checkReferences(ctx context.Context, tx pgx.Tx, c *catalog, ws string, f *f
 			}
 			return errInvalid(fmt.Sprintf("%s must be the id of a %s in this workspace", f.Key, target))
 		}
-		return errInvalid(f.Key + " must be the user id of a member of this workspace")
+		return errInvalid(f.Key + " must be the user id of a member of this workspace, or the id of a person in the team directory who has no sign-in")
 	}
 	return nil
 }
@@ -558,6 +561,11 @@ func writeAttributes(ctx context.Context, tx pgx.Tx, c *catalog, t *recordTypeVi
 		} else {
 			rec.Attributes[key] = next
 			rec.AttributeSources[key] = source
+		}
+		if key == "parent_company" && f.Builtin {
+			if err := checkParent(ctx, tx, a.WorkspaceID, rec.ID, next); err != nil {
+				return false, err
+			}
 		}
 		if err := attributeChanged(ctx, tx, a, rec.ID, key, prev, next, had, source); err != nil {
 			return false, err

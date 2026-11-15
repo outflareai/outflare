@@ -8,14 +8,13 @@ import { PickBrand } from "@/components/pick-brand";
 // the flow builder.
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import type { EmailTemplate, Journey, Rule, RuleCondition, RuleSimulation, RuleTrigger, Schemas, SmartList } from "@outflare/sdk";
+import type { Journey, Rule, RuleCondition, RuleSimulation, RuleTrigger, Schemas, SmartList } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural, stamp } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
-import { clean, newStep } from "@/components/journey-flow/model";
 import { StepPicker, useStepKinds } from "@/components/journey-flow/step-picker";
 import { Conditions, useFlowCatalog, type FlowCatalog } from "@/components/journey-flow/step-panel";
 import { KitNotice } from "@/components/kit-notice";
@@ -36,11 +35,13 @@ function duration(s: number) {
 // sentence reads a rule out loud, as the card builds it.
 export function sentence(r: Pick<Rule, "trigger" | "conditions" | "match" | "emit_event" | "record_type">, lists: SmartList[] = []): string {
   const t = r.trigger;
+  const company = r.record_type === "account";
+  const who = company ? "anyone at a company" : "someone";
   const when = {
-    event: `When someone does ${t.event || "…"}`,
+    event: `When ${who} does ${t.event || "…"}`,
     absence: t.start_event
-      ? `When someone does ${t.start_event} and doesn't do ${t.event || "…"} within ${duration(t.within_seconds ?? 0)}`
-      : `When someone hasn't done ${t.event || "…"} for ${duration(t.within_seconds ?? 0)}`,
+      ? `When ${who} does ${t.start_event} and doesn't do ${t.event || "…"} within ${duration(t.within_seconds ?? 0)}`
+      : `When ${company ? "no one at a company has" : "someone hasn't"} done ${t.event || "…"} for ${duration(t.within_seconds ?? 0)}`,
     change: `When a ${r.record_type || "person"} comes to match`,
     audience: `When someone ${t.on === "leave" ? "leaves" : "joins"} ${lists.find((l) => l.id === t.list_id)?.name ?? "a smart list"}`,
   }[t.kind];
@@ -165,7 +166,7 @@ function bodyOf(f: Form) {
   if (t.kind === "event") trigger.event = t.event;
   if (t.kind === "absence") Object.assign(trigger, { event: t.event, within_seconds: t.within_seconds, ...(t.start_event ? { start_event: t.start_event } : {}) });
   if (t.kind === "audience") Object.assign(trigger, { list_id: t.list_id, on: t.on ?? "enter" });
-  return { ...f, trigger, record_type: t.kind === "change" ? f.record_type : "person" };
+  return { ...f, trigger, record_type: t.kind === "change" || (t.kind !== "audience" && f.record_type === "account") ? f.record_type : "person" };
 }
 
 type Unit = 3600 | 86400;
@@ -202,6 +203,18 @@ function Sentence({ f, set, catalog, lists, disabled }: { f: Form; set: (f: Form
           </select>
         </Word>
       </p>
+      {(t.kind === "event" || t.kind === "absence") && (
+        <p className="flex flex-wrap items-center gap-x-2">
+          <span>the rule is about</span>
+          <Word>
+            <select aria-label="Who the rule is about" className={field} value={f.record_type === "account" ? "account" : "person"} disabled={disabled}
+              onChange={(e) => set({ ...f, record_type: e.target.value })}>
+              <option value="person">each person</option>
+              <option value="account">each company (anyone there counts)</option>
+            </select>
+          </Word>
+        </p>
+      )}
       {t.kind === "event" && <p className="flex flex-wrap items-center gap-x-2"><span>they do</span><Word>{ev(t.event, (v) => setT({ event: v }), "Event", "product_activated")}</Word></p>}
       {t.kind === "absence" && (
         <p className="flex flex-wrap items-center gap-x-2">
@@ -232,6 +245,7 @@ function Sentence({ f, set, catalog, lists, disabled }: { f: Form; set: (f: Form
             <input type="checkbox" checked={f.manual_edits} disabled={disabled} onChange={(e) => set({ ...f, manual_edits: e.target.checked })} />
             also when someone changes it by hand
           </label>
+          <span className="block w-full text-[12px] leading-5 text-muted-foreground">For a date, compare with today, +60d (60 days from now) or -14d (14 days ago); a rule about dates is also checked once a day. For a trend, use a metric's change in percent, such as metrics.usage_7d_change less than -30.</span>
         </p>
       )}
       {t.kind === "audience" && (
@@ -373,16 +387,19 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
     if (!r) return;
     setPicking(false);
     track("ui.rule_followup_picked", { kind });
-    const { data: tpl } = await api.GET("/v1/brands/{brand}/email-templates", { params: { path: { brand: brandId } } });
-    const templates = (tpl?.data ?? []).filter((t: EmailTemplate) => t.purpose === "lifecycle" && t.status === "active");
-    const step = newStep(kinds, kind, [], templates);
-    const steps = kind === "email" && !step.template ? [] : clean([step]);
+    // The journey starts empty: the step is added in the builder, where
+    // its settings are filled in before anything is saved.
     const { data, error } = await api.POST("/v1/brands/{brand}/journeys", {
       params: { path: { brand: brandId } },
-      body: { name: `${r.name}: follow-up`.slice(0, 200), trigger: { kind: "event", event: r.emit_event }, steps },
+      body: { name: `${r.name}: follow-up`.slice(0, 200), trigger: { kind: "event", event: r.emit_event }, steps: [] },
     });
     if (error || !data) return toast(errorMessage(error), "error");
-    toast("Journey drafted. Finish its steps, then activate it.");
+    try {
+      sessionStorage.setItem(`outflare:first-step:${data.id}`, kind);
+    } catch {
+      // Without storage the builder opens empty, and the step is one click away.
+    }
+    toast("Journey drafted. Fill in the step, then activate it.");
     go("journeys", data.id);
   }
 
@@ -473,7 +490,7 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
           </Card>
         </div>
       )}
-      {picking && <StepPicker kinds={kinds.filter((k) => k.kind !== "exit")} onPick={(k) => followUp(k.kind)} onClose={() => setPicking(false)} onConnect={() => go("connectors")} />}
+      {picking && <StepPicker kinds={kinds.filter((k) => k.kind !== "exit")} title="When this fires, do…" description="Pick the first thing that should happen. It opens in a new journey, where you fill in its details and add more steps." onPick={(k) => followUp(k.kind)} onClose={() => setPicking(false)} onConnect={() => go("connectors")} />}
     </div>
   );
 }

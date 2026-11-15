@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -31,19 +32,24 @@ import { crmApi } from "./client";
 import { SalesFloor } from "./Sales";
 import { api, errorMessage } from "@/api";
 import {
+  Badge,
   Button,
   Empty,
   ErrorText,
   field,
   Loading,
+  Status,
   toast,
   confirmAction,
 } from "@/ui";
 import { setBrand, useBrand } from "@/lib/brand";
 import { displayName, identity, useCatalog } from "@/lib/records";
 import { track } from "@/lib/analytics";
+import { TeammatePicker, teammateNames, useTeammates } from "@/components/teammate-picker";
 import type { Tab } from "@/App";
 import { RecordDialog, FieldInput, RecordPicker } from "../RecordEdit";
+import { BulkEditSheet } from "../BulkEdit";
+import { bandText, natureText, toneOf } from "@/components/record-scores";
 import { Activities } from "./Activities";
 import { InlineField, RecordPreview } from "./RecordPreview";
 import { RecordBoard } from "./Board";
@@ -75,6 +81,8 @@ type Config = {
   columns: string[] | null;
   layout: "table" | "board";
   group: string;
+  /** Which records: the live ones, those held for someone to approve, or archived ones. */
+  show: "active" | "review" | "archived";
 };
 const defaults = (): Config => ({
   q: "",
@@ -84,6 +92,7 @@ const defaults = (): Config => ({
   columns: null,
   layout: "table",
   group: "",
+  show: "active",
 });
 function readConfig(raw: unknown): Config {
   const c = raw && typeof raw === "object" ? (raw as Partial<Config>) : {};
@@ -104,6 +113,7 @@ function readConfig(raw: unknown): Config {
       : null,
     layout: c.layout === "board" ? "board" : "table",
     group: typeof c.group === "string" ? c.group : "",
+    show: c.show === "review" || c.show === "archived" ? c.show : "active",
   };
 }
 
@@ -240,11 +250,20 @@ function WorkspaceBody({
   const [bulkField, setBulkField] = useState("");
   const [bulkValue, setBulkValue] = useState<unknown>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  // People and companies get the bulk edit that can be undone in one step.
+  const [bulkSheet, setBulkSheet] = useState<string[] | null>(null);
+  const team = useTeammates(ws, brand?.id);
+  // Owners and other member fields read as the teammate's name.
+  const allNames = useMemo(
+    () => ({ ...teammateNames(team.people), ...referenceNames }),
+    [team.people, referenceNames],
+  );
   const configKey = JSON.stringify({
     q: config.q,
     sort: config.sort,
     direction: config.direction,
     filters: config.filters,
+    show: config.show,
   });
   const viewRequest = useRef(0);
   const loadViews = useCallback(async () => {
@@ -303,6 +322,8 @@ function WorkspaceBody({
               attribute: Object.entries(config.filters)
                 .filter(([, v]) => v)
                 .map(([k, v]) => `${k}:${v}`),
+              ...(config.show === "review" ? { review: "needs_review" as const } : {}),
+              ...(config.show === "archived" ? { archived: "true" as const } : {}),
             },
           },
           signal: controller.signal,
@@ -332,7 +353,8 @@ function WorkspaceBody({
       patch.q !== undefined ||
       patch.sort !== undefined ||
       patch.direction !== undefined ||
-      patch.filters !== undefined
+      patch.filters !== undefined ||
+      patch.show !== undefined
     )
       setOffset(0);
       setCursors([undefined]);
@@ -344,7 +366,24 @@ function WorkspaceBody({
     });
   };
   const refresh = () => setTick((n) => n + 1);
-  const openRecord = (id: string) => setOpen(`${section}:${id}`);
+  // The brand's headline scores for this kind of record, as columns.
+  const [scoreDefs, setScoreDefs] = useState<Schemas["Score"][]>([]);
+  useEffect(() => {
+    setScoreDefs([]);
+    if (!brandId || (type !== "person" && type !== "account")) return;
+    let live = true;
+    void api.GET("/v1/brands/{brand}/scores", { params: { path: { brand: brandId } } }).then(({ data }) => {
+      if (!live || !data) return;
+      const mine = data.data.filter((d) => d.record_type === type);
+      const parts = new Set(mine.flatMap((d) => d.parts.map((p) => p.key)));
+      setScoreDefs(mine.filter((d) => !parts.has(d.key)).slice(0, 3));
+    });
+    return () => {
+      live = false;
+    };
+  }, [brandId, type]);
+  // A record opens as a full page, never a panel over the list.
+  const openRecord = (id: string) => go("people", id);
   const activeView = views.find((v) => v.id === viewId);
   const defaultColumns =
     type === "person"
@@ -481,13 +520,16 @@ function WorkspaceBody({
       toast(errorMessage(e), "error");
     }
   }
-  async function bulk(archive = false) {
+  async function bulk(archive = false, set?: Record<string, unknown>) {
     if (busy || !chosen.length) return;
+    // In the archived view the same button brings records back.
+    const restoring = archive && config.show === "archived";
     if (
       archive &&
+      !restoring &&
       !(await confirmAction(
         `Archive ${chosen.length} records?`,
-        "You can restore them from the record directory.",
+        "You can bring them back: choose Archived in the Show menu, pick them and press Restore.",
         "Archive",
       ))
     )
@@ -504,8 +546,8 @@ function WorkspaceBody({
             body: {
               version: row.version,
               ...(archive
-                ? { archived: true }
-                : { attributes: { [bulkField]: bulkValue } }),
+                ? { archived: !restoring }
+                : { attributes: set ?? { [bulkField]: bulkValue } }),
             },
           },
         );
@@ -520,7 +562,7 @@ function WorkspaceBody({
     setBulkOpen(false);
     refresh();
     toast(
-      `${changed} records ${archive ? "archived" : "updated"}.${failures ? ` ${failures} could not be changed; refresh and try again.` : ""}`,
+      `${changed} records ${archive ? (restoring ? "restored" : "archived") : "updated"}.${failures ? ` ${failures} could not be changed; refresh and try again.` : ""}`,
       failures ? "error" : undefined,
     );
   }
@@ -625,7 +667,6 @@ function WorkspaceBody({
           )}
         </div>
       </header>
-      <Button variant="ghost" onClick={() => setOpen("sales:new")}>Open Sales conversations</Button>
       <nav
         aria-label="CRM sections"
         className="flex flex-wrap gap-1 rounded-xl border bg-card p-1.5 shadow-xs"
@@ -799,6 +840,16 @@ function WorkspaceBody({
                 onChange={(e) => change({ q: e.target.value })}
               />
             </label>
+            <select
+              aria-label="Show"
+              className={field}
+              value={config.show}
+              onChange={(e) => change({ show: e.target.value as Config["show"] })}
+            >
+              <option value="active">Active</option>
+              <option value="review">Held for review</option>
+              <option value="archived">Archived</option>
+            </select>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost">
@@ -1033,19 +1084,33 @@ function WorkspaceBody({
               <span className="font-medium">
                 {chosen.length} selected on this page
               </span>
+              {fields.some((f) => f.key === "owner") && (
+                <TeammatePicker
+                  value={null}
+                  people={team.people}
+                  me={team.me}
+                  disabled={busy || team.people.length === 0}
+                  noneLabel="Nobody (take the owner off)"
+                  trigger="Assign to…"
+                  onPick={(to) => {
+                    track("ui.record_owner_assigned", { record_type: "bulk", to: !to ? "nobody" : to === team.me ? "me" : "teammate" });
+                    void bulk(false, { owner: to });
+                  }}
+                />
+              )}
               <Button
                 variant="ghost"
                 disabled={busy}
-                onClick={() => setBulkOpen(true)}
+                onClick={() => (type === "person" || type === "account" ? setBulkSheet(chosen.map((r) => r.id)) : setBulkOpen(true))}
               >
-                Edit attribute
+                {type === "person" || type === "account" ? "Bulk edit" : "Edit attribute"}
               </Button>
               <Button
                 variant="ghost"
                 disabled={busy}
                 onClick={() => void bulk(true)}
               >
-                Archive
+                {config.show === "archived" ? "Restore" : "Archive"}
               </Button>
               <button
                 className="ml-auto underline"
@@ -1063,15 +1128,15 @@ function WorkspaceBody({
           ) : !error && rows.length === 0 ? (
             <Empty
               title={
-                config.q || Object.values(config.filters).some(Boolean)
+                config.q || config.show !== "active" || Object.values(config.filters).some(Boolean)
                   ? "No matching records"
                   : `Your ${obj.plural.toLowerCase()} start here`
               }
             >
-              {config.q || Object.values(config.filters).some(Boolean) ? (
+              {config.q || config.show !== "active" || Object.values(config.filters).some(Boolean) ? (
                 <button
                   className="underline"
-                  onClick={() => change({ q: "", filters: {} })}
+                  onClick={() => change({ q: "", filters: {}, show: "active" })}
                 >
                   Clear the search and filters
                 </button>
@@ -1108,6 +1173,11 @@ function WorkspaceBody({
                         {fields.find((f) => f.key === key)!.label}
                       </th>
                     ))}
+                    {scoreDefs.map((d) => (
+                      <th key={d.key} className="p-3 font-medium whitespace-nowrap">
+                        {d.label.replace(/ score$/i, "")}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -1140,8 +1210,10 @@ function WorkspaceBody({
                             {displayName(r).slice(0, 2).toUpperCase()}
                           </span>
                           <span className="min-w-0">
-                            <span className="block font-medium">
+                            <span className="flex flex-wrap items-center gap-1.5 font-medium">
                               {displayName(r)}
+                              {r.needs_review && <Badge tone="amber" title="Held for someone to approve before anything is sent to them.">Needs review</Badge>}
+                              {r.archived && <Badge>Archived</Badge>}
                             </span>
                             <span className="mt-0.5 block text-[11px] text-muted-foreground">
                               {identity(
@@ -1157,7 +1229,7 @@ function WorkspaceBody({
                           <InlineField
                             ws={ws}
                             record={r}
-                            names={referenceNames}
+                            names={allNames}
                             f={fields.find((f) => f.key === key)!}
                             cat={cat}
                             canManage={canManage}
@@ -1165,6 +1237,22 @@ function WorkspaceBody({
                           />
                         </td>
                       ))}
+                      {scoreDefs.map((d) => {
+                        const sc = r.attributes.scores as Record<string, unknown> | undefined;
+                        const v = sc?.[d.key];
+                        const band = sc?.[`${d.key}_band`];
+                        return (
+                          <td key={d.key} className="p-3">
+                            {typeof v === "number" && (band === "high" || band === "medium" || band === "low") ? (
+                              <span title={`${d.label}: ${bandText[band].toLowerCase()} (${natureText[d.nature].toLowerCase()})`}>
+                                <Status tone={toneOf(band, d.higher_is_better)}>{v}</Status>
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">–</span>
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -1226,7 +1314,20 @@ function WorkspaceBody({
           onClose={() => setAdding(false)}
           onSaved={(r) => {
             refresh();
-            setOpen(`${type}:${r.id}`);
+            go("people", r.id);
+          }}
+        />
+      )}
+      {bulkSheet && (type === "person" || type === "account") && (
+        <BulkEditSheet
+          ws={ws}
+          brand={brandId}
+          source={{ kind: "records", ids: bulkSheet, type }}
+          onClose={() => setBulkSheet(null)}
+          onDone={() => {
+            setBulkSheet(null);
+            setSelected(new Set());
+            refresh();
           }}
         />
       )}

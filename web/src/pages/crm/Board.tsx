@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Schemas } from "@outflare/sdk";
 import { GripVertical, Loader2 } from "lucide-react";
 import { api, errorMessage } from "@/api";
-import { Button, ErrorText, field, toast } from "@/ui";
+import { Button, ErrorText, ask, field, toast } from "@/ui";
 import { displayName, type CatalogInfo } from "@/lib/records";
 import { useBrand } from "@/lib/brand";
 
@@ -41,6 +41,24 @@ export function RecordBoard({
     [];
   const move = async (record: Rec, value: string) => {
     if (busy || !canManage) return;
+    // Losing a deal asks why, so the company's page and reports can say.
+    const more: Record<string, unknown> = {};
+    const reason = cat.fields(type).find((f) => f.key === "lost_reason");
+    if (value === "lost" && group.key === "stage" && reason) {
+      const picked = await ask({
+        title: `Why was ${displayName(record)} lost?`,
+        body: "Pick the reason. It shows on the company's page, so the next person knows why they didn't move forward.",
+        input: { label: "Note (optional)", placeholder: "What happened, and when to try again", maxLength: 500, optional: true },
+        choices: [
+          { label: "Cancel", value: "cancel", variant: "ghost" },
+          ...cat.options(reason).map((o) => ({ label: o.label, value: o.key, variant: "ghost" as const })),
+          { label: "Skip the reason", value: "skip", variant: "ghost" },
+        ],
+      });
+      if (!picked) return;
+      if (picked.choice !== "skip") more.lost_reason = picked.choice;
+      if (picked.value.trim() && cat.fields(type).some((f) => f.key === "lost_note")) more.lost_note = picked.value.trim();
+    }
     setBusy(true);
     try {
       const { data, error } = await api.PATCH(
@@ -49,7 +67,7 @@ export function RecordBoard({
           params: { path: { brand: record.brand_id ?? "", record: record.id } },
           body: {
             version: record.version,
-            attributes: { [group.key]: value || null },
+            attributes: { [group.key]: value || null, ...more },
           },
         },
       );

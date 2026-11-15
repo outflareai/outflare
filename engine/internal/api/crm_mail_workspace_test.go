@@ -78,7 +78,7 @@ func TestCRMMailThroughWorkspace(t *testing.T) {
 	e.oauth.Endpoints.GoogleMail = fake.URL + "/gmail"
 
 	// The connection: the company's key, tested as one of its users.
-	conn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "google_workspace", "credentials": map[string]string{"service_account_json": newServiceAccount(t), "admin_email": ownerEmail}})
+	conn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "google_workspace_mail", "credentials": map[string]string{"service_account_json": newServiceAccount(t), "admin_email": ownerEmail}})
 	if conn["account"].(map[string]any)["name"] != "northpeak.example" && !users[strings.ToLower(ownerEmail)] {
 		t.Fatalf("connection: %v", conn)
 	}
@@ -131,4 +131,16 @@ func TestCRMMailThroughWorkspace(t *testing.T) {
 	if c := employee.must(200, "GET", root+"/connection", nil); c["connected"] != false {
 		t.Fatalf("still read after the admin stopped it: %v", c)
 	}
+
+	// Excluding by address works for people with no account yet, and wins
+	// over being listed as eligible.
+	saved := owner.must(200, "PUT", root+"/rollout", map[string]any{"enabled": true, "allowed_user_ids": []string{employeeID}, "excluded_user_ids": []string{},
+		"excluded_emails": []string{"Employee@Northpeak.example", "future.hire@northpeak.example"}, "workspace_integration_id": connID, "version": 2})
+	if list := saved["excluded_emails"].([]any); len(list) != 2 || list[0] != "employee@northpeak.example" {
+		t.Fatalf("excluded emails: %v", saved)
+	}
+	if c := employee.must(200, "GET", root+"/connection", nil); c["connected"] != false || c["eligible"] != false {
+		t.Fatalf("an excluded address was read: %v", c)
+	}
+	owner.must(400, "PUT", root+"/rollout", map[string]any{"enabled": true, "allowed_user_ids": []string{}, "excluded_user_ids": []string{}, "excluded_emails": []string{"not an address"}, "version": 3})
 }

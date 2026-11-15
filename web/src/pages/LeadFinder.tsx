@@ -175,9 +175,11 @@ const stateBadge = (r: Run) => {
 };
 
 export function LeadFinder({ ws, canManage, onConnectors, onProfiles, onRates }: Props) {
-  const base = `/v1/workspaces/${ws}/cloud/lead-finder`;
   const { brand: picked, active: brands } = useBrand(ws);
   const pickedId = picked?.id;
+  // Settings are the team's; everything else is the picked brand's own.
+  const wsBase = `/v1/workspaces/${ws}/cloud/lead-finder`;
+  const base = pickedId ? `/v1/brands/${pickedId}/cloud/lead-finder` : wsBase;
   const brandsCount = brands.length;
   const [settings, setSettings] = useState<Settings | null>(null);
   const [profiles, setProfiles] = useState<CustomerProfile[]>([]);
@@ -191,14 +193,14 @@ export function LeadFinder({ ws, canManage, onConnectors, onProfiles, onRates }:
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const [s, r, sm] = await Promise.all([call<Settings>("GET", `${base}/settings`), call<{ data: Run[] }>("GET", `${base}/runs`), call<Summary>("GET", `${base}/summary?days=${days}`)]);
+    const [s, r, sm] = await Promise.all([call<Settings>("GET", `${wsBase}/settings`), call<{ data: Run[] }>("GET", `${base}/runs`), call<Summary>("GET", `${base}/summary?days=${days}`)]);
     if (s.error || r.error) setError(errorMessage(s.error ?? r.error));
     if (s.data) setSettings(s.data);
     setRuns(r.data?.data ?? []);
     // A server without the summary shows the list of runs only.
     setSummary(sm.data ?? null);
     if (!sm.data) setView("runs");
-  }, [base, days]);
+  }, [base, wsBase, days]);
   useEffect(() => {
     load();
     // Profiles are a brand's: the picked brand's, or every brand's.
@@ -235,7 +237,7 @@ export function LeadFinder({ ws, canManage, onConnectors, onProfiles, onRates }:
       <ErrorText>{error}</ErrorText>
       {!settings.eu_notice_accepted_at ? (
         <Notice canManage={canManage} onAccept={async () => {
-          const { data, error } = await call<Settings>("PATCH", `${base}/settings`, { accept_eu_notice: true });
+          const { data, error } = await call<Settings>("PATCH", `${wsBase}/settings`, { accept_eu_notice: true });
           if (error) return toast(errorMessage(error), "error");
           setSettings(data!);
         }} />
@@ -273,7 +275,7 @@ export function LeadFinder({ ws, canManage, onConnectors, onProfiles, onRates }:
       )}
       {setup && ready && <SetupDialog ws={ws} base={base} profiles={profiles.filter((p) => p.status === "active")} settings={settings} initial={setup}
         onClose={() => setSetup(null)} onStarted={(id) => { setSetup(null); setOpen({ id }); }} />}
-      {editingSettings && <SettingsDialog base={base} settings={settings} onClose={() => setEditingSettings(false)} onSaved={(s) => { setSettings(s); setEditingSettings(false); }} />}
+      {editingSettings && <SettingsDialog base={wsBase} settings={settings} onClose={() => setEditingSettings(false)} onSaved={(s) => { setSettings(s); setEditingSettings(false); }} />}
     </div>
   );
 }

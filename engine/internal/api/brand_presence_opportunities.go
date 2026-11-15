@@ -351,6 +351,19 @@ func (s *Server) coverageOpportunities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, 400, "invalid_request", "exclude_competitors is true or false")
 		return
 	}
+	// Whose site it is: the owner of the site's company record.
+	switch q.Get("owner") {
+	case "":
+	case "me":
+		add("so.owner=$%d", a.personID())
+	case "none":
+		where += " AND so.owner IS NULL"
+	case "others":
+		add("so.owner IS NOT NULL AND so.owner<>$%d", a.personID())
+	default:
+		writeError(w, r, 400, "invalid_request", "owner is me, none or others")
+		return
+	}
 	order, ok := opportunitySorts[q.Get("sort")]
 	if !ok {
 		writeError(w, r, 400, "invalid_request", "sort is score, domain_rating, traffic, ai_citations, competitors or recent")
@@ -376,8 +389,11 @@ func (s *Server) coverageOpportunities(w http.ResponseWriter, r *http.Request) {
 	}
 	// Each row says how many opportunities its site has; grouped by
 	// domain, a site is one row, its best opportunity.
-	from := `(SELECT o.*, count(*) OVER (PARTITION BY o.host) AS site_opportunities,
- row_number() OVER (PARTITION BY o.host ORDER BY ` + order + `) AS site_rank FROM placement_opportunities o WHERE ` + where + `) o`
+	from := `(SELECT o.*, so.owner AS site_owner_id, (SELECT u.name FROM users u WHERE u.id::text = so.owner) AS site_owner_name,
+ (SELECT nullif(u.avatar_url, '') FROM users u WHERE u.id::text = so.owner) AS site_owner_avatar_url,
+ count(*) OVER (PARTITION BY o.host) AS site_opportunities,
+ row_number() OVER (PARTITION BY o.host ORDER BY ` + order + `) AS site_rank FROM placement_opportunities o
+ LEFT JOIN LATERAL ` + coverageSiteRecordSQL("o.host") + ` so ON true WHERE ` + where + `) o`
 	if group == "domain" {
 		from += " WHERE o.site_rank=1"
 	}

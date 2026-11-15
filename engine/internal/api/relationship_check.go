@@ -68,9 +68,18 @@ type relationshipCheck struct {
 		Stale          bool       `json:"stale"`
 	} `json:"contact"`
 	Team []relCheckTeammate `json:"team"`
+	// Owner is the teammate managing the company (its owner field), the
+	// claim on a site in Presence.
+	Owner *relCheckOwner `json:"owner"`
 	// Flags sum it up: already_customer, in_other_pipeline, open_deal,
-	// warm_intro and stale_thread.
+	// warm_intro, stale_thread and claimed (a teammate other than the
+	// caller manages the company).
 	Flags []string `json:"flags"`
+}
+
+type relCheckOwner struct {
+	UserID string `json:"user_id"`
+	Name   string `json:"name"`
 }
 
 func (s *Server) routesRelationship(mux *http.ServeMux) {
@@ -100,6 +109,14 @@ func (s *Server) recordRelationship(w http.ResponseWriter, r *http.Request) {
 		if company != "" {
 			out.CompanyID = &company
 			subjects = append(subjects, company)
+			var owner relCheckOwner
+			err := tx.QueryRow(ctx, `SELECT u.id::text, u.name FROM records c JOIN users u ON u.id::text = c.attributes->>'owner'
+				WHERE c.id = $1 AND c.workspace_id = $2`, company, a.WorkspaceID).Scan(&owner.UserID, &owner.Name)
+			if err == nil {
+				out.Owner = &owner
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
 		}
 		if rec.Type == "person" {
 			subjects = append(subjects, rec.ID)
@@ -217,6 +234,9 @@ func (s *Server) recordRelationship(w http.ResponseWriter, r *http.Request) {
 	}
 	if out.Contact.Stale {
 		out.Flags = append(out.Flags, "stale_thread")
+	}
+	if out.Owner != nil && out.Owner.UserID != a.UserID {
+		out.Flags = append(out.Flags, "claimed")
 	}
 	writeJSON(w, http.StatusOK, out)
 }

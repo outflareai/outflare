@@ -519,19 +519,23 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 			return v, err
 		}
 		// Cost, by each campaign's cost model (B6): per click for token
-		// (what the traffic source reported with {cost}) and cpc, per
+		// (the click's share of what the network reported spending, Z2,
+		// else what the traffic source reported with {cost}) and cpc, per
 		// conversion for cpa and revshare. A fixed amount is in the
 		// campaign's currency, else its traffic source's, else the
 		// brand's; a share is in the payout's. It splits by every level.
+		// A reported cost counts on every click, likely bots too: the
+		// network charged for them, and the totals must match its own.
+		// A fixed cpc counts real clicks only, as before.
 		cargs := append(slices.Clone(args), v.Currency)
 		pc := `$` + strconv.Itoa(len(cargs))
 		fixedCur := `COALESCE(NULLIF(tc.cost_currency, ''), ts.currency, ` + pc + `)`
 		costQueries := []string{
 			`SELECT ` + inKeys + `CASE WHEN tc.cost_model = 'cpc' THEN ` + fixedCur + ` ELSE COALESCE(ts.currency, ` + pc + `) END AS cur,
-				CASE WHEN tc.cost_model = 'cpc' THEN tc.cost_amount_micros WHEN COALESCE(tc.cost_model, 'token') = 'token' THEN k.cost_micros ELSE 0 END AS v` + from + `
+				CASE WHEN tc.cost_model = 'cpc' THEN tc.cost_amount_micros WHEN COALESCE(tc.cost_model, 'token') = 'token' THEN COALESCE(k.network_cost_micros, k.cost_micros) ELSE 0 END AS v` + from + `
 			LEFT JOIN tracker_traffic_sources ts ON ts.id = tc.traffic_source_id
-			WHERE k.workspace_id = $2 AND k.brand_id = $3 AND k.clicked_at >= $4 AND k.clicked_at < $5 AND NOT k.likely_bot
-			  AND $1::text <> ''` + where,
+			WHERE k.workspace_id = $2 AND k.brand_id = $3 AND k.clicked_at >= $4 AND k.clicked_at < $5
+			  AND (NOT k.likely_bot OR COALESCE(tc.cost_model, 'token') = 'token') AND $1::text <> ''` + where,
 			`SELECT ` + inKeys + `CASE WHEN tc.cost_model = 'cpa' THEN ` + fixedCur + ` ELSE cv.currency END AS cur,
 				CASE WHEN tc.cost_model = 'cpa' THEN tc.cost_amount_micros ELSE cv.payout_micros * tc.cost_share_bp / 10000 END AS v
 			FROM tracker_conversions cv JOIN tracking_link_clicks k ON k.id = cv.click_id AND k.workspace_id = cv.workspace_id

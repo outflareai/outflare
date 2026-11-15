@@ -168,7 +168,7 @@ func TestLeadsBecomePeopleAndActivityFollows(t *testing.T) {
 	// A reply from Bo links through his lead; one from a stranger stays
 	// unlinked; a meeting with Ana links by her address.
 	var mailbox string
-	if err := pool.QueryRow(ctx, `INSERT INTO mailboxes (workspace_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials) VALUES ($1, 'sam@send.example', 'other', 'h', 587, 'u', 'h', 993, 'u', '\x00') RETURNING id::text`, ws).Scan(&mailbox); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO mailboxes (brand_id, workspace_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials) VALUES (outflare_first_brand($1), $1, 'sam@send.example', 'other', 'h', 587, 'u', 'h', 993, 'u', '\x00') RETURNING id::text`, ws).Scan(&mailbox); err != nil {
 		t.Fatal(err)
 	}
 	var boReply, strangerReply, meeting *string

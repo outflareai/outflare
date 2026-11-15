@@ -305,7 +305,7 @@ func overviewRange(q url.Values, latest time.Time) (from, to time.Time, err erro
 // the brand an analytics site was set to report for, when one was.
 func (s *Server) workspaceHosts(ctx context.Context, ws string) ([]string, map[string]string, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT host, COALESCE(outflare_site_brand(integration_id, site)::text, ''), true
+		SELECT host, COALESCE(outflare_site_brand_or_first(integration_id, site)::text, ''), true
 		FROM analytics_syncs a WHERE workspace_id = $1 AND host <> ''
 		  AND EXISTS (SELECT 1 FROM analytics_site_brands o WHERE o.integration_id = a.integration_id AND o.site = a.site)
 		UNION SELECT host, '', false FROM analytics_syncs WHERE workspace_id = $1 AND host <> ''

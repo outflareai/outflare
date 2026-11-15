@@ -60,7 +60,9 @@ const (
 // MaxArchiveDays); otherwise everything comes from Postgres, which only
 // keeps what the event retention keeps.
 func Simulate(ctx context.Context, pool *pgxpool.Pool, r Rule, days int, archive EventArchive) (Simulation, error) {
-	if (r.Trigger.Kind == KindEvent || r.Trigger.Kind == KindAbsence) && archive != nil {
+	// The archive keeps people's events by person; a rule about companies
+	// or deals reads Postgres, which knows who is at which company.
+	if (r.Trigger.Kind == KindEvent || r.Trigger.Kind == KindAbsence) && archive != nil && r.RecordType == "person" {
 		return simulateArchived(ctx, pool, r, days, archive)
 	}
 	sim := Simulation{WindowDays: days, Sample: []string{}, Source: "postgres"}
@@ -90,17 +92,25 @@ func Simulate(ctx context.Context, pool *pgxpool.Pool, r Rule, days int, archive
 		switch r.Trigger.Kind {
 		case KindEvent:
 			sim.Note = "Each matching event in the window, as if the rule had been active."
-			rows, err = tx.Query(ctx, `SELECT e.record_id::text, r.brand_id::text, r.attributes, e.properties, e.occurred_at
-				FROM customer_events e JOIN records r ON r.id = e.record_id AND r.merged_into IS NULL AND r.archived_at IS NULL AND r.record_type = $3
+			rows, err = tx.Query(ctx, `SELECT sj.id::text, r.brand_id::text, r.attributes, e.properties, e.occurred_at
+				FROM customer_events e JOIN records er ON er.id = e.record_id
+				JOIN LATERAL (SELECT CASE WHEN er.record_type = 'person' AND $3 <> 'person' THEN COALESCE(e.account_id, (SELECT l.to_id FROM record_relationships l
+					WHERE l.from_id = er.id AND l.kind = 'companies' AND l.valid_to IS NULL ORDER BY l.valid_from, l.id LIMIT 1)) ELSE e.record_id END AS id) sj ON sj.id IS NOT NULL
+				JOIN records r ON r.id = sj.id AND r.merged_into IS NULL AND r.archived_at IS NULL AND r.record_type = $3
 				WHERE e.workspace_id = $1 AND e.name = $2 AND e.occurred_at >= now() - $4::interval AND e.source <> 'browser'
 				ORDER BY e.occurred_at LIMIT $5`, r.WorkspaceID, r.Trigger.Event, r.RecordType, window, simulateLimit+1)
 		case KindAbsence:
 			sim.Note = "Each start event in the window whose time has run out with no " + r.Trigger.Event + " after it. Fields are tested as they are now."
-			rows, err = tx.Query(ctx, `SELECT s.record_id::text, r.brand_id::text, r.attributes, s.properties, s.occurred_at
-				FROM customer_events s JOIN records r ON r.id = s.record_id AND r.merged_into IS NULL AND r.archived_at IS NULL AND r.record_type = $3
+			rows, err = tx.Query(ctx, `SELECT sj.id::text, r.brand_id::text, r.attributes, s.properties, s.occurred_at
+				FROM customer_events s JOIN records er ON er.id = s.record_id
+				JOIN LATERAL (SELECT CASE WHEN er.record_type = 'person' AND $3 <> 'person' THEN COALESCE(s.account_id, (SELECT l.to_id FROM record_relationships l
+					WHERE l.from_id = er.id AND l.kind = 'companies' AND l.valid_to IS NULL ORDER BY l.valid_from, l.id LIMIT 1)) ELSE s.record_id END AS id) sj ON sj.id IS NOT NULL
+				JOIN records r ON r.id = sj.id AND r.merged_into IS NULL AND r.archived_at IS NULL AND r.record_type = $3
 				WHERE s.workspace_id = $1 AND s.name = $2 AND s.occurred_at >= now() - $4::interval
 				  AND s.occurred_at <= now() - make_interval(secs => $6) AND s.source <> 'browser'
-				  AND NOT EXISTS (SELECT 1 FROM customer_events t WHERE t.workspace_id = $1 AND t.record_id = s.record_id AND t.name = $7
+				  AND NOT EXISTS (SELECT 1 FROM customer_events t WHERE t.workspace_id = $1 AND t.name = $7
+					AND (t.record_id = sj.id OR ($3 <> 'person' AND (t.account_id = sj.id OR t.record_id IN (SELECT l.from_id FROM record_relationships l
+						WHERE l.to_id = sj.id AND l.kind = 'companies' AND l.valid_to IS NULL))))
 					AND t.occurred_at > s.occurred_at AND t.occurred_at <= s.occurred_at + make_interval(secs => $6))
 				ORDER BY s.occurred_at LIMIT $5`, r.WorkspaceID, r.Trigger.Start(), r.RecordType, window, simulateLimit+1, r.Trigger.WithinSeconds, r.Trigger.Event)
 		case KindChange:

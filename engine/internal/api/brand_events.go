@@ -684,6 +684,15 @@ type inboxCodeCount struct {
 	ExpiresAt *time.Time `json:"expires_at"`
 }
 
+// eventSourceCount is how many events the brand stored from one source
+// (browser for its website, api, segment, outflare...), whichever way they
+// came in: the events API above, the workspace route or the website script.
+type eventSourceCount struct {
+	Source string `json:"source"`
+	Day    int    `json:"last_24h"`
+	Week   int    `json:"last_7d"`
+}
+
 type inboxNameCount struct {
 	Name      string     `json:"name"`
 	Count     int        `json:"count"`
@@ -694,14 +703,15 @@ func (s *Server) brandEventsSummary(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
 	var out struct {
-		Day             inboxCounts      `json:"last_24h"`
-		Week            inboxCounts      `json:"last_7d"`
-		Pending         int              `json:"pending"`
-		OldestPendingAt *time.Time       `json:"oldest_pending_at"`
-		Codes           []inboxCodeCount `json:"rejection_codes"`
-		HeldNames       []inboxNameCount `json:"held_names"`
-		NameChecks      []eventNameCheck `json:"name_checks"`
-		RetentionDays   map[string]int   `json:"retention_days"`
+		Day             inboxCounts        `json:"last_24h"`
+		Week            inboxCounts        `json:"last_7d"`
+		Pending         int                `json:"pending"`
+		OldestPendingAt *time.Time         `json:"oldest_pending_at"`
+		Codes           []inboxCodeCount   `json:"rejection_codes"`
+		HeldNames       []inboxNameCount   `json:"held_names"`
+		NameChecks      []eventNameCheck   `json:"name_checks"`
+		Sources         []eventSourceCount `json:"sources"`
+		RetentionDays   map[string]int     `json:"retention_days"`
 	}
 	out.RetentionDays = inboxRetention
 	err := s.readTx(ctx, func(tx pgx.Tx) error {
@@ -758,7 +768,21 @@ func (s *Server) brandEventsSummary(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		out.NameChecks, err = askedEventNames(ctx, tx, a.WorkspaceID, a.Brand)
+		if out.NameChecks, err = askedEventNames(ctx, tx, a.WorkspaceID, a.Brand); err != nil {
+			return err
+		}
+		// Every event the brand stored, by source, so the website's and
+		// other senders' events show here too, not only the events API's.
+		rows, err = tx.Query(ctx, `SELECT source, count(*) FILTER (WHERE occurred_at > now() - interval '1 day'), count(*)
+			FROM customer_events WHERE brand_id = $1 AND workspace_id = $2 AND occurred_at > now() - interval '7 days'
+			GROUP BY source ORDER BY count(*) DESC, source`, a.Brand, a.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		out.Sources, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (eventSourceCount, error) {
+			var c eventSourceCount
+			return c, r.Scan(&c.Source, &c.Day, &c.Week)
+		})
 		return err
 	})
 	if s.allocError(w, r, err) {
@@ -769,6 +793,9 @@ func (s *Server) brandEventsSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	if out.HeldNames == nil {
 		out.HeldNames = []inboxNameCount{}
+	}
+	if out.Sources == nil {
+		out.Sources = []eventSourceCount{}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

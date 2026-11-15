@@ -90,6 +90,7 @@ export function page(name: string) {
 // without a request. Names are object.verb in the past tense, like the
 // server's; add new ones to this list (AGENTS.md, "Events").
 export type UiEvent =
+  | "ui.sales_reporting_interacted" // bounded view, period, stage and wallet values only
   | "ui.sales_section_opened"
   | "ui.sales_filter_changed"
   | "ui.sales_source_opened"
@@ -204,6 +205,41 @@ export type UiEvent =
   | "ui.journey_change_undone" // an edit in the journey builder undone or redone, by button or keyboard (redo)
   | "ui.journey_version_viewed" // an older journey version shown read-only (version, current)
   | "ui.journey_test_opened" // test mode opened in the journey builder (version: live or draft, status)
+  | "ui.journey_action_preset_picked" // journey builder: a ready-made call picked for a "Do an Outflare action" step (preset: its id, or custom)
+  | "ui.signals_filter_changed" // Needs attention switched between mine, all open, late, no owner, snoozed and closed (filter)
+  | "ui.signal_types_opened" // the signal types editor opened from Needs attention
+  | "ui.signal_flag_opened" // "Flag for attention" opened on a person or company
+  | "ui.playbook_set_up" // Playbooks: a playbook's setup kit applied from its page without starting a run (playbook_id, changes, holdout_percent)
+  | "ui.signal_credit_opened" // Needs attention: the credit view opened
+  | "ui.signal_credit_period_changed" // Credit: the period changed (days)
+  | "ui.revenue_forecast_opened" // Revenue: the forecast opened
+  | "ui.revenue_forecast_quarter_changed" // Forecast: another quarter picked (ahead: 0 for this quarter)
+  | "ui.revenue_forecast_target_saved" // Forecast: a quarter's target saved or removed (has_target)
+  | "ui.revenue_forecast_weights_saved" // Forecast: the weights saved (stages)
+  | "ui.team_org_chart_opened" // Settings, Team: the org chart opened (people)
+  | "ui.sales_team_opened" // Revenue: the sales team opened
+  | "ui.sales_team_quarter_changed" // Sales team: another quarter picked (ahead)
+  | "ui.sales_team_quotas_saved" // Sales team: quotas saved (people)
+  | "ui.commissions_opened" // Revenue: commissions opened
+  | "ui.commission_month_changed" // Commissions: another month picked (back)
+  | "ui.commission_statement_downloaded" // Commissions: the month's lines downloaded as a CSV file (lines)
+  | "ui.commission_statement_opened" // Commissions: a person's lines shown (lines)
+  | "ui.commission_statement_changed" // Commissions: a month approved, marked paid or reopened (status)
+  | "ui.commission_plan_saved" // Commissions: a plan saved (rules, status, is_new)
+  | "ui.commission_starter_picked" // Commissions: a new plan started from an example (rules)
+  | "ui.own_playbook_builder_opened" // Playbooks: "New playbook" pressed
+  | "ui.own_playbook_opened" // Playbooks: one of the brand's own playbooks opened (parts)
+  | "ui.own_playbook_saved" // Playbook builder: a playbook made or changed (parts, is_new)
+  | "ui.own_playbook_removed" // A brand's own playbook removed (parts)
+  | "ui.account_group_opened" // Account page: another company in the group opened from the Company group card (depth)
+  | "ui.conversation_signals_opened" // Needs attention: the conversations setting opened
+  | "ui.conversation_signals_saved" // Conversations: reading switched on or off, or a channel changed (enabled, channels)
+  | "ui.routing_saved" // Routing: the brand's routing rules saved (rules)
+  | "ui.revenue_period_changed" // Revenue: the period switched (days)
+  | "ui.score_starter_picked" // Scores: a starter (health, lead) opened in the editor (starter)
+  | "ui.signal_assigned" // Needs attention: a signal given to a teammate from the Assign menu
+  | "ui.record_owner_assigned" // A record's page or the CRM list: an owner picked (record_type; to: me, teammate, nobody)
+  | "ui.record_routed" // A company's or person's page: Route pressed for a record with no owner (outcome)
   | "ui.automation_map_node_picked" // a node picked on the automation map, lighting up what it sets off and what sets it off (kind)
   | "ui.automation_map_flag_opened" // a flag on the automation map shown on the map (flag: loop, overlap, unheard or never_fires)
   | "ui.automation_map_filtered" // the automation map switched between everything and only what's live (show), or narrowed to what touches a sequence, list or tag (touches: its kind)
@@ -266,6 +302,7 @@ export type UiEvent =
   | "ui.setup_method_used" // a way to do an install step picked (step, method: gtm, dns, developer, ai, manual; how: copied, email, claude, chatgpt)
   | "ui.indexability_filtered" // a site's indexability report filtered by verdict or issue (filter, value: the verdict or issue id, or all)
   | "ui.logs_filtered" // a filter on the Logs page changed (filter: which one)
+  | "ui.brand_events_view_changed" // the view on a brand's Events page changed (view: all for every event, api for the events API's inbox)
   | "ui.brand_events_filtered" // a filter on a brand's Events page changed (filter: status, code or source; value: the status or code, or set/all for source)
   | "ui.brand_event_opened" // one received event opened on a brand's Events page (status, code)
   | "ui.brand_events_replayed" // rejected or held events replayed from a brand's Events page (how: selected, code, held_name or one; replayed)

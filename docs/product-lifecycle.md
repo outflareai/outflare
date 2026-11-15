@@ -2,7 +2,7 @@
 
 A brand often sells more than one product, and a customer can be in a different place with each one: still paying for one, cancelled on another, trying a third. Outflare keeps a **stage per product** for every company and person, so a rule or journey reacts to the right product. A company that cancels one product while it keeps paying for another is not "churned", and it doesn't get a "welcome back" email when it uses the product it never left.
 
-This is part of the [customer data platform](customers.md). Everything here works the same from the REST API, the MCP server and the web app (People → Products, and a Products card on each person and company). It belongs to one brand: the API lives under `/v1/brands/{brand}/`.
+This is part of the [customer data platform](customers.md). Everything here works the same from the REST API, the MCP server and the web app (CRM → Customer data → Products, and a Products card on each person and company). It belongs to one brand: the API lives under `/v1/brands/{brand}/`.
 
 ## Products
 

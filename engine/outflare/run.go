@@ -86,13 +86,18 @@ import (
 	"github.com/outflareai/outflare/engine/internal/platforms"
 	"github.com/outflareai/outflare/engine/internal/ranks"
 	"github.com/outflareai/outflare/engine/internal/recmetrics"
+	"github.com/outflareai/outflare/engine/internal/recordevents"
 	"github.com/outflareai/outflare/engine/internal/research"
+	"github.com/outflareai/outflare/engine/internal/revenue"
+	"github.com/outflareai/outflare/engine/internal/routing"
 	"github.com/outflareai/outflare/engine/internal/rules"
+	"github.com/outflareai/outflare/engine/internal/scores"
 	"github.com/outflareai/outflare/engine/internal/searchinsights"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 	"github.com/outflareai/outflare/engine/internal/sending"
 	"github.com/outflareai/outflare/engine/internal/seointel"
 	"github.com/outflareai/outflare/engine/internal/seosync"
+	"github.com/outflareai/outflare/engine/internal/signals"
 	"github.com/outflareai/outflare/engine/internal/smartlists"
 	"github.com/outflareai/outflare/engine/internal/support"
 	"github.com/outflareai/outflare/engine/internal/sysmail"
@@ -394,7 +399,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	lifecycle.Register(sendQueue)
 	// Journeys start runs from customer events and move them through their
 	// steps, sending with the lifecycle service.
-	journeyRuns := &journeys.Service{Pool: pool, Emails: lifecycle, Log: log, Store: integrations, Box: box, AllowPrivate: cfg.WebhooksAllowPrivate}
+	journeyRuns := &journeys.Service{Pool: pool, Emails: lifecycle, Log: log, Store: integrations, Box: box, AllowPrivate: cfg.WebhooksAllowPrivate, Router: routing.Router{}}
 	journeyRuns.Register(queue)
 	// Smart lists keep their members up to date from their rules.
 	smart := &smartlists.Service{Pool: pool, Log: log}
@@ -403,6 +408,11 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// own, which journeys and webhooks act on.
 	ruleEngine := &rules.Service{Pool: pool, Log: log}
 	ruleEngine.Register(queue)
+	signalEngine := &signals.Service{Pool: pool, Log: log}
+	signalEngine.Register(queue)
+	// Scores, such as a health score, kept on every company or person.
+	scoreEngine := &scores.Service{Pool: pool, Log: log}
+	scoreEngine.Register(queue)
 	// Lifecycle stages per product: each move is an event on the timeline.
 	lifecycleStages := &productlifecycle.Service{Pool: pool, Log: log}
 	lifecycleStages.Register(queue)
@@ -471,6 +481,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// Journey steps that change fields write through the API's checks.
 	journeyRuns.Fields = apiServer
 	journeyRuns.Deals = apiServer
+	journeyRuns.Agents = apiServer
 	journeyRuns.AI = apiServer.JourneyAI()
 	host.server = apiServer
 	researcher.Models = apiServer.AIModels()
@@ -651,6 +662,31 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			ruleEngine.Run(ctx, time.Minute)
 		}()
+		// Signals nobody picked up in time go to the owners and admins.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			signalEngine.Run(ctx, time.Minute)
+		}()
+		// Every score is worked out again once a day.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			scoreEngine.Run(ctx, time.Minute)
+		}()
+		// Each brand's recurring revenue, and how it moved today.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			(&revenue.Service{Pool: pool, Log: log}).Run(ctx, 15*time.Minute)
+		}()
+		// Records with no owner go to the member the brand's routing
+		// rules pick.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			(&routing.Service{Pool: pool, Log: log}).Run(ctx, time.Minute)
+		}()
 		// Lifecycle inactivity moves (at risk, churned for no usage).
 		wg.Add(1)
 		go func() {
@@ -667,6 +703,13 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			plat.Loop(ctx, time.Minute)
+		}()
+		// Networks' spend per campaign and target, shared out over the
+		// tracker's clicks (Z2).
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunNetworkCosts(ctx, 15*time.Minute)
 		}()
 		// Tracker clicks' IP reputation lookups, on each brand's own
 		// connection (B7c).
@@ -750,6 +793,13 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			outcomes.RunMeetingEvents(ctx, pool, log, time.Minute)
+		}()
+		// Deals, support conversations and tasks on timelines, as
+		// customer events.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recordevents.Run(ctx, pool, log, time.Minute)
 		}()
 		wg.Add(1)
 		go func() {

@@ -43,7 +43,8 @@ import { Separator } from "@/components/ui/separator";
 import { FeedbackButton, WhatsNewButton } from "@/components/build-with-us";
 
 export const tabNames: Record<Tab, string> = {
- crm: "Sales workspace",
+ crm: "Sales conversations",
+ "sales-reporting": "Sales reporting",
   overview: "Home",
   "get-started": "Get started",
   setup: "Brand setup",
@@ -116,7 +117,7 @@ export const tabNames: Record<Tab, string> = {
   playbooks: "Playbooks",
   outcomes: "Outcomes",
   sequences: "Sequences",
-  people: "People",
+  people: "Customer data",
   query: "Query",
   leads: "Leads",
   lists: "Lists",
@@ -137,10 +138,13 @@ export const tabNames: Record<Tab, string> = {
   broadcasts: "Broadcasts",
   journeys: "Journeys",
   rules: "Rules",
+  signals: "Needs attention",
+  revenue: "Revenue",
   automations: "Automation map",
   providers: "Email providers",
   support: "Support inbox",
   "agent-mail": "Overview",
+  "outreach-mailboxes": "Outreach Mailboxes",
   knowledge: "Library",
   "help-centre": "Help centre",
   company: "About your company",
@@ -168,6 +172,7 @@ export const tabNames: Record<Tab, string> = {
 // palette show it.
 export const tabBlurbs: Record<Tab, string> = {
  crm: "People, companies, deals, saved views, tasks and notes in one sales workspace.",
+ "sales-reporting": "Compare Sales milestones, inspect interval leads, and review growth, tool costs and mailbox capacity.",
   overview: "How sending is going across every mailbox and sequence, and what to set up next.",
   "get-started": "Add your brand, invite your team and connect your AI model, analytics and tools. Every step can be skipped.",
   setup: "One brand's website script, site verification and tools, in order, each in one click where it can be. Leave any time and pick up where you left off.",
@@ -199,6 +204,8 @@ export const tabBlurbs: Record<Tab, string> = {
   broadcasts: "One lifecycle email to many people at once, such as a newsletter or a launch.",
   journeys: "Flows an event starts: send an email, wait, branch on what people did, exit.",
   rules: "Turn what people do, or don't do, into events of your own that journeys start on: signed up and didn't activate within 7 days.",
+  signals: "People and companies someone should act on now, each with an owner and a due date.",
+  revenue: "Recurring revenue and how it moved, what you collected, renewals coming up and revenue at risk.",
   automations: "Every rule and journey in one picture: what sets each off, what it touches, and what needs a look.",
   providers: "Amazon SES, Postmark or Resend, connected step by step, and the domains you send from.",
   "link-building": "Pages that could link to your site, from every way of earning links, followed until the link is live; one website pitched at a time.",
@@ -265,6 +272,7 @@ export const tabBlurbs: Record<Tab, string> = {
   seo: "Domain rating, backlinks and the keywords your sites rank for, from DataForSEO or Ahrefs.",
   connectors: "The services Outflare can use, connected once for the whole workspace.",
   "agent-mail": "Hosted email inboxes for your agents, within the current brand.",
+  "outreach-mailboxes": "Outreach mailboxes set up and billed for you, on your own domains, within the current brand.",
   support: "Customers who write to your support mailbox, as conversations your team assigns, answers and closes.",
   knowledge: "Articles and quick answers your team writes once: products, prices, policies and stock answers. Your team and every AI in Outflare answer from them.",
   "help-centre": "A public site where customers read and search what you've marked for the help centre, styled like your brand.",
@@ -317,6 +325,8 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   broadcasts: "/docs/guides/lifecycle-email/#broadcasts",
   journeys: "/docs/guides/lifecycle-email/#journeys",
   rules: "/docs/guides/rules/",
+  signals: "/docs/guides/signals/",
+  revenue: "/docs/guides/revenue/",
   automations: "/docs/guides/lifecycle-email/#the-automation-map",
   providers: "/docs/integrations/email-providers/",
   allocation: "/docs/guides/mailbox-allocation/",
@@ -395,9 +405,10 @@ export type NavGroup = { label?: string; tabs: Tab[] };
 // with no pages yet is left out, and so is a heading with no modules.
 export const everyday: Tab[] = ["overview", "inbox", "agents"];
 
-export type ModuleGroup = "customers" | "email" | "search" | "social" | "ads" | "measure" | "company";
+export type ModuleGroup = "customers" | "automations" | "email" | "search" | "social" | "ads" | "measure" | "company";
 export const moduleGroups: { id: ModuleGroup; label: string }[] = [
   { id: "customers", label: "Customers" },
+  { id: "automations", label: "Automations" },
   { id: "email", label: "Email and outreach" },
   { id: "search", label: "Search" },
   { id: "social", label: "Social" },
@@ -406,19 +417,27 @@ export const moduleGroups: { id: ModuleGroup; label: string }[] = [
   { id: "company", label: "Company" },
 ];
 
-export type Module = { id: string; label: string; icon: IconName; group: ModuleGroup; tabs: Tab[] };
+// links are places inside one of the module's pages that people need in one
+// click (the CRM's people, companies and deals), listed before its pages.
+export type ModuleLink = { tab: Tab; item: string; label: string };
+export type Module = { id: string; label: string; icon: IconName; group: ModuleGroup; tabs: Tab[]; links?: ModuleLink[] };
 export const modules: Module[] = [
   // Customers: who they are, who is on the site, answering them, and the
   // partners who send them.
-  { id: "crm", label: "CRM", icon: "leads", group: "customers", tabs: ["crm", "people", "query", "leads", "lists", "telegram", "lead-finder", "email-finder", "suppression"] },
+  { id: "attention", label: "Needs attention", icon: "attention", group: "customers", tabs: ["signals"] },
+  { id: "crm", label: "CRM", icon: "leads", group: "customers", tabs: ["crm", "sales-reporting", "people", "query", "lists", "telegram", "suppression"], links: [{ tab: "crm", item: "person", label: "People" }, { tab: "crm", item: "account", label: "Companies" }, { tab: "crm", item: "deal", label: "Deals" }] },
   { id: "visitors", label: "Visitors", icon: "visitors", group: "customers", tabs: ["visitors"] },
   { id: "support", label: "Support", icon: "support", group: "customers", tabs: ["support"] },
   { id: "partners", label: "Partners", icon: "partners", group: "customers", tabs: ["partners"] },
+  // Automations: what runs by itself across every module. Playbooks are
+  // the recipes; rules and journeys are what they are made of.
+  { id: "playbooks", label: "Playbooks", icon: "playbooks", group: "automations", tabs: ["playbooks"] },
+  { id: "flows", label: "Rules and journeys", icon: "lifecycle", group: "automations", tabs: ["rules", "journeys", "automations"] },
   // Email and outreach: cold outreach, the mailboxes behind it, and the
   // email customers get.
-  { id: "outreach", label: "Outreach", icon: "sequences", group: "email", tabs: ["sequences", "link-building", "link-autopilot", "news", "stories", "pr-autopilot", "allocation", "reports"] },
+  { id: "outreach", label: "Outreach", icon: "sequences", group: "email", tabs: ["sequences", "outreach-mailboxes", "leads", "lead-finder", "email-finder", "link-building", "link-autopilot", "news", "stories", "pr-autopilot", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", group: "email", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
-  { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", group: "email", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
+  { id: "lifecycle", label: "Email", icon: "inbox", group: "email", tabs: ["lifecycle", "broadcasts", "templates", "topics", "emails", "providers"] },
   { id: "agent-mail", label: "Agent Mail", icon: "inbox", group: "email", tabs: ["agent-mail"] },
   // Search: where the brand is found, in search engines and AI answers,
   // against its competitors, and everywhere else it appears.
@@ -437,9 +456,8 @@ export const modules: Module[] = [
   // The tracker (plans/ad-tracker-ui.md B0): the report first; campaigns,
   // offers, landers, flows and the rest join it.
   { id: "tracker", label: "Tracker", icon: "reports", group: "ads", tabs: ["tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs"] },
+  { id: "revenue", label: "Revenue", icon: "revenue", group: "measure", tabs: ["revenue"] },
   { id: "analytics", label: "Analytics", icon: "reports", group: "measure", tabs: ["dashboards", "funnels", "trends", "retention", "paths", "channels", "outcomes", "analytics", "live", "page-speed", "tracking", "flags", "ab-tests", "links"] },
-  // Playbooks: recipes that use every module above, from playbooks/ in the repository.
-  { id: "playbooks", label: "Playbooks", icon: "playbooks", group: "company", tabs: ["playbooks"] },
   // What the business knows: knowledge, company context and memories, which
   // every module and agent reads.
   { id: "knowledge", label: "Knowledge", icon: "book", group: "company", tabs: ["knowledge", "help-centre", "company"] },
@@ -451,7 +469,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "telegram"];
+const brandTabs: readonly Tab[] = ["crm", "sales-reporting", "revenue","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "signals", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "outreach-mailboxes", "telegram"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -612,7 +630,9 @@ type SidebarProps = {
   onWorkspace: (id: string) => void;
   onCreateWorkspace: () => void;
   tab: Tab;
-  onTab: (t: Tab) => void;
+  // item is what is open inside the page, so a link to a place inside a page can show as current.
+  item?: string;
+  onTab: (t: Tab, item?: string) => void;
   unread: number;
   // counts are badges on pages inside modules, such as pitches waiting on
   // Link building.
@@ -637,6 +657,7 @@ export function Sidebar(p: SidebarProps) {
   // open it in a new tab; a plain click still switches page in place.
   const href = (t: Tab) => (p.ws ? appPath(p.ws.id, t) : undefined);
   const go = (t: Tab) => () => { p.onTab(t); close(); };
+  const onLink = (l: ModuleLink) => p.tab === l.tab && (p.item ?? "").split(":")[0] === l.item;
   return (
     <UISidebar collapsible="icon">
       <SidebarHeader className="gap-2 pt-3">
@@ -677,6 +698,21 @@ export function Sidebar(p: SidebarProps) {
             {g.modules.map((m) => {
               const inside = m.tabs.includes(p.tab);
               const expanded = open === m.id;
+              // A module with one page is that page: one click, nothing to open.
+              if (m.tabs.length === 1) {
+                const t = m.tabs[0];
+                return (
+                  <SidebarMenuItem key={m.id}>
+                    <SidebarMenuButton asChild isActive={inside} tooltip={m.label} className="h-10 text-[13px] md:h-7">
+                      <a href={href(t)} onClick={(e) => inPlace(e, go(t))} aria-current={inside ? "page" : undefined}>
+                        <Icon name={m.icon} className={cn("size-4", inside && "text-brand-strong dark:text-brand")} />
+                        <span className="flex-1 font-medium">{m.label}</span>
+                        <CountBadge n={p.counts?.[t] ?? 0} />
+                      </a>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              }
               return (
                 <SidebarMenuItem key={m.id}>
                   <SidebarMenuButton
@@ -695,10 +731,19 @@ export function Sidebar(p: SidebarProps) {
                   <div className={cn("grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none group-data-[collapsible=icon]:hidden", expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")} inert={!expanded}>
                     <div className="min-h-0 overflow-hidden">
                       <SidebarMenuSub className="mr-0 gap-px py-0.5 pr-0">
-                        {m.tabs.map((t) => (
+                        {(m.links ?? []).filter((l) => m.tabs.includes(l.tab)).map((l) => (
+                          <SidebarMenuSubItem key={`${l.tab}:${l.item}`} className="flex items-center">
+                            <SidebarMenuSubButton asChild isActive={onLink(l)}>
+                              <a href={p.ws ? appPath(p.ws.id, l.tab, l.item) : undefined} onClick={(e) => inPlace(e, () => { p.onTab(l.tab, l.item); close(); })} aria-current={onLink(l) ? "page" : undefined} className="h-9 w-full flex-1 text-[13px] md:h-7">
+                                <span className="flex-1 text-left">{l.label}</span>
+                              </a>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                        {m.tabs.map((t) => ({ t, on: p.tab === t && !(m.links ?? []).some(onLink) })).map(({ t, on }) => (
                           <SidebarMenuSubItem key={t} className="flex items-center">
-                            <SidebarMenuSubButton asChild isActive={p.tab === t}>
-                              <a href={href(t)} onClick={(e) => inPlace(e, go(t))} aria-current={p.tab === t ? "page" : undefined} className="group/nav h-9 w-full flex-1 text-[13px] md:h-7">
+                            <SidebarMenuSubButton asChild isActive={on}>
+                              <a href={href(t)} onClick={(e) => inPlace(e, go(t))} aria-current={on ? "page" : undefined} className="group/nav h-9 w-full flex-1 text-[13px] md:h-7">
                                 <span className="flex-1 text-left">{tabNames[t]}</span>
                                 <CountBadge n={p.counts?.[t] ?? 0} />
                                 {shortcuts[t] && !p.counts?.[t] && <span className="hidden font-mono text-[10px] text-muted-foreground md:group-hover/nav:inline">G {shortcuts[t]!.toUpperCase()}</span>}
@@ -1143,8 +1188,10 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent
   }, []);
   const salesSection = tab === "crm" && item?.startsWith("sales:") ? item.split(":")[1] : undefined;
   const salesLabel = salesSection && salesPageName(item);
+  // The CRM's own places (people, companies, deals and the rest) are named, not shown as a path under the conversations page.
+  const crmPlace = tab === "crm" && item && !salesSection ? ({ person: "People", account: "Companies", deal: "Deals", tasks: "My work", notes: "Notes", collections: "Lists", reports: "Reports", settings: "Settings" } as Record<string, string>)[item.split(":")[0]] : undefined;
   const itemID = salesSection ? (salesSection === "lead" ? item?.split(":")[2] : undefined) : item;
-  const itemLabel = item && (itemName ?? salesLabel ?? (item === "new" ? "New" : tab === "domains" ? item : named?.id === item ? named.name : uuidish.test(item) ? "…" : item));
+  const itemLabel = item && (itemName ?? salesLabel ?? crmPlace ?? (item === "new" ? "New" : tab === "domains" ? item : named?.id === item ? named.name : uuidish.test(item) ? "…" : tab === "revenue" && item === "forecast" ? "Forecast" : tab === "revenue" && item === "team" ? "Sales team" : tab === "revenue" && item === "commissions" ? "Commissions" : item));
   return (
     <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
       <SidebarTrigger className="-ml-1 size-7 text-muted-foreground" />
@@ -1152,7 +1199,7 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent
       <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
         {ws && <BrandSwitcher ws={ws} chip onAdded={() => onTab("brands")} onManage={() => onTab("workspace-brands")} />}
         {ws && <BrandSlash ws={ws.id} />}
-        {moduleOf(tab) && (
+        {moduleOf(tab) && moduleOf(tab)!.label !== tabNames[tab] && (
           <>
             <span className="hidden text-muted-foreground sm:inline">{moduleOf(tab)!.label}</span>
             <span aria-hidden="true" className="hidden text-muted-foreground/50 sm:inline">/</span>
@@ -1164,16 +1211,16 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent
             <span aria-hidden="true" className="hidden text-muted-foreground/50 sm:inline">/</span>
           </>
         )}
-        {item ? (
+        {crmPlace ? null : item ? (
           <button onClick={() => onTab(tab)} className="truncate text-muted-foreground hover:text-foreground">{tabNames[tab]}</button>
         ) : (
           <span aria-current="page" className="truncate text-foreground">{tabNames[tab]}</span>
         )}
         {item && (
           <>
-            <span aria-hidden="true" className="text-muted-foreground/50">/</span>
+            {!crmPlace && <span aria-hidden="true" className="text-muted-foreground/50">/</span>}
             <span aria-current="page" className={cn("truncate text-foreground", itemLabel === item && "font-mono text-[12px]")} title={item}>{itemLabel}</span>
-            {itemID && itemID !== "new" && <CopyButton text={itemID} label={`Copy id ${itemID}`} />}
+            {itemID && itemID !== "new" && !crmPlace && <CopyButton text={itemID} label={`Copy id ${itemID}`} />}
           </>
         )}
       </nav>
@@ -1204,8 +1251,12 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
   const brand = pickedBrandId() || "BRAND_ID";
   const brandBase = { brand };
   switch (tab) {
+    case "outreach-mailboxes":
+      return { title: "Outreach mailbox orders", path: "/v1/workspaces/{ws}/cloud/outreach/brands/{brand}/orders", params: { ws, brand }, scope: "mailboxes.read" };
     case "agent-mail":
       return { title: "Agent Mail inboxes", path: "/v1/workspaces/{ws}/cloud/agent-mail/brands/{brand}/inboxes", params: { ws, brand }, scope: "inbox.read" };
+    case "sales-reporting":
+      return { title: "Sales reporting", path: "/v1/brands/{brand}/sales/reporting", params: brandBase, query: { period: "24h" }, mcp: "get_sales_reporting", ask: "Compare my Sales pipeline milestones, tool costs and mailbox capacity.", scope: "customers.read" };
     case "crm":
       if (!item || item.startsWith("sales:")) {
         const [, section = "new", lead] = (item ?? "sales:new").split(":");
@@ -1392,7 +1443,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "link-autopilot":
       return { title: "Link autopilots", path: "/v1/workspaces/{ws}/cloud/link-autopilot", params: base, ask: "Get us 5 new live links a month for northpeak.example, spending at most $100 a month.", scope: "agents.read" };
     case "lead-finder":
-      return { title: "Lead finder runs", path: "/v1/workspaces/{ws}/cloud/lead-finder/runs", params: base, ask: "Find 25 companies that fit our ideal customer profile.", scope: "leads.read" };
+      return { title: "Lead finder runs", path: "/v1/brands/{brand}/cloud/lead-finder/runs", params: { brand }, ask: "Find 25 companies that fit our ideal customer profile.", scope: "leads.read" };
     case "email-finder":
       return { title: "Find a work email", path: "/v1/workspaces/{ws}/email-finder/find", params: base, mcp: "find_emails", ask: "Find the work email for Alice Nguyen at acme.example.", scope: "leads.read" };
     case "suppression":
@@ -1435,6 +1486,10 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return item
         ? { title: "One rule", path: "/v1/brands/{brand}/rules/{id}", params: { brand, id: item }, mcp: "get_rule", ask: "What would this rule have done over the last 30 days, and which journeys start on its event?", scope: "customers.read" }
         : { title: "Rules", path: "/v1/brands/{brand}/rules", params: { brand }, mcp: "list_rules", ask: "Make a rule that emits customer.stalled when someone signs up and doesn't activate within 7 days, unless they're on enterprise, and dry-run it.", scope: "customers.read" };
+    case "signals":
+      return { title: "Needs attention", path: "/v1/brands/{brand}/signals", params: { brand }, mcp: "list_signals", ask: "Which accounts need attention this week, and what would you do about each?", scope: "customers.read" };
+    case "revenue":
+      return { title: "Revenue", path: "/v1/brands/{brand}/revenue", params: { brand }, mcp: "get_revenue", ask: "How did recurring revenue move this quarter, which renewals are at risk, and what should I do first?", scope: "customers.read" };
     case "automations":
       return { title: "The automation map", path: "/v1/brands/{brand}/automation-map", params: { brand }, mcp: "get_automation_map", ask: "Walk me through how my rules and journeys fit together, and what I should fix first.", scope: "emails.read" };
     case "topics":

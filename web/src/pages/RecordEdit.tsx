@@ -1098,7 +1098,7 @@ export async function softDeleteRecord(
         Reports and rule history that counted {person ? "their" : "its"} events
         change while {person ? "they are" : "it is"} deleted. You can restore{" "}
         {person ? "them" : "it"}, as {person ? "they were" : "it was"} and
-        without sending anything again, from People → Recently deleted for 7
+        without sending anything again, from Customer data → Recently deleted for 7
         days; then {person ? "they are" : "it is"} gone for good.
       </p>
       <p>
@@ -1144,7 +1144,7 @@ export async function softDeleteEvent(
         Nothing already sent because of it is taken back.
       </p>
       <p>
-        You can restore it from People → Recently deleted for 7 days, without
+        You can restore it from Customer data → Recently deleted for 7 days, without
         firing rules or journeys again; then it is gone for good.
       </p>
     </>,

@@ -35,7 +35,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 }
 
 // fixture is a workspace with a brand, a Google Ads account on it with
-// two search campaigns, and a shared account no brand owns.
+// two search campaigns, and another brand's account with no payers.
 type fixture struct {
 	t                                  *testing.T
 	pool                               *pgxpool.Pool
@@ -69,7 +69,15 @@ func newFixture(t *testing.T) *fixture {
 	f.spring = f.q(`INSERT INTO ad_entities (brand_id, workspace_id, ad_account_id, external_id, name, status, objective, daily_budget_micros) VALUES ($1, $2, $3, '7', 'Spring search', 'active', 'search', 30000000) RETURNING id::text`, f.brand, f.ws, f.acct)
 	f.brandCamp = f.q(`INSERT INTO ad_entities (brand_id, workspace_id, ad_account_id, external_id, name, status, objective, daily_budget_micros) VALUES ($1, $2, $3, '8', 'Northpeak brand', 'active', 'search', 10000000) RETURNING id::text`, f.brand, f.ws, f.acct)
 	shared := f.q(`INSERT INTO integrations (workspace_id, connector, name, credentials) VALUES ($1, 'meta_ads', 'Meta', '\x00') RETURNING id::text`, f.ws)
-	f.sharedAcct = f.q(`INSERT INTO ad_accounts (workspace_id, integration_id, connector, external_id, name, currency) VALUES ($1, $2, 'meta_ads', 'act_1', 'Shared', 'USD') RETURNING id::text`, f.ws, shared)
+	// Every ad account belongs to a brand: this one to a second brand that
+	// sends Outflare no payers.
+	other := f.q(`INSERT INTO brands (workspace_id, name, handle, website, currency) VALUES ($1, 'Acme', 'acme', 'https://acme.example', 'USD') RETURNING id::text`, f.ws)
+	f.sharedAcct = f.q(`INSERT INTO ad_accounts (workspace_id, brand_id, integration_id, connector, external_id, name, currency) VALUES ($1, $2, $3, 'meta_ads', 'act_1', 'Shared', 'USD') RETURNING id::text`, f.ws, other, shared)
+	otherEcon := paidads.Defaults(f.ws, other, "USD")
+	otherEcon.ShadowMode = false
+	if _, err := paidads.Save(context.Background(), f.pool, otherEcon, nil); err != nil {
+		t.Fatal(err)
+	}
 	f.shared = f.q(`INSERT INTO ad_entities (workspace_id, ad_account_id, external_id, name, status, daily_budget_micros, target_cost_per_conversion_micros) VALUES ($1, $2, '9', 'Everyone', 'active', 30000000, 10000000) RETURNING id::text`, f.ws, f.sharedAcct)
 	f.run = &Runner{Pool: f.pool, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	return f
@@ -150,7 +158,7 @@ func TestRunOnPayers(t *testing.T) {
 	f.payers(f.spring, 40, 1, 1)
 	f.days(f.brandCamp, 40, 1, 10_000_000, 4)
 	f.payers(f.brandCamp, 40, 1, 3)
-	// The shared account, no brand: a good cost per network conversion
+	// The other brand's account, no payers: a good cost per network conversion
 	// with the budget run out every day.
 	f.days(f.shared, 40, 1, 30_000_000, 5)
 	f.econ(10_000_000, true)
@@ -170,7 +178,7 @@ func TestRunOnPayers(t *testing.T) {
 	if _, ok := f.rows(f.brandCamp)[BudgetDown]; ok {
 		t.Fatal("the winner was cut")
 	}
-	// The shared account's campaign has no brand: an open raise on the
+	// The other brand's campaign has no payers: an open raise on the
 	// network's conversions.
 	sr := f.rows(f.shared)[BudgetUp]
 	if sr.status != "open" || sr.unit != UnitPlatform || sr.autonomy != "approve" {

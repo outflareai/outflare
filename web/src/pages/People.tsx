@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { AccountSummary } from "./crm/AccountSummary";
+import { OwnerPicker } from "@/components/owner-picker";
+import { RecordScores } from "@/components/record-scores";
+import { Routing } from "./Routing";
 import type { Schemas } from "@outflare/sdk";
-import { Search } from "lucide-react";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, toast } from "../ui";
+import { Badge, Button, Card, confirmAction, ErrorText, field, Loading, Menu, PageHeader, toast } from "../ui";
 import { DataTable } from "@/components/data-table";
 import { BrandBadge } from "@/components/brand-badge";
 import { PickBrand } from "@/components/pick-brand";
@@ -11,7 +14,7 @@ import { useBrand } from "@/lib/brand";
 import { isID } from "@/lib/paths";
 import { ago, plural, stamp, when } from "../format";
 import type { Tab } from "../App";
-import { displayName, fieldLabelValue, identity, nameItem, namespaces, originPhrases, origins, useCatalog, type CatalogInfo } from "@/lib/records";
+import { displayName, fieldLabelValue, namespaces, originPhrases, useCatalog, type CatalogInfo } from "@/lib/records";
 import { AddIdentity, eraseRecord, RecordConsent, RecordDialog, softDeleteEvent, softDeleteRecord } from "./RecordEdit";
 import { Duplicates } from "./Duplicates";
 import { BrandEvents } from "./BrandEvents";
@@ -22,7 +25,7 @@ import { Batches, RecordMerges } from "./Undo";
 import { RecordPartners } from "./Partners";
 import { RecordTransactions, Transactions } from "./Transactions";
 import { Metrics } from "./Metrics";
-import { BulkEditSheet } from "./BulkEdit";
+import { Scores } from "./Scores";
 
 type Rec = Schemas["Record"];
 type Field = Schemas["Field"];
@@ -33,255 +36,70 @@ type Link = Schemas["RecordRelationship"];
 type Consent = Schemas["Consent"];
 type PrivacyExport = Schemas["PrivacyExport"];
 
-// People and Companies are the two built-in record types; the item part of
-// the URL picks the view: "" for people, "companies", "duplicates", "events"
-// (the brand's product events as received), "products" (its products and
-// lifecycle stages), "setup" (Developer setup: the live checklist of
-// what the brand's developer sends), "batches" (imports and sends
-// of events, each undoable in one step), "deleted" (Recently deleted,
-// restorable for 7 days), or a record's id.
-type View = "person" | "account";
-const viewOf = (open: string): View => (open === "companies" ? "account" : "person");
-const itemOf = (v: View) => (v === "account" ? "companies" : "");
-
-
-
-
+// The list of people and companies is the CRM's (crm/Workspace.tsx): one
+// list, with its views, filters and bulk actions. This page is a record's
+// full page (the item part of the URL is its id) and the brand's customer
+// data: "" or "events" (the brand's product events as received),
+// "duplicates", "products" (its products and lifecycle stages),
+// "transactions", "metrics", "scores", "routing", "batches" (imports and
+// sends of events, each undoable in one step), "deleted" (Recently deleted,
+// restorable for 7 days) and "setup" (Developer setup: the live checklist
+// of what the brand's developer sends).
+const dataTabs = ["events", "duplicates", "products", "transactions", "metrics", "scores", "routing", "batches", "deleted", "setup"] as const;
+type DataTab = (typeof dataTabs)[number];
 
 export function People({ ws, canManage, canConfigure = false, open, onOpen, go }: { ws: string; canManage: boolean; canConfigure?: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab, item?: string) => void }) {
   const cat = useCatalog(ws);
+  // Old links to the list that lived here go to the CRM's.
+  const old = open === "companies";
+  useEffect(() => {
+    if (old) go("crm", "account");
+  }, [old]); // eslint-disable-line react-hooks/exhaustive-deps
   if (isID(open)) return <RecordPage key={open} ws={ws} id={open} cat={cat} canManage={canManage} onOpen={onOpen} go={go} />;
-  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "products" || open === "batches" || open === "deleted" || open === "transactions" || open === "metrics" || open === "setup" ? open : viewOf(open)} onOpen={onOpen} />;
-  if (open === "duplicates") return <Duplicates ws={ws} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
-  if (open === "events") return <BrandEvents ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
-  if (open === "setup") return <DeveloperSetup ws={ws} canManage={canManage} tabs={tabs} />;
+  if (old) return null;
+  const at: DataTab = (dataTabs as readonly string[]).includes(open) ? (open as DataTab) : "events";
+  const tabs = <ViewTabs value={at} onOpen={onOpen} go={go} />;
+  if (at === "duplicates") return <Duplicates ws={ws} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  if (at === "setup") return <DeveloperSetup ws={ws} canManage={canManage} tabs={tabs} />;
   // Products and lifecycle stages are part of the catalog: catalog.manage.
-  if (open === "products") return <Products ws={ws} canManage={canConfigure} tabs={tabs} />;
-  if (open === "metrics") return <Metrics ws={ws} canManage={canConfigure} tabs={tabs} />;
-  if (open === "transactions") return <Transactions ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
-  if (open === "batches") return <Batches ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
-  if (open === "deleted") return <RecentlyDeleted ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
-  return <RecordList ws={ws} view={viewOf(open)} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  if (at === "products") return <Products ws={ws} canManage={canConfigure} tabs={tabs} />;
+  if (at === "metrics") return <Metrics ws={ws} canManage={canConfigure} tabs={tabs} />;
+  if (at === "scores") return <Scores ws={ws} canManage={canConfigure} tabs={tabs} />;
+  if (at === "routing") return <Routing ws={ws} canManage={canConfigure} tabs={tabs} go={go} />;
+  if (at === "transactions") return <Transactions ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  if (at === "batches") return <Batches ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  if (at === "deleted") return <RecentlyDeleted ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  return <BrandEvents ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
 }
 
-function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "products" | "batches" | "deleted" | "transactions" | "metrics" | "setup"; onOpen: (item: string) => void }) {
+function ViewTabs({ value, onOpen, go }: { value: DataTab; onOpen: (item: string) => void; go: (t: Tab, item?: string) => void }) {
   return (
-    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "products" || v === "batches" || v === "deleted" || v === "transactions" || v === "metrics" || v === "setup" ? v : itemOf(v as View))}>
-      <TabsList className="h-8">
-        <TabsTrigger value="person" className="px-3 text-[12px]">People</TabsTrigger>
-        <TabsTrigger value="account" className="px-3 text-[12px]">Companies</TabsTrigger>
-        <TabsTrigger value="duplicates" className="px-3 text-[12px]">Duplicates</TabsTrigger>
-        <TabsTrigger value="events" className="px-3 text-[12px]">Events</TabsTrigger>
-        <TabsTrigger value="products" className="px-3 text-[12px]">Products</TabsTrigger>
-        <TabsTrigger value="transactions" className="px-3 text-[12px]">Transactions</TabsTrigger>
-        <TabsTrigger value="metrics" className="px-3 text-[12px]">Metrics</TabsTrigger>
-        <TabsTrigger value="batches" className="px-3 text-[12px]">Imports</TabsTrigger>
-        <TabsTrigger value="deleted" className="px-3 text-[12px]">Recently deleted</TabsTrigger>
-        <TabsTrigger value="setup" className="px-3 text-[12px]">Developer setup</TabsTrigger>
-      </TabsList>
-    </Tabs>
-  );
-}
-
-
-
-const dash = <span className="text-muted-foreground">–</span>;
-
-function RecordList({ ws, view, cat, canManage, tabs, onOpen }: { ws: string; view: View; cat: CatalogInfo; canManage: boolean; tabs: ReactNode; onOpen: (item: string) => void }) {
-  const [rows, setRows] = useState<Rec[]>([]);
-  const [adding, setAdding] = useState(false);
-  const [next, setNext] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState("");
-  const [q, setQ] = useState("");
-  const [show, setShow] = useState<"active" | "review" | "archived">("active");
-  // Field filters: one value per field key.
-  const [filters, setFilters] = useState<Record<string, string>>({});
-  // Records ticked for a bulk edit (docs/bulk-edits.md).
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [bulk, setBulk] = useState<string[] | null>(null);
-  const { brand, active } = useBrand(ws);
-  const brandID = brand?.id ?? "";
-
-  // The fields worth filtering by: the catalog marks them, and a choice
-  // from a list fits a dropdown.
-  const filterFields = cat.fields(view).filter((f) => f.filterable && (f.value_type === "select" || f.value_type === "status") && f.option_set);
-  const filterKey = JSON.stringify(filters);
-
-  const load = useCallback(
-    async (cursor?: string) => {
-      if (!brandID) return;
-      const attribute = Object.entries(filters).filter(([, v]) => v).map(([k, v]) => `${k}:${v}`);
-      const { data, error } = await api.GET("/v1/brands/{brand}/records", {
-        params: {
-          path: { brand: brandID },
-          query: {
-            type: view,
-            limit: 100,
-            ...(q.trim() ? { q: q.trim() } : {}),
-            ...(attribute.length ? { attribute } : {}),
-            ...(show === "review" ? { review: "needs_review" as const } : {}),
-            ...(show === "archived" ? { archived: "true" as const } : {}),
-            ...(cursor ? { cursor } : {}),
-          },
-        },
-      });
-      setLoaded(true);
-      if (!data) return setError(errorMessage(error));
-      setError("");
-      setRows((prev) => (cursor ? [...prev, ...data.data] : data.data));
-      setNext(data.next_cursor ?? null);
-    },
-    [brandID, view, q, show, filterKey], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  useEffect(() => {
-    const t = setTimeout(() => load(), 200);
-    return () => clearTimeout(t);
-  }, [load]);
-
-  // Switching between people and companies starts the filters again.
-  useEffect(() => {
-    setFilters({});
-    setPicked(new Set());
-    if (view === "account") nameItem("companies", "Companies");
-  }, [view]);
-
-  const label = (f: string, v: unknown) => fieldLabelValue(cat, view, f, v);
-  const filtered = !!q || show !== "active" || Object.values(filters).some(Boolean);
-  const people = view === "person";
-  // Bulk edits change live records only, so archived and held ones can't be picked.
-  const canBulk = canManage && show === "active";
-  const toggle = (id: string) =>
-    setPicked((p) => {
-      const n = new Set(p);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title={people ? "People" : "Companies"}
-        description={
-          people
-            ? "Everyone your business knows: customers from your product, leads, CRM contacts and the people who reply. One record each, shared by every feature."
-            : "The companies your people work at, from your product, your CRM, leads' websites and imports."
-        }
-        action={canManage && cat.catalog && brandID && <Button onClick={() => setAdding(true)}>{people ? "Add person" : "Add company"}</Button>}
-      />
-      {adding && <RecordDialog ws={ws} brand={brandID} type={view} rec={null} cat={cat} names={{}} onClose={() => setAdding(false)} onSaved={(r) => onOpen(r.id)} />}
-      {bulk && <BulkEditSheet ws={ws} brand={brandID} source={{ kind: "records", ids: bulk, type: view }} onClose={() => setBulk(null)} onDone={() => { setBulk(null); setPicked(new Set()); void load(); }} />}
-      {tabs}
-      {!brandID && <PickBrand what={people ? "People" : "Companies"} brands={active.length} />}
-      <ErrorText>{brandID && (error || cat.error)}</ErrorText>
-      {brandID && !loaded && <Loading />}
-      {brandID && loaded && !filtered && rows.length === 0 && (
-        <Empty title={people ? "No people yet" : "No companies yet"}>
-          {people
-            ? "People arrive from your product (sign-ups and payments), leads you import, your CRM and the replies you get. Connect a source or import leads to start."
-            : "Companies arrive with your people: from their email domains, your CRM and leads' websites."}
-        </Empty>
-      )}
-      {brandID && loaded && (filtered || rows.length > 0) && (
-        <div className="space-y-3">
-          <DataTable
-            data={rows}
-            rowId={(r) => r.id}
-            onRowClick={(r) => onOpen(r.id)}
-            toolbar={
-              <>
-                <label className="relative min-w-0 flex-1 basis-60">
-                  <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    type="search"
-                    aria-label={people ? "Search people" : "Search companies"}
-                    className={`${field} w-full pl-8`}
-                    placeholder={people ? "Search name, email, phone or id" : "Search name or domain"}
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                  />
-                </label>
-                {filterFields.map((f) => (
-                  <select key={f.key} aria-label={f.label} className={`${field} max-w-44`} value={filters[f.key] ?? ""} onChange={(e) => setFilters({ ...filters, [f.key]: e.target.value })}>
-                    <option value="">Any {f.label.toLowerCase()}</option>
-                    {cat.options(f).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                  </select>
-                ))}
-                {canBulk && rows.length > 0 && (
-                  <Button variant="ghost" onClick={() => setBulk(picked.size ? [...picked] : rows.map((r) => r.id))}>
-                    {picked.size ? `Bulk edit ${picked.size} picked` : `Bulk edit the ${rows.length} shown`}
-                  </Button>
-                )}
-                <select aria-label="Show" className={field} value={show} onChange={(e) => setShow(e.target.value as typeof show)}>
-                  <option value="active">Active</option>
-                  <option value="review">Held for review</option>
-                  <option value="archived">Archived</option>
-                </select>
-              </>
-            }
-            empty={<>Nothing matches. <button className="underline" onClick={() => { setQ(""); setFilters({}); setShow("active"); }}>Clear the filters</button></>}
-            mobile={(r) => (
-              <div className="min-w-0">
-                <div className="font-medium">{displayName(r)}</div>
-                <div className="text-xs text-muted-foreground">
-                  {(people ? [identity(r, "email"), r.attributes.job_title as string] : [identity(r, "domain"), label("industry", r.attributes.industry)]).filter(Boolean).join(" · ")}
-                </div>
-              </div>
-            )}
-            hidden={["origin"]}
-            columns={[
-              ...(canBulk
-                ? [
-                    {
-                      id: "pick",
-                      header: "",
-                      enableSorting: false,
-                      enableHiding: false,
-                      cell: ({ row: { original: r } }: { row: { original: Rec } }) => (
-                        <input type="checkbox" aria-label={`Pick ${displayName(r)}`} checked={picked.has(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggle(r.id)} />
-                      ),
-                    },
-                  ]
-                : []),
-              {
-                id: "name",
-                header: "Name",
-                accessorFn: (r) => displayName(r),
-                cell: ({ row: { original: r } }) => (
-                  <span className="inline-flex flex-wrap items-center gap-1.5">
-                    <span className="font-medium">{displayName(r)}</span>
-                    {r.needs_review && <Badge tone="amber" title="Held for someone to approve before anything is sent to them.">Needs review</Badge>}
-                    {r.archived && <Badge>Archived</Badge>}
-                    <BrandBadge id={r.brand_id} />
-                  </span>
-                ),
-              },
-              people
-                ? { id: "email", header: "Email", accessorFn: (r) => identity(r, "email") ?? "", cell: ({ getValue }) => (getValue() as string) ? <span className="font-mono text-[12px]">{getValue() as string}</span> : dash }
-                : { id: "domain", header: "Domain", accessorFn: (r) => identity(r, "domain") ?? "", cell: ({ getValue }) => (getValue() as string) ? <span className="font-mono text-[12px]">{getValue() as string}</span> : dash },
-              ...(people
-                ? [
-                    { id: "job_title", header: "Job title", accessorFn: (r: Rec) => (r.attributes.job_title as string) ?? "", cell: ({ getValue }: { getValue: () => unknown }) => (getValue() as string) || dash },
-                    { id: "seniority", header: "Seniority", accessorFn: (r: Rec) => label("seniority", r.attributes.seniority), cell: ({ getValue }: { getValue: () => unknown }) => (getValue() as string) || dash },
-                  ]
-                : [
-                    { id: "industry", header: "Industry", accessorFn: (r: Rec) => label("industry", r.attributes.industry), cell: ({ getValue }: { getValue: () => unknown }) => (getValue() as string) || dash },
-                    { id: "company_size", header: "Size", accessorFn: (r: Rec) => label("company_size", r.attributes.company_size), cell: ({ getValue }: { getValue: () => unknown }) => (getValue() as string) || dash },
-                  ]),
-              { id: "lifecycle_stage", header: "Stage", accessorFn: (r) => label("lifecycle_stage", r.attributes.lifecycle_stage), cell: ({ getValue }) => (getValue() as string) ? <Badge>{getValue() as string}</Badge> : dash },
-              { id: "origin", header: "From", accessorFn: (r) => origins[r.origin], cell: ({ getValue }) => <span className="text-muted-foreground">{getValue() as string}</span> },
-              { id: "created", header: "Added", accessorFn: (r) => r.created_at, cell: ({ row: { original: r } }) => <span className="text-muted-foreground" title={stamp(r.created_at)}>{ago(r.created_at)}</span> },
-            ]}
-          />
-          {next && <Button variant="ghost" onClick={() => load(next)}>Show more</Button>}
-        </div>
-      )}
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <Tabs value={value} onValueChange={(v) => onOpen(v)} className="min-w-0">
+        <TabsList className="h-8 max-w-full justify-start overflow-x-auto">
+          <TabsTrigger value="events" className="px-3 text-[12px]">Events</TabsTrigger>
+          <TabsTrigger value="duplicates" className="px-3 text-[12px]">Duplicates</TabsTrigger>
+          <TabsTrigger value="products" className="px-3 text-[12px]">Products</TabsTrigger>
+          <TabsTrigger value="transactions" className="px-3 text-[12px]">Transactions</TabsTrigger>
+          <TabsTrigger value="metrics" className="px-3 text-[12px]">Metrics</TabsTrigger>
+          <TabsTrigger value="scores" className="px-3 text-[12px]">Scores</TabsTrigger>
+          <TabsTrigger value="routing" className="px-3 text-[12px]">Routing</TabsTrigger>
+          <TabsTrigger value="batches" className="px-3 text-[12px]">Imports</TabsTrigger>
+          <TabsTrigger value="deleted" className="px-3 text-[12px]">Recently deleted</TabsTrigger>
+          <TabsTrigger value="setup" className="px-3 text-[12px]">Developer setup</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      <span className="text-[12px] text-muted-foreground">
+        The lists are in the CRM:{" "}
+        <button type="button" className="underline hover:text-foreground" onClick={() => go("crm", "person")}>People</button>
+        {" · "}
+        <button type="button" className="underline hover:text-foreground" onClick={() => go("crm", "account")}>Companies</button>
+      </span>
     </div>
   );
 }
 
+const dash = <span className="text-muted-foreground">–</span>;
 
 // FieldValue shows a value the way its field's type reads.
 function FieldValue({ f, v, cat, names, onOpen }: { f?: Field; v: unknown; cat: CatalogInfo; names: Record<string, string>; onOpen: (id: string) => void }): ReactNode {
@@ -377,20 +195,21 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
     );
   }, [ws]);
 
-  if (!brand) return <div className="space-y-6"><PageHeader title="Record" back={{ label: "People", onClick: () => onOpen("") }} /><PickBrand what="Records" brands={active.length} /></div>;
-  if (error) return <div className="space-y-6"><PageHeader title="Record" back={{ label: "People", onClick: () => onOpen("") }} /><ErrorText>{error}</ErrorText></div>;
+  if (!brand) return <div className="space-y-6"><PageHeader title="Record" back={{ label: "People", onClick: () => go("crm", "person") }} /><PickBrand what="Records" brands={active.length} /></div>;
+  if (error) return <div className="space-y-6"><PageHeader title="Record" back={{ label: "People", onClick: () => go("crm", "person") }} /><ErrorText>{error}</ErrorText></div>;
   if (!rec) return <Loading />;
 
   const people = rec.type === "person";
-  const list = rec.type === "account" ? "companies" : "";
+  const toList = () => go("crm", rec.type);
   const fields = cat.fields(rec.type);
   // Names of the records this one points at, from its links.
   const names: Record<string, string> = { ...members, ...Object.fromEntries(links.map((l) => [l.record.id, l.record.name || "Unnamed"])), [rec.id]: displayName(rec) };
   const known = new Set(fields.map((f) => f.key));
   const has = (v: unknown) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0);
   const blank = fields.filter((f) => !has(rec.attributes[f.key]));
-  // metrics are live totals (docs/metrics.md), shown in their own card.
-  const extra = Object.keys(rec.attributes).filter((k) => !known.has(k) && k !== "metrics");
+  // metrics are live totals (docs/metrics.md) and scores have their own
+  // card with "Why?", so neither is listed again as a raw value.
+  const extra = Object.keys(rec.attributes).filter((k) => !known.has(k) && k !== "metrics" && k !== "scores" && k !== "sentiment");
   const manage = canManage && !rec.merged_into;
 
   async function archive(archived: boolean) {
@@ -424,17 +243,17 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
   }
 
   async function erase() {
-    if (await eraseRecord(rec!, displayName(rec!))) onOpen(list);
+    if (await eraseRecord(rec!, displayName(rec!))) toList();
   }
 
   async function softDelete() {
-    if (await softDeleteRecord(rec!, displayName(rec!))) onOpen(list);
+    if (await softDeleteRecord(rec!, displayName(rec!))) toList();
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
-        back={rec.type === "person" || rec.type === "account" ? { label: people ? "People" : "Companies", onClick: () => onOpen(list) } : undefined}
+        back={rec.type === "person" || rec.type === "account" ? { label: people ? "People" : "Companies", onClick: toList } : { label: "CRM", onClick: () => go("crm", rec.type) }}
         title={
           <>
             {displayName(rec)}
@@ -452,6 +271,9 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
         action={
           manage && (
             <>
+              {rec.brand_id && !rec.merged_into && !rec.archived && cat.fields(rec.type).some((f) => f.key === "owner") && (
+                <OwnerPicker ws={ws} brand={rec.brand_id} record={rec} what={people ? "person" : rec.type === "account" ? "company" : rec.type === "deal" ? "deal" : "record"} canManage onChanged={changed} />
+              )}
               {rec.needs_review && <Button onClick={() => review("approve")}>Approve</Button>}
               {rec.needs_review && <Button variant="ghost" onClick={() => review("reject")}>Reject</Button>}
               <Button variant={rec.needs_review ? "ghost" : "primary"} onClick={() => setEditing(true)}>Edit</Button>
@@ -485,6 +307,10 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
           This record was merged into another. <button className="underline" onClick={() => onOpen(rec.merged_into!)}>Open the record it was merged into</button>
         </p>
       )}
+      {(people || rec.type === "account") && rec.brand_id && !rec.merged_into && (
+        <AccountSummary ws={ws} record={rec} cat={cat} canManage={manage} names={names} onOpen={onOpen} onChanged={changed} />
+      )}
+      {!people && rec.type !== "account" && rec.brand_id && !rec.merged_into && <RecordScores brand={rec.brand_id} record={rec.id} version={rec.version} />}
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-1">
           <Card title="Fields" description={canManage ? undefined : "From the catalog of fields this workspace keeps."}>
@@ -614,7 +440,7 @@ async function deleteFromRecord(rec: Rec, what: { kind: "field"; key: string; la
   const name = what.kind === "field" ? `the value of ${what.label}` : what.label;
   const ok = await confirmAction(
     `Delete ${name}?`,
-    <p>It is hidden everywhere at once, and goes to People → Recently deleted, where you can restore it for 7 days without firing any rule or journey. Use this for wrong data.</p>,
+    <p>It is hidden everywhere at once, and goes to Customer data → Recently deleted, where you can restore it for 7 days without firing any rule or journey. Use this for wrong data.</p>,
     "Delete",
     true,
   );
@@ -840,6 +666,9 @@ const kinds: Record<TimelineItem["kind"], string> = {
   opt_out: "Do not contact",
   journey: "Journey",
   list: "List",
+  support: "Support conversation",
+  task: "Task",
+  note: "Note",
 };
 
 function Timeline({ brand, rec, cat, names, onOpen, canManage }: { brand: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void; canManage: boolean }) {
@@ -978,6 +807,12 @@ function itemDetail(it: TimelineItem, type: string, cat: CatalogInfo, names: Rec
       return [text(d.change), text(d.exit_reason)].filter(Boolean).join(" · ");
     case "list":
       return d.change === "enter" ? "joined" : "left";
+    case "support":
+      return [d.change === "closed" ? "Closed" : "Opened", text(d.channel), d.change !== "closed" && d.status !== "closed" ? (d.last_from === "customer" ? "waiting on your reply" : "waiting on them") : ""].filter(Boolean).join(" · ");
+    case "task":
+      return [d.status === "done" ? "Done" : "Open", d.due_at ? `due ${stamp(String(d.due_at))}` : "", d.priority === "high" ? "high priority" : ""].filter(Boolean).join(" · ");
+    case "note":
+      return "Note";
     case "event": {
       const props = (d.properties ?? {}) as Record<string, unknown>;
       return Object.entries(props).filter(([, v]) => v !== null && typeof v !== "object").slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(" · ");

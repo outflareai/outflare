@@ -17,6 +17,8 @@ var Erased = []Ref{
 	{"sales_leads", "record_id"}, {"sales_drafts", "record_id"}, {"sales_messages", "record_id"}, {"sales_events", "record_id"},
 	{"telegram_chats", "record_id"},
 	{"review_requests", "record_id"},
+	// Signals about them, with what someone wrote on them.
+	{"signals", "record_id"}, {"conversation_transcripts", "record_id"}, {"conversation_sentiments", "record_id"},
 	{"coverage_publishers", "record_id"},
 	{"coverage_parties", "record_id"},
 	{"customer_events", "record_id"}, {"consents", "record_id"},
@@ -66,7 +68,7 @@ var Kept = []Ref{
 	{"coverage_placements", "contact_record_id"},
 	// What partners earned and were paid: see erasedPartner.
 	{"partner_memberships", "record_id"}, {"partner_rewards", "recipient_id"},
-	{"customer_events", "account_id"}, {"deals", "record_id"}, {"payment_subscriptions", "record_id"}, {"transactions", "record_id"},
+	{"customer_events", "account_id"}, {"deals", "record_id"}, {"deals", "renewal_of"}, {"payment_subscriptions", "record_id"}, {"transactions", "record_id"},
 	{"tracker_conversions", "record_id"},
 	{"seo_competitors", "record_id"}, {"suppressions", "record_id"}, {"site_visitors", "account_id"},
 	// A suggestion that someone's chat might be theirs: the chat is the
@@ -152,6 +154,14 @@ func Erase(ctx context.Context, tx pgx.Tx, workspaceID string, ids, emails []str
 		}
 		gone[r.Table] += int(tag.RowsAffected())
 	}
+	// A renewal deal stays, as revenue; it has no foreign key to clear it.
+	if ok, err := columnExists(ctx, tx, "deals", "renewal_of"); err != nil {
+		return nil, err
+	} else if ok {
+		if _, err := tx.Exec(ctx, `UPDATE deals SET renewal_of = NULL WHERE workspace_id = $1 AND renewal_of = ANY($2)`, workspaceID, ids); err != nil {
+			return nil, err
+		}
+	}
 	tag, err := tx.Exec(ctx, `DELETE FROM records WHERE workspace_id = $1 AND id = ANY($2)`, workspaceID, ids)
 	if err != nil {
 		return nil, err
@@ -163,6 +173,13 @@ func Erase(ctx context.Context, tx pgx.Tx, workspaceID string, ids, emails []str
 func tableExists(ctx context.Context, tx pgx.Tx, table string) (bool, error) {
 	var ok bool
 	err := tx.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&ok)
+	return ok, err
+}
+
+func columnExists(ctx context.Context, tx pgx.Tx, table, column string) (bool, error) {
+	var ok bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2)`, table, column).Scan(&ok)
 	return ok, err
 }
 

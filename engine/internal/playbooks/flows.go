@@ -8,7 +8,10 @@ import (
 	"strings"
 
 	"github.com/outflareai/outflare/engine/internal/journeys"
+	"github.com/outflareai/outflare/engine/internal/recmetrics"
 	"github.com/outflareai/outflare/engine/internal/rules"
+	"github.com/outflareai/outflare/engine/internal/scores"
+	"github.com/outflareai/outflare/engine/internal/signals"
 	"github.com/outflareai/outflare/engine/internal/smartlists"
 )
 
@@ -75,12 +78,68 @@ type KitJourney struct {
 	Key            string         `yaml:"key,omitempty" json:"key"`
 	Name           string         `yaml:"name,omitempty" json:"name"`
 	Description    string         `yaml:"description,omitempty" json:"description,omitempty"`
+	RecordType     string         `yaml:"record_type,omitempty" json:"record_type,omitempty"`
 	Trigger        map[string]any `yaml:"trigger,omitempty" json:"trigger"`
 	Entry          string         `yaml:"entry,omitempty" json:"entry,omitempty"`
 	GoalEvent      string         `yaml:"goal_event,omitempty" json:"goal_event,omitempty"`
 	ExitEvents     []string       `yaml:"exit_events,omitempty" json:"exit_events,omitempty"`
 	ExitConditions []any          `yaml:"exit_conditions,omitempty" json:"exit_conditions,omitempty"`
 	Steps          []any          `yaml:"steps,omitempty" json:"steps"`
+}
+
+// KitSignalType is a signal type the kit's rules and journeys raise
+// (PUT .../signal-types/{key}): a kind of thing that needs someone's
+// attention, the events that raise it and how many days its owner has.
+type KitSignalType struct {
+	Key         string   `yaml:"key,omitempty" json:"key"`
+	Label       string   `yaml:"label,omitempty" json:"label"`
+	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Events      []string `yaml:"events,omitempty" json:"events,omitempty"`
+	DueDays     int      `yaml:"due_days,omitempty" json:"due_days,omitempty"`
+}
+
+// KitMetric is a metric the kit adds (POST .../metrics): a live number on
+// companies and people, counted from events over a rolling window, that
+// its rules, lists and scores read as metrics.<key>. A metric whose
+// window has a twin for the days before also gives <key>_change.
+type KitMetric struct {
+	Key         string   `yaml:"key,omitempty" json:"key"`
+	Name        string   `yaml:"name,omitempty" json:"name"`
+	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Levels      []string `yaml:"levels,omitempty" json:"levels,omitempty"`
+	Aggregate   string   `yaml:"aggregate,omitempty" json:"aggregate"`
+	Events      []string `yaml:"events,omitempty" json:"events"`
+	Usage       bool     `yaml:"usage,omitempty" json:"usage,omitempty"`
+	Property    string   `yaml:"property,omitempty" json:"property,omitempty"`
+	WindowDays  int      `yaml:"window_days,omitempty" json:"window_days,omitempty"`
+	OffsetDays  int      `yaml:"offset_days,omitempty" json:"offset_days,omitempty"`
+}
+
+// KitScore is a score the kit adds (POST .../scores): a number from 0 to
+// 100 on companies or people, a base plus the points of each factor
+// whose conditions hold.
+type KitScore struct {
+	Key         string `yaml:"key,omitempty" json:"key"`
+	Label       string `yaml:"label,omitempty" json:"label"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	RecordType  string `yaml:"record_type,omitempty" json:"record_type"`
+	Base        *int   `yaml:"base,omitempty" json:"base,omitempty"`
+	HighFrom    int    `yaml:"high_from,omitempty" json:"high_from,omitempty"`
+	LowBelow    int    `yaml:"low_below,omitempty" json:"low_below,omitempty"`
+	Factors     []any  `yaml:"factors,omitempty" json:"factors"`
+	// Nature is measured (when left out), ai or predicted; Parts makes it
+	// a headline score of the kit's (or the brand's) other scores.
+	Nature         string        `yaml:"nature,omitempty" json:"nature,omitempty"`
+	Parts          []scores.Part `yaml:"parts,omitempty" json:"parts,omitempty"`
+	HigherIsBetter *bool         `yaml:"higher_is_better,omitempty" json:"higher_is_better,omitempty"`
+	Needs          string        `yaml:"needs,omitempty" json:"needs,omitempty"`
+}
+
+// FlowSignalType is a kit signal type with its placeholders filled in.
+type FlowSignalType struct {
+	Key, Label, Description string
+	Events                  []string
+	DueDays                 int
 }
 
 // FlowList is a kit smart list with its placeholders filled in.
@@ -98,6 +157,7 @@ type FlowRule struct {
 // FlowJourney is a kit journey with its placeholders filled in.
 type FlowJourney struct {
 	Key, Name, Description, Entry string
+	RecordType                    string
 	TriggerKind                   string
 	TriggerEvent, GoalEvent       *string
 	TriggerFilter                 []journeys.Condition
@@ -108,14 +168,18 @@ type FlowJourney struct {
 
 // Flows are a kit's smart lists, rules and journeys, ready to add.
 type Flows struct {
-	Lists    []FlowList
-	Rules    []FlowRule
-	Journeys []FlowJourney
+	Lists       []FlowList
+	Rules       []FlowRule
+	Journeys    []FlowJourney
+	SignalTypes []FlowSignalType
+	Metrics     []recmetrics.Definition
+	Scores      []scores.Definition
 }
 
-// HasFlows reports whether the kit brings smart lists, rules or journeys.
+// HasFlows reports whether the kit brings smart lists, rules, journeys,
+// signal types, metrics or scores.
 func (k Kit) HasFlows() bool {
-	return len(k.SmartLists)+len(k.Rules)+len(k.Journeys) > 0
+	return len(k.SmartLists)+len(k.Rules)+len(k.Journeys)+len(k.SignalTypes)+len(k.Metrics)+len(k.Scores) > 0
 }
 
 var (
@@ -216,6 +280,95 @@ func (k Kit) Resolve(values map[string]string, ids map[string]string) (Flows, er
 		all["journey."+j.Key] = ids["journey."+j.Key]
 	}
 	var out Flows
+	for _, t := range k.SignalTypes {
+		ft := FlowSignalType{Key: t.Key, Label: t.Label, Description: t.Description, Events: []string{}, DueDays: t.DueDays}
+		if ft.DueDays == 0 {
+			ft.DueDays = 2
+		}
+		for _, e := range t.Events {
+			f, err := fillString(e, all)
+			if err != nil || !journeys.ValidEventName(f) {
+				return out, fmt.Errorf("signal type %s: events are event names", t.Key)
+			}
+			ft.Events = append(ft.Events, f)
+		}
+		out.SignalTypes = append(out.SignalTypes, ft)
+	}
+	for _, m := range k.Metrics {
+		d := recmetrics.Definition{Key: m.Key, Name: m.Name, Description: m.Description, Levels: m.Levels, Aggregate: m.Aggregate, Events: []string{},
+			Usage: m.Usage, Property: m.Property, WindowDays: m.WindowDays, OffsetDays: m.OffsetDays, PerProduct: true}
+		if len(d.Levels) == 0 {
+			d.Levels = []string{recmetrics.LevelCompany, recmetrics.LevelPerson}
+		}
+		if d.WindowDays == 0 {
+			d.WindowDays = 30
+		}
+		for _, e := range m.Events {
+			f, err := fillString(e, all)
+			if err != nil {
+				return out, fmt.Errorf("metric %s: %w", m.Key, err)
+			}
+			d.Events = append(d.Events, f)
+		}
+		if msg := recmetrics.Check(d); msg != "" {
+			return out, fmt.Errorf("metric %s: %s", m.Key, msg)
+		}
+		out.Metrics = append(out.Metrics, d)
+	}
+	for _, sc := range k.Scores {
+		d := scores.Definition{Key: sc.Key, Label: sc.Label, Description: sc.Description, RecordType: sc.RecordType, Base: 50, HighFrom: sc.HighFrom, LowBelow: sc.LowBelow,
+			Nature: sc.Nature, Parts: sc.Parts, HigherIsBetter: true, Needs: sc.Needs}
+		if d.Nature == "" {
+			d.Nature = scores.Measured
+		}
+		if d.Parts == nil {
+			d.Parts = []scores.Part{}
+		}
+		if sc.HigherIsBetter != nil {
+			d.HigherIsBetter = *sc.HigherIsBetter
+		}
+		if sc.Base != nil {
+			d.Base = *sc.Base
+		}
+		if len(d.Parts) > 0 {
+			d.Base = 0
+		}
+		if d.HighFrom == 0 {
+			d.HighFrom = 70
+		}
+		if d.LowBelow == 0 {
+			d.LowBelow = 40
+		}
+		if err := decodeFilled(sc.Factors, all, &d.Factors); err != nil {
+			return out, fmt.Errorf("score %s: factors: %w", sc.Key, err)
+		}
+		for i := range d.Factors {
+			if d.Factors[i].Match == "" {
+				d.Factors[i].Match = "all"
+			}
+		}
+		if msg := scores.Check(d); msg != "" {
+			return out, fmt.Errorf("score %s: %s", sc.Key, msg)
+		}
+		out.Scores = append(out.Scores, d)
+	}
+	// A kit's scores are made of and read each other: one the kit doesn't
+	// carry is checked against the brand's when the kit is applied.
+	for _, d := range out.Scores {
+		var same []scores.Definition
+		inKit := map[string]bool{}
+		for _, o := range out.Scores {
+			if o.RecordType == d.RecordType {
+				same = append(same, o)
+				inKit[o.Key] = true
+			}
+		}
+		if !slices.ContainsFunc(d.Uses(), func(k string) bool { return !inKit[k] }) {
+			if msg := scores.CheckSet(d, same); msg != "" {
+				return out, fmt.Errorf("score %s: %s", d.Key, msg)
+			}
+		}
+	}
 	for _, l := range k.SmartLists {
 		fl := FlowList{Key: l.Key, Name: l.Name, Description: l.Description, Kind: l.Kind, Match: l.Match, Rules: []smartlists.Rule{}}
 		if fl.Kind == "" {
@@ -290,6 +443,12 @@ func (k Kit) Resolve(values map[string]string, ids map[string]string) (Flows, er
 		if fj.Entry == "" {
 			fj.Entry = "once"
 		}
+		if fj.RecordType = j.RecordType; fj.RecordType == "" {
+			fj.RecordType = journeys.TypePerson
+		}
+		if !journeys.ValidType(fj.RecordType) {
+			return out, fmt.Errorf("journey %s: record_type is person or account", j.Key)
+		}
 		var trigger struct {
 			Kind   string               `json:"kind"`
 			Event  string               `json:"event"`
@@ -357,7 +516,7 @@ func (k Kit) Resolve(values map[string]string, ids map[string]string) (Flows, er
 		if err := decodeFilled(j.Steps, all, &fj.Steps); err != nil {
 			return out, fmt.Errorf("journey %s: steps: %w", j.Key, err)
 		}
-		if msg := journeys.Check(fj.Steps); msg != "" {
+		if msg := journeys.CheckFor(fj.RecordType, fj.Steps); msg != "" {
 			return out, fmt.Errorf("journey %s: %s", j.Key, msg)
 		}
 		if bad := journeys.Unreachable(fj.Steps); len(bad) > 0 {
@@ -369,6 +528,12 @@ func (k Kit) Resolve(values map[string]string, ids map[string]string) (Flows, er
 			}
 			if st.Kind == "transactional_email" && !slices.ContainsFunc(k.Templates, func(t KitTemplate) bool { return t.Handle == st.Template && t.Purpose == "transactional" }) {
 				return out, fmt.Errorf("journey %s: step %s sends %q, which is not one of the kit's transactional email drafts", j.Key, st.ID, st.Template)
+			}
+			if st.Kind == "raise_signal" && st.SignalType != "" && !k.knowsSignalType(st.SignalType) {
+				return out, fmt.Errorf("journey %s: step %s: signal_type is a starter type (such as churn_risk) or one of the kit's signal_types", j.Key, st.ID)
+			}
+			if st.Kind == "outflare_action" {
+				return out, fmt.Errorf("journey %s: step %s runs as one of a workspace's agents, which a kit can't know", j.Key, st.ID)
 			}
 			if st.Kind == "assign_owner" {
 				return out, fmt.Errorf("journey %s: step %s assigns workspace members, whose ids a kit can't know", j.Key, st.ID)
@@ -387,6 +552,12 @@ func (k Kit) Resolve(values map[string]string, ids map[string]string) (Flows, er
 		out.Journeys = append(out.Journeys, fj)
 	}
 	return out, nil
+}
+
+// knowsSignalType reports whether key is a signal type every brand starts
+// with or one the kit adds.
+func (k Kit) knowsSignalType(key string) bool {
+	return signals.IsStarter(key) || slices.ContainsFunc(k.SignalTypes, func(t KitSignalType) bool { return t.Key == key })
 }
 
 // CheckInputs checks the values given for the kit's inputs, filling in
@@ -493,6 +664,38 @@ func (k Kit) validateFlows(bad func(string, ...any)) {
 	}
 	for _, j := range k.Journeys {
 		part("journey", j.Key, j.Name)
+	}
+	for _, m := range k.Metrics {
+		if keys["metric"+m.Key] {
+			bad("metric %q is in the kit twice", m.Key)
+		}
+		keys["metric"+m.Key] = true
+	}
+	for _, sc := range k.Scores {
+		if keys["score"+sc.Key] {
+			bad("score %q is in the kit twice", sc.Key)
+		}
+		keys["score"+sc.Key] = true
+	}
+	if len(k.Metrics) > 10 || len(k.Scores) > 8 {
+		bad("a kit adds at most 10 metrics and 8 scores")
+	}
+	for _, t := range k.SignalTypes {
+		switch {
+		case !signals.ValidKey(t.Key) || keys["signal type"+t.Key]:
+			bad("signal type %q needs a unique key of lowercase letters, numbers and underscores", t.Key)
+		case signals.IsStarter(t.Key):
+			bad("signal type %q is one every brand starts with; a kit adds only its own", t.Key)
+		case t.Label == "" || len(t.Label) > 80:
+			bad("signal type %q needs a label of at most 80 characters", t.Key)
+		case len(t.Description) > 500:
+			bad("signal type %q: description is at most 500 characters", t.Key)
+		case len(t.Events) > 20:
+			bad("signal type %q listens to at most 20 events", t.Key)
+		case t.DueDays < 0 || t.DueDays > 365:
+			bad("signal type %q: due_days is at most 365", t.Key)
+		}
+		keys["signal type"+t.Key] = true
 	}
 	if !k.HasFlows() {
 		return

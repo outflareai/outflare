@@ -109,3 +109,5 @@ pnpm --filter @outflare/web test:lead-import
 ```
 
 With every API request mocked: a list's page imports a CSV in a dialog with that list fixed and stays on the list, and the Leads import picks a list from a menu (search lists left out), starts on the filtered list, names a new list before importing, and sends no list for **No list**. `OUTFLARE_TEST_SHOTS=<dir>` saves screenshots. CI runs it in the web-and-sdk job.
+
+`pnpm --filter @outflare/web test:sales-reporting` exercises Sales reporting in the real app with fictional API fixtures. It covers the manager link, missing/error/connected data, the explicit demo, periods, optional revenue, mobile layout, interval drilldowns and conversation navigation. `OUTFLARE_TEST_SHOTS` optionally saves local fixture screenshots.

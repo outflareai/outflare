@@ -73,7 +73,7 @@ func TestCRMCalendarThroughWorkspace(t *testing.T) {
 	e.integrations.Client.BaseURLs["google_calendar"] = fake.URL + "/calendar"
 	e.oauth.Endpoints.GoogleMail = fake.URL + "/gmail"
 
-	conn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "google_workspace", "credentials": map[string]string{"service_account_json": newServiceAccount(t), "admin_email": ownerEmail}})["id"].(string)
+	conn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "google_workspace_mail", "credentials": map[string]string{"service_account_json": newServiceAccount(t), "admin_email": ownerEmail}})["id"].(string)
 	owner.must(200, "PUT", root+"/policy", map[string]any{"internal_domains": []string{"northpeak.example"}, "blocked_addresses": []string{}, "blocked_domains": []string{}, "version": 0})
 	owner.must(200, "PUT", root+"/rollout", map[string]any{"enabled": true, "allowed_user_ids": []string{employeeID}, "excluded_user_ids": []string{}, "workspace_integration_id": conn, "version": 0})
 	var mailbox string

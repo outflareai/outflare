@@ -347,19 +347,35 @@ const (
 	JobRuleEvent    = "rule.event"
 	JobRuleChange   = "rule.change"
 	JobRuleAudience = "rule.audience"
+	// JobRuleRecheck tests a change rule whose conditions name dates
+	// relative to today against every record, once a day.
+	JobRuleRecheck = "rule.recheck"
+	// JobSignalEvent raises the signals of the signal types that listen to
+	// an event (engine/internal/signals).
+	JobSignalEvent = "signal.event"
+	// JobScoreRecord scores a record again after one of the fields its
+	// brand's scores read changed (engine/internal/scores).
+	JobScoreRecord = "score.record"
 )
 
 // EventAdded tells journeys and rules about a new event on a person's
 // timeline when an active journey starts or ends on its name, or an active
 // rule listens to it. Call it in the transaction that stored the event.
 func EventAdded(ctx context.Context, q Querier, workspaceID, eventID, name string) error {
-	var journey, rule bool
+	var journey, rule, signal bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM journeys WHERE workspace_id = $1
 		AND ((status = 'active' AND trigger_event = $2) OR (status IN ('active', 'paused') AND (goal_event = $2 OR $2 = ANY (exit_events)))))
 		OR EXISTS (SELECT 1 FROM journey_runs WHERE workspace_id = $1 AND status = 'active' AND wait_events @> ARRAY[$2]::text[]),
-		EXISTS (SELECT 1 FROM rules WHERE workspace_id = $1 AND status = 'active' AND $2 = ANY (watch_events))`,
-		workspaceID, name).Scan(&journey, &rule); err != nil {
+		EXISTS (SELECT 1 FROM rules WHERE workspace_id = $1 AND status = 'active' AND $2 = ANY (watch_events)),
+		EXISTS (SELECT 1 FROM signal_types WHERE workspace_id = $1 AND archived_at IS NULL AND $2 = ANY (events))`,
+		workspaceID, name).Scan(&journey, &rule, &signal); err != nil {
 		return err
+	}
+	if signal {
+		if _, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobSignalEvent, WorkspaceID: &workspaceID, Payload: map[string]string{"event_id": eventID},
+			IdempotencyKey: "signal-event:" + eventID}); err != nil {
+			return err
+		}
 	}
 	if journey {
 		if _, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobJourneyEvent, WorkspaceID: &workspaceID, Payload: map[string]string{"event_id": eventID},
@@ -407,10 +423,22 @@ func FieldChanged(ctx context.Context, q Querier, workspaceID string, c FieldCha
 			return err
 		}
 	}
-	var hit bool
+	var hit, score bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM rules WHERE workspace_id = $1 AND status = 'active' AND trigger_kind = 'change'
-		AND $2 = ANY (watch_fields))`, workspaceID, c.Field).Scan(&hit); err != nil || !hit {
+		AND $2 = ANY (watch_fields)),
+		EXISTS (SELECT 1 FROM score_definitions WHERE workspace_id = $1 AND status = 'active' AND $2 = ANY (watch_fields))`,
+		workspaceID, c.Field).Scan(&hit, &score); err != nil {
 		return err
+	}
+	// A score that reads the field is worked out again, in a job.
+	if score {
+		if _, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobScoreRecord, WorkspaceID: &workspaceID,
+			Payload: map[string]string{"record_id": c.RecordID}}); err != nil {
+			return err
+		}
+	}
+	if !hit {
+		return nil
 	}
 	_, err = jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobRuleChange, WorkspaceID: &workspaceID, Payload: c})
 	return err

@@ -1,0 +1,223 @@
+id: customer-health
+version: 1
+title: Customer health
+summary: A health score made of usage, billing and engagement, sentiment from conversations, and churn risk and expansion potential predicted from them, flagged for the owner.
+
+metrics:
+  - key: meetings_90d
+    name: Meetings, last 90 days
+    description: Meetings booked with them in the last 90 days.
+    aggregate: count
+    events: [meeting.booked]
+    window_days: 90
+  - key: support_conversations_30d
+    name: Support conversations, last 30 days
+    description: Support conversations they opened in the last 30 days.
+    aggregate: count
+    events: [support.conversation_opened]
+    window_days: 30
+  - key: site_visits_30d
+    name: Website visits, last 30 days
+    description: Pages they looked at on your website in the last 30 days.
+    aggregate: count
+    events: [page.viewed]
+    window_days: 30
+
+scores:
+  - key: usage
+    label: Usage trend
+    description: Whether a customer uses the product, and whether that is going up or down against their own week before.
+    record_type: account
+    base: 50
+    factors:
+      - label: Used the product in the last 7 days
+        points: 25
+        conditions: [{ attribute: metrics.usage_7d, op: gt, value: 0 }]
+      - label: Usage is up by a fifth or more on the week before
+        points: 25
+        conditions: [{ attribute: metrics.usage_7d_change, op: gt, value: 19 }]
+      - label: Usage fell by a third or more on the week before
+        points: -25
+        conditions: [{ attribute: metrics.usage_7d_change, op: lt, value: -29 }]
+      - label: No usage in the last 7 days
+        match: any
+        points: -30
+        conditions:
+          - { attribute: metrics.usage_7d, op: not_exists }
+          - { attribute: metrics.usage_7d, op: lt, value: 1 }
+      - label: Not seen for 30 days
+        points: -20
+        conditions: [{ attribute: metrics.last_seen, op: lt, value: "-30d" }]
+  - key: billing
+    label: Billing
+    description: Whether a customer pays, and whether anything is wrong with what they pay, from your payment connection.
+    record_type: account
+    base: 50
+    factors:
+      - label: Paid in the last 90 days
+        points: 25
+        conditions: [{ attribute: metrics.payments_90d, op: gt, value: 0 }]
+      - label: Has an active subscription
+        points: 20
+        conditions: [{ attribute: billing_status, op: eq, value: active }]
+      - label: A payment is past due
+        points: -35
+        conditions: [{ attribute: billing_status, op: eq, value: past_due }]
+      - label: Canceled their subscription
+        points: -40
+        conditions: [{ attribute: billing_status, op: eq, value: canceled }]
+      - label: Had a refund in the last 90 days
+        points: -15
+        conditions: [{ attribute: metrics.refunds_90d, op: gt, value: 0 }]
+  - key: engagement
+    label: Engagement
+    description: How much a customer is in touch, from meetings, your website and support. Opening many support conversations in a month counts against it.
+    record_type: account
+    base: 40
+    factors:
+      - label: Had a meeting in the last 90 days
+        points: 25
+        conditions: [{ attribute: metrics.meetings_90d, op: gt, value: 0 }]
+      - label: Visited your website in the last 30 days
+        points: 15
+        conditions: [{ attribute: metrics.site_visits_30d, op: gt, value: 0 }]
+      - label: Seen in the last 14 days
+        points: 20
+        conditions: [{ attribute: metrics.last_seen, op: gt, value: "-14d" }]
+      - label: Opened 3 or more support conversations in the last 30 days
+        points: -20
+        conditions: [{ attribute: metrics.support_conversations_30d, op: gt, value: 2 }]
+      - label: Not seen for 30 days
+        points: -20
+        conditions: [{ attribute: metrics.last_seen, op: lt, value: "-30d" }]
+  - key: sentiment
+    label: Sentiment
+    description: How a customer sounds in their conversations with you, read by your own AI. A customer nobody has talked to has no sentiment score, which is not a bad one.
+    record_type: account
+    nature: ai
+    needs: sentiment.value
+    base: 50
+    factors:
+      - label: Sounds happy in recent conversations
+        points: 35
+        conditions: [{ attribute: sentiment.label, op: eq, value: positive }]
+      - label: Sounds unhappy in recent conversations
+        points: -35
+        conditions: [{ attribute: sentiment.label, op: eq, value: negative }]
+      - label: Sounds better than before
+        points: 10
+        conditions: [{ attribute: sentiment.trend, op: eq, value: up }]
+      - label: Sounds worse than before
+        points: -15
+        conditions: [{ attribute: sentiment.trend, op: eq, value: down }]
+  - key: health
+    label: Health score
+    description: The one number for how a customer is doing, the average of usage, billing and engagement, all measured. Each stays visible under it, so one going down is never hidden by another going up.
+    record_type: account
+    parts:
+      - { key: usage, weight: 3 }
+      - { key: billing, weight: 2 }
+      - { key: engagement, weight: 2 }
+  - key: churn_risk
+    label: Churn risk
+    description: How likely a customer is to leave, from their health and what is going wrong. A prediction, where high is the one to worry about.
+    record_type: account
+    nature: predicted
+    higher_is_better: false
+    base: 10
+    high_from: 60
+    low_below: 30
+    factors:
+      - label: Health is low
+        points: 30
+        conditions: [{ attribute: scores.health_band, op: eq, value: low }]
+      - label: Usage fell by a third or more on the week before
+        points: 20
+        conditions: [{ attribute: metrics.usage_7d_change, op: lt, value: -29 }]
+      - label: A payment is past due
+        points: 20
+        conditions: [{ attribute: billing_status, op: eq, value: past_due }]
+      - label: Canceled their subscription
+        points: 40
+        conditions: [{ attribute: billing_status, op: eq, value: canceled }]
+      - label: Sounds unhappy in recent conversations
+        points: 20
+        conditions: [{ attribute: sentiment.label, op: eq, value: negative }]
+      - label: Sounds worse than before
+        points: 10
+        conditions: [{ attribute: sentiment.trend, op: eq, value: down }]
+      - label: Renews in the next 60 days
+        points: 5
+        conditions:
+          - { attribute: renews_on, op: gt, value: "-1d" }
+          - { attribute: renews_on, op: lt, value: "+60d" }
+      - label: Health is high
+        points: -10
+        conditions: [{ attribute: scores.health_band, op: eq, value: high }]
+  - key: expansion
+    label: Expansion potential
+    description: How likely a customer is to buy more, from growing usage, steady payments and how they sound. A prediction.
+    record_type: account
+    nature: predicted
+    base: 15
+    high_from: 60
+    low_below: 30
+    factors:
+      - label: Usage is up by a fifth or more on the week before
+        points: 25
+        conditions: [{ attribute: metrics.usage_7d_change, op: gt, value: 19 }]
+      - label: Health is high
+        points: 15
+        conditions: [{ attribute: scores.health_band, op: eq, value: high }]
+      - label: Paid in the last 90 days
+        points: 15
+        conditions: [{ attribute: metrics.payments_90d, op: gt, value: 0 }]
+      - label: Sounds happy in recent conversations
+        points: 15
+        conditions: [{ attribute: sentiment.label, op: eq, value: positive }]
+      - label: A payment is past due
+        points: -20
+        conditions: [{ attribute: billing_status, op: eq, value: past_due }]
+      - label: Health is low
+        points: -25
+        conditions: [{ attribute: scores.health_band, op: eq, value: low }]
+
+rules:
+  - key: churn_risk_high
+    name: Churn risk turned high
+    description: Fires when a company's churn risk moves into the high band, at most once a month.
+    record_type: account
+    trigger: { kind: change }
+    conditions:
+      - { attribute: scores.churn_risk_band, op: eq, value: high }
+    emit_event: account.churn_risk_high
+    cooldown_seconds: 2592000
+  - key: expansion_high
+    name: Ready to grow
+    description: Fires when a company's expansion potential moves into the high band, at most once a quarter.
+    record_type: account
+    trigger: { kind: change }
+    conditions:
+      - { attribute: scores.expansion_band, op: eq, value: high }
+    emit_event: account.expansion_high
+    cooldown_seconds: 7776000
+
+journeys:
+  - key: flag_churn_risk
+    name: Flag high churn risk
+    description: Puts the company in Needs attention as a churn risk, with a task for its owner to read why and talk to the customer.
+    record_type: account
+    trigger: { kind: event, event: account.churn_risk_high }
+    entry: again
+    steps:
+      - { id: flag, kind: raise_signal, signal_type: churn_risk, title: Churn risk turned high, next: task }
+      - { id: task, kind: create_task, title: Find out what is going wrong, text: "Open the company's scores and read why its churn risk is high, then talk to the customer.", due_after_seconds: 259200 }
+  - key: flag_expansion
+    name: Flag customers ready to grow
+    description: Puts the company in Needs attention as an upsell, with a task for its owner to offer more.
+    record_type: account
+    trigger: { kind: event, event: account.expansion_high }
+    entry: again
+    steps:
+      - { id: flag, kind: raise_signal, signal_type: upsell, title: Looks ready to grow, next: task }
+      - { id: task, kind: create_task, title: Offer the next plan or more volume, text: "Open the company's scores and read why its expansion potential is high, then make an offer.", due_after_seconds: 604800 }

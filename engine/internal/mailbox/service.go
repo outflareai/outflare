@@ -184,7 +184,7 @@ func (s *Service) Import(ctx context.Context, tx pgx.Tx, workspaceID, source str
 func EnsureDomain(ctx context.Context, q jobs.Querier, workspaceID, domain, source string) error {
 	_, err := q.Exec(ctx, `
 		INSERT INTO sending_domains (workspace_id, domain, spf, dkim, dmarc, checked_at, source, brand_id)
-		VALUES ($1, $2, 'pending', 'pending', 'pending', NULL, $3, outflare_only_brand($1))
+		VALUES ($1, $2, 'pending', 'pending', 'pending', NULL, $3, outflare_first_brand($1))
 		ON CONFLICT (workspace_id, domain) DO NOTHING`, workspaceID, domain, source)
 	return err
 }

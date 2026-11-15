@@ -4,7 +4,7 @@ Rules are the rules engine of the [customer data platform](customers.md). A rule
 
 A rule never sends anything itself. "What happened" (the event) and "what we did about it" (the journey's email, the webhook) stay separate, so one business event can drive several automations, and each can be changed on its own.
 
-Everything here works the same from the REST API, the MCP server and the web app (Lifecycle → Rules).
+Everything here works the same from the REST API, the MCP server and the web app (Automations → Rules and journeys → Rules).
 
 A rule belongs to one brand (`plans/brands/README.md`) and acts on that brand's records only; its firings and the events it emits are that brand's. The API lives under the brand: `/v1/brands/{brand}/rules/...`. The workspace routes (`/v1/workspaces/{ws}/rules/...`) are deprecated and keep working until the brands contract step: a list is the brand `?brand=` picks, else the workspace's first, and a rule made there without `brand_id` goes to the workspace's first brand. Two brands can each have a rule of the same name.
 
@@ -28,7 +28,7 @@ A rule changes while it is a draft or paused.
 | `absence` | An event doesn't happen within a time of a start event. Without a start event, each occurrence of the event starts the clock again, so it fires after a stretch with none (inactivity). | `signed_up`, then no `product_activated` within 7 days; or no `api_called` for 14 days. |
 | `audience` | Someone joins (`on: enter`) or leaves (`on: leave`) a [smart list](lists.md#smart-lists). | Joined "Paying, no login in 30 days". |
 
-Event and absence rules are about people. An audience rule is about its list's records: people, or companies for a [list of companies](lists.md#lists-of-companies) (`record_type: account`). A change rule can watch any record type, such as `deal`.
+Event and absence rules are about people by default. With `record_type: account` they are about companies: an event by anyone at the company (the event's own company when it names one, otherwise the company the person is on) counts for the company, so "no one at the company has called the API for 14 days" is one absence rule, and its event goes on the company's timeline. An event recorded on a company or another record itself, such as a deal, drives the rules for that record type. An audience rule is about its list's records: people, or companies for a [list of companies](lists.md#lists-of-companies) (`record_type: account`). A change rule can watch any record type, such as `deal`.
 
 ```sh
 curl -X POST "$OUTFLARE_URL/v1/brands/$BRAND/rules" \
@@ -39,6 +39,18 @@ curl -X POST "$OUTFLARE_URL/v1/brands/$BRAND/rules" \
        "emit_event": "customer.stalled"}'
 ```
 
+### Events from the rest of Outflare
+
+Deals, support conversations and CRM tasks reach the timeline as events too, so a rule, a journey or a metric can use them like any event your product sends. They are recorded within a minute of the change, wherever it was made (the app, the API, a CRM sync, an import).
+
+| Event | When | Properties |
+| --- | --- | --- |
+| `deal.created`, `deal.stage_changed`, `deal.won`, `deal.lost`, `deal.reopened` | A deal was added, moved to another stage while open, closed as won or lost, or opened again. | `deal_id`, `state`, `stage`, `amount_minor`, `currency`, `deal_source`; `from_stage` on a stage change; `lost_reason` on a lost deal that has one |
+| `support.conversation_opened`, `support.conversation_closed`, `support.conversation_reopened` | A support conversation with the person started, was closed, or was opened again. | `conversation_id`, `channel`, `topic_id`, `sla_breaches` |
+| `task.created`, `task.completed`, `task.reopened` | A CRM task about the record was added, done, or opened again. | `task_id`, `priority`, `due_at`, `assigned_to` |
+
+A deal's events go on its person; a deal with no person, on its company; otherwise on the deal's own record. Their source is `deals`, `support` or `tasks`. Deals, conversations and tasks from before this existed record nothing, so turning a rule on never fires for the past.
+
 ## Conditions
 
 Conditions are the same tests journeys use, with `match` `all` (the default) or `any`:
@@ -46,7 +58,14 @@ Conditions are the same tests journeys use, with `match` `all` (the default) or 
 - `attribute`: a field on the record, such as `plan` or `address.country`.
 - `property`: a property of the event that set the rule off. For an absence rule, a property of the start event.
 
-The ops are `eq`, `neq`, `gt`, `lt`, `contains`, `exists` and `not_exists`. Change and audience rules test attributes only. An absence rule tests attributes when its time runs out, so a person who became an enterprise customer in the meantime is left out.
+The ops are `eq`, `neq`, `gt`, `lt`, `contains`, `exists` and `not_exists`.
+
+**Dates relative to today.** For a date field, the value can be `today`, `+60d` (60 days from now) or `-14d` (14 days ago), compared by day in UTC: `renews_on` `lt` `+60d` with `renews_on` `gt` `today` is "renews within 60 days", and `last_contacted` `lt` `-30d` is "not contacted for 30 days". A change rule with such a condition is also tested against every record once a day, because it can come true when nothing changes and a day passes; its event then carries `checked: daily`. The first check after the rule goes live only notes where each record stands, so a record that already matched doesn't fire.
+
+**Trends.** A [metric](metrics.md#trends) with a twin over the window before has a `_change` value, in percent: `metrics.usage_7d_change` `lt` `-30` is "usage is down more than 30% on the week before".
+
+**Scores.** A [score](scores.md) is a field too: `scores.health_band` `eq` `low` is "their health score came to be low", and `scores.lead` `gt` `59` is "their lead score passed 59".
+ Change and audience rules test attributes only. An absence rule tests attributes when its time runs out, so a person who became an enterprise customer in the meantime is left out.
 
 ## Firing once
 

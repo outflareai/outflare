@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strconv"
 	"testing"
 	"time"
 
@@ -56,6 +57,8 @@ func TestRecordMetrics(t *testing.T) {
 	past(ana, "payment.succeeded", 45, map[string]any{"amount_minor": 99900}, false) // outside 30 days
 	past(ana, "proxy.request", 9, map[string]any{}, true)
 	past(ana, "proxy.request", 2, map[string]any{}, true)
+	past(ana, "balance.updated", 6, map[string]any{"balance_minor": 9000}, false)
+	past(ana, "balance.updated", 3, map[string]any{"balance_minor": 4000}, false)
 
 	// A rule: a company spending over $1,000 in 30 days is a big spender.
 	rule := owner.must(201, "POST", base+"/rules", map[string]any{"name": "Big spender", "record_type": "account",
@@ -160,6 +163,11 @@ func TestRecordMetrics(t *testing.T) {
 	if m := attr(ana); m["usage_7d"] != 2.0 {
 		t.Fatalf("usage after a live event: %v", m)
 	}
+	// The trend against the week before comes with it: one request then,
+	// two now.
+	if m := attr(ana); m["usage_7d_change"] != 100.0 {
+		t.Fatalf("usage trend: %v", m)
+	}
 
 	// Days pass: the window moves on at the sweep.
 	exec(`UPDATE metric_buckets SET day = day - 40 WHERE record_id = $1`, north)
@@ -196,6 +204,25 @@ func TestRecordMetrics(t *testing.T) {
 	settled()
 	if m := attr(acme); m["big_payments_30d"] != 50000.0 {
 		t.Fatalf("refilled for 7 days: %v", m)
+	}
+
+	// Latest: what the product last reported, such as a prepaid balance.
+	owner.must(400, "POST", base+"/metrics", map[string]any{"key": "balance", "name": "Balance", "aggregate": "latest", "events": []string{"balance.updated"}})
+	owner.must(201, "POST", base+"/metrics", map[string]any{"key": "balance", "name": "Balance", "aggregate": "latest",
+		"events": []string{"balance.updated"}, "property": "balance_minor", "window_days": 365, "levels": []string{"person", "company"}})
+	settled()
+	if m := attr(acme); m["balance"] != 4000.0 || attr(ana)["balance"] != 4000.0 {
+		t.Fatalf("the latest balance from history: %v", m)
+	}
+	for i, v := range []int{2500, 700} {
+		if _, err := customers.Record(ctx, e.pool, ws, customers.Event{RecordID: ana, Name: "balance.updated",
+			Properties: map[string]any{"balance_minor": v}, MessageID: "bal-" + strconv.Itoa(i)}); err != nil {
+			t.Fatal(err)
+		}
+		settled()
+	}
+	if m := attr(acme); m["balance"] != 700.0 {
+		t.Fatalf("the latest balance, live: %v", m)
 	}
 	owner.must(200, "POST", base+"/metrics/"+big["id"].(string)+"/archive", nil)
 	if _, ok := attr(acme)["big_payments_30d"]; ok {

@@ -31,6 +31,7 @@ func (s *Service) Register(q *jobs.Queue) {
 	q.Handle(customers.JobRuleEvent, s.eventJob)
 	q.Handle(customers.JobRuleChange, s.changeJob)
 	q.Handle(customers.JobRuleAudience, s.audienceJob)
+	q.Handle(customers.JobRuleRecheck, s.recheckJob)
 }
 
 // Columns is what Load selects, in the order scanRule reads.
@@ -214,13 +215,13 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 	}
 	ws := *job.WorkspaceID
 	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		var rec *string
+		var rec, account *string
 		var name, source string
 		var brand *string
 		var raw []byte
 		var occurred, received time.Time
-		err := tx.QueryRow(ctx, `SELECT record_id::text, name, properties, source, occurred_at, received_at, brand_id::text FROM customer_events WHERE workspace_id = $1 AND id = $2`,
-			ws, in.EventID).Scan(&rec, &name, &raw, &source, &occurred, &received, &brand)
+		err := tx.QueryRow(ctx, `SELECT record_id::text, name, properties, source, occurred_at, received_at, brand_id::text, account_id::text FROM customer_events WHERE workspace_id = $1 AND id = $2`,
+			ws, in.EventID).Scan(&rec, &name, &raw, &source, &occurred, &received, &brand, &account)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && rec == nil) {
 			return nil
 		}
@@ -252,17 +253,39 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 		if err != nil || sub == nil {
 			return err
 		}
-		list, err := Load(ctx, tx, ws, `status = 'active' AND $2 = ANY (watch_events) AND record_type = $3`, name, sub.recordType)
-		if err != nil {
-			return err
+		// A person's event is their company's too: rules about companies
+		// hear what the company's people do.
+		subjects := []*subject{sub}
+		if sub.recordType == "person" {
+			company, err := companyOf(ctx, tx, ws, sub, account)
+			if err != nil {
+				return err
+			}
+			if company != nil {
+				subjects = append(subjects, company)
+			}
 		}
 		props := map[string]any{}
 		_ = json.Unmarshal(raw, &props)
 		late := received.Sub(occurred) > Lateness
-		for _, r := range list {
-			if !r.inBrand(sub) {
-				continue
+		type pair struct {
+			r   Rule
+			sub *subject
+		}
+		var list []pair
+		for _, sub := range subjects {
+			rs, err := Load(ctx, tx, ws, `status = 'active' AND $2 = ANY (watch_events) AND record_type = $3`, name, sub.recordType)
+			if err != nil {
+				return err
 			}
+			for _, r := range rs {
+				if r.inBrand(sub) {
+					list = append(list, pair{r, sub})
+				}
+			}
+		}
+		for _, p := range list {
+			r, sub := p.r, p.sub
 			live := r.ActivatedAt == nil || !occurred.Before(*r.ActivatedAt)
 			outcome := ""
 			switch {
@@ -286,6 +309,32 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 		}
 		return nil
 	})
+}
+
+// companyOf is the company a person's event counts for: the event's own
+// account when it names one, else the company the person is on, in the
+// person's brand. It returns nil when there is none.
+func companyOf(ctx context.Context, tx pgx.Tx, ws string, person *subject, account *string) (*subject, error) {
+	id := ""
+	if account != nil {
+		id = *account
+	} else {
+		err := tx.QueryRow(ctx, `SELECT l.to_id::text FROM record_relationships l JOIN records c ON c.id = l.to_id
+			WHERE l.workspace_id = $1 AND l.from_id = $2 AND l.kind = 'companies' AND l.valid_to IS NULL
+			  AND c.brand_id IS NOT DISTINCT FROM $3::uuid AND c.merged_into IS NULL AND c.archived_at IS NULL
+			ORDER BY l.valid_from, l.id LIMIT 1`, ws, person.id, person.brandID).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	company, err := loadSubject(ctx, tx, ws, id)
+	if err != nil || company == nil || company.recordType == "person" {
+		return nil, err
+	}
+	return company, nil
 }
 
 // absenceEvent moves an absence rule's clock for an event: the event that
@@ -439,6 +488,9 @@ func (s *Service) Run(ctx context.Context, tick time.Duration) {
 	t := time.NewTicker(tick)
 	defer t.Stop()
 	for {
+		if _, err := s.Daily(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "rule.daily_check_failed", ActorType: "system", Surface: "system"}, "internal", err)
+		}
 		n, err := s.Sweep(ctx)
 		if err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.Log, track.Event{Name: "rule.timers_failed", ActorType: "system", Surface: "system"}, "internal", err)

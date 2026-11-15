@@ -69,7 +69,7 @@ func (f *fakeProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(200, map[string]any{"access_token": "ignored", "token_type": "Bearer", "expires_in": 3600,
-		"id_token": idToken(map[string]any{"sub": parts[1], "email": parts[2], "email_verified": !strings.HasPrefix(parts[2], "unverified"), "name": "Signed In"})})
+		"id_token": idToken(map[string]any{"sub": parts[1], "email": parts[2], "email_verified": !strings.HasPrefix(parts[2], "unverified"), "name": "Signed In", "picture": "https://lh3.googleusercontent.com/a/test-photo"})})
 }
 
 func (e *env) useFakeProvider(t *testing.T) *fakeProvider {

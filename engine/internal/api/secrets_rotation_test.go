@@ -28,9 +28,9 @@ func TestSecretKeyRotation(t *testing.T) {
 	ctx := context.Background()
 	// A mailbox sending through another platform has no login: its empty
 	// credentials are nothing to reseal, not unreadable.
-	if _, err := e.pool.Exec(ctx, `INSERT INTO mailboxes (workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port,
+	if _, err := e.pool.Exec(ctx, `INSERT INTO mailboxes (brand_id, workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port,
 		imap_username, credentials, status, daily_limit, source, has_login)
-		VALUES ($1, 'elsewhere@example.com', '', 'other', '', 0, '', '', 0, '', '\x', 'active', 10, 'emailbison', false)`, ws); err != nil {
+		VALUES (outflare_first_brand($1), $1, 'elsewhere@example.com', '', 'other', '', 0, '', '', 0, '', '\x', 'active', 10, 'emailbison', false)`, ws); err != nil {
 		t.Fatal(err)
 	}
 	res, err := rotating.ResealStored(ctx, e.pool)

@@ -14,28 +14,28 @@ import (
 )
 
 // Analytics sites by brand: each site a tool reads (a GA4 property, a
-// Search Console site, a PostHog project) reports for the brand whose
-// domains include its domain, unless someone picked another brand or
-// marked it shared.
+// Search Console site, a PostHog project) reports for one brand: the one
+// someone picked, else its connection's, else the workspace's first brand.
+// A domain only suggests a brand.
 
 func (s *Server) routesAnalyticsBrands(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/site-brands", s.inBrand(auth.ScopeAnalyticsRead, s.listSiteBrands))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/analytics/{id}/site-brand", s.inBrand(auth.ScopeIntegrationsManage, s.setSiteBrand))
 }
 
-// siteOwner is the brand a site reports for, and whether someone placed it
-// by hand (a placed site with no brand is shared by every brand).
+// siteOwner is the brand a site reports for, and whether that brand is
+// only the workspace's first brand because nothing else decided it.
 type siteOwner struct {
-	brand *string
-	set   bool
+	brand     *string
+	byDefault bool
 }
 
 // siteOwners says who owns each of a connection's sites, by site id.
 func (s *Server) siteOwners(ctx context.Context, ws, integration string, sites, hosts []string) (map[string]siteOwner, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT x.site, outflare_site_brand($2, x.site)::text, o.site IS NOT NULL
+		SELECT x.site, outflare_site_brand_or_first($2, x.site)::text, outflare_site_brand_chosen($2, x.site) IS NULL
 		FROM unnest($3::text[], $4::text[]) AS x (site, host)
-		LEFT JOIN analytics_site_brands o ON o.workspace_id = $1 AND o.integration_id = $2 AND o.site = x.site`,
+		JOIN integrations i ON i.id = $2 AND i.workspace_id = $1`,
 		ws, integration, sites, hosts)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func (s *Server) siteOwners(ctx context.Context, ws, integration string, sites, 
 	for rows.Next() {
 		var site string
 		var o siteOwner
-		if err := rows.Scan(&site, &o.brand, &o.set); err != nil {
+		if err := rows.Scan(&site, &o.brand, &o.byDefault); err != nil {
 			return nil, err
 		}
 		out[site] = o
@@ -55,15 +55,13 @@ func (s *Server) siteOwners(ctx context.Context, ws, integration string, sites, 
 
 // placesSite reports whether the caller may see and place a site. Someone
 // kept to some brands places the sites of their own brands and the ones
-// nobody has placed yet, never another brand's or a shared one.
+// nobody has placed yet (in the first brand only by default), never
+// another brand's.
 func (a *access) placesSite(o siteOwner) bool {
-	if a.Brands == nil {
+	if a.Brands == nil || o.byDefault {
 		return true
 	}
-	if o.brand != nil {
-		return slices.Contains(a.Brands, *o.brand)
-	}
-	return !o.set
+	return o.brand != nil && slices.Contains(a.Brands, *o.brand)
 }
 
 type siteBrand struct {
@@ -71,8 +69,9 @@ type siteBrand struct {
 	Site        string  `json:"site"`
 	Host        string  `json:"host"`
 	BrandID     *string `json:"brand_id"`
-	// Source says why: set (someone picked it), domain (the brand's
-	// domains include the site's) or none (no brand has it).
+	// Source says why: set (someone picked it), domain (its connection's
+	// brand; the name is older than that) or default (the workspace's first
+	// brand, until someone picks one).
 	Source    string     `json:"source"`
 	UpdatedAt *time.Time `json:"updated_at"`
 }
@@ -90,8 +89,8 @@ const siteBrandSQL = `
 		LEFT JOIN daily d ON d.integration_id = k.integration_id AND d.site = k.site
 		LEFT JOIN analytics_syncs s ON s.integration_id = k.integration_id AND s.site = k.site
 	)
-	SELECT x.integration_id::text, x.site, x.host, outflare_site_brand(x.integration_id, x.site)::text,
-		o.integration_id IS NOT NULL, o.updated_at
+	SELECT x.integration_id::text, x.site, x.host, outflare_site_brand_or_first(x.integration_id, x.site)::text,
+		o.integration_id IS NOT NULL, outflare_site_brand_chosen(x.integration_id, x.site) IS NULL, o.updated_at
 	FROM sites x
 	LEFT JOIN analytics_site_brands o ON o.integration_id = x.integration_id AND o.site = x.site`
 
@@ -104,17 +103,17 @@ func (s *Server) loadSiteBrands(ctx context.Context, ws, where string, args ...a
 	out := []siteBrand{}
 	for rows.Next() {
 		var b siteBrand
-		var set bool
-		if err := rows.Scan(&b.Integration, &b.Site, &b.Host, &b.BrandID, &set, &b.UpdatedAt); err != nil {
+		var set, byDefault bool
+		if err := rows.Scan(&b.Integration, &b.Site, &b.Host, &b.BrandID, &set, &byDefault, &b.UpdatedAt); err != nil {
 			return nil, err
 		}
 		switch {
 		case set:
 			b.Source = "set"
-		case b.BrandID != nil:
-			b.Source = "domain"
+		case byDefault:
+			b.Source = "default"
 		default:
-			b.Source = "none"
+			b.Source = "domain"
 		}
 		out = append(out, b)
 	}
@@ -186,21 +185,24 @@ func (s *Server) setSiteBrand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !a.placesSite(owners[req.Site]) {
-			writeError(w, r, http.StatusForbidden, "forbidden", "this site belongs to another brand or is shared by every brand; you can place sites only in your own brands")
+			writeError(w, r, http.StatusForbidden, "forbidden", "this site belongs to another brand; you can place sites only in your own brands")
 			return
 		}
-		if ref == "" || ref == "auto" || ref == "none" {
+		if ref == "" || ref == "auto" {
 			writeError(w, r, http.StatusForbidden, "forbidden", "you can place sites only in your own brands: brand is one of their ids or handles")
 			return
 		}
 	}
 	var brandID *string
 	switch ref {
-	case "", "auto", "none":
+	case "", "auto":
+	case "none":
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "every site belongs to a brand: brand is a brand's id or handle, or auto to follow the connection")
+		return
 	default:
 		bid, err := s.brandIDFor(r.Context(), a.WorkspaceID, ref)
 		if errors.Is(err, errNotFound) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "brand not found: brand is a brand's id or handle, none for shared, or auto to follow the domain")
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "brand not found: brand is a brand's id or handle, or auto to follow the connection")
 			return
 		}
 		if err != nil {
@@ -247,7 +249,7 @@ func (s *Server) setSiteBrand(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	out := siteBrand{Integration: id, Site: req.Site, Source: "none"}
+	out := siteBrand{Integration: id, Site: req.Site, Source: "default"}
 	if len(list) == 1 {
 		out = list[0]
 	}
@@ -283,8 +285,8 @@ func (s *Server) hostBrandFilter(ctx context.Context, ws string, brand brandSel)
 				}
 			}
 		}
-		// In a workspace with one brand, everything is that brand's, as
-		// in outflare_site_brand.
+		// In a workspace with one brand, every domain is that brand's, as
+		// in outflare_host_brand.
 		if owner == "" && len(byBrand) == 1 {
 			owner = byBrand[0][0].(string)
 		}

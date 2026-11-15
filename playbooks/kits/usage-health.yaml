@@ -1,0 +1,76 @@
+id: usage-health
+version: 1
+title: Usage health
+summary: A health score for companies from how often they use the product, a rule that spots usage dropping, and a journey that flags it for the owner.
+
+inputs:
+  - name: usage_event
+    label: The event that shows someone is using the product
+    help: Something active customers do most days, such as project_updated. It counts for the company whoever there does it.
+    kind: event
+    example: project_updated
+
+metrics:
+  - key: key_action_days_30d
+    name: Days with the key action, last 30 days
+    description: Days in the last 30 on which someone did the key action.
+    aggregate: days
+    events: ["{{usage_event}}"]
+    window_days: 30
+  - key: key_action_days_prev_30d
+    name: Days with the key action, the 30 days before
+    description: The same count for the 30 days before the last 30, so the change between the two shows as key_action_days_30d_change.
+    aggregate: days
+    events: ["{{usage_event}}"]
+    window_days: 30
+    offset_days: 30
+
+scores:
+  - key: health
+    label: Health score
+    description: How well a customer is doing, from how many days they did the key action and whether that is going up or down.
+    record_type: account
+    base: 50
+    high_from: 70
+    low_below: 40
+    factors:
+      - label: Did the key action on 8 days or more in the last 30
+        points: 25
+        conditions: [{ attribute: metrics.key_action_days_30d, op: gt, value: 7 }]
+      - label: Did the key action on 20 days or more in the last 30
+        points: 15
+        conditions: [{ attribute: metrics.key_action_days_30d, op: gt, value: 19 }]
+      - label: Up by a fifth or more on the 30 days before
+        points: 10
+        conditions: [{ attribute: metrics.key_action_days_30d_change, op: gt, value: 19 }]
+      - label: Down by two fifths or more on the 30 days before
+        points: -25
+        conditions: [{ attribute: metrics.key_action_days_30d_change, op: lt, value: -39 }]
+      - label: Did not do the key action in the last 30 days
+        match: any
+        points: -30
+        conditions:
+          - { attribute: metrics.key_action_days_30d, op: not_exists }
+          - { attribute: metrics.key_action_days_30d, op: lt, value: 1 }
+
+rules:
+  - key: usage_dropped
+    name: Usage dropped
+    description: Fires when a company did the key action on two fifths fewer days than in the 30 days before, at most once a month.
+    record_type: account
+    trigger: { kind: change }
+    conditions:
+      - { attribute: metrics.key_action_days_30d_change, op: lt, value: -39 }
+    emit_event: account.usage_dropped
+    cooldown_seconds: 2592000
+
+journeys:
+  - key: flag_usage_drops
+    name: Flag usage drops
+    description: Puts the company in Needs attention as a churn risk, with a task for its owner to find out why.
+    record_type: account
+    trigger: { kind: event, event: account.usage_dropped }
+    entry: again
+    steps:
+      - { id: flag, kind: raise_signal, signal_type: churn_risk, title: Usage fell by two fifths or more, next: task }
+      - { id: task, kind: create_task, title: Find out why usage dropped, text: "Look at who stopped using the product and what changed, then talk to the customer.", due_after_seconds: 259200 }

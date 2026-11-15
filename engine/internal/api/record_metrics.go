@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -199,22 +198,13 @@ type metricFields struct {
 	PerProduct  *bool     `json:"per_product"`
 }
 
-var metricAggregates = []string{recmetrics.Count, recmetrics.Sum, recmetrics.Min, recmetrics.Max, recmetrics.Days, recmetrics.Last}
-
 // apply sets f on d and reports whether what it counts changed.
 func (f metricFields) apply(d *recmetrics.Definition) (bool, error) {
 	changed := false
 	if f.Name != nil {
-		n := strings.TrimSpace(*f.Name)
-		if n == "" || len(n) > 100 {
-			return false, errInvalid("name is 1 to 100 characters")
-		}
-		d.Name = n
+		d.Name = strings.TrimSpace(*f.Name)
 	}
 	if f.Description != nil {
-		if len(*f.Description) > 500 {
-			return false, errInvalid("description is at most 500 characters")
-		}
 		d.Description = *f.Description
 	}
 	set := func(cond bool, apply func()) {
@@ -231,40 +221,11 @@ func (f metricFields) apply(d *recmetrics.Definition) (bool, error) {
 	set(f.WindowDays != nil, func() { d.WindowDays = *f.WindowDays })
 	set(f.OffsetDays != nil, func() { d.OffsetDays = *f.OffsetDays })
 	set(f.PerProduct != nil, func() { d.PerProduct = *f.PerProduct })
-	switch {
-	case !recmetrics.KeyRE.MatchString(d.Key) || d.Key == "by_product":
-		return false, errInvalid("key is lowercase letters, digits and underscores, such as spend_30d (not by_product)")
-	case len(d.Levels) == 0 || len(d.Levels) > 2:
-		return false, errInvalid("levels are company, person or both")
-	case !slices.Contains(metricAggregates, d.Aggregate):
-		return false, errInvalid("aggregate is count, sum, min, max, days or last")
-	case len(d.Events) == 0 && !d.Usage:
-		return false, errInvalid("a metric counts events (their names) or usage, or both")
-	case len(d.Events) > 20:
-		return false, errInvalid("a metric names at most 20 events")
-	case (d.Aggregate == recmetrics.Sum || d.Aggregate == recmetrics.Min || d.Aggregate == recmetrics.Max) && !fieldNameRE.MatchString(d.Property):
-		return false, errInvalid("sum, min and max read a number property of the events, such as amount_minor")
-	case d.Aggregate != recmetrics.Sum && d.Aggregate != recmetrics.Min && d.Aggregate != recmetrics.Max && d.Property != "":
-		return false, errInvalid("only sum, min and max read a property")
-	case d.WindowDays < 1 || d.WindowDays > 365:
-		return false, errInvalid("window_days is 1 to 365")
-	case d.OffsetDays < 0 || d.OffsetDays > 365:
-		return false, errInvalid("offset_days is 0 to 365")
-	}
-	for _, l := range d.Levels {
-		if l != recmetrics.LevelCompany && l != recmetrics.LevelPerson {
-			return false, errInvalid("levels are company, person or both")
-		}
-	}
-	for _, e := range d.Events {
-		if !validEventName(e) {
-			return false, errInvalid("events are event names, such as payment.succeeded")
-		}
+	if msg := recmetrics.Check(*d); msg != "" {
+		return false, errInvalid(msg)
 	}
 	return changed, nil
 }
-
-var fieldNameRE = recmetrics.KeyRE
 
 func (s *Server) createMetric(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())

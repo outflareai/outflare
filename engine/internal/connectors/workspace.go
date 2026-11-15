@@ -73,14 +73,23 @@ type WorkspaceUserUpdate struct {
 	Photo      []byte
 	PhotoType  string
 	Signature  *string
+	// RecoveryEmail sets the user's recovery address; "" clears it.
+	RecoveryEmail *string
+	// Forwarding forwards the mailbox's new mail to an address, keeping a
+	// copy in the inbox; "" turns forwarding off.
+	Forwarding *string
 }
 
 // WorkspaceUserResult says, per part of an update, "updated", "failed" or
-// "" (not asked for). It never carries Google's messages.
+// "" (not asked for); forwarding can also be "pending" while the forwarding
+// address hasn't confirmed Google's verification email. It never carries
+// Google's messages.
 type WorkspaceUserResult struct {
-	Name      string `json:"name,omitempty"`
-	Photo     string `json:"photo,omitempty"`
-	Signature string `json:"signature,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Photo         string `json:"photo,omitempty"`
+	Signature     string `json:"signature,omitempty"`
+	RecoveryEmail string `json:"recovery_email,omitempty"`
+	Forwarding    string `json:"forwarding,omitempty"`
 }
 
 type WorkspaceUserManager interface {

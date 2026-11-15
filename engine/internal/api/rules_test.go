@@ -98,7 +98,6 @@ func TestRules(t *testing.T) {
 		{"name": "Bad", "trigger": map[string]any{"kind": "change"}, "emit_event": "a.b", "conditions": []map[string]any{{"property": "plan", "op": "exists"}}},
 		{"name": "Bad", "trigger": map[string]any{"kind": "absence", "event": "a", "within_seconds": 10}, "emit_event": "a.b"},
 		{"name": "Bad", "trigger": map[string]any{"kind": "audience", "list_id": "00000000-0000-0000-0000-000000000000", "on": "enter"}, "emit_event": "a.b"},
-		{"name": "Bad", "trigger": map[string]any{"kind": "event", "event": "signed_up"}, "emit_event": "a.b", "record_type": "deal"},
 		{"name": "Bad", "trigger": map[string]any{"kind": "change"}, "emit_event": "a.b", "record_type": "nope",
 			"conditions": []map[string]any{{"attribute": "stage", "op": "eq", "value": "won"}}},
 		{"name": "Bad", "trigger": map[string]any{"kind": "teleport"}, "emit_event": "a.b"},

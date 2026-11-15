@@ -119,7 +119,7 @@ func (Connector) Definition() c.Definition {
 			"Create an OAuth client (web application) with this server's redirect URI. In Google Admin, Security, API controls, Domain-wide delegation, " +
 			"authorize the service account's numeric client ID for exactly the Directory customer.readonly and domain.readonly scopes. " +
 			"Then connect with the service account's email and your OAuth client, and sign in. No key is downloaded. " +
-			"With profile changes allowed (and the Directory user and Gmail settings basic scopes authorized too), it can change existing users' names, photos and signatures. " +
+			"With profile changes allowed (and the Directory user and Gmail settings basic and sharing scopes authorized too), it can change existing users' names, photos, signatures, recovery email and forwarding. " +
 			"It cannot create or delete users, enroll two-factor authentication or retrieve passwords or login codes.",
 		Website: "https://workspace.google.com", DocsURL: "https://developers.google.com/workspace/admin/directory/v1/guides/manage-domains",
 		KeyURL: "https://console.cloud.google.com/iam-admin/serviceaccounts",

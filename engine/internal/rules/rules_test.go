@@ -16,7 +16,6 @@ func TestCheck(t *testing.T) {
 		"emits what it hears": func(r *Rule) { r.Emit = "signed_up" },
 		"too short":           func(r *Rule) { r.Trigger.WithinSeconds = 5 },
 		"list on absence":     func(r *Rule) { r.Trigger.ListID = "x" },
-		"deal absence":        func(r *Rule) { r.RecordType = "deal" },
 		"email condition":     func(r *Rule) { r.Conditions = []Condition{{Email: "opened", Step: "a", Op: "exists"}} },
 		"change with event":   func(r *Rule) { r.Trigger = Trigger{Kind: KindChange, Event: "x"} },
 		"empty change":        func(r *Rule) { r.Trigger = Trigger{Kind: KindChange} },

@@ -7,7 +7,8 @@ import (
 
 // TestBrandViewsShowOnlyTheBrand: with one brand picked, infrastructure,
 // mailbox health, Home's status, leads and allocation count only that
-// brand's records; brand=none counts the ones no brand has.
+// brand's records. Every mailbox has a brand: one made without one is the
+// workspace's first brand's, so brand=none counts nothing.
 func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
@@ -15,6 +16,7 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})["id"].(string)
 	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})
 	ctx := context.Background()
+	first := brandOf(t, e, `SELECT outflare_first_brand($1)::text`, ws)
 	mine := addMailbox(t, e, ws, "ana@geonode.example")
 	addMailbox(t, e, ws, "bo@unassigned.example")
 	addMailbox(t, e, ws, "cy@unassigned.example")
@@ -28,8 +30,8 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 		t.Helper()
 		return owner.must(200, "GET", base+"/infrastructure"+q, nil)["mailboxes"].(map[string]any)["ready"].(float64)
 	}
-	if ready("") != 3 || ready("?brand=geonode") != 1 || ready("?brand=repocket") != 0 || ready("?brand=none") != 2 {
-		t.Fatalf("ready: %v %v %v %v", ready(""), ready("?brand=geonode"), ready("?brand=repocket"), ready("?brand=none"))
+	if ready("") != 3 || ready("?brand=geonode") != 1 || ready("?brand=repocket") != 0 || ready("?brand=none") != 0 || ready("?brand="+first) != 2 {
+		t.Fatalf("ready: %v %v %v %v %v", ready(""), ready("?brand=geonode"), ready("?brand=repocket"), ready("?brand=none"), ready("?brand="+first))
 	}
 	if n := len(owner.must(200, "GET", base+"/mailbox-health?brand=repocket", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("repocket health: %d", n)
@@ -50,21 +52,21 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 		t.Fatal("no_mailboxes should show for Repocket only")
 	}
 	owner.must(404, "GET", base+"/status?brand=nope", nil)
-	// Mailboxes in no brand show on Home under All brands, and go once
-	// they are moved into one.
-	if !codes("")["records_unassigned"] || codes("?brand=geonode")["records_unassigned"] {
-		t.Fatal("records_unassigned should show under All brands only")
+	// No mailbox is in no brand, so Home has nothing to place; the first
+	// brand's move to another brand in one go.
+	if codes("")["records_unassigned"] {
+		t.Fatal("records_unassigned with every mailbox in a brand")
 	}
 	var loose []string
-	for _, m := range owner.must(200, "GET", base+"/mailboxes?brand=none", nil)["data"].([]any) {
+	for _, m := range owner.must(200, "GET", base+"/mailboxes?brand="+first, nil)["data"].([]any) {
 		loose = append(loose, m.(map[string]any)["id"].(string))
 	}
 	if len(loose) != 2 {
-		t.Fatalf("unassigned mailboxes: %v", loose)
+		t.Fatalf("first brand's mailboxes: %v", loose)
 	}
 	owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"mailbox_ids": loose})
-	if codes("")["records_unassigned"] || ready("?brand=repocket") != 2 {
-		t.Fatal("moved mailboxes still unassigned")
+	if ready("?brand=repocket") != 2 || ready("?brand="+first) != 0 {
+		t.Fatal("moved mailboxes stayed in the first brand")
 	}
 
 	// A lead belongs to one brand (brands step 5): one made without a

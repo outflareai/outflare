@@ -38,8 +38,8 @@ func addMailbox(t *testing.T, e *env, ws, email string) string {
 	t.Helper()
 	var id string
 	err := e.pool.QueryRow(context.Background(), `
-		INSERT INTO mailboxes (workspace_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials, status)
-		VALUES ($1, $2, 'google', 'smtp.gmail.com', 587, $2, 'imap.gmail.com', 993, $2, '\x00', 'active') RETURNING id::text`, ws, email).Scan(&id)
+		INSERT INTO mailboxes (brand_id, workspace_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials, status)
+		VALUES (outflare_mailbox_brand($1, $2, NULL), $1, $2, 'google', 'smtp.gmail.com', 587, $2, 'imap.gmail.com', 993, $2, '\x00', 'active') RETURNING id::text`, ws, email).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}

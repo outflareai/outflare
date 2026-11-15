@@ -306,10 +306,12 @@ func (s *Server) updateAdAccount(w http.ResponseWriter, r *http.Request) {
 	if req.Brand != nil {
 		switch ref := strings.ToLower(strings.TrimSpace(*req.Brand)); ref {
 		case "", "none":
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "every ad account belongs to a brand: brand is a brand's id or handle")
+			return
 		default:
 			bid, err := s.brandIDFor(r.Context(), a.WorkspaceID, ref)
 			if errors.Is(err, errNotFound) {
-				writeError(w, r, http.StatusBadRequest, "invalid_request", "brand not found: brand is a brand's id or handle, or none for shared")
+				writeError(w, r, http.StatusBadRequest, "invalid_request", "brand not found: brand is a brand's id or handle")
 				return
 			}
 			if err != nil {

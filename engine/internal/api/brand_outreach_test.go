@@ -208,10 +208,10 @@ func TestBrandOutreach(t *testing.T) {
 	// ---- Replies, meetings and deals ----
 
 	mb := ""
-	if err := e.pool.QueryRow(ctx, `INSERT INTO mailboxes (workspace_id, email, provider, auth_method, smtp_host, smtp_port, smtp_username,
+	if err := e.pool.QueryRow(ctx, `INSERT INTO mailboxes (brand_id, workspace_id, email, provider, auth_method, smtp_host, smtp_port, smtp_username,
 		imap_host, imap_port, imap_username, credentials, status, daily_limit, source)
-		VALUES ($1, 'sales@alpha.example', 'other', 'password', 'smtp.alpha.example', 587, 'sales', 'imap.alpha.example', 993, 'sales', '\x00', 'active', 30, 'manual')
-		RETURNING id::text`, ws).Scan(&mb); err != nil {
+		VALUES ($2, $1, 'sales@alpha.example', 'other', 'password', 'smtp.alpha.example', 587, 'sales', 'imap.alpha.example', 993, 'sales', '\x00', 'active', 30, 'manual')
+		RETURNING id::text`, ws, alpha).Scan(&mb); err != nil {
 		t.Fatal(err)
 	}
 	var reply string

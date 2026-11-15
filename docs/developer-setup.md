@@ -1,6 +1,6 @@
 # Developer setup
 
-**People → Developer setup** (`GET /v1/brands/{brand}/developer-setup`, MCP `get_developer_setup`) is a live checklist of what one brand's developer sends. Each brand has its own, since each brand's integration is separate. The page refreshes every 30 seconds while it is open.
+**CRM → Customer data → Developer setup** (`GET /v1/brands/{brand}/developer-setup`, MCP `get_developer_setup`) is a live checklist of what one brand's developer sends. Each brand has its own, since each brand's integration is separate. The page refreshes every 30 seconds while it is open.
 
 Each check says **OK**, **Check** (it works, but something should be fixed) or **Not yet** (nothing has arrived), what it found, and what to send to fix it, with an example to copy:
 
