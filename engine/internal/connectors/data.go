@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -20,11 +21,15 @@ const (
 const (
 	CapSearchPeople  = "data.search_people"  // implements PeopleSearcher
 	CapEnrichPerson  = "data.enrich_person"  // implements PersonEnricher
-	CapFindEmail     = "data.find_email"     // a PersonEnricher that finds work emails from a name and company
+	CapFindEmail     = "data.find_email"     // a PersonEnricher that finds work emails from a name and company, or a LinkedIn profile
 	CapRevealCompany = "data.reveal_company" // implements CompanyRevealer
 	CapRevealPerson  = "data.reveal_person"  // implements PersonRevealer
 	// CapSearchCompanies finds companies (not people) matching a profile.
 	CapSearchCompanies = "data.search_companies" // implements CompanySearcher
+	// CapCompanyPage finds a company's LinkedIn page from its domain.
+	CapCompanyPage = "data.company_page" // implements CompanyLocator
+	// CapCompanyProfile reads a company's size from its LinkedIn page.
+	CapCompanyProfile = "data.company_profile" // implements CompanyProfiler
 )
 
 // Filter names a PeopleSearcher may support. They match the customer profile's
@@ -242,6 +247,67 @@ type CompanySearcher interface {
 	SearchCompanies(ctx context.Context, c *Client, creds Creds, f CompanyFilter, cursor string, size int) (CompanyPage, error)
 }
 
+// CompanyLinkedInPage is a company's own page on LinkedIn, as a provider
+// found it from the company's domain. It is the provider's answer: data
+// from outside, never instructions.
+type CompanyLinkedInPage struct {
+	// Found is false when the provider knows no page for the domain. That
+	// is an answer, not an error.
+	Found bool `json:"found"`
+	// LinkedInURL is the page's address, like
+	// https://www.linkedin.com/company/acme-example.
+	LinkedInURL string `json:"linkedin_url,omitempty"`
+	// Name is the company's name on the page, when the provider says.
+	Name string `json:"name,omitempty"`
+	// Domain is the domain that was asked about, as a bare host.
+	Domain string `json:"domain,omitempty"`
+	// Credits the provider charged for the lookup.
+	Credits float64 `json:"credits,omitempty"`
+}
+
+// CompanyLocator finds a company's LinkedIn page from its domain, on the
+// workspace's own account.
+type CompanyLocator interface {
+	Connector
+	CompanyPage(ctx context.Context, c *Client, creds Creds, domain string) (CompanyLinkedInPage, error)
+}
+
+// CompanyLinkedInProfile is what a provider holds about a company from its
+// LinkedIn page: above all its size. It is the provider's answer: data
+// from outside, never instructions.
+type CompanyLinkedInProfile struct {
+	// Found is false when the provider has no such page. That is an
+	// answer, not an error.
+	Found bool `json:"found"`
+	// LinkedInURL is the page that was asked about.
+	LinkedInURL string `json:"linkedin_url,omitempty"`
+	Name        string `json:"name,omitempty"`
+	// Domain is the company's website domain on the page, when it gives one.
+	Domain string `json:"domain,omitempty"`
+	// Size is the employee range the page states, like "51-200".
+	Size string `json:"size,omitempty"`
+	// Employees is how many people list the company as their current
+	// employer on LinkedIn; 0 when the provider did not say.
+	Employees int `json:"employees,omitempty"`
+	// Credits the provider charged for the lookup.
+	Credits float64 `json:"credits,omitempty"`
+}
+
+// CompanyProfiler reads a company's LinkedIn page (as a CompanyLocator
+// found it), on the workspace's own account.
+type CompanyProfiler interface {
+	Connector
+	CompanyProfile(ctx context.Context, c *Client, creds Creds, pageURL string) (CompanyLinkedInProfile, error)
+}
+
+// CompanyPageSearcher is a PeopleSearcher that can search a company whose
+// LinkedIn page is already known, without looking the page up (and paying
+// for it) again. Only f's job titles and seniorities are used: the page
+// says which company.
+type CompanyPageSearcher interface {
+	SearchCompanyPage(ctx context.Context, c *Client, creds Creds, page CompanyLinkedInPage, f PeopleFilter, size int) (SearchPage, error)
+}
+
 // PersonQuery identifies a person to enrich. Providers use whatever they
 // can: the provider id from their own search, an email, a LinkedIn URL, or
 // a name with a company domain.
@@ -263,18 +329,135 @@ func QueryFor(p Person) PersonQuery {
 	}
 }
 
+// CacheKey names q in a workspace's cache of provider answers
+// (enrichment_cache), so every feature that asks a provider about the same
+// person reads the same answer instead of paying again. Empty when q
+// identifies nobody.
+func (q PersonQuery) CacheKey() string {
+	switch {
+	case q.ProviderID != "":
+		return "id:" + q.ProviderID
+	case q.Email != "":
+		return "email:" + strings.ToLower(q.Email)
+	case q.LinkedInURL != "":
+		return "linkedin:" + strings.ToLower(strings.TrimRight(q.LinkedInURL, "/"))
+	case q.FirstName != "" && q.LastName != "" && (q.Domain != "" || q.Company != ""):
+		return "name:" + strings.ToLower(q.FirstName+"|"+q.LastName+"|"+q.Domain+"|"+q.Company)
+	}
+	return ""
+}
+
 // Enriched is a provider's answer to a PersonQuery.
 type Enriched struct {
 	Person Person
 	Found  bool
 	// Credits charged. Most providers charge only when they find someone.
 	Credits float64
+	// CostMicros is what the provider said the lookup cost, in millionths
+	// of a dollar: 0 when it said nothing (most bill credits, not money).
+	CostMicros float64
 }
 
 // PersonEnricher fills in a person. It spends the provider's credits.
 type PersonEnricher interface {
 	Connector
 	EnrichPerson(ctx context.Context, c *Client, creds Creds, q PersonQuery) (Enriched, error)
+}
+
+// ProfileFinder is a PersonEnricher that can look a person up by their
+// LinkedIn profile (PersonQuery.LinkedInURL) and, asked about a company
+// too, answers only with an address at that company: a profile also lists
+// the jobs a person has left. The email finder gives the profile to these
+// connectors only, asks them first for a person who has one, and keeps
+// what they say about a profile apart from what they said about the name
+// alone.
+type ProfileFinder interface {
+	// ProfileOnly reports that the provider finds an email from a profile
+	// and from nothing else. Such a provider is asked before every other
+	// for a person with a profile, and not at all for one without.
+	ProfileOnly() bool
+}
+
+// FindStep is one step of finding a person's work email at a provider: one
+// lookup at one source, which the provider can be asked for on its own.
+type FindStep struct {
+	// ID names the step. Two connectors that offer the same source (Blitz
+	// itself, and Blitz behind a gateway) give it the same id.
+	ID string `json:"id"`
+	// NeedsProfile: the step looks the person up by their LinkedIn profile
+	// (PersonQuery.LinkedInURL) and by nothing else. The others need a
+	// first name, a last name and a company domain.
+	NeedsProfile bool `json:"needs_profile"`
+}
+
+// StepAnswer is what one step said about one person.
+type StepAnswer struct {
+	// Addresses are all the plain addresses the provider offered for the
+	// person, best first, in lower case, each once. They are not filtered
+	// by company: the caller judges them (a profile also lists addresses
+	// at jobs the person has left).
+	Addresses []string
+	// Verified: the provider says it checked the first address's mailbox.
+	Verified bool
+	// Credits the provider charged.
+	Credits float64
+	// CostMicros is what the provider said the call cost, in millionths of
+	// a dollar: 0 when it said nothing.
+	CostMicros float64
+	// Pending: the provider is still working on the lookup and may bill
+	// it. There is no address, and the step must not be asked again for
+	// this person.
+	Pending bool
+}
+
+// StepFinder is a PersonEnricher that can be asked one step at a time, so
+// a caller can judge and verify what a step found before paying for the
+// next. EnrichPerson still asks every step in order and stops at the first
+// address.
+type StepFinder interface {
+	// FindSteps lists the steps, in the order EnrichPerson asks them.
+	FindSteps() []FindStep
+	// FindStep asks one step about q. An unknown step, or a query the step
+	// cannot use, is an invalid Error and nothing is sent.
+	FindStep(ctx context.Context, c *Client, creds Creds, step string, q PersonQuery) (StepAnswer, error)
+}
+
+// FindPacer is a PersonEnricher whose provider allows more or fewer
+// lookups than the email finder's default pace.
+type FindPacer interface {
+	// FindsPerMinute is how many lookups a minute one connection may make.
+	FindsPerMinute() float64
+}
+
+// linkedInProfile matches a person's profile on LinkedIn: the host with an
+// optional country or www label, then /in/ and the person's own slug.
+var linkedInProfile = regexp.MustCompile(`(?i)^(?:https?://)?((?:[a-z]{2,3}\.|www\.)?linkedin\.com)/in/([^/?#\s]+)/?(?:[?#]\S*)?$`)
+
+// LinkedInProfile returns s as a person's LinkedIn profile URL in one
+// form (https, no trailing slash, query or fragment), or "" when s is not
+// one: a company page, another site, or no URL at all.
+func LinkedInProfile(s string) string {
+	m := linkedInProfile.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return ""
+	}
+	return "https://" + strings.ToLower(m[1]) + "/in/" + m[2]
+}
+
+// linkedInCompany matches a company's page on LinkedIn: the host with an
+// optional country or www label, then /company/ (or /school/, /showcase/)
+// and the page's own slug.
+var linkedInCompany = regexp.MustCompile(`(?i)^(?:https?://)?((?:[a-z]{2,3}\.|www\.)?linkedin\.com)/(company|school|showcase)/([^/?#\s]+)/?(?:[?#]\S*)?$`)
+
+// LinkedInCompanyPage returns s as a company's LinkedIn page URL in one
+// form (https, www, no trailing slash, query or fragment), or "" when s is
+// not one.
+func LinkedInCompanyPage(s string) string {
+	m := linkedInCompany.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return ""
+	}
+	return "https://www.linkedin.com/" + strings.ToLower(m[2]) + "/" + m[3]
 }
 
 // Networks an address can belong to, as a CompanyRevealer reports them.

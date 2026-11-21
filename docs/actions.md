@@ -27,6 +27,8 @@ From then on the token's reads run as before, and each change it makes is an **a
 | A grant says **hold**, no grant matches, or the change always needs a person | `202` with the held `action` | Nothing changes until a person approves it |
 | A grant says **refuse** | `403 action_refused` | Nothing changes |
 
+A held answer says what happened and what to do next: `outcome` is `approval_required`, `approval_url` is the page where a person decides, and `next_step` says to read the action for the decision and to cancel it if it goes out of date. The other answers an agent can get are a missing permission (`403 forbidden`), a change only a signed-in person may make (`403 person_only`), a removal on the ad platform this agent has no permission for (`403 permission_required`, naming `ads.remove_campaign`, `ads.remove_ad` or `ads.remove_keyword`, which a person turns on for it as Ask or On), a platform that can't do it (`422 connector_invalid`), and, for a change a job makes, `202` with the queued change: its `status` becomes `applied` or `failed`, and `verified_at` is set once the platform shows it.
+
 A grant that runs changes can have a **daily limit**: once it has run that many in a UTC day, the rest are held.
 
 **Always a person.** These wait for a person whatever the grants say: mailboxes, sending servers, senders, sign-ins, API tokens, webhooks, connections, email providers, suppressions, company context, one-off emails, and the fixes [fix autonomy](fix-autonomy.md) holds.
@@ -88,6 +90,7 @@ Leave `fields` empty to approve every change to that method and path. A template
 **Agents** in the app shows what waits for you, everything your agents changed, and what each may do, for the picked brand; `GET /v1/brands/{brand}/actions?status=held` is the same approval inbox over the API. Changes about no brand (the team's own, such as invites and connections) are in Settings, Team activity, and on `GET /v1/workspaces/{ws}/actions`. Each action shows the request, the agent's reason (its `Outflare-Reason` header), why it was held, and a `body_hash` of exactly what will run. Write the reason as the yes/no question a person answers, then why ("Take Acme's free proxy list (https://blog.acme.example/free-proxy-lists) out of this outreach campaign? Acme is a competitor."): the card leads with the question, and shows the rest as its reason.
 
 - **One at a time:** `POST .../actions/{id}/approve` runs it as the agent, through every check again, and answers with the result. `POST .../actions/{id}/reject` with a `note` turns it down.
+- **Taken back by its agent:** `POST .../actions/{id}/cancel` (`actions.read`, and only the token or person that made the change) cancels a change that still waits, so nobody can approve a request that is out of date. `superseded_by` names the agent's later change that replaces it, shown on the cancelled one. Records `action.cancelled`.
 - **A batch:** `POST .../actions/decide` with `{"approve": [...], "reject": [...], "note": "..."}`, up to 100 at once. Each is decided on its own, and the answer says what happened to each.
 
 Approving needs `actions.approve`, and is for people and approver tokens: an agent token on the action layer never decides on changes, its own or another agent's. A held change nobody decides within 30 days expires, and the agent has to make it again.

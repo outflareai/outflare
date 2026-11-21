@@ -81,6 +81,29 @@ func TestInsightsPhase5(t *testing.T) {
 	owner.must(400, "POST", base+"/insights/lifecycle", map[string]any{"step": map[string]any{"kind": "event", "event": "opened_app"}, "interval": "hour"})
 	owner.must(400, "POST", base+"/insights/lifecycle", map[string]any{"step": map[string]any{"kind": "event", "event": "opened_app", "within": map[string]any{"value": 1, "unit": "day"}}})
 
+	// Stickiness by day over the same five days: Ana on all five, Bo and
+	// Cy on one each.
+	st := owner.must(200, "POST", base+"/insights/stickiness", map[string]any{"step": map[string]any{"kind": "event", "event": "opened_app"},
+		"date_range": map[string]any{"from": today.Add(-4 * day).Format(time.DateOnly), "to": today.Format(time.DateOnly)}})
+	buckets := st["buckets"].([]any)
+	if st["interval"] != "day" || st["people"] != 3.0 || len(buckets) != 5 {
+		t.Fatalf("stickiness: %v", st)
+	}
+	if b := buckets[0].(map[string]any); b["periods"] != 1.0 || b["people"] != 2.0 {
+		t.Fatalf("one day: %v", b)
+	}
+	if b := buckets[4].(map[string]any); b["people"] != 1.0 || b["share"].(float64) < 0.33 || b["share"].(float64) > 0.34 {
+		t.Fatalf("five days: %v", b)
+	}
+	if avg := st["average_periods"].(float64); avg < 2.33 || avg > 2.34 {
+		t.Fatalf("average: %v", avg)
+	}
+	owner.must(400, "POST", base+"/insights/stickiness", map[string]any{"step": map[string]any{"kind": "event", "event": "opened_app"}, "interval": "hour"})
+	sticky := owner.must(201, "POST", base+"/insights", map[string]any{"kind": "stickiness", "name": "Days active", "spec": map[string]any{"step": map[string]any{"kind": "event", "event": "opened_app"}, "interval": "week"}})
+	if sticky["kind"] != "stickiness" {
+		t.Fatalf("saved stickiness: %v", sticky)
+	}
+
 	// Saved lifecycle question, run with the dashboard's dates.
 	saved := owner.must(201, "POST", base+"/insights", map[string]any{"kind": "lifecycle", "name": "Weekly actives", "spec": map[string]any{"step": map[string]any{"kind": "event", "event": "opened_app"}, "date_range": map[string]any{"preset": "last_90_days"}}})
 	if saved["kind"] != "lifecycle" {

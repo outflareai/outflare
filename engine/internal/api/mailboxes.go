@@ -25,6 +25,7 @@ func (s *Server) routesMailboxes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes", s.inWorkspace(manage, s.replans(s.createMailbox)))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/import", s.inWorkspace(manage, s.replans(s.importMailboxes)))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/mailboxes/{id}", s.inBrand(read, s.getMailbox))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/mailboxes/{id}/activity", s.inBrand(read, s.mailboxActivity))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/mailboxes/{id}", s.inWorkspace(manage, s.replans(s.updateMailbox)))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/mailboxes/{id}", s.inWorkspace(manage, s.replans(s.deleteMailbox)))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/{id}/verify", s.inWorkspace(manage, s.replans(s.verifyMailbox)))

@@ -53,6 +53,21 @@ func TestPartnershipPipelines(t *testing.T) {
 		}
 	}
 
+	// A pipeline set up before the kit gained a stage gets it in the kit's
+	// order when the kit is applied again, not at the end.
+	if _, err := e.pool.Exec(ctx, `UPDATE option_sets SET options = (SELECT jsonb_agg(o) FROM jsonb_array_elements(options) o WHERE o->>'key' <> 'researching')
+		WHERE workspace_id = $1 AND brand_id = $2 AND key = 'link_partnership_stage'`, ws, second); err != nil {
+		t.Fatal(err)
+	}
+	if re := owner.must(200, "POST", root+"/kits/partnerships-seo/apply", nil); re["changes"] != 1.0 {
+		t.Fatalf("applying the kit again: %v", re)
+	}
+	var stages []string
+	if err := e.pool.QueryRow(ctx, `SELECT array_agg(o->>'key' ORDER BY n) FROM option_sets, jsonb_array_elements(options) WITH ORDINALITY AS x(o, n)
+		WHERE workspace_id = $1 AND brand_id = $2 AND key = 'link_partnership_stage'`, ws, second).Scan(&stages); err != nil || len(stages) != 10 || stages[0] != "researching" || stages[1] != "prospect" {
+		t.Fatalf("stages after applying again: %v %v", stages, err)
+	}
+
 	// Add a prospect by website: company found or added, first stage.
 	add := owner.must(201, "POST", root+"/partnerships", map[string]any{
 		"type": "link_partnership", "website": "https://www.trailgear.example/blog",
@@ -60,7 +75,7 @@ func TestPartnershipPipelines(t *testing.T) {
 	})
 	rec := add["record"].(map[string]any)
 	attrs := rec["attributes"].(map[string]any)
-	if add["created"] != true || rec["name"] != "trailgear.example" || attrs["stage"] != "prospect" || attrs["link_type"] != "guest_post" || attrs["company"] == nil {
+	if add["created"] != true || rec["name"] != "trailgear.example" || attrs["stage"] != "researching" || attrs["link_type"] != "guest_post" || attrs["company"] == nil {
 		t.Fatalf("add: %v", add)
 	}
 	var companyDomain string

@@ -8,6 +8,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/leadportal"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,20 +51,10 @@ func salesReportRange(r *http.Request, now time.Time) (time.Time, time.Time, str
 	return from, to, bucket, nil
 }
 func (s *Server) getSalesReporting(w http.ResponseWriter, r *http.Request) {
-	a := accessFrom(r.Context())
-	allowed := auth.Grants(a.Scopes, auth.ScopeMembersManage)
-	if !allowed && a.UserID != "" && a.TokenID == "" && a.ViewID == "" {
-		m, e := salesMemberAt(r.Context(), s.pool, a, a.UserID)
-		if e != nil {
-			s.allocError(w, r, e)
-			return
-		}
-		allowed = m.Role == "manager"
-	}
-	if !allowed {
-		writeError(w, r, 403, "forbidden", "Sales reporting requires a Sales manager or workspace owner")
+	if !s.salesReportingAllowed(w, r) {
 		return
 	}
+	a := accessFrom(r.Context())
 	from, to, bucket, err := salesReportRange(r, time.Now())
 	if err != nil {
 		writeError(w, r, 400, "invalid_request", err.Error())
@@ -125,7 +116,63 @@ func (s *Server) getSalesReporting(w http.ResponseWriter, r *http.Request) {
 			source["status"] = "choose"
 		}
 	}
-	out := map[string]any{"schema_version": 1, "generated_at": time.Now().UTC(), "from": from, "to": to, "bucket": bucket, "buckets": []any{}, "totals": map[string]any{}, "cohort": nil, "tools": nil, "capacity": nil, "groups": []any{}}
+	// The discovery lane board lives only in the connected portal: there is no native part to combine.
+	if strings.HasSuffix(r.URL.Path, "/lanes") {
+		status := q.Get("status")
+		if status != "" && !salesLaneStatus.MatchString(status) {
+			writeError(w, r, 400, "invalid_request", "Choose a valid lane status")
+			return
+		}
+		trace := q.Get("trace") == "true"
+		if q.Has("trace") && q.Get("trace") != "true" && q.Get("trace") != "false" {
+			writeError(w, r, 400, "invalid_request", "Choose a valid trace option")
+			return
+		}
+		for _, key := range []string{"mission", "lane", "run"} {
+			if q.Has(key) && !salesTraceID.MatchString(q.Get(key)) {
+				writeError(w, r, 400, "invalid_request", "Choose valid discovery IDs")
+				return
+			}
+		}
+		if trace && offset > 100000 {
+			writeError(w, r, 400, "invalid_request", "Trace offset is too large")
+			return
+		}
+		page := map[string]any{"source": source, "lanes": nil, "trace": nil}
+		if connection != nil {
+			source["status"] = "connected"
+			source["integration_id"] = connection.ID
+			opened, e := s.integrations.Open(r.Context(), s.pool, a.WorkspaceID, connection.ID)
+			if e != nil {
+				s.internal(w, r, e)
+				return
+			}
+			args := url.Values{"lanes": {"1"}, "offset": {strconv.Itoa(offset)}}
+			if status != "" {
+				args.Set("lane_status", status)
+			}
+			if trace {
+				args.Del("lanes")
+				args.Set("trace", "1")
+				for _, key := range []string{"mission", "lane", "run"} {
+					if q.Has(key) {
+						args.Set(key, q.Get(key))
+					}
+				}
+			}
+			response, e := (leadportal.Connector{}).Read(r.Context(), opened.Client, opened.Creds, args)
+			if e != nil {
+				writeError(w, r, 502, "connector_unavailable", "Lead Portal discovery lanes could not be read. Check its connection and retry.")
+				return
+			}
+			page["lanes"] = response["lanes"]
+			page["trace"] = response["trace"]
+		}
+		w.Header().Set("Cache-Control", "private, no-store")
+		writeJSON(w, 200, page)
+		return
+	}
+	out := map[string]any{"schema_version": 1, "generated_at": time.Now().UTC(), "from": from, "to": to, "bucket": bucket, "buckets": []any{}, "totals": map[string]any{}, "cohort": nil, "tools": nil, "capacity": nil, "discovery": nil, "groups": []any{}}
 	upstream := []string{}
 	for _, v := range selected {
 		if v != "sdr" && v != "closed" {
@@ -219,6 +266,8 @@ func (s *Server) getSalesReporting(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
+var salesLaneStatus = regexp.MustCompile(`^[a-z_]{1,40}$`)
+
 const salesReportingNative = `WITH milestones AS (
  SELECT l.id,l.record_id,l.owner_id,l.amount_minor,l.currency,l.state,r.name,l.source,l.source_id,
  (SELECT min(e.occurred_at) FROM sales_events e WHERE e.workspace_id=l.workspace_id AND e.brand_id=l.brand_id AND e.lead_id=l.id AND e.action='lead_taken' AND e.actor_role='sdr') AS picked,
@@ -245,4 +294,24 @@ func (s *Server) nativeSalesReporting(r *http.Request, from, to time.Time, bucke
 	var out map[string]any
 	err = json.Unmarshal(raw, &out)
 	return out, err
+}
+
+var salesTraceID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+func (s *Server) salesReportingAllowed(w http.ResponseWriter, r *http.Request) bool {
+	a := accessFrom(r.Context())
+	allowed := auth.Grants(a.Scopes, auth.ScopeMembersManage)
+	if !allowed && a.UserID != "" && a.TokenID == "" && a.ViewID == "" {
+		m, e := salesMemberAt(r.Context(), s.pool, a, a.UserID)
+		if e != nil {
+			s.allocError(w, r, e)
+			return false
+		}
+		allowed = m.Role == "manager"
+	}
+	if !allowed {
+		writeError(w, r, 403, "forbidden", "Sales reporting requires a Sales manager or workspace owner")
+		return false
+	}
+	return true
 }

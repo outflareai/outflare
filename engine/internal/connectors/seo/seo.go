@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
@@ -45,6 +46,12 @@ func get(ctx context.Context, cl *c.Client, name, u string, header http.Header, 
 }
 
 func post(ctx context.Context, cl *c.Client, name, u string, header http.Header, body, out any) error {
+	return postWithin(ctx, cl, name, u, header, body, out, 0)
+}
+
+// postWithin is post, waiting up to wait for the answer (zero: the
+// client's own timeout).
+func postWithin(ctx context.Context, cl *c.Client, name, u string, header http.Header, body, out any, wait time.Duration) error {
 	raw, _ := json.Marshal(body)
 	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(raw))
 	if err != nil {
@@ -54,7 +61,7 @@ func post(ctx context.Context, cl *c.Client, name, u string, header http.Header,
 		req.Header[h] = v
 	}
 	req.Header.Set("Content-Type", "application/json")
-	_, err = c.DoJSON(ctx, cl, name, req, out)
+	_, err = c.DoJSONWithin(ctx, cl, name, req, out, wait)
 	return err
 }
 

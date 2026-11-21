@@ -53,7 +53,10 @@ type Definition struct {
 	WindowDays  int      `json:"window_days"`
 	OffsetDays  int      `json:"offset_days"`
 	PerProduct  bool     `json:"per_product"`
-	Version     int      `json:"version"`
+	// ProductCategory, when set, counts only events about a product in
+	// that category (products.category), such as proxies.
+	ProductCategory string `json:"product_category,omitempty"`
+	Version         int    `json:"version"`
 }
 
 var both = []string{LevelCompany, LevelPerson}
@@ -101,6 +104,9 @@ func Seed(ctx context.Context, tx pgx.Tx, ws, brand string) ([]string, error) {
 // Aggregates are the ways a metric counts.
 var Aggregates = []string{Count, Sum, Min, Max, Days, Last, Latest}
 
+// CategoryRE is what a product category looks like (products.category).
+var CategoryRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,62}$`)
+
 var eventNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]*([._][a-z0-9_]+)*$`)
 
 // Check reports what is wrong with a metric, or "".
@@ -129,6 +135,8 @@ func Check(d Definition) string {
 		return "window_days is 1 to 365"
 	case d.OffsetDays < 0 || d.OffsetDays > 365:
 		return "offset_days is 0 to 365"
+	case d.ProductCategory != "" && !CategoryRE.MatchString(d.ProductCategory):
+		return "product_category is a product category's key: lowercase letters, digits, dots, dashes and underscores, such as proxies"
 	}
 	for _, l := range d.Levels {
 		if l != LevelCompany && l != LevelPerson {
@@ -151,20 +159,20 @@ func Insert(ctx context.Context, tx pgx.Tx, ws, brand string, d Definition) (str
 		events = []string{}
 	}
 	err := tx.QueryRow(ctx, `INSERT INTO metric_definitions (workspace_id, brand_id, key, name, description, levels, aggregate, events, usage, property,
-			window_days, offset_days, per_product)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), $11, $12, $13) RETURNING id::text`,
-		ws, brand, d.Key, d.Name, d.Description, d.Levels, d.Aggregate, events, d.Usage, d.Property, d.WindowDays, d.OffsetDays, d.PerProduct).Scan(&id)
+			window_days, offset_days, per_product, product_category)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), $11, $12, $13, $14) RETURNING id::text`,
+		ws, brand, d.Key, d.Name, d.Description, d.Levels, d.Aggregate, events, d.Usage, d.Property, d.WindowDays, d.OffsetDays, d.PerProduct, d.ProductCategory).Scan(&id)
 	return id, err
 }
 
 // Columns is what Load selects, in the order scan reads.
-const Columns = `id::text, key, name, description, levels, aggregate, events, usage, COALESCE(property, ''), window_days, offset_days, per_product, version`
+const Columns = `id::text, key, name, description, levels, aggregate, events, usage, COALESCE(property, ''), window_days, offset_days, per_product, version, product_category`
 
 // Scan reads a definition selected with Columns.
 func Scan(row pgx.Row) (Definition, error) {
 	var d Definition
 	err := row.Scan(&d.ID, &d.Key, &d.Name, &d.Description, &d.Levels, &d.Aggregate, &d.Events, &d.Usage, &d.Property, &d.WindowDays, &d.OffsetDays,
-		&d.PerProduct, &d.Version)
+		&d.PerProduct, &d.Version, &d.ProductCategory)
 	return d, err
 }
 

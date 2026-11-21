@@ -1,0 +1,11 @@
+-- Excluded audiences: an audience can be one whose people every campaign
+-- in its ad accounts stops showing to, instead of one a campaign targets.
+-- It is how refunds reach a network that takes no conversion back (Meta,
+-- ChatGPT Ads): the people who were refunded go in a list, and the list is
+-- excluded. The sync queues the exclusion on each active campaign once
+-- (ad_changes, exclusion_add), so one a person takes off a campaign stays
+-- off.
+--
+-- Expand only (docs/migrations.md): a new column with a default, which the
+-- previous version never reads.
+ALTER TABLE ad_audiences ADD COLUMN exclude boolean NOT NULL DEFAULT false;

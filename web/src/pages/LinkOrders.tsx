@@ -46,10 +46,13 @@ function sectionOf(item?: string): { section: Section; orderId?: string } {
   return { section: "overview" };
 }
 
-async function collect<T>(load: (cursor?: string) => Promise<{ data?: T[]; next_cursor?: string | null; error?: unknown }>): Promise<T[]> {
+// collect reads up to maxPages pages. The catalog asks for 1,000 rows a
+// page and up to 100 pages, so a whole intermediary database (11,000+
+// sites) is loaded and every filter, sort and recommendation sees it.
+async function collect<T>(load: (cursor?: string) => Promise<{ data?: T[]; next_cursor?: string | null; error?: unknown }>, maxPages = 8): Promise<T[]> {
   const out: T[] = [];
   let cursor: string | undefined;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < maxPages; i++) {
     const page = await load(cursor);
     if (page.error) throw page.error;
     out.push(...(page.data ?? []));
@@ -96,7 +99,8 @@ function LinkOrdersBrand({ ws, myId, item, can, go }: Props) {
     Promise.all([
       api.GET("/v1/brands/{brand}/link-orders/settings", { params: { path: { brand } } }),
       collect<LinkOrderDonor>((cursor) =>
-        api.GET("/v1/brands/{brand}/link-orders/catalog", { params: { path: { brand }, query: { limit: 200, cursor, archived: "false" } } }).then(({ data, error }) => ({ data: data?.data, next_cursor: data?.next_cursor, error })),
+        api.GET("/v1/brands/{brand}/link-orders/catalog", { params: { path: { brand }, query: { limit: 1000, cursor, archived: "false" } } }).then(({ data, error }) => ({ data: data?.data, next_cursor: data?.next_cursor, error })),
+        100,
       ).then((data) => ({ data })).catch((error) => ({ error })),
       collect<LinkOrder>((cursor) =>
         api.GET("/v1/brands/{brand}/link-orders", { params: { path: { brand }, query: { limit: 200, cursor } } }).then(({ data, error }) => ({ data: data?.data, next_cursor: data?.next_cursor, error })),

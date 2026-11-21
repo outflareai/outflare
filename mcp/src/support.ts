@@ -36,6 +36,7 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
         q: z.string().max(200).optional().describe("Words in the subject, address, name or messages."),
         sort: z.enum(["newest", "oldest", "due"]).optional().describe("oldest (with status open): who has waited longest first. due: what the SLA says is due first."),
         sla: z.enum(["overdue", "due_soon"]).optional().describe("overdue: past an SLA target. due_soon: a reply due within the hour."),
+        source: z.enum(["outflare", "intercom"]).optional().describe("intercom: only conversations copied from Intercom, which are answered there (read-only here, except notes)."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional().describe("next_cursor from the previous answer, for the next page."),
       },
@@ -154,7 +155,74 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
     ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/support/handoff-topics", { params: { path: { brand: b } } }))),
   );
 
+  server.registerTool(
+    "list_support_imports",
+    {
+      title: "List support imports",
+      description:
+        "A brand's support imports: support tools (Intercom) whose conversations, with Fin's results, are copied into the support inbox and kept " +
+        "in step every few minutes, with status (syncing, idle, paused, failed), how many conversations and messages are copied and how far it has got.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/support/imports", { params: { path: { brand: b } } }))),
+  );
+
   if (readOnly) return;
+
+  server.registerTool(
+    "start_support_import",
+    {
+      title: "Start copying Intercom conversations",
+      description:
+        "Copies a connected support tool's conversations (Intercom, with Fin's results) into the brand's support inbox and keeps them in step. " +
+        "integration_id is the Intercom connection (list_integrations), which must serve the brand. Copied conversations stay answered in Intercom: " +
+        "they can't be replied to, assigned or closed here. A connection made for one brand starts copying on its own.",
+      inputSchema: {
+        brand: brandRef,
+        integration_id: id,
+        history_from: z.string().datetime({ offset: true }).optional().describe("Copy only conversations changed since then; all history when left out."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/support/imports", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "sync_support_import",
+    {
+      title: "Sync a support import now",
+      description: "Looks for changed Intercom conversations now instead of at the next pass (every few minutes).",
+      inputSchema: { brand: brandRef, import_id: id },
+      annotations: write,
+    },
+    ({ brand, import_id }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/support/imports/{id}/sync", { params: { path: { brand: b, id: import_id } } }))),
+  );
+
+  server.registerTool(
+    "pause_support_import",
+    {
+      title: "Pause or resume a support import",
+      description: "paused true stops copying (what was copied stays); false carries on from where it stopped.",
+      inputSchema: { brand: brandRef, import_id: id, paused: z.boolean() },
+      annotations: write,
+    },
+    ({ brand, import_id, paused }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/support/imports/{id}", { params: { path: { brand: b, id: import_id } }, body: { paused } }))),
+  );
+
+  server.registerTool(
+    "stop_support_import",
+    {
+      title: "Stop a support import",
+      description: "Stops copying for good. The conversations copied so far stay in the support inbox.",
+      inputSchema: { brand: brandRef, import_id: id },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    ({ brand, import_id }) =>
+      call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/support/imports/{id}", { params: { path: { brand: b, id: import_id } } }))),
+  );
 
   server.registerTool(
     "add_handoff_topic",

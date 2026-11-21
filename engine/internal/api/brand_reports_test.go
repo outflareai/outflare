@@ -13,8 +13,8 @@ func TestBrandReportRoutes(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
 	bb := "/v1/brands/" + rp
 
 	// Fields that hold the time of the call differ between two calls, and a
@@ -48,7 +48,7 @@ func TestBrandReportRoutes(t *testing.T) {
 			t.Errorf("%s: brand route %v, workspace route %v", p, own, ws)
 		}
 		// The path's brand wins: ?brand= can't point a brand route at another.
-		owner.must(200, "GET", bb+p+sep+"brand=geonode", nil)
+		owner.must(200, "GET", bb+p+sep+"brand=northpeak", nil)
 	}
 	if code, _ := owner.raw("GET", bb+"/outcomes/export?dataset=report", "", ""); code != 200 {
 		t.Fatalf("export: %d", code)

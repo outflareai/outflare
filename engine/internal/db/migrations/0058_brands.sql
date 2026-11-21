@@ -1,4 +1,4 @@
--- Brands: the businesses one company markets, such as Geonode, Repocket and
+-- Brands: the businesses one company markets, such as Northpeak, Summitly and
 -- each of its games, each with its own website. A workspace holds many
 -- brands so connectors, members, API tokens, leads and suppressions are set
 -- up once and shared. A brand owns its context, memories, projects and
@@ -8,7 +8,7 @@ CREATE TABLE brands (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id uuid NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     name         text NOT NULL,
-    -- Short name for URLs and API calls (?brand=repocket): 2 to 40 of
+    -- Short name for URLs and API calls (?brand=summitly): 2 to 40 of
     -- a-z, 0-9 and dashes.
     handle       text NOT NULL,
     -- The brand's main website, the point of truth for what it is.

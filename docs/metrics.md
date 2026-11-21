@@ -62,6 +62,7 @@ A fill never sets anything off. No rule, journey, email or webhook reacts to it.
 | `window_days`, `offset_days` | The last `window_days` UTC days, today included, ending `offset_days` ago. |
 | `levels` | `company`, `person` or both. |
 | `per_product` | Also keep it per product (default true). |
+| `product_category` | Count only events about products in this [category](product-lifecycle.md#categories), such as `proxies`, for a total across a family of products (`proxies_gb_30d`). Empty counts every product. In the app: **Products → Only proxies products**. |
 
 Changing what a metric counts makes a new version and refills it. `POST .../metrics/{metric}/archive` takes it off every record. Reading needs `customers.read`; changing needs `catalog.manage`.
 

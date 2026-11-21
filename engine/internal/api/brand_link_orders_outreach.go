@@ -21,6 +21,32 @@ import (
 func (s *Server) routesLinkOrderOutreach(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/catalog/items/{id}/contacts", s.onBrand(auth.ScopeCoverageRead, s.getLinkOrderDonorContacts))
 	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/catalog/items/{id}/outreach", s.onBrand(auth.ScopeCoverageManage, s.sendLinkOrderDonorToSequence))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/{id}/thread", s.onBrand(auth.ScopeInboxRead, s.getLinkOrderThread))
+}
+
+// getLinkOrderThread is the brand's email with an order's donor. It shows
+// mail, so it needs inbox.read, and coverage.read to see the order.
+func (s *Server) getLinkOrderThread(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	if !a.has(auth.ScopeCoverageRead) {
+		writeError(w, r, http.StatusNotFound, "not_found", "not found")
+		return
+	}
+	ws, brand, _, err := parseLinkOrderIDs(a)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	id, ok := parsePathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	out, err := linkorders.GetOrderThread(r.Context(), s.pool, ws, brand, id)
+	if err != nil {
+		s.writeLinkOrderError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) getLinkOrderDonorContacts(w http.ResponseWriter, r *http.Request) {

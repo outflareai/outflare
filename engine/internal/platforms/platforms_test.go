@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -29,10 +30,18 @@ type fake struct {
 	campaigns []connectors.CampaignState
 	attached  map[string][]string // campaign -> mailbox external ids
 	calls     []string
-	blocked   []connectors.Blocked // the platform's blocklist
-	pushed    []connectors.Blocked // what Outflare wrote to it
-	listErr   error                // what reading the blocklist answers
-	lists     int                  // how many times it was read
+	blocked   []connectors.Blocked    // the platform's blocklist
+	pushed    []connectors.Blocked    // what Outflare wrote to it
+	listErr   error                   // what reading the blocklist answers
+	lists     int                     // how many times it was read
+	days      []connectors.MailboxDay // each mailbox's counts per day
+	statReads int                     // how many times they were read
+	statErr   error                   // what reading them answers
+}
+
+func (f *fake) MailboxDays(context.Context, *connectors.Client, connectors.Creds, []string, time.Time, time.Time) ([]connectors.MailboxDay, error) {
+	f.statReads++
+	return f.days, f.statErr
 }
 
 func (f *fake) ListBlocked(context.Context, *connectors.Client, connectors.Creds) ([]connectors.Blocked, error) {
@@ -490,5 +499,75 @@ func TestBlocklistPullFailsOpen(t *testing.T) {
 	now = now.Add(6 * time.Hour)
 	if _, err = svc.Sync(ctx, ws, integration); err != nil || f.lists != 3 {
 		t.Fatalf("not read after 6h: lists = %d, %v", f.lists, err)
+	}
+}
+
+func TestMailboxStatsAreReadHourlyAndReplaced(t *testing.T) {
+	pool, svc, f, ws, integration := setup(t)
+	ctx := context.Background()
+	now := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	svc.Now = func() time.Time { return now }
+	events := track.Capture(t)
+	f.days = []connectors.MailboxDay{
+		{Email: "Ana@acme.test", Day: "2026-03-09", Sent: 30, Replies: 2, Bounced: 1},
+		{Email: "ana@acme.test", Day: "2026-03-10", Sent: 12},
+		{Email: "stranger@acme.test", Day: "2026-03-10", Sent: 99}, // not a mailbox of this account
+		{Email: "bo@acme.test", Day: "2026-02-01", Sent: 5},        // outside the days asked for
+	}
+	res, err := svc.Sync(ctx, ws, integration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatDays != 2 {
+		t.Fatalf("stat days %d", res.StatDays)
+	}
+	total := func() (sent, replies, bounced, branded int) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `
+			SELECT COALESCE(sum(d.sent), 0), COALESCE(sum(d.replies), 0), COALESCE(sum(d.bounced), 0), count(*) FILTER (WHERE d.brand_id = m.brand_id AND d.brand_id IS NOT NULL)
+			FROM mailbox_platform_days d JOIN mailboxes m ON m.id = d.mailbox_id WHERE d.workspace_id = $1 AND m.email = 'ana@acme.test'`, ws).
+			Scan(&sent, &replies, &bounced, &branded); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if sent, replies, bounced, branded := total(); sent != 42 || replies != 2 || bounced != 1 || branded != 2 {
+		t.Fatalf("stored %d sent, %d replies, %d bounced, %d with the mailbox's brand", sent, replies, bounced, branded)
+	}
+	if !slices.ContainsFunc(events(), func(e track.Event) bool { return e.Name == "mailbox.stats_synced" && e.Props["days"] == 2 }) {
+		t.Fatalf("no mailbox.stats_synced event: %+v", events())
+	}
+
+	// Within the hour the counts are not read again.
+	now = now.Add(20 * time.Minute)
+	if _, err := svc.Sync(ctx, ws, integration); err != nil {
+		t.Fatal(err)
+	}
+	if f.statReads != 1 {
+		t.Fatalf("read %d times within the hour", f.statReads)
+	}
+
+	// After it, the days are replaced with what the sequencer says now:
+	// yesterday's late bounce shows, and nothing is counted twice.
+	now = now.Add(time.Hour)
+	f.days = []connectors.MailboxDay{{Email: "ana@acme.test", Day: "2026-03-09", Sent: 30, Replies: 2, Bounced: 2}}
+	if _, err := svc.Sync(ctx, ws, integration); err != nil {
+		t.Fatal(err)
+	}
+	if sent, _, bounced, _ := total(); sent != 30 || bounced != 2 {
+		t.Fatalf("after the second read: %d sent, %d bounced", sent, bounced)
+	}
+
+	// A failed read is an event, and the mailbox sync still finishes.
+	now = now.Add(2 * time.Hour)
+	f.statErr = errors.New("sequencer is down")
+	if _, err := svc.Sync(ctx, ws, integration); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(events(), func(e track.Event) bool { return e.Name == "mailbox.stats_sync_failed" && e.ErrorCode != "" }) {
+		t.Fatalf("no mailbox.stats_sync_failed event: %+v", events())
+	}
+	if sent, _, _, _ := total(); sent != 30 {
+		t.Fatalf("a failed read changed the stored counts: %d", sent)
 	}
 }

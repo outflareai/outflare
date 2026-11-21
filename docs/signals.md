@@ -11,6 +11,7 @@ The open signals are the brand's **Needs attention** queue (Customers, Needs att
 - **A person.** "Flag for attention" on a person or company, "Flag for sales" in a support conversation or a Telegram chat, or `POST /v1/brands/{brand}/signals` (with `conversation` to say which conversation it came from).
 - **A conversation.** With "Read conversations for signals" on, the brand's own AI reads what customers say and raises what sales should act on. See "Signals from conversations" below.
 - **An agent or the API.** The same endpoint, and the MCP tool `raise_signal`.
+- **A Slack channel.** A post in a Slack channel a brand picked for signals raises that channel's signal type on the person's company, or on the person when they have none. Its `source` is `feed`, and its `data` has `link`, `feed_channel_id` and `item_id`.
 
 A signal goes to the record's owner (its `owner` attribute), or to `owner_id` when given. With no owner it waits in the queue under "No owner".
 

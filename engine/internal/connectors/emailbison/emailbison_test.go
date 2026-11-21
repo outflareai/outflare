@@ -20,7 +20,19 @@ func fakeServer(t *testing.T, calls *[]string) *httptest.Server {
 			w.WriteHeader(401)
 			return
 		}
-		body, _ := io.ReadAll(r.Body)
+		var body []byte
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			// The bulk blocklist endpoints take a CSV file.
+			f, _, err := r.FormFile("csv")
+			if err != nil {
+				w.WriteHeader(500)
+				return
+			}
+			b, _ := io.ReadAll(f)
+			body = []byte("csv:" + strings.ReplaceAll(strings.TrimSpace(string(b)), "\n", "|"))
+		} else {
+			body, _ = io.ReadAll(r.Body)
+		}
 		*calls = append(*calls, r.Method+" "+r.URL.Path+" "+strings.TrimSpace(string(body)))
 		w.Header().Set("Content-Type", "application/json")
 		page := r.URL.Query().Get("page")
@@ -132,7 +144,7 @@ func TestBlocklist(t *testing.T) {
 	if err := (emailbison.EmailBison{}).Block(ctx, &c.Client{}, creds, []c.Blocked{{Value: "bo@acme.test"}, {Value: "spam.example", Domain: true}}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{`POST /api/blacklisted-emails/bulk {"emails":["bo@acme.test"]}`, `POST /api/blacklisted-domains/bulk {"domains":["spam.example"]}`}
+	want := []string{`POST /api/blacklisted-emails/bulk csv:email|bo@acme.test`, `POST /api/blacklisted-domains/bulk csv:domain|spam.example`}
 	if !slices.Equal(calls, want) {
 		t.Fatalf("calls = %v", calls)
 	}

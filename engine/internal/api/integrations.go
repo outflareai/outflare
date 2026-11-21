@@ -728,7 +728,11 @@ type integrationState struct {
 	// Set when signing an existing connection in to an account through
 	// the workspace's own app (connectors.AccountSignIn).
 	Integration string `json:"i,omitempty"`
-	Name        string `json:"n,omitempty"`
+	// Set when signing an existing connection in again through the
+	// server's app (?integration=): the new sign-in replaces its tokens and
+	// keeps the connection, its accounts and their history.
+	Reconnect string `json:"x,omitempty"`
+	Name      string `json:"n,omitempty"`
 	// Set when the connection is a brand's own (?brand=).
 	Brand string `json:"b,omitempty"`
 	// The connection's kind (?brand_kind=), empty for the default.
@@ -813,8 +817,35 @@ func (s *Server) integrationAuthorize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Signing an existing connection in again keeps it: its ad accounts,
+	// synced data and history stay, and only its tokens change.
+	// A mailbox sign-in keeps its own path, which adds or refreshes the
+	// mailbox, so it ignores this.
+	reconnect := r.URL.Query().Get("integration")
+	if mail {
+		reconnect = ""
+	}
+	if reconnect != "" {
+		if !validUUID(reconnect) {
+			writeError(w, r, http.StatusNotFound, "not_found", "integration not found")
+			return
+		}
+		i, err := s.integrations.Get(r.Context(), s.pool, a.WorkspaceID, reconnect)
+		if errors.Is(err, connectors.ErrNotFound) {
+			writeError(w, r, http.StatusNotFound, "not_found", "integration not found")
+			return
+		}
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if i.Connector != def.ID {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "that connection is "+i.Connector+", not "+def.ID+": sign it in again with its own connector")
+			return
+		}
+	}
 	st, _ := json.Marshal(integrationState{
-		Workspace: a.WorkspaceID, Actor: a.ActorID, ActorType: a.ActorType, Connector: def.ID, Name: cleanName(r.URL.Query().Get("name")), Return: back, Brand: brand, Kind: kind, Pool: pool,
+		Workspace: a.WorkspaceID, Actor: a.ActorID, ActorType: a.ActorType, Connector: def.ID, Name: cleanName(r.URL.Query().Get("name")), Return: back, Brand: brand, Kind: kind, Pool: pool, Reconnect: reconnect,
 		Verifier: newID() + newID(), Expires: time.Now().Add(15 * time.Minute).Unix(),
 	})
 	// The verifier rides inside the signed state; the state is sealed so the
@@ -940,6 +971,10 @@ func (s *Server) integrationCallback(w http.ResponseWriter, r *http.Request) {
 		fail(truncate(err.Error(), 300))
 		return
 	}
+	if st.Reconnect != "" {
+		s.finishReconnect(w, r, st, creds, account, done, fail)
+		return
+	}
 	name := st.Name
 	if name == "" {
 		name = s.defaultName(r, st.Workspace, def, account)
@@ -963,6 +998,24 @@ func (s *Server) integrationCallback(w http.ResponseWriter, r *http.Request) {
 			done(url.Values{"integration": {id}, "mailbox": {account.Email}})
 		}
 		return
+	}
+	// Signing in again with an account the workspace already connected
+	// renews that connection instead of adding a copy: two connections to
+	// one account would store the same sites twice.
+	if st.Request == "" {
+		id, err := s.renewSameAccount(r.Context(), &principal{ActorID: st.Actor, ActorType: actorType}, st.Workspace, st.Brand, def, creds, account)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if id != "" {
+			params := url.Values{"integration": {id}, "renewed": {"true"}}
+			if also := s.connectAlso(r, st, def, creds, actorType); len(also) > 0 {
+				params["also"] = also
+			}
+			done(params)
+			return
+		}
 	}
 	out, err := s.saveIntegration(r.Context(), &principal{ActorID: st.Actor, ActorType: actorType}, st.Workspace, def, connectors.AuthOAuth2, name, creds, account, "oauth", st.Request, st.share())
 	if errors.Is(err, errRequestUsed) {
@@ -994,13 +1047,18 @@ func (s *Server) connectAlso(r *http.Request, st integrationState, def connector
 		if _, configured := s.integrations.OAuthApps[id]; !ok || !configured || other.Status != connectors.Available {
 			continue
 		}
-		var have bool
-		if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM integrations WHERE workspace_id = $1 AND connector = $2 AND brand_id IS NOT DISTINCT FROM NULLIF($3, '')::uuid)`, st.Workspace, id, st.Brand).Scan(&have); err != nil || have {
-			continue
-		}
 		account, err := s.integrations.Test(r.Context(), id, creds)
 		if err != nil {
 			// Not granted: the main connection stands on its own.
+			continue
+		}
+		// The same account connected already: renew it, never add a copy.
+		renewed, err := s.renewSameAccount(r.Context(), &principal{ActorID: st.Actor, ActorType: actorType}, st.Workspace, st.Brand, other, creds, account)
+		if err != nil || renewed != "" {
+			continue
+		}
+		var have bool
+		if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM integrations WHERE workspace_id = $1 AND connector = $2 AND brand_id IS NOT DISTINCT FROM NULLIF($3, '')::uuid)`, st.Workspace, id, st.Brand).Scan(&have); err != nil || have {
 			continue
 		}
 		if ar, ok := s.integrations.Registry.Get(id); ok {
@@ -1017,6 +1075,54 @@ func (s *Server) connectAlso(r *http.Request, st integrationState, def connector
 		}
 	}
 	return names
+}
+
+// renewSameAccount stores fresh sign-in tokens on the workspace's existing
+// connection to the same connector and account, when there is one the
+// sign-in's brand may use (shared, or that brand's own), and returns its
+// id; "" when there is none. A second Google sign-in therefore mends an
+// expired connection rather than adding "Google Analytics (…) 2", which
+// would import every site again.
+func (s *Server) renewSameAccount(ctx context.Context, p *principal, ws, brand string, def connectors.Definition, creds connectors.Creds, account connectors.Account) (string, error) {
+	email := strings.TrimSpace(account.Email)
+	if email == "" {
+		return "", nil
+	}
+	// Every copy to this account renews, not only the first: an older
+	// duplicate ("… 2") left on dead tokens would keep showing as broken.
+	rows, err := s.pool.Query(ctx, `SELECT id::text FROM integrations
+		WHERE workspace_id = $1 AND connector = $2 AND auth_method = 'oauth2' AND lower(account->>'email') = lower($3)
+			AND (brand_id IS NULL OR brand_id = NULLIF($4, '')::uuid)
+		ORDER BY (status = 'connected') DESC, created_at`, ws, def.ID, email, brand)
+	if err != nil {
+		return "", err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(ids) == 0 {
+		return "", err
+	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		for _, id := range ids {
+			if err := s.integrations.SetCreds(ctx, tx, ws, id, connectors.AuthOAuth2, creds); err != nil {
+				return err
+			}
+			if err := s.integrations.Checked(ctx, tx, ws, id, &account, nil); err != nil {
+				return err
+			}
+			i, err := s.integrations.Get(ctx, tx, ws, id)
+			if err != nil {
+				return err
+			}
+			if err := s.integrations.Reconnected(ctx, tx, i); err != nil {
+				return err
+			}
+			if err := record(ctx, tx, p, ws, "integration.signed_in", "integration", id, map[string]any{"connector": def.ID, "via": "oauth", "renewed": true}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return ids[0], err
 }
 
 // saveIntegration stores a tested connection, runs the connect hooks and

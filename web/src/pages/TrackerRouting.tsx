@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Schemas } from "@outflare/sdk";
 import { pickedBrandId } from "@/lib/brand";
+import { NumberInput } from "@/components/number-input";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, ErrorText, field, Loading, toast } from "../ui";
 
@@ -213,7 +214,7 @@ function PathEditor({ card, isDefault, canManage, offers, landers, suggestions, 
           </div>
         )}
         <WeightList title="Landers" rows={landerRows} canManage={canManage} kind="lander" offers={offers} landers={landers} onChange={(r) => setDests(r, offerRows)} />
-        <WeightList title={landerRows.length ? "Offers after the lander" : "Offers and pages"} rows={offerRows} canManage={canManage} kind="offer" offers={offers} landers={landers} onChange={(r) => setDests(landerRows, r)} />
+        <WeightList title={landerRows.length ? "Offers after the lander" : "Offers and pages"} rows={offerRows} canManage={canManage} kind="offer" landersBefore={landerRows.length > 0} offers={offers} landers={landers} onChange={(r) => setDests(landerRows, r)} />
         {suggestions.map((l) => (
           <SuggestedWeights key={l.kind} list={l} canManage={canManage} onApply={() => onApply(l)} />
         ))}
@@ -224,16 +225,25 @@ function PathEditor({ card, isDefault, canManage, offers, landers, suggestions, 
 
 // WeightList: one list of a path, each row with its weight, a live share
 // bar and its cap; Equalise sets every weight the same.
-function WeightList({ title, rows, kind, canManage, offers, landers, onChange }: {
+function WeightList({ title, rows, kind, landersBefore = false, canManage, offers, landers, onChange }: {
   title: string;
   rows: Dest[];
   kind: "lander" | "offer";
+  // landersBefore says the list has landers, so these come after one.
+  landersBefore?: boolean;
   canManage: boolean;
   offers: Offer[];
   landers: Lander[];
   onChange: (rows: Dest[]) => void;
 }) {
   const total = rows.reduce((s, r) => s + r.weight, 0);
+  const [adding, setAdding] = useState(false);
+  // What a row is, to say when one is in the list twice (it then gets two
+  // shares, which is rarely meant).
+  const what = (r: Dest) => (kind === "lander" ? r.lander_id : r.offer_id ? `offer:${r.offer_id}` : r.url.trim()) || "";
+  const counts = new Map<string, number>();
+  for (const r of rows) if (what(r)) counts.set(what(r), (counts.get(what(r)) ?? 0) + 1);
+  const room = stageLimit - rows.length;
   const set = (k: string, patch: Partial<Dest>) => onChange(rows.map((r) => (r.key === k ? { ...r, ...patch } : r)));
   const pick = (k: string, v: string) => {
     if (kind === "lander") {
@@ -256,11 +266,12 @@ function WeightList({ title, rows, kind, canManage, offers, landers, onChange }:
           </button>
         )}
       </div>
-      {rows.length === 0 && <p className="text-xs text-muted-foreground">{kind === "lander" ? "No landers: clicks go straight to the offers." : "None yet."}</p>}
+      {rows.length === 0 && !(kind === "offer" && landersBefore) && <p className="text-xs text-muted-foreground">{kind === "lander" ? "No landers: clicks go straight to the offers." : "None yet."}</p>}
       {rows.map((r) => {
-        const share = total > 0 ? Math.round((r.weight / total) * 100) : 0;
+        const share = total > 0 ? (r.weight / total) * 100 : 0;
+        const twice = (counts.get(what(r)) ?? 0) > 1;
         return (
-          <div key={r.key} className="grid grid-cols-[1fr_80px_90px_auto] items-center gap-2 text-sm">
+          <div key={r.key} className="grid grid-cols-[1fr_80px_100px_auto] items-center gap-2 text-sm">
             {kind === "lander" ? (
               <select aria-label="Lander" className={field} value={r.lander_id ?? ""} disabled={!canManage} onChange={(e) => pick(r.key, e.target.value)}>
                 {!r.lander_id && <option value="">Pick a lander…</option>}
@@ -279,28 +290,149 @@ function WeightList({ title, rows, kind, canManage, offers, landers, onChange }:
                 {!r.offer_id && <input aria-label="Page" className={`${field} min-w-0 flex-1`} placeholder="https://" value={r.url} disabled={!canManage} onChange={(e) => set(r.key, { url: e.target.value })} />}
               </span>
             )}
-            <input aria-label="Weight" type="number" min={0} max={10000} className={field} value={r.weight} disabled={!canManage} onChange={(e) => set(r.key, { weight: Math.max(0, Math.min(10000, Number(e.target.value) || 0)) })} />
-            <div className="flex items-center gap-1" title={`${share}% of the clicks`}>
+            <NumberInput label="Weight" min={0} max={10000} value={r.weight} disabled={!canManage} onChange={(n) => set(r.key, { weight: n })} />
+            <div className="flex items-center gap-1" title={`${percent(share)} of the ${kind === "lander" ? "clicks" : landersBefore ? "lander clicks" : "clicks"}`}>
               <div className="h-1.5 flex-1 rounded bg-muted">
                 <div className="h-1.5 rounded bg-primary" style={{ width: `${share}%` }} />
               </div>
-              <span className="w-8 text-right text-xs tabular-nums">{share}%</span>
+              <span className="w-11 text-right text-xs tabular-nums">{percent(share)}</span>
             </div>
             <span className="flex items-center gap-1">
+              {twice && <Badge tone="amber" title="It is in this list more than once, so it gets more than one share of the clicks. Remove one, or keep both if you mean it.">Listed twice</Badge>}
               {r.daily_click_cap !== null && <Badge tone="grey" title="Daily click cap">cap {r.daily_click_cap}</Badge>}
               {canManage && <Button variant="ghost" aria-label="Remove" onClick={() => onChange(rows.filter((x) => x.key !== r.key))}>×</Button>}
             </span>
           </div>
         );
       })}
-      {canManage && rows.length < 20 && (
-        <Button
-          variant="ghost"
-          onClick={() => onChange([...rows, kind === "lander" ? { key: key(), name: "", url: "", lander_id: landers[0]?.id, weight: 100, daily_click_cap: null } : { key: key(), name: offers[0]?.name ?? "", url: offers[0]?.url ?? "", offer_id: offers[0]?.id, weight: 100, daily_click_cap: null }])}
-        >
-          + {kind === "lander" ? "Lander" : "Offer or page"}
-        </Button>
+      {kind === "offer" && landersBefore && rows.length === 0 && (
+        <p className="text-xs text-amber-600 dark:text-amber-400" data-testid="no-offers-warning">
+          No offers after the landers: a lander button that links to /click goes to this link's own page. Add an offer, or leave it if your landers link on by themselves.
+        </p>
       )}
+      {canManage && room <= 0 && <p className="text-xs text-muted-foreground">A list takes up to {stageLimit} {kind === "lander" ? "landers" : "offers and pages"}.</p>}
+      {canManage && room > 0 && !adding && (
+        <div className="flex flex-wrap gap-1">
+          <Button
+            variant="ghost"
+            onClick={() => onChange([...rows, kind === "lander" ? { key: key(), name: "", url: "", lander_id: landers[0]?.id, weight: 100, daily_click_cap: null } : { key: key(), name: offers[0]?.name ?? "", url: offers[0]?.url ?? "", offer_id: offers[0]?.id, weight: 100, daily_click_cap: null }])}
+          >
+            + {kind === "lander" ? "Lander" : "Offer or page"}
+          </Button>
+          {(kind === "lander" ? landers : offers).length > 1 && (
+            <Button variant="ghost" onClick={() => setAdding(true)}>
+              + Add several {kind === "lander" ? "landers" : "offers"}
+            </Button>
+          )}
+        </div>
+      )}
+      {adding && (
+        <AddSeveral
+          kind={kind}
+          items={kind === "lander" ? landers : offers}
+          listed={new Set(rows.map((r) => (kind === "lander" ? r.lander_id : r.offer_id)).filter(Boolean) as string[])}
+          room={room}
+          onCancel={() => setAdding(false)}
+          onAdd={(picked) => {
+            onChange([
+              ...rows,
+              ...picked.map((x) => (kind === "lander" ? { key: key(), name: x.name, url: x.url, lander_id: x.id, weight: 100, daily_click_cap: null } : { key: key(), name: x.name, url: x.url, offer_id: x.id, weight: 100, daily_click_cap: null })),
+            ]);
+            setAdding(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// A list takes this many landers, and this many offers and pages: the
+// API's own limits.
+const stageLimit = 100;
+
+// percent writes a share with one decimal, so 1 of 31 reads 3.2%, not 3%.
+const percent = (share: number) => `${share.toFixed(1)}%`;
+
+// AddSeveral: pick many of the brand's landers or offers at once, by search
+// or all of them, and add each as a row at weight 100. Ones already in the
+// list are left out, so nothing is added twice.
+function AddSeveral({ kind, items, listed, room, onAdd, onCancel }: {
+  kind: "lander" | "offer";
+  items: { id: string; name: string; url: string }[];
+  listed: Set<string>;
+  room: number;
+  onAdd: (picked: { id: string; name: string; url: string }[]) => void;
+  onCancel: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const noun = kind === "lander" ? "landers" : "offers";
+  const free = items.filter((x) => !listed.has(x.id));
+  const words = q.trim().toLowerCase();
+  const shown = free.filter((x) => !words || x.name.toLowerCase().includes(words) || x.url.toLowerCase().includes(words));
+  const allShown = shown.length > 0 && shown.every((x) => picked.has(x.id));
+  const toggle = (id: string) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const over = picked.size > room;
+  return (
+    <div className="space-y-2 rounded-md border p-3" data-testid={`add-several-${kind}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm font-medium">Add {noun}</span>
+        <span className="text-xs text-muted-foreground">
+          {free.length} not in this list yet{listed.size > 0 ? ` · ${listed.size} already in it` : ""}
+        </span>
+      </div>
+      {free.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Every one of the brand's {noun} is already in this list.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <input aria-label={`Search ${noun}`} className={`${field} min-w-48 flex-1`} placeholder={`Search ${free.length} ${noun} by name or page`} value={q} autoFocus onChange={(e) => setQ(e.target.value)} />
+            <label className="flex items-center gap-1.5 text-xs">
+              <input
+                type="checkbox"
+                aria-label={`Select all ${noun} shown`}
+                checked={allShown}
+                disabled={shown.length === 0}
+                onChange={() =>
+                  setPicked((p) => {
+                    const n = new Set(p);
+                    for (const x of shown) if (allShown) n.delete(x.id);
+                    else n.add(x.id);
+                    return n;
+                  })
+                }
+              />
+              Select all {shown.length}
+            </label>
+          </div>
+          <ul className="max-h-64 divide-y overflow-y-auto rounded-md border text-sm">
+            {shown.length === 0 && <li className="px-2 py-1.5 text-xs text-muted-foreground">Nothing matches "{q}".</li>}
+            {shown.map((x) => (
+              <li key={x.id}>
+                <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 hover:bg-muted/50">
+                  <input type="checkbox" checked={picked.has(x.id)} onChange={() => toggle(x.id)} />
+                  <span className="min-w-0 flex-1 truncate">{x.name}</span>
+                  <span className="min-w-0 max-w-[50%] truncate text-xs text-muted-foreground">{x.url}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {over && <ErrorText>This list has room for {room} more {noun}; untick {picked.size - room}.</ErrorText>}
+      <div className="flex items-center gap-2">
+        <Button variant="primary" disabled={picked.size === 0 || over} onClick={() => onAdd(free.filter((x) => picked.has(x.id)))}>
+          {picked.size === 0 ? `Add ${noun}` : `Add ${picked.size} ${picked.size === 1 ? noun.slice(0, -1) : noun}`}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+        {picked.size > 0 && !over && <span className="text-xs text-muted-foreground">Each is added at weight 100, an equal share.</span>}
+      </div>
     </div>
   );
 }

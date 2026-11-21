@@ -2,11 +2,13 @@ package api_test
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -68,6 +70,13 @@ func TestTrackerConversionUploads(t *testing.T) {
 	// An upload: a pending sale, its approval days later by transaction id
 	// alone, and rows that can't be recorded.
 	k2 := click()
+	// The sale is dated the day after its click, so the click is a past one.
+	if err := e.srv.FlushClicks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE tracking_link_clicks SET clicked_at = '2026-11-08T09:00:00Z' WHERE click_key = $1`, k2); err != nil {
+		t.Fatal(err)
+	}
 	res := owner.must(200, "POST", base+"/tracker-conversions", map[string]any{"source": sid, "conversions": []any{
 		map[string]any{"click_id": k2, "transaction_id": "U-1", "payout": 5, "type": "sale", "status": "pending", "converted_at": "2026-11-09T10:00:00Z",
 			"params": map[string]any{"p2": "batch-7"}},
@@ -83,6 +92,25 @@ func TestTrackerConversionUploads(t *testing.T) {
 	rows := res["rows"].([]any)
 	if rows[2].(map[string]any)["error"] == nil || rows[5].(map[string]any)["error"] == nil {
 		t.Fatalf("rows: %v", rows)
+	}
+	// A conversion can't be dated before its click: a date long before it
+	// is refused with the click's time, and a day-only date on the click's
+	// own day (midnight) is moved up to the click.
+	kEarly := click()
+	if err := e.srv.FlushClicks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	early := owner.must(200, "POST", base+"/tracker-conversions", map[string]any{"source": sid, "conversions": []any{
+		map[string]any{"click_id": kEarly, "transaction_id": "U-8", "converted_at": "2020-01-01T00:00:00Z"},
+		map[string]any{"click_id": kEarly, "transaction_id": "U-9", "converted_at": time.Now().UTC().Format(time.DateOnly)},
+	}})
+	erows := early["rows"].([]any)
+	if early["failed"] != float64(1) || early["accepted"] != float64(1) || !strings.Contains(fmt.Sprint(erows[0].(map[string]any)["error"]), "before the click it credits") {
+		t.Fatalf("conversions dated before their click: %v", early)
+	}
+	var clicked, converted time.Time
+	if err := e.pool.QueryRow(ctx, `SELECT clicked_at, converted_at FROM tracker_conversions WHERE transaction_id = 'U-9'`).Scan(&clicked, &converted); err != nil || converted.Before(clicked) {
+		t.Fatalf("a day-only date: clicked %v, converted %v, %v", clicked, converted, err)
 	}
 	list := owner.must(200, "GET", base+"/tracker-conversions?status=approved", nil)["data"].([]any)
 	var up map[string]any
@@ -107,7 +135,7 @@ func TestTrackerConversionUploads(t *testing.T) {
 	// Bad uploads.
 	owner.must(400, "POST", base+"/tracker-conversions", map[string]any{"source": "nope", "conversions": []any{map[string]any{"click_id": k3}}})
 	owner.must(400, "POST", base+"/tracker-conversions", map[string]any{"source": sid, "conversions": []any{}})
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	owner.must(400, "POST", "/v1/brands/"+other["id"].(string)+"/tracker-conversions", map[string]any{"source": sid, "conversions": []any{map[string]any{"click_id": k3}}})
 
 	found := false

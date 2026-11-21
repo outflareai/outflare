@@ -422,6 +422,13 @@ func (s *Service) Redeliver(ctx context.Context, deliveryID int64) error {
 	return err
 }
 
+// Post signs and sends one body to a URL the way deliveries are sent, with
+// the same checks on where it may go. It returns the status code (0 when
+// there was no answer) and what went wrong. Event destinations use it.
+func (s *Service) Post(ctx context.Context, rawURL, secret, msgID string, body []byte) (int, string) {
+	return s.send(ctx, rawURL, []string{secret}, msgID, body)
+}
+
 // send posts one delivery and returns the status code (0 when there was no
 // answer) and what went wrong.
 func (s *Service) send(ctx context.Context, rawURL string, secrets []string, msgID string, body []byte) (int, string) {

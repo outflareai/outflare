@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,8 +16,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/db"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/paidads"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 )
@@ -40,6 +43,9 @@ type fakeAds struct {
 	// autoApplied answers AutoApplied.
 	autoApplied []string
 	tz          string
+	// failDays makes AdDays fail, as a platform that is down or refuses
+	// the sign-in would.
+	failDays error
 }
 
 func (f *fakeAds) Definition() connectors.Definition {
@@ -65,6 +71,9 @@ func (f *fakeAds) AdDays(_ context.Context, _ *connectors.Client, _ connectors.C
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.windows = append(f.windows, [2]string{from, to})
+	if f.failDays != nil {
+		return nil, f.failDays
+	}
 	var out []connectors.AdDay
 	for _, c := range f.campaigns {
 		out = append(out, connectors.AdDay{CampaignID: c.ID, Date: to, SpendMicros: 1_000_000, Impressions: 10, Clicks: 1})
@@ -271,6 +280,84 @@ func TestSyncWindowsAndWatermarks(t *testing.T) {
 	}
 }
 
+// A sync that keeps failing is an alert people hear about: at the third
+// failure in a row, or at once when the platform refuses the sign-in, and
+// once per run of failures.
+func TestSyncFailedAlert(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	if _, err := e.s.SyncOnce(ctx, e.ws, e.integration); err != nil {
+		t.Fatal(err)
+	}
+	heard := func() []alerts.Row {
+		t.Helper()
+		rows, err := e.pool.Query(ctx, `SELECT id::text FROM alerts WHERE workspace_id = $1 AND kind = $2 ORDER BY created_at, id`, e.ws, AlertSyncFailed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []alerts.Row
+		for _, id := range ids {
+			r, err := alerts.Load(ctx, e.pool, e.ws, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, r)
+		}
+		return out
+	}
+	fail := func(kind string) {
+		t.Helper()
+		e.now = e.now.Add(time.Hour)
+		e.f.failDays = connectors.Errf(kind, "the platform said no to ana@acme.example")
+		if _, err := e.s.SyncOnce(ctx, e.ws, e.integration); err == nil {
+			t.Fatal("the sync didn't fail")
+		}
+	}
+	// Down twice: nobody hears yet. The third time they do, once.
+	fail(connectors.ErrUnavailable)
+	fail(connectors.ErrUnavailable)
+	if n := len(heard()); n != 0 {
+		t.Fatalf("%d alerts after two failures", n)
+	}
+	fail(connectors.ErrUnavailable)
+	fail(connectors.ErrUnavailable)
+	got := heard()
+	if len(got) != 1 || got[0].TargetType != "integration" || got[0].TargetID != e.integration || got[0].Data["connector"] != "fake_ads" ||
+		got[0].Data["error_code"] != "connector_unavailable" || got[0].Data["failures"] != 3.0 {
+		t.Fatalf("after the third failure: %+v", got)
+	}
+	// Ids, a code and a count only: never the platform's message.
+	if raw := fmt.Sprint(got[0].Data); strings.Contains(raw, "said no") || strings.Contains(raw, "@") {
+		t.Fatalf("the alert holds the error text: %s", raw)
+	}
+	if v := alerts.Describe(ctx, e.pool, got[0]); v.Title != "Fake Ads stopped syncing" || v.Path != "connectors/fake_ads" || !strings.Contains(v.Text, "getting old") {
+		t.Fatalf("its view: %+v", v)
+	}
+	if n := e.count(t, `SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action = 'alert.raised'`, e.ws); n != 1 {
+		t.Fatalf("%d alert.raised audit events", n)
+	}
+
+	// It syncs again, then the platform refuses the sign-in: people hear
+	// at once, as a new alert.
+	e.now = e.now.Add(time.Hour)
+	e.f.failDays = nil
+	if _, err := e.s.SyncOnce(ctx, e.ws, e.integration); err != nil {
+		t.Fatal(err)
+	}
+	fail(connectors.ErrAuth)
+	got = heard()
+	if len(got) != 2 || got[1].Data["error_code"] != "connector_auth" || got[1].Data["failures"] != 1.0 {
+		t.Fatalf("after a refused sign-in: %+v", got)
+	}
+	if v := alerts.Describe(ctx, e.pool, got[1]); !strings.Contains(v.Text, "refused the sign-in") {
+		t.Fatalf("its view: %+v", v)
+	}
+}
+
 // The first sync harvests 90 days of clicks, one query per day; later runs
 // only the days since; a refused day stops where it is and the next run
 // carries on from there.
@@ -300,25 +387,35 @@ func TestClickHarvest(t *testing.T) {
 		t.Fatalf("a click: %s %s %s %v", kw, device, acct, err)
 	}
 
-	// The next run carries on from October and finishes yesterday.
+	// The next run carries on from October, finishes yesterday and reads
+	// today's clicks so far.
 	e.f.failClicksOn = ""
 	e.f.clickDays = nil
 	e.now = e.now.Add(time.Hour)
-	if res, err = e.s.SyncOnce(ctx, e.ws, e.integration); err != nil || res.Clicks != 39 {
+	if res, err = e.s.SyncOnce(ctx, e.ws, e.integration); err != nil || res.Clicks != 40 {
 		t.Fatalf("resume: %+v %v", res, err)
 	}
-	if e.f.clickDays[0] != "2026-10-01" || e.f.clickDays[len(e.f.clickDays)-1] != "2026-11-08" {
+	if e.f.clickDays[0] != "2026-10-01" || e.f.clickDays[len(e.f.clickDays)-1] != "2026-11-09" {
 		t.Fatalf("resumed days %v..%v", e.f.clickDays[0], e.f.clickDays[len(e.f.clickDays)-1])
 	}
-	// Same day again: nothing to read.
+	// The watermark stays at yesterday, so today is read again in full
+	// once it has ended.
+	if err := e.pool.QueryRow(ctx, `SELECT last_clicks_day FROM ad_syncs WHERE integration_id = $1`, e.integration).Scan(&mark); err != nil || mark == nil || mark.Format(time.DateOnly) != "2026-11-08" {
+		t.Fatalf("watermark after resume %v %v", mark, err)
+	}
+	// Same day again: only today, and its clicks are stored once.
 	e.f.clickDays = nil
 	e.now = e.now.Add(time.Hour)
-	if res, err = e.s.SyncOnce(ctx, e.ws, e.integration); err != nil || res.Clicks != 0 || len(e.f.clickDays) != 0 {
+	if res, err = e.s.SyncOnce(ctx, e.ws, e.integration); err != nil || len(e.f.clickDays) != 1 || e.f.clickDays[0] != "2026-11-09" {
 		t.Fatalf("same day: %+v %v %v", res, err, e.f.clickDays)
 	}
-	// Tomorrow: yesterday only.
+	if n := e.count(t, `SELECT count(*) FROM ad_clicks WHERE workspace_id = $1`, e.ws); n != 91 {
+		t.Fatalf("%d clicks stored after reading today twice", n)
+	}
+	// Tomorrow: yesterday in full, then the new day so far.
+	e.f.clickDays = nil
 	e.now = e.now.Add(24 * time.Hour)
-	if res, err = e.s.SyncOnce(ctx, e.ws, e.integration); err != nil || res.Clicks != 1 || len(e.f.clickDays) != 1 || e.f.clickDays[0] != "2026-11-09" {
+	if res, err = e.s.SyncOnce(ctx, e.ws, e.integration); err != nil || res.Clicks != 2 || len(e.f.clickDays) != 2 || e.f.clickDays[0] != "2026-11-09" || e.f.clickDays[1] != "2026-11-10" {
 		t.Fatalf("next day: %+v %v %v", res, err, e.f.clickDays)
 	}
 }
@@ -502,7 +599,7 @@ func TestAlerts(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.exec(t, `INSERT INTO ad_entities (workspace_id, ad_account_id, level, parent_id, external_id, name, status, details)
-		SELECT $1, ad_account_id, 'ad', $2, 'a1', 'Best CRM ever', 'active', '{"policy_status": "disapproved"}' FROM ad_entities WHERE id = $2`, e.ws, group)
+		SELECT $1, ad_account_id, 'ad', $2, 'a1', 'Best CRM ever', 'active', '{"policy_status": "disapproved", "policy_reasons": "Destination not working"}' FROM ad_entities WHERE id = $2`, e.ws, group)
 	// Conversions sent back: 2 of 10 refused.
 	var acct, rule string
 	if err := e.pool.QueryRow(ctx, `SELECT id FROM ad_accounts WHERE workspace_id = $1`, e.ws).Scan(&acct); err != nil {
@@ -523,6 +620,22 @@ func TestAlerts(t *testing.T) {
 		e.exec(t, `INSERT INTO ad_conversion_sends (workspace_id, rule_id, event_row_id, event_id, occurred_at, status, reason) VALUES ($1, $2, $3, $4, now() - interval '1 hour', $5, $6)`,
 			e.ws, rule, ev, fmt.Sprintf("m-%d", i), status, map[bool]string{true: "click too old", false: ""}[status == "failed"])
 	}
+	// Conversions the platform took but doesn't count: 12 with a click id
+	// four days ago for "Purchase", while it reports conversions for
+	// another action only.
+	var counted string
+	if err := e.pool.QueryRow(ctx, `INSERT INTO ad_conversion_rules (workspace_id, ad_account_id, event_name, target_id, target_name) VALUES ($1, $2, 'payment.succeeded', 't2', 'Purchase') RETURNING id`, e.ws, acct).Scan(&counted); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		var ev string
+		if err := e.pool.QueryRow(ctx, `INSERT INTO customer_events (workspace_id, kind, name, occurred_at, message_id) VALUES ($1, 'track', 'payment.succeeded', now() - interval '4 days', $2) RETURNING id`, e.ws, fmt.Sprintf("p-%d", i)).Scan(&ev); err != nil {
+			t.Fatal(err)
+		}
+		e.exec(t, `INSERT INTO ad_conversion_sends (workspace_id, rule_id, event_row_id, event_id, occurred_at, status, match_keys, sent_at, updated_at) VALUES ($1, $2, $3, $4, now() - interval '4 days', 'sent', '{gclid,email}', now() - interval '4 days', now() - interval '4 days')`,
+			e.ws, counted, ev, fmt.Sprintf("p-%d", i))
+	}
+	e.exec(t, `INSERT INTO ad_conversion_actions_daily (ad_entity_id, day, action, workspace_id, conversions, brand_id) VALUES ($1, current_date - 3, 'Sign-up', $2, 4, $3)`, anomaly, e.ws, brand)
 	// Paid visits: 25 in the last day, 5 with a click id.
 	for i := 0; i < 25; i++ {
 		ids := `{}`
@@ -537,7 +650,7 @@ func TestAlerts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{AlertSpendAnomaly, AlertFlatline, AlertZeroConversions, AlertPacing, AlertDisapproved, AlertSendsFailing, AlertTrackingBroken, AlertAutoApplyOn, OverspendPause} {
+	for _, k := range []string{AlertSpendAnomaly, AlertFlatline, AlertZeroConversions, AlertPacing, AlertDisapproved, AlertSendsFailing, AlertSendsNotCounted, AlertTrackingBroken, AlertAutoApplyOn, OverspendPause} {
 		if res.Raised[k] != 1 {
 			t.Errorf("%s raised %d times: %+v", k, res.Raised[k], res.Raised)
 		}
@@ -568,7 +681,7 @@ func TestAlerts(t *testing.T) {
 		got[k] = x
 	}
 	rows.Close()
-	if len(got) != 9 {
+	if len(got) != 10 {
 		t.Fatalf("%d findings: %v", len(got), got)
 	}
 	for k, x := range got {
@@ -594,11 +707,14 @@ func TestAlerts(t *testing.T) {
 	if x := got[AlertPacing]; x.entity != anomaly || x.evidence["scope"] != "account" || x.evidence["ratio"].(float64) <= 1.1 {
 		t.Errorf("pacing: %+v", x)
 	}
-	if x := got[AlertDisapproved]; x.entity != anomaly || x.evidence["ads"] != 1.0 {
+	if x := got[AlertDisapproved]; x.entity != anomaly || x.evidence["ads"] != 1.0 || fmt.Sprint(x.evidence["reasons"]) != "[Destination not working]" {
 		t.Errorf("disapproved: %+v", x)
 	}
 	if x := got[AlertSendsFailing]; x.evidence["failed"] != 2.0 || x.evidence["sent"] != 10.0 || x.evidence["account_id"] != acct {
 		t.Errorf("sends: %+v", x)
+	}
+	if x := got[AlertSendsNotCounted]; x.evidence["sent"] != 12.0 || x.evidence["account_id"] != acct || fmt.Sprint(x.evidence["actions"]) != "[Purchase]" || !strings.Contains(x.reason, `"Purchase"`) {
+		t.Errorf("sends not counted: %+v", x)
 	}
 	if x := got[AlertTrackingBroken]; x.unit != "signups" || x.evidence["check"] != "capture" || x.evidence["paid_visits"] != 25.0 {
 		t.Errorf("tracking: %+v", x)
@@ -609,17 +725,52 @@ func TestAlerts(t *testing.T) {
 	if x := got[OverspendPause]; x.entity != over || x.evidence["multiple"] != 2.5 {
 		t.Errorf("overspend: %+v", x)
 	}
-	if n := e.count(t, `SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action = 'ad_alert.raised'`, e.ws); n != 9 {
+	if n := e.count(t, `SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action = 'ad_alert.raised'`, e.ws); n != 10 {
 		t.Fatalf("%d ad_alert.raised audit events", n)
+	}
+
+	// The refused conversions are also an alert people hear about, on the
+	// account, with counts only.
+	refused := func() []alerts.Row {
+		t.Helper()
+		rows, err := e.pool.Query(ctx, `SELECT id::text FROM alerts WHERE workspace_id = $1 AND kind = $2 ORDER BY created_at`, e.ws, AlertSendsRefused)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []alerts.Row
+		for _, id := range ids {
+			r, err := alerts.Load(ctx, e.pool, e.ws, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, r)
+		}
+		return out
+	}
+	heard := refused()
+	if len(heard) != 1 || heard[0].TargetType != "ad_account" || heard[0].TargetID != acct || heard[0].Data["failed"] != 2.0 || heard[0].Data["sent"] != 10.0 ||
+		heard[0].BrandID == nil || *heard[0].BrandID != brand {
+		t.Fatalf("ads.sends_refused: %+v", heard)
+	}
+	if v := alerts.Describe(ctx, e.pool, heard[0]); v.Title != "Acme ads is refusing conversions" || v.Path != "ads" ||
+		v.Text != "It refused 2 of the 10 conversions sent to it in 24 hours. See why under Paid ads." {
+		t.Fatalf("its view: %+v", v)
 	}
 
 	// Run again: everything still holds, nothing new; then Spiky calms
 	// down and its anomaly expires while the others stay.
-	if res, err = e.s.RunAlerts(ctx, e.ws); err != nil || len(res.Raised) != 0 || res.Held != 9 || res.Expired != 0 {
+	if res, err = e.s.RunAlerts(ctx, e.ws); err != nil || len(res.Raised) != 0 || res.Held != 10 || res.Expired != 0 {
 		t.Fatalf("second run: %+v %v", res, err)
 	}
+	if n := len(refused()); n != 1 {
+		t.Fatalf("a finding that holds raised %d alerts", n)
+	}
 	day(anomaly, 0, 55, 3000, 150, 1)
-	if res, err = e.s.RunAlerts(ctx, e.ws); err != nil || res.Expired != 1 || res.Held != 8 {
+	if res, err = e.s.RunAlerts(ctx, e.ws); err != nil || res.Expired != 1 || res.Held != 9 {
 		t.Fatalf("third run: %+v %v", res, err)
 	}
 	if e.count(t, `SELECT count(*) FROM ad_suggestions WHERE workspace_id = $1 AND kind = $2 AND status = 'expired'`, e.ws, AlertSpendAnomaly) != 1 {
@@ -627,7 +778,7 @@ func TestAlerts(t *testing.T) {
 	}
 	// An acknowledged alert isn't raised again for a day while it holds.
 	e.exec(t, `UPDATE ad_suggestions SET status = 'acknowledged', updated_at = now() WHERE workspace_id = $1 AND kind = $2`, e.ws, AlertFlatline)
-	if res, err = e.s.RunAlerts(ctx, e.ws); err != nil || res.Raised[AlertFlatline] != 0 || res.Held != 7 {
+	if res, err = e.s.RunAlerts(ctx, e.ws); err != nil || res.Raised[AlertFlatline] != 0 || res.Held != 8 {
 		t.Fatalf("acknowledged: %+v %v", res, err)
 	}
 
@@ -745,5 +896,124 @@ func TestAlertsFirstParty(t *testing.T) {
 	var entity, unit string
 	if err := e.pool.QueryRow(ctx, `SELECT ad_entity_id::text, unit FROM ad_suggestions WHERE workspace_id = $1 AND kind = $2`, e.ws, AlertZeroConversions).Scan(&entity, &unit); err != nil || entity != c2 || unit != "signups" {
 		t.Fatalf("%s %s %v", entity, unit, err)
+	}
+}
+
+// gauge reads one of the ad sync's gauges for a connector.
+func gauge(t *testing.T, name, connector string) float64 {
+	t.Helper()
+	fams, err := metrics.Registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range fams {
+		if f.GetName() != name {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "connector" && l.GetValue() == connector {
+					return m.GetGauge().GetValue()
+				}
+			}
+		}
+	}
+	t.Fatalf("no %s for %s", name, connector)
+	return 0
+}
+
+// The sync interval (plans/ad-tracker.md, B2): the server's, or the
+// extension's answer for the workspace, never under the platform's floor
+// or over a day. A connection is queued once per interval, a paused one
+// never, and one whose last success is older than twice its interval is
+// counted as overdue.
+func TestSyncInterval(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	if got := e.s.IntervalFor(ctx, e.ws, "fake_ads"); got != time.Hour {
+		t.Fatalf("default interval %v", got)
+	}
+	e.s.Default = 20 * time.Minute
+	if got := e.s.IntervalFor(ctx, e.ws, "fake_ads"); got != 30*time.Minute {
+		t.Fatalf("under the floor: %v", got)
+	}
+	if got := e.s.IntervalFor(ctx, e.ws, "zeropark_ads"); got != 20*time.Minute {
+		t.Fatalf("Zeropark's floor: %v", got)
+	}
+	e.s.Default = 5 * time.Minute
+	if got := e.s.IntervalFor(ctx, e.ws, "zeropark_ads"); got != 15*time.Minute {
+		t.Fatalf("under Zeropark's floor: %v", got)
+	}
+	e.s.Default = 2 * time.Hour
+	answer := map[string]time.Duration{}
+	e.s.Interval = func(_ context.Context, ws string) time.Duration { return answer[ws] }
+	if got := e.s.IntervalFor(ctx, e.ws, "fake_ads"); got != 2*time.Hour {
+		t.Fatalf("no answer for the workspace: %v", got)
+	}
+	answer[e.ws] = 45 * time.Minute
+	if got := e.s.IntervalFor(ctx, e.ws, "fake_ads"); got != 45*time.Minute {
+		t.Fatalf("the workspace's interval: %v", got)
+	}
+	answer[e.ws] = 72 * time.Hour
+	if got := e.s.IntervalFor(ctx, e.ws, "fake_ads"); got != 24*time.Hour {
+		t.Fatalf("over a day: %v", got)
+	}
+
+	// Every 45 minutes: synced now, nothing is queued for 44 minutes, then
+	// one job, and a second pass in the same slot queues no other.
+	answer[e.ws] = 45 * time.Minute
+	if _, err := e.s.SyncOnce(ctx, e.ws, e.integration); err != nil {
+		t.Fatal(err)
+	}
+	queued := func() int {
+		t.Helper()
+		var n int
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind = $1`, JobSync).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	pass := func() {
+		t.Helper()
+		if err := e.s.QueueDue(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.now = e.now.Add(44 * time.Minute)
+	pass()
+	if n := queued(); n != 0 {
+		t.Fatalf("%d jobs before the interval", n)
+	}
+	if got := gauge(t, "outflare_ads_sync_overdue", "fake_ads"); got != 0 {
+		t.Fatalf("overdue while on time: %v", got)
+	}
+	if got := gauge(t, "outflare_ads_sync_oldest_seconds", "fake_ads"); got != 44*60 {
+		t.Fatalf("oldest sync: %v", got)
+	}
+	e.now = e.now.Add(2 * time.Minute)
+	pass()
+	pass()
+	if n := queued(); n != 1 {
+		t.Fatalf("%d jobs after the interval", n)
+	}
+	// Nothing ran it: past twice the interval and a quarter of an hour, it
+	// is overdue.
+	e.now = e.now.Add(60 * time.Minute)
+	pass()
+	if got := gauge(t, "outflare_ads_sync_overdue", "fake_ads"); got != 1 {
+		t.Fatalf("overdue after 106 minutes: %v", got)
+	}
+	// A paused connection is neither queued nor counted.
+	if _, err := e.pool.Exec(ctx, `UPDATE integrations SET config = jsonb_set(COALESCE(config, '{}'), '{sync_paused}', 'true') WHERE id = $1`, e.integration); err != nil {
+		t.Fatal(err)
+	}
+	before := queued()
+	e.now = e.now.Add(3 * time.Hour)
+	pass()
+	if n := queued(); n != before {
+		t.Fatalf("a paused connection was queued: %d jobs, %d before", n, before)
+	}
+	if got := gauge(t, "outflare_ads_sync_overdue", "fake_ads"); got != 0 {
+		t.Fatalf("a paused connection counted as overdue: %v", got)
 	}
 }

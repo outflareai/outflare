@@ -442,3 +442,45 @@ func TestChangeForAndInverse(t *testing.T) {
 		t.Fatalf("savings: %v", SavingKinds())
 	}
 }
+
+// A finding on an account billed in another currency is written in the
+// brand's own, like the tables beside it.
+func TestReasonsInTheBrandsCurrency(t *testing.T) {
+	c := mk(14, 30_000_000, 5, 5)
+	c.capped = 7
+	if p := budgetRaise(c); p == nil || !strings.Contains(p.reason, "to 36.00 USD") {
+		t.Fatalf("same currency: %+v", p)
+	}
+	c.currency, c.report, c.fx = "EUR", "USD", 1.1
+	p := budgetRaise(c)
+	if p == nil || !strings.Contains(p.reason, "to 39.60 USD") || strings.Contains(p.reason, "EUR") || p.proposed["daily_budget_micros"] != int64(36_000_000) {
+		t.Fatalf("converted: %+v", p)
+	}
+	if got := (measuring{currency: "EUR", report: "USD", fx: 1.1}).cash(10_000_000); got != "11.00 USD" {
+		t.Fatalf("verdict money: %s", got)
+	}
+}
+
+// A change that can spend more is proposed as a test where the network
+// can run one and the campaign converts often enough to reach an answer.
+func TestProposeTest(t *testing.T) {
+	ev := map[string]any{"unit": UnitPayers, "days": 28.0, "conversions": 4.0, "platform_conversions": 84.0}
+	p := ProposeTest(BiddingTarget, "google_ads", ev)
+	if p == nil || p.Kind != "bidding" || p.Days < 21 || p.Days > maxWindow || !strings.Contains(p.Note, "new bid target") {
+		t.Fatalf("a Google bid target: %+v", p)
+	}
+	if p := ProposeTest(BudgetUp, "meta_ads", map[string]any{"unit": UnitPlatform, "days": 14.0, "conversions": 70.0}); p == nil || p.Kind != "budget" {
+		t.Errorf("a Meta budget: %+v", p)
+	}
+	for name, got := range map[string]*TestFirst{
+		"Google can't test a budget":    ProposeTest(BudgetUp, "google_ads", ev),
+		"a saving is made, not tested":  ProposeTest(BudgetDown, "meta_ads", ev),
+		"too few conversions to settle": ProposeTest(BiddingTarget, "google_ads", map[string]any{"days": 28.0, "platform_conversions": 20.0}),
+		"payers are not the network's":  ProposeTest(BudgetUp, "meta_ads", map[string]any{"unit": UnitPayers, "days": 28.0, "conversions": 90.0}),
+		"X has no tests":                ProposeTest(BudgetUp, "x_ads", ev),
+	} {
+		if got != nil {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+}

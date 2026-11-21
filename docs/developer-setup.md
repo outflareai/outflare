@@ -13,7 +13,7 @@ Each check says **OK**, **Check** (it works, but something should be fixed) or *
 | Payments sent two ways share an id and an amount | Every payment that arrived both as an order and as a transaction in the last 30 days matched by id, with the same amount and currency. |
 | No payment is saved twice | No payment or refund is kept twice, once from an order event and once as a transaction with the same id. **Merge them** fixes those (see below). |
 | Each charge has its own id | No payment id came again a day or more after the payment it first named. |
-| A retry keeps its payment's id | No payment came minutes after another from the same person, of the same amount and from the same way, under a different id. |
+| A retry keeps its payment's id | No payment came minutes after another from the same person, with the same amount, currency and source, under a different id. Only pairs where both payments arrived within 24 hours of occurring are compared; older history imports are ignored. |
 | Amounts are in cents | No recent payment is 50 or more times smaller than the brand's usual payment in its currency (from five payments, with a usual amount of at least 1000 minor units). |
 | Refunds find their payment | Every refund names a payment Outflare has. |
 | Website and server copies agree | The website tag's sign-ups and orders match the server's copies by `messageId` or `order_id`. A copy matched only by person and time is a warning: it is still [counted once](paid-media.md#sending-conversions-back), but the id should be added. |

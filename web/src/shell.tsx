@@ -10,12 +10,14 @@ import type { Scope } from "@outflare/sdk";
 import { api, errorMessage } from "./api";
 import { CopyButton, Kbd, Logo, toast } from "./ui";
 import type { Tab } from "./App";
-import { appPath, appTabs } from "./lib/paths";
+import { appPath, appTabs, currentBrandPart, workspaceTabs } from "./lib/paths";
+import { ago, clearRecents, itemRef, labelOf, opened, parseRef, rememberLabel, resetMenu, startMenu, togglePinned, useMenu } from "@/lib/menu";
 import { cn } from "@/lib/utils";
 import { salesPageName } from "@/lib/sales";
 import { track } from "@/lib/analytics";
 import { desktop, desktopInfo, isDesktopApp, onUpdateReady, type UpdateState } from "@/lib/desktop";
 import { pickedBrandId, setBrand, useBrand } from "@/lib/brand";
+import { usePeopleSetup } from "@/lib/peopleSetup";
 import { useAgentApps } from "@/lib/agentApps";
 import { AddBrand } from "./pages/Brands";
 import {
@@ -40,6 +42,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FeedbackButton, WhatsNewButton } from "@/components/build-with-us";
 
 export const tabNames: Record<Tab, string> = {
@@ -71,8 +74,13 @@ export const tabNames: Record<Tab, string> = {
   paths: "Paths",
   dashboards: "Dashboards",
   channels: "Channels",
+  recordings: "Recordings",
+  heatmaps: "Heatmaps",
   live: "Right now",
   "page-speed": "Page speed",
+  errors: "Errors",
+  "named-clicks": "Named clicks",
+  "internal-people": "Internal and test people",
   tracking: "Website tracking",
   flags: "Feature flags",
   "ab-tests": "A/B tests",
@@ -97,6 +105,7 @@ export const tabNames: Record<Tab, string> = {
   backlinks: "Backlinks",
   "link-orders": "Link orders",
   "link-roi": "Link ROI",
+  partnerships: "Partnerships",
   competition: "Overview",
   competitors: "Competitors",
   "link-building": "Link building",
@@ -108,6 +117,7 @@ export const tabNames: Record<Tab, string> = {
   reddit: "Reddit",
   "reddit-campaigns": "Reddit campaigns",
   social: "Accounts",
+  mentions: "Mentions",
   reviews: "Reviews",
   ads: "Paid ads",
   visitors: "Visitors",
@@ -118,7 +128,9 @@ export const tabNames: Record<Tab, string> = {
   outcomes: "Outcomes",
   sequences: "Sequences",
   people: "Customer data",
-  query: "Query",
+  query: "Queries",
+  "query-endpoints": "Endpoints",
+  "data-catalog": "Data catalog",
   leads: "Leads",
   lists: "Lists",
   "lead-finder": "Lead finder",
@@ -148,6 +160,7 @@ export const tabNames: Record<Tab, string> = {
   knowledge: "Library",
   "help-centre": "Help centre",
   company: "About your company",
+  "brand-profile": "Brand profile",
   brands: "Brand",
   "ideal-customers": "Ideal customers",
   "brand-accounts": "Accounts",
@@ -186,7 +199,9 @@ export const tabBlurbs: Record<Tab, string> = {
   agents: "What your agents changed, what waits for you, and what each may do on its own.",
   sequences: "The emails and follow-ups each lead gets, the schedule they send on, and who is in them.",
   people: "Every person and company Outflare knows: their fields, timeline, consent and duplicates.",
-  query: "Ask the brand's data anything in SQL: every table and record type, results as a table or a chart, CSV downloads, and saved queries with their versions.",
+  query: "Describe a list or a question in plain English and get it as a table you can adjust without SQL: save it, share it, make it a list, chart it or download it.",
+  "query-endpoints": "Saved queries published as API endpoints another system calls with its own token: their calls, row caps and rate limits.",
+  "data-catalog": "Every table of the brand's data that Queries and agents read: what it holds, where it comes from, how fresh it is and what each column means.",
   leads: "Everyone you can contact, where they came from, and what has been sent to them.",
   lists: "Saved searches that build lead lists from your data providers and keep them fresh.",
   "lead-finder": "AI that searches the web for companies that fit your ideal customer, reads their websites and says which fit and why.",
@@ -221,12 +236,17 @@ export const tabBlurbs: Record<Tab, string> = {
   analytics: "Visitors, top pages, traffic sources and conversions from the analytics tools on your website.",
   live: "Who is on your website this minute, where they came from and what they are doing.",
   "page-speed": "How fast your pages are for real visitors, and which ones got slower.",
+  errors: "Errors on your website or app, grouped so you can see what breaks most and for whom.",
+  "named-clicks": "Give a button or link on your site an event name, with no change to the site.",
+  "internal-people": "Leave your own team and test accounts out of funnels, trends and the other reports.",
   tracking: "Outflare's own snippet for your websites: the script tag to paste, and whether each site is sending visits.",
   flags: "Turn things on for some visitors, or split them between versions to see which works better.",
   "ab-tests": "See which version of a flag wins at a goal, with numbers that stay honest however often you check.",
   funnels: "Follow people from an ad visit to sign-up to payment, and see exactly where they drop off.",
   trends: "Any number over time: visits, events, revenue, ad spend, or a formula between them such as cost per sign-up.",
   dashboards: "Your saved funnels, trends and retention on one page, all over the same dates.",
+  recordings: "Watch a visit to your website back, as the visitor saw it. Nothing a visitor types is ever recorded.",
+  heatmaps: "Where visitors click on each page of your website, and how far down they scroll.",
   retention: "Of the people who first did something in a week, how many came back the week after, and the one after that.",
   paths: "Where people go step by step: the pages they view and the things they do, from a start or on the way to an end.",
   channels: "Visits, sign-ups, revenue and cost for every channel, credited the same way in every report.",
@@ -242,7 +262,7 @@ export const tabBlurbs: Record<Tab, string> = {
   "tracker-campaigns": "Your tracker campaigns: the link each ad network sends clicks to, and the paths, landers, offers and weights behind it.",
   partners: "Referral, affiliate and influencer programs: paid or voluntary tasks, partner websites and channels, referral links, rewards and payouts.",
   content: "Posts and pages written for the brand's website: approve them, copy or download them, and see where each went live.",
-  "seo-overview": "Is each brand growing in search: branded search, visitors, domain rating and links, with their trends.",
+  "seo-overview": "A dashboard of organic revenue, sign-ups and clicks by period with the pages and countries behind them, Search Console's Performance report with more filters, and whether each brand is growing in search.",
   experiments: "Did a change help? Hold back a matched group of pages and measure the difference from Search Console.",
   audits: "OutflareBot crawls your websites, scores their health and finds what to fix, page by page.",
   fixes: "Everything worth fixing, one ticket per problem, written up by your AI model and reviewed by you.",
@@ -251,6 +271,7 @@ export const tabBlurbs: Record<Tab, string> = {
   "organic-conversions": "First-touch Organic Search signups and revenue by landing page and search group, from your PostHog events, without counting the same payment twice.",
   backlinks: "Who links to your sites, what you gained and lost, and which links are worth getting back.",
   "link-orders": "Paid placements from our own donor catalog: requests, live-link checks and donor prices, with Approve and Paid reserved for the brand approver.",
+  partnerships: "Every site and person you work with in one place: sites worth being on, deals paid or free, what is live, affiliates, what you owe and what it did.",
   "link-roi": "Cost per published link against stored Search Console, ranking and referring-domain changes on the target page, 30, 60 and 90 days around publication.",
   "ai-visibility": "How often AI assistants name and recommend your brand against its competitors, and what to do next.",
   "ai-answer-share": "Share of voice in stored AI answers, by topic, with a weekly trend and citations of compare pages.",
@@ -265,6 +286,7 @@ export const tabBlurbs: Record<Tab, string> = {
   competitors: "Who you compete with in search, and the keywords and links they have that you don't.",
   visitors: "The companies and people on your website, scored for buying intent, from your site snippet and clicks on your emails.",
   ads: "What a new paying customer costs you from your own Google, Meta, Microsoft and other ad accounts, measured on your own sign-ups and payments, with the decisions that need you, the people the ads brought and the set-up that makes it count.",
+  mentions: "Who names your brand or your competitors in videos, podcasts, posts, forums and news, what they said and who said it.",
   social: "Confirm your brands' X and LinkedIn accounts, then follow their followers, posts and engagement every day.",
   reviews: "Every review of your brands on Trustpilot, G2, Capterra, SourceForge and Google, your review score and its direction, and answers drafted for you to post.",
   reddit: "Find threads where your brand can help, reply with a disclosure from its own account, and count the sign-ups.",
@@ -277,6 +299,7 @@ export const tabBlurbs: Record<Tab, string> = {
   knowledge: "Articles and quick answers your team writes once: products, prices, policies and stock answers. Your team and every AI in Outflare answer from them.",
   "help-centre": "A public site where customers read and search what you've marked for the help centre, styled like your brand.",
   company: "What Outflare knows about your company, so people and agents never have to repeat it.",
+  "brand-profile": "What your agents know about the brand: who you are, who you serve and why customers pick you.",
   brands: "The brand's own website, context, links and team.",
   "ideal-customers": "Who you sell to, described once for lead lists and the lead finder.",
   "brand-accounts": "The external accounts your brand's agent acts through: how each signs in, whether access works, the vault, incidents, and the takeovers waiting for a person.",
@@ -299,6 +322,7 @@ export const tabBlurbs: Record<Tab, string> = {
 // Where to read more about each page on outflare.ai.
 export const tabDocs: Partial<Record<Tab, string>> = {
   brands: "/docs/guides/brands/",
+  "brand-profile": "/docs/guides/brand-profile/",
   "ideal-customers": "/docs/guides/ideal-customers/",
   ai: "/docs/agents/mcp/",
   "ai-usage": "/docs/guides/ai-usage/",
@@ -310,6 +334,9 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   playbooks: "/playbooks/",
   sequences: "/docs/guides/sequences/",
   people: "/docs/guides/customer-records/",
+  query: "/docs/guides/query-and-search/#query",
+  "query-endpoints": "/docs/guides/query-and-search/#published-endpoints",
+  "data-catalog": "/docs/guides/query-and-search/#data-catalog",
   leads: "/docs/guides/import-leads/",
   lists: "/docs/guides/lead-lists/",
   suppression: "/docs/concepts/policy-check/",
@@ -346,9 +373,15 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   "tracker-setup": "/docs/guides/analytics/",
   "tracker-logs": "/docs/guides/analytics/",
   partners: "/docs/guides/partners/",
+  partnerships: "/docs/guides/partnerships/",
   funnels: "/docs/guides/funnels/",
   trends: "/docs/guides/trends/",
   retention: "/docs/guides/retention/",
+  recordings: "/docs/guides/session-recordings/",
+  heatmaps: "/docs/guides/heatmaps/",
+  errors: "/docs/guides/errors/",
+  "named-clicks": "/docs/guides/website-tracking/",
+  "internal-people": "/docs/guides/internal-people/",
   paths: "/docs/guides/paths/",
   dashboards: "/docs/guides/dashboards/",
   channels: "/docs/guides/attribution/",
@@ -405,116 +438,159 @@ export type NavGroup = { label?: string; tabs: Tab[] };
 // with no pages yet is left out, and so is a heading with no modules.
 export const everyday: Tab[] = ["overview", "inbox", "agents"];
 
-export type ModuleGroup = "customers" | "automations" | "email" | "search" | "social" | "ads" | "measure" | "company";
+export type ModuleGroup = "customers" | "partnerships" | "automations" | "email" | "search" | "social" | "ads" | "measure" | "data" | "company";
 export const moduleGroups: { id: ModuleGroup; label: string }[] = [
   { id: "customers", label: "Customers" },
+  { id: "partnerships", label: "Partnerships" },
   { id: "automations", label: "Automations" },
   { id: "email", label: "Email and outreach" },
   { id: "search", label: "Search" },
   { id: "social", label: "Social" },
   { id: "ads", label: "Ads" },
   { id: "measure", label: "Measure" },
+  { id: "data", label: "Data" },
   { id: "company", label: "Company" },
 ];
 
 // links are places inside one of the module's pages that people need in one
 // click (the CRM's people, companies and deals), listed before its pages.
 export type ModuleLink = { tab: Tab; item: string; label: string };
-export type Module = { id: string; label: string; icon: IconName; group: ModuleGroup; tabs: Tab[]; links?: ModuleLink[] };
+// also are older pages that now open inside the module's own (Partnerships
+// shows Presence, Partners, Link orders and Link ROI): they count as the
+// module for the breadcrumb and the menu, but aren't listed in it.
+export type Module = { id: string; label: string; icon: IconName; group: ModuleGroup; tabs: Tab[]; links?: ModuleLink[]; also?: Tab[] };
 export const modules: Module[] = [
-  // Customers: who they are, who is on the site, answering them, and the
-  // partners who send them.
+  // CRM: who the customers are, what needs someone now, and answering them.
   { id: "attention", label: "Needs attention", icon: "attention", group: "customers", tabs: ["signals"] },
-  { id: "crm", label: "CRM", icon: "leads", group: "customers", tabs: ["crm", "sales-reporting", "people", "query", "lists", "telegram", "suppression"], links: [{ tab: "crm", item: "person", label: "People" }, { tab: "crm", item: "account", label: "Companies" }, { tab: "crm", item: "deal", label: "Deals" }] },
-  { id: "visitors", label: "Visitors", icon: "visitors", group: "customers", tabs: ["visitors"] },
+  { id: "crm", label: "CRM", icon: "leads", group: "customers", tabs: ["crm", "sales-reporting", "lists", "telegram", "suppression"], links: [{ tab: "crm", item: "person", label: "People" }, { tab: "crm", item: "account", label: "Companies" }, { tab: "crm", item: "deal", label: "Deals" }, { tab: "crm", item: "collections", label: "Pipelines" }, { tab: "crm", item: "tasks", label: "My work" }, { tab: "crm", item: "notes", label: "Notes" }, { tab: "crm", item: "reports", label: "CRM reports" }, { tab: "crm", item: "settings", label: "CRM settings" }] },
   { id: "support", label: "Support", icon: "support", group: "customers", tabs: ["support"] },
-  { id: "partners", label: "Partners", icon: "partners", group: "customers", tabs: ["partners"] },
+  // Partnerships: every site and person the brand works with, in the order
+  // the work happens: find, deal, live, affiliates, payments, results.
+  { id: "partnerships", label: "Partnerships", icon: "handshake", group: "partnerships", tabs: ["partnerships"], also: ["partners", "coverage", "link-orders", "link-roi", "link-building", "link-autopilot"], links: [{ tab: "partnerships", item: "find", label: "Find" }, { tab: "partnerships", item: "offers", label: "Offers" }, { tab: "partnerships", item: "live", label: "Live" }, { tab: "partnerships", item: "affiliates", label: "Affiliates" }, { tab: "partnerships", item: "payments", label: "Payments" }, { tab: "partnerships", item: "results", label: "Results" }] },
   // Automations: what runs by itself across every module. Playbooks are
   // the recipes; rules and journeys are what they are made of.
   { id: "playbooks", label: "Playbooks", icon: "playbooks", group: "automations", tabs: ["playbooks"] },
   { id: "flows", label: "Rules and journeys", icon: "lifecycle", group: "automations", tabs: ["rules", "journeys", "automations"] },
   // Email and outreach: cold outreach, the mailboxes behind it, and the
   // email customers get.
-  { id: "outreach", label: "Outreach", icon: "sequences", group: "email", tabs: ["sequences", "outreach-mailboxes", "leads", "lead-finder", "email-finder", "link-building", "link-autopilot", "news", "stories", "pr-autopilot", "allocation", "reports"] },
+  { id: "outreach", label: "Outreach", icon: "sequences", group: "email", links: [{ tab: "crm", item: "cold", label: "Cold contacts" }], tabs: ["sequences", "outreach-mailboxes", "lead-finder", "email-finder", "news", "stories", "pr-autopilot", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", group: "email", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
-  { id: "lifecycle", label: "Email", icon: "inbox", group: "email", tabs: ["lifecycle", "broadcasts", "templates", "topics", "emails", "providers"] },
+  { id: "lifecycle", label: "Customer email", icon: "inbox", group: "email", tabs: ["lifecycle", "broadcasts", "templates", "topics", "emails", "providers"] },
   { id: "agent-mail", label: "Agent Mail", icon: "inbox", group: "email", tabs: ["agent-mail"] },
-  // Search: where the brand is found, in search engines and AI answers,
-  // against its competitors, and everywhere else it appears.
-  { id: "seo", label: "SEO", icon: "seo", group: "search", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "seo", "backlinks", "link-orders", "link-roi"] },
+  // Search: where the brand is found, in search engines and AI answers.
+  { id: "seo", label: "SEO", icon: "seo", group: "search", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "seo", "backlinks"] },
   // AI visibility: how AI assistants answer the questions buyers ask, against competitors.
   { id: "ai-visibility", label: "AI visibility", icon: "ai-visibility", group: "search", tabs: ["ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings"] },
-  // Competitors: how the brand stands against everyone it competes with,
-  // across search, AI answers, Presence and, as they arrive, social and reviews.
-  { id: "competitors", label: "Competitors", icon: "competitors", group: "search", tabs: ["competition", "competitors"] },
-  // Presence: everywhere the brand appears, what to go after next, and the
-  // publishers behind it.
-  { id: "presence", label: "Presence", icon: "coverage", group: "search", tabs: ["coverage"] },
-  { id: "social", label: "Social", icon: "social", group: "social", tabs: ["social", "reddit", "reddit-campaigns"] },
+  { id: "social", label: "Social", icon: "social", group: "social", tabs: ["social", "mentions", "reddit", "reddit-campaigns"] },
   { id: "reviews", label: "Reviews", icon: "reviews", group: "social", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", group: "ads", tabs: ["ads"] },
   // The tracker (plans/ad-tracker-ui.md B0): the report first; campaigns,
   // offers, landers, flows and the rest join it.
   { id: "tracker", label: "Tracker", icon: "reports", group: "ads", tabs: ["tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs"] },
   { id: "revenue", label: "Revenue", icon: "revenue", group: "measure", tabs: ["revenue"] },
-  { id: "analytics", label: "Analytics", icon: "reports", group: "measure", tabs: ["dashboards", "funnels", "trends", "retention", "paths", "channels", "outcomes", "analytics", "live", "page-speed", "tracking", "flags", "ab-tests", "links"] },
+  { id: "analytics", label: "Analytics", icon: "reports", group: "measure", tabs: ["dashboards", "funnels", "trends", "retention", "paths", "channels", "outcomes", "analytics", "live", "recordings", "heatmaps", "page-speed", "errors", "named-clicks", "internal-people", "flags", "ab-tests", "links"] },
+  // Who is on the website, scored for buying intent: read beside the
+  // recordings and heatmaps of what they did there.
+  { id: "visitors", label: "Visitors", icon: "visitors", group: "measure", tabs: ["visitors"] },
+  // Data: the brand's data itself, asked in plain English or SQL, served to
+  // other systems, and as it arrives (events, transactions, imports).
+  { id: "data-catalog", label: "Catalog", icon: "book", group: "data", tabs: ["data-catalog"] },
+  { id: "queries", label: "Queries", icon: "database", group: "data", tabs: ["query"] },
+  { id: "query-endpoints", label: "Endpoints", icon: "endpoints", group: "data", tabs: ["query-endpoints"] },
+  { id: "customer-data", label: "Customer data", icon: "people", group: "data", tabs: ["people"], links: [{ tab: "people", item: "events", label: "Events and their sources" }, { tab: "people", item: "transactions", label: "Transactions" }] },
   // What the business knows: knowledge, company context and memories, which
   // every module and agent reads.
   { id: "knowledge", label: "Knowledge", icon: "book", group: "company", tabs: ["knowledge", "help-centre", "company"] },
   // The company hub: its brands, their setup and who it sells to.
-  { id: "company", label: "Company", icon: "company", group: "company", tabs: ["brands", "setup", "ideal-customers", "brand-accounts"] },
+  { id: "company", label: "Company", icon: "company", group: "company", tabs: ["brand-profile", "brands", "setup", "ideal-customers", "brand-accounts"] },
+  // Competitors: how the brand stands against everyone it competes with,
+  // across search, AI answers, Presence and, as they arrive, social and reviews.
+  { id: "competitors", label: "Competitors", icon: "competitors", group: "company", tabs: ["competition", "competitors"] },
 ];
-export const moduleOf = (t: Tab) => modules.find((m) => m.tabs.includes(t));
+export const moduleOf = (t: Tab) => modules.find((m) => m.tabs.includes(t) || m.also?.includes(t));
+
+// The new menu (version 2) shows a rail of areas, and beside it only the
+// pages of the area you are in. An area is one or more headings of the
+// single sidebar, so a module added to a heading shows up in both menus.
+// A heading no area names joins the last one, so nothing can go missing.
+export type Area = { id: string; label: string; icon: IconName; groups: ModuleGroup[]; intro: string; home?: Tab };
+export const areas: Area[] = [
+  { id: "customers", label: "CRM", icon: "leads", groups: ["customers"], home: "crm", intro: "People, companies and deals, with everything they have done." },
+  { id: "partnerships", label: "Partnerships", icon: "handshake", groups: ["partnerships"], intro: "Every site and person the brand works with, from finding them to paying them." },
+  { id: "automations", label: "Automations", icon: "playbooks", groups: ["automations"], intro: "What runs by itself: playbooks, rules and journeys." },
+  { id: "email", label: "Email", icon: "sequences", groups: ["email"], intro: "Cold outreach, the mailboxes behind it, and the email customers get." },
+  { id: "search", label: "Search", icon: "seo", groups: ["search"], intro: "Where the brand is found, in search engines and AI answers." },
+  { id: "social", label: "Social", icon: "social", groups: ["social"], intro: "Posts, mentions and reviews of the brand." },
+  { id: "ads", label: "Ads", icon: "ads", groups: ["ads"], intro: "Paid ads, and the tracker that follows every click to a sale." },
+  { id: "analytics", label: "Analytics", icon: "reports", groups: ["measure"], home: "dashboards", intro: "What visitors and customers do, who is on the website, and what it earns." },
+  { id: "data", label: "Data", icon: "database", home: "query", groups: ["data"], intro: "Ask questions of your data, publish answers, and see what is stored about customers." },
+  { id: "company", label: "Company", icon: "company", groups: ["company"], intro: "What the business knows, its brands, who it sells to and who it competes with." },
+];
+export const areaOfGroup = (g: ModuleGroup) => areas.find((a) => a.groups.includes(g)) ?? areas[areas.length - 1];
+export const areaOf = (t: Tab) => { const m = moduleOf(t); return m ? areaOfGroup(m.group) : undefined; };
 const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["crm", "sales-reporting", "revenue","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "signals", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "outreach-mailboxes", "telegram"];
+const brandTabs: readonly Tab[] = ["crm", "sales-reporting", "revenue","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "link-building", "link-autopilot", "coverage", "partnerships", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "mentions", "reviews", "ads", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "recordings", "heatmaps", "live", "page-speed", "errors", "named-clicks", "internal-people", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "query-endpoints", "data-catalog", "leads", "lists", "rules", "signals", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brand-profile", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "outreach-mailboxes", "telegram"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
 export const canOpen = (ws: Workspace | undefined, t: Tab) =>
   (!featureTabs[t] || !!ws?.features?.includes(featureTabs[t]!)) && (!ws?.brand_ids?.length || brandTabs.includes(t));
 
-// The sidebar keeps two things. Pins are kept in this browser for the
-// person who made them, and dropped if someone else signs in. Which module
-// is open lasts only while signed in: signing out starts again at Home
-// with every module closed.
-type NavPrefs = { pins: Tab[]; open: string };
+// The sidebar remembers, in this browser and for the person who set them,
+// their pins, which modules they have open and which headings they have
+// folded away; someone else signing in starts with none of it. Several
+// modules can be open at once, so opening one never moves the others.
+// Signing out still starts the next sign-in at Home. Pins (and the things
+// opened last) are kept with the person's account instead (lib/menu.ts);
+// pins here are only what this browser held before that, sent up once.
+// version is which menu the person uses: "v1" is the single sidebar, "v2"
+// the rail of areas with a menu for the area they are in. "v2" is the
+// default; the single sidebar stays for anyone who switches back, and only
+// a switch they made themselves (chose) keeps them on it.
+export type NavVersion = "v1" | "v2";
+type NavPrefs = { pins: Tab[]; open: string[]; folded: string[]; version: NavVersion; chose?: boolean };
 const prefsKey = "nav";
 const isAppTab = (t: unknown): t is Tab => typeof t === "string" && (appTabs as readonly string[]).includes(t);
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+const noPrefs: NavPrefs = { pins: [], open: [], folded: [], version: "v2" };
 
-function loadPins(user: string): Tab[] {
+function loadPrefs(user: string): NavPrefs {
   try {
     const p = JSON.parse(localStorage.getItem(prefsKey) ?? "null");
-    if (p && typeof p === "object" && p.user === user && Array.isArray(p.pins)) return p.pins.filter(isAppTab);
+    if (p && typeof p === "object" && p.user === user) {
+      return { pins: strings(p.pins).filter(isAppTab), open: strings(p.open), folded: strings(p.folded), version: p.version === "v1" && p.chose === true ? "v1" : "v2", chose: p.chose === true };
+    }
   } catch {
     // Storage can be refused or hold something old; start fresh.
   }
-  return [];
+  return noPrefs;
 }
 
 let navUser = "";
-let prefs: NavPrefs = { pins: [], open: "" };
+let prefs: NavPrefs = noPrefs;
 const prefListeners = new Set<() => void>();
 
 function setPrefs(next: NavPrefs) {
-  if (next.pins !== prefs.pins) {
+  prefs = next;
+  if (navUser) {
     try {
-      localStorage.setItem(prefsKey, JSON.stringify({ user: navUser, pins: next.pins }));
+      localStorage.setItem(prefsKey, JSON.stringify({ user: navUser, ...next }));
     } catch {
       // Not remembered after a reload; fine.
     }
   }
-  prefs = next;
   prefListeners.forEach((l) => l());
 }
 
-// Called once the signed-in person is known: loads their pins.
+// Called once the signed-in person is known: loads what they set.
 export function startNav(user: string) {
   if (user === navUser) return;
   navUser = user;
-  prefs = { pins: loadPins(user), open: "" };
+  prefs = loadPrefs(user);
+  startMenu(user, prefs.pins);
   prefListeners.forEach((l) => l());
 }
 
@@ -522,7 +598,8 @@ export function startNav(user: string) {
 // or anyone's, starts at Home.
 export function resetNav() {
   navUser = "";
-  prefs = { pins: [], open: "" };
+  prefs = noPrefs;
+  resetMenu();
   prefListeners.forEach((l) => l());
   history.replaceState(null, "", "/");
 }
@@ -538,29 +615,56 @@ export function useNavPrefs(): NavPrefs {
 }
 
 export function togglePin(t: Tab, from: string) {
-  const on = prefs.pins.includes(t);
-  setPrefs({ ...prefs, pins: on ? prefs.pins.filter((x) => x !== t) : [...prefs.pins, t] });
-  track(on ? "ui.nav_unpinned" : "ui.nav_pinned", { tab: t, from });
+  track(togglePinned(t) ? "ui.nav_pinned" : "ui.nav_unpinned", { tab: t, from });
 }
 
-// One module is open at a time, like an accordion: opening one closes the
-// one before, so the sidebar never grows past the screen.
+// Pins or unpins one thing inside a page (a report, a funnel), by its ref.
+export function togglePinItem(ref: string, tab: Tab, from: string) {
+  track(togglePinned(ref) ? "ui.nav_pinned" : "ui.nav_unpinned", { tab, from, kind: "item" });
+}
+
+// The ref of what is open: the thing inside the page when there is one (an
+// item with an id in it, or a page's heatmap), otherwise the page itself.
+const anyID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const isThing = (tab: Tab, item?: string): item is string => !!item && item !== "new" && (anyID.test(item) || (tab === "heatmaps" && item !== "settings"));
+const refOf = (ws: string, tab: Tab, item?: string) => (isThing(tab, item) ? itemRef(ws, workspaceTabs.includes(tab) ? "" : currentBrandPart(), tab, item) : tab);
+
+// Switches between the two menus; from says where it was pressed.
+export function setNavVersion(version: NavVersion, from: string) {
+  if (prefs.version === version) return;
+  setPrefs({ ...prefs, version, chose: true });
+  track("ui.nav_version_switched", { version, from });
+}
+
+// A module opens and closes on its own; the others stay as they are.
 function toggleModule(id: string) {
-  const open = prefs.open !== id;
-  setPrefs({ ...prefs, open: open ? id : "" });
+  const open = !prefs.open.includes(id);
+  setPrefs({ ...prefs, open: open ? [...prefs.open, id] : prefs.open.filter((x) => x !== id) });
   track("ui.nav_module_toggled", { module: id, open });
 }
 
-// Opening a page opens its module and closes any other.
+// A heading folds its modules away (the one you are in stays in sight).
+function toggleSection(id: string) {
+  const folded = !prefs.folded.includes(id);
+  setPrefs({ ...prefs, folded: folded ? [...prefs.folded, id] : prefs.folded.filter((x) => x !== id) });
+  track("ui.nav_section_toggled", { section: id, folded });
+}
+
+function collapseAll() {
+  track("ui.nav_collapsed", { modules: prefs.open.length });
+  setPrefs({ ...prefs, open: [] });
+}
+
+// Opening a page opens its module too, and leaves the others open.
 function visited(t: Tab) {
-  const open = moduleOf(t)?.id ?? "";
-  if (prefs.open !== open) setPrefs({ ...prefs, open });
+  const id = moduleOf(t)?.id;
+  if (id && !prefs.open.includes(id)) setPrefs({ ...prefs, open: [...prefs.open, id] });
 }
 
 // A small pin beside a page's name: shows on hover (always when pinned),
 // hidden on phones, where All tools does the pinning.
 export function PinButton({ tab, from, className }: { tab: Tab; from: string; className?: string }) {
-  const { pins } = useNavPrefs();
+  const { pins } = useMenu();
   const on = pins.includes(tab);
   return (
     <button
@@ -585,6 +689,9 @@ export function PinButton({ tab, from, className }: { tab: Tab; from: string; cl
 export function settingsGroups(isAdmin: boolean, ws?: Workspace): NavGroup[] {
   const groups: NavGroup[] = [
     { label: "Workspace", tabs: ["workspace", "workspace-brands", "members", "team", "team-activity"] },
+    // A brand's website script: set up once, then only looked at to check
+    // it or change it, so it sits here and not among the reports it feeds.
+    { label: "Website", tabs: ["tracking"] },
     { label: "AI", tabs: ["ai", "ai-usage", "ai-accounts"] },
     { label: "Notifications", tabs: ["alerts", "digests"] },
     { label: "Developers", tabs: isAdmin ? ["tokens", "webhooks", "logs", "audit", "tools"] : ["webhooks", "tools"] },
@@ -594,7 +701,7 @@ export function settingsGroups(isAdmin: boolean, ws?: Workspace): NavGroup[] {
   return groups.map((g) => ({ ...g, tabs: g.tabs.filter((t) => canOpen(ws, t)) })).filter((g) => g.tabs.length > 0);
 }
 
-export const settingsTabs: readonly Tab[] = ["workspace", "workspace-brands", "members", "team", "team-activity", "ai", "ai-usage", "ai-accounts", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "account", "instance"];
+export const settingsTabs: readonly Tab[] = ["workspace", "workspace-brands", "members", "team", "team-activity", "tracking", "ai", "ai-usage", "ai-accounts", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "account", "instance"];
 export const isSettings = (t: Tab) => settingsTabs.includes(t);
 
 // ---- Theme ----
@@ -648,62 +755,157 @@ export function Sidebar(p: SidebarProps) {
   const close = () => setOpenMobile(false);
   const prefs = useNavPrefs();
   const open = prefs.open;
+  const folded = (g: string) => state !== "collapsed" && prefs.version !== "v2" && prefs.folded.includes(g);
   const shown = (t: Tab) => canOpen(p.ws, t) && pageIsAvailable(t);
-  const pins = prefs.pins.filter(shown);
-  const modules = allModules.map((m) => ({ ...m, tabs: m.tabs.filter(shown) })).filter((m) => m.tabs.length > 0);
+  // Pins and recents come from the person's account. One for a thing
+  // inside a page shows on the workspace and brand it belongs to; the new
+  // menu shows the ones of the area you are in.
+  const menu = useMenu();
+  const entryOf = (ref: string, at?: string): MenuEntry | undefined => {
+    const r = parseRef(ref);
+    if (!r || !isAppTab(r.tab) || !shown(r.tab)) return undefined;
+    if (r.item === undefined) return { ref, tab: r.tab, label: tabNames[r.tab], at };
+    if (r.ws !== p.ws?.id || r.brand !== (workspaceTabs.includes(r.tab) ? "" : currentBrandPart())) return undefined;
+    return { ref, tab: r.tab, item: r.item, label: labelOf(ref) ?? `${tabNames[r.tab]} ${r.item.slice(-6)}`, at };
+  };
+  const entries = (refs: { ref: string; at?: string }[]) => refs.map((r) => entryOf(r.ref, r.at)).filter((e): e is MenuEntry => !!e);
+  // Support conversations live in the Inbox, so its own entry stays out of the menu (old links still open there).
+  const everyModule = allModules.filter((m) => m.id !== "support").map((m) => ({ ...m, tabs: m.tabs.filter(shown) })).filter((m) => m.tabs.length > 0);
+  // The new menu lists only the area you are in. An area with few modules
+  // shows their pages already open, so there is nothing to unfold.
+  const v2 = prefs.version === "v2";
+  const area = v2 ? areaOf(p.tab) : undefined;
+  const modules = v2 ? everyModule.filter((m) => area && areaOfGroup(m.group).id === area.id) : everyModule;
+  const flat = v2 && modules.length <= 5;
+  const here = (e: MenuEntry) => !area || areaOf(e.tab)?.id === area.id;
+  const pins = entries(menu.pins.map((ref) => ({ ref }))).filter(here);
+  const recents = v2 ? entries(menu.recents).filter((e) => e.item !== undefined && here(e) && !menu.pins.includes(e.ref)).slice(0, 5) : [];
   useEffect(() => visited(p.tab), [p.tab]);
-  useBrand(p.ws?.id); // links below carry the brand picked
+  // Keep the page you are on in sight once its module has slid open.
+  useEffect(() => {
+    const t = setTimeout(() => document.querySelector('[data-sidebar="content"] [aria-current="page"]')?.scrollIntoView({ block: "nearest" }), 220);
+    return () => clearTimeout(t);
+  }, [p.tab, p.item]);
+  const { brand: pickedBrand } = useBrand(p.ws?.id); // links below carry the brand picked
+  // On a short window the menu scrolls: a fade at the bottom says there is more.
+  const [more, setMore] = useState(false);
+  const checkMore = () => {
+    const el = document.querySelector('[data-sidebar="content"]');
+    setMore(!!el && el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+  };
+  useEffect(() => {
+    const t = setTimeout(checkMore, 250);
+    addEventListener("resize", checkMore);
+    return () => {
+      clearTimeout(t);
+      removeEventListener("resize", checkMore);
+    };
+  });
+  // CRM's lists follow the brand's people setup: Companies only when it
+  // sells to companies, Accounts only when its product has them.
+  const peopleSetup = usePeopleSetup(pickedBrand?.id);
+  const crmLists = peopleSetup?.lists ?? ["people", "companies", "deals"];
+  const linksOf = (m: Module) =>
+    (m.links ?? [])
+      .flatMap((l) => (l.tab === "crm" && l.item === "account" && crmLists.includes("accounts") ? [l, { tab: "crm" as Tab, item: "customer_account", label: "Accounts" }] : [l]))
+      .filter((l) => shown(l.tab) && !(l.tab === "crm" && l.item === "account" && !crmLists.includes("companies")));
   // Each page is a real link, so right-click, Ctrl/Cmd-click and middle-click
   // open it in a new tab; a plain click still switches page in place.
   const href = (t: Tab) => (p.ws ? appPath(p.ws.id, t) : undefined);
   const go = (t: Tab) => () => { p.onTab(t); close(); };
-  const onLink = (l: ModuleLink) => p.tab === l.tab && (p.item ?? "").split(":")[0] === l.item;
-  return (
-    <UISidebar collapsible="icon">
+  // A People list of one event, and adding people from one, are People.
+  // An older page that opens inside Partnerships lights the tab it belongs to.
+  const partnershipOf: Partial<Record<Tab, string>> = { coverage: "live", partners: "affiliates", "link-orders": "offers", "link-roi": "results", "link-building": "find", "link-autopilot": "find" };
+  const onLink = (l: ModuleLink) =>
+    l.tab === "partnerships"
+      ? (p.tab === "partnerships" ? (p.item || "find").split("/")[0] : partnershipOf[p.tab]) === l.item
+      : p.tab === l.tab && ((p.item ?? "").split(":")[0].replace(/^(event|add-from-event)$/, "person")) === l.item;
+  const header = (
       <SidebarHeader className="gap-2 pt-3">
         <div className="grid gap-px">
           <WorkspaceSwitcher workspaces={p.workspaces} ws={p.ws} onChange={(id) => { p.onWorkspace(id); close(); }} onCreate={() => { close(); p.onCreateWorkspace(); }} />
           {p.ws && <BrandSwitcher ws={p.ws} onAdded={() => p.onTab("brands")} onManage={() => p.onTab("workspace-brands")} onPicked={close} />}
         </div>
         <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Search  ⌘K" onClick={() => { close(); p.onSearch(); }} className="h-8 border bg-background text-muted-foreground shadow-xs hover:text-foreground dark:bg-input/30">
+          <SidebarMenuItem className="flex items-center gap-1">
+            <SidebarMenuButton tooltip="Search  ⌘K" onClick={() => { close(); p.onSearch(); }} className="h-8 min-w-0 flex-1 border bg-background text-muted-foreground shadow-xs hover:text-foreground dark:bg-input/30">
               <Icon name="search" className="size-3.5" />
-              <span className="flex-1">Search or jump to…</span>
+              <span className="flex-1 truncate">Search…</span>
               <Kbd>⌘K</Kbd>
             </SidebarMenuButton>
+            {open.length > 0 && !flat && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" onClick={collapseAll} aria-label="Close every open menu group" className="grid size-8 shrink-0 place-items-center rounded-md border bg-background text-muted-foreground shadow-xs hover:bg-sidebar-accent hover:text-foreground group-data-[collapsible=icon]:hidden dark:bg-input/30">
+                    <Icon name="collapse" className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Close every open group</TooltipContent>
+              </Tooltip>
+            )}
           </SidebarMenuItem>
         </SidebarMenu>
+        {v2 && area && (
+          <div className="px-1 pt-1">
+            <h2 className="text-[15px] font-semibold tracking-tight">{area.label}</h2>
+            <p className="text-[11.5px] leading-snug text-muted-foreground">{area.intro}</p>
+          </div>
+        )}
         {p.ws && shown("ai") && <ConnectAIPrompt ws={p.ws.id} active={p.tab === "ai"} onOpen={() => { p.onTab("ai"); close(); }} />}
       </SidebarHeader>
-
-      <SidebarContent className="gap-0">
-        <SidebarGroup className="py-1">
+  );
+  const content = (
+      <SidebarContent className="gap-0" onScroll={checkMore}>
+        {!v2 && <SidebarGroup className="py-0.5">
           <SidebarMenu className="gap-px">
             {everyday.filter(shown).map((t) => <NavItem key={t} tab={t} active={p.tab === t} unread={t === "inbox" ? p.unread : p.counts?.[t] ?? 0} unreadLabel={t === "inbox" ? "unread" : "waiting for you"} href={href(t)} onClick={go(t)} />)}
           </SidebarMenu>
-        </SidebarGroup>
+        </SidebarGroup>}
+        {v2 && !area && pins.length === 0 && <p className="px-3 py-2 text-[12px] leading-snug text-muted-foreground">Pick an area on the left to see its pages. Pages you pin show here.</p>}
         {pins.length > 0 && (
-          <SidebarGroup className="py-1">
+          <SidebarGroup className="py-0.5">
             <SidebarGroupLabel className="h-5 font-mono text-[10px] tracking-wider uppercase">Pinned</SidebarGroupLabel>
             <SidebarMenu className="gap-px">
-              {pins.map((t) => <NavItem key={t} tab={t} active={p.tab === t} pin="pinned" href={href(t)} onClick={go(t)} />)}
+              {pins.map((e) => e.item === undefined
+                ? <NavItem key={e.ref} tab={e.tab} active={p.tab === e.tab} pin="pinned" href={href(e.tab)} onClick={go(e.tab)} />
+                : <NavItem key={e.ref} tab={e.tab} label={e.label} active={p.tab === e.tab && p.item === e.item} href={p.ws ? appPath(p.ws.id, e.tab, e.item) : undefined} onClick={() => { p.onTab(e.tab, e.item); close(); }}
+                    extra={<button type="button" onClick={() => togglePinItem(e.ref, e.tab, "pinned")} aria-label={`Unpin ${e.label}`} title="Unpin" className="ml-0.5 hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover/menu-item:opacity-100 hover:bg-sidebar-accent hover:text-foreground focus-visible:opacity-100 md:flex"><Icon name="pin" className="size-3.5" /></button>} />)}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
+        {recents.length > 0 && (
+          <SidebarGroup className="py-0.5">
+            <SidebarGroupLabel className="h-5 font-mono text-[10px] tracking-wider uppercase">
+              <span className="flex-1">Recents</span>
+              <button type="button" onClick={() => { track("ui.nav_recents_cleared", { count: menu.recents.length }); clearRecents(); }} className="rounded px-1 font-sans text-[11px] tracking-normal normal-case hover:bg-sidebar-accent hover:text-sidebar-foreground">Clear</button>
+            </SidebarGroupLabel>
+            <SidebarMenu className="gap-px">
+              {recents.map((e) => (
+                <NavItem key={e.ref} tab={e.tab} label={e.label} active={p.tab === e.tab && p.item === e.item} href={p.ws ? appPath(p.ws.id, e.tab, e.item) : undefined} onClick={() => { track("ui.nav_recent_opened", { tab: e.tab }); p.onTab(e.tab, e.item); close(); }}
+                  extra={e.at && <span className="mr-1.5 shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">{ago(e.at)}</span>} />
+              ))}
             </SidebarMenu>
           </SidebarGroup>
         )}
         {moduleGroups.map((g) => ({ ...g, modules: modules.filter((m) => m.group === g.id) })).filter((g) => g.modules.length > 0).map((g) => (
-        <SidebarGroup key={g.id} className="py-1 group-data-[collapsible=icon]:py-0">
-          <SidebarGroupLabel className="h-5 font-mono text-[10px] tracking-wider uppercase group-data-[collapsible=icon]:hidden">{g.label}</SidebarGroupLabel>
+        <SidebarGroup key={g.id} className="py-0">
+          <SidebarGroupLabel asChild className={cn("h-5 font-mono text-[10px] tracking-wider uppercase group-data-[collapsible=icon]:hidden", v2 && area?.groups.length === 1 && "hidden")}>
+            <button type="button" onClick={() => { if (!v2) toggleSection(g.id); }} aria-expanded={!folded(g.id)} className="group/label w-full cursor-pointer hover:text-sidebar-foreground">
+              <span className="flex-1 text-left">{g.label}</span>
+              {folded(g.id) && <span className="mr-1 font-sans text-[11px] tracking-normal normal-case">{g.modules.length}</span>}
+              <Icon name="chevron" className={cn("size-3! text-muted-foreground transition-transform duration-200", folded(g.id) ? "opacity-100" : "rotate-90 opacity-0 group-hover/label:opacity-100 group-focus-visible/label:opacity-100")} />
+            </button>
+          </SidebarGroupLabel>
           <SidebarMenu className="gap-px">
-            {g.modules.map((m) => {
-              const inside = m.tabs.includes(p.tab);
-              const expanded = open === m.id;
+            {g.modules.filter((m) => !folded(g.id) || m.tabs.includes(p.tab) || !!m.also?.includes(p.tab)).map((m) => {
+              const inside = m.tabs.includes(p.tab) || !!m.also?.includes(p.tab);
+              const expanded = flat || open.includes(m.id);
               // A module with one page is that page: one click, nothing to open.
-              if (m.tabs.length === 1) {
+              if (m.tabs.length === 1 && linksOf(m).length === 0) {
                 const t = m.tabs[0];
                 return (
                   <SidebarMenuItem key={m.id}>
-                    <SidebarMenuButton asChild isActive={inside} tooltip={m.label} className="h-10 text-[13px] md:h-7">
+                    <SidebarMenuButton asChild isActive={inside} tooltip={m.label} className="h-10 text-[13px] md:h-6.5">
                       <a href={href(t)} onClick={(e) => inPlace(e, go(t))} aria-current={inside ? "page" : undefined}>
                         <Icon name={m.icon} className={cn("size-4", inside && "text-brand-strong dark:text-brand")} />
                         <span className="flex-1 font-medium">{m.label}</span>
@@ -718,32 +920,32 @@ export function Sidebar(p: SidebarProps) {
                   <SidebarMenuButton
                     isActive={inside && !expanded}
                     tooltip={m.label}
-                    onClick={() => { if (state === "collapsed") p.onTab(m.tabs[0]); else toggleModule(m.id); }}
+                    onClick={() => { if (state === "collapsed" || flat) p.onTab(m.tabs[0]); else toggleModule(m.id); }}
                     aria-expanded={expanded}
-                    className="h-10 text-[13px] md:h-7"
+                    className="h-10 text-[13px] md:h-6.5"
                   >
                     <Icon name={m.icon} className={cn("size-4", inside && "text-brand-strong dark:text-brand")} />
                     <span className="flex-1 font-medium">{m.label}</span>
                     {!expanded && <CountBadge n={m.tabs.reduce((n, t) => n + (p.counts?.[t] ?? 0), 0)} />}
-                    <Icon name="chevron" className={cn("size-3.5 text-muted-foreground transition-transform duration-200", expanded && "rotate-90")} />
+                    {!flat && <Icon name="chevron" className={cn("size-3.5 text-muted-foreground transition-transform duration-200", expanded && "rotate-90")} />}
                   </SidebarMenuButton>
                   {/* Opens and closes with a short slide; closed pages can't be tabbed to. */}
                   <div className={cn("grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none group-data-[collapsible=icon]:hidden", expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")} inert={!expanded}>
                     <div className="min-h-0 overflow-hidden">
                       <SidebarMenuSub className="mr-0 gap-px py-0.5 pr-0">
-                        {(m.links ?? []).filter((l) => m.tabs.includes(l.tab)).map((l) => (
+                        {linksOf(m).map((l) => (
                           <SidebarMenuSubItem key={`${l.tab}:${l.item}`} className="flex items-center">
                             <SidebarMenuSubButton asChild isActive={onLink(l)}>
-                              <a href={p.ws ? appPath(p.ws.id, l.tab, l.item) : undefined} onClick={(e) => inPlace(e, () => { p.onTab(l.tab, l.item); close(); })} aria-current={onLink(l) ? "page" : undefined} className="h-9 w-full flex-1 text-[13px] md:h-7">
+                              <a href={p.ws ? appPath(p.ws.id, l.tab, l.item) : undefined} onClick={(e) => inPlace(e, () => { p.onTab(l.tab, l.item); close(); })} aria-current={onLink(l) ? "page" : undefined} className="h-9 w-full flex-1 text-[13px] md:h-6">
                                 <span className="flex-1 text-left">{l.label}</span>
                               </a>
                             </SidebarMenuSubButton>
                           </SidebarMenuSubItem>
                         ))}
-                        {m.tabs.map((t) => ({ t, on: p.tab === t && !(m.links ?? []).some(onLink) })).map(({ t, on }) => (
+                        {m.tabs.filter((t) => !linksOf(m).some((l) => l.tab === t)).map((t) => ({ t, on: p.tab === t && !linksOf(m).some(onLink) })).map(({ t, on }) => (
                           <SidebarMenuSubItem key={t} className="flex items-center">
                             <SidebarMenuSubButton asChild isActive={on}>
-                              <a href={href(t)} onClick={(e) => inPlace(e, go(t))} aria-current={on ? "page" : undefined} className="group/nav h-9 w-full flex-1 text-[13px] md:h-7">
+                              <a href={href(t)} onClick={(e) => inPlace(e, go(t))} aria-current={on ? "page" : undefined} className="group/nav h-9 w-full flex-1 text-[13px] md:h-6">
                                 <span className="flex-1 text-left">{tabNames[t]}</span>
                                 <CountBadge n={p.counts?.[t] ?? 0} />
                                 {shortcuts[t] && !p.counts?.[t] && <span className="hidden font-mono text-[10px] text-muted-foreground md:group-hover/nav:inline">G {shortcuts[t]!.toUpperCase()}</span>}
@@ -761,15 +963,21 @@ export function Sidebar(p: SidebarProps) {
           </SidebarMenu>
         </SidebarGroup>
         ))}
+        {more && <div aria-hidden="true" className="pointer-events-none sticky bottom-0 -mt-10 h-10 shrink-0 bg-gradient-to-t from-sidebar to-transparent group-data-[collapsible=icon]:hidden" />}
       </SidebarContent>
-
+  );
+  if (!v2) {
+    return (
+      <UISidebar collapsible="icon">
+        {header}
+        {content}
       <SidebarFooter className="gap-1 border-t pt-1.5 pb-3">
         <SidebarMenu className="gap-px">
           {shown("connectors") && <NavItem tab="connectors" pin="sidebar" active={p.tab === "connectors"} href={href("connectors")} onClick={go("connectors")} />}
           <NavItem tab="workspace" label="Settings" icon="settings" active={isSettings(p.tab)} href={href("workspace")} onClick={go(isSettings(p.tab) ? p.tab : "workspace")} />
           {(p.links ?? []).map((l) => (
             <SidebarMenuItem key={l.id}>
-              <SidebarMenuButton asChild tooltip={l.label} className="h-10 text-[13px] md:h-7">
+              <SidebarMenuButton asChild tooltip={l.label} className="h-10 text-[13px] md:h-6.5">
                 <a href={l.href}>
                   <Icon name={isIconName(l.icon) ? l.icon : "external"} className="size-4" />
                   <span className="flex-1">{l.label}</span>
@@ -779,9 +987,71 @@ export function Sidebar(p: SidebarProps) {
             </SidebarMenuItem>
           ))}
         </SidebarMenu>
+        <button type="button" onClick={() => setNavVersion("v2", "sidebar")} className="mx-1 flex h-7 items-center gap-2 rounded-md border border-dashed px-2 text-left text-[12px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground group-data-[collapsible=icon]:hidden">
+          <Icon name="sparkles" className="size-3.5 text-brand-strong dark:text-brand" />
+          <span className="flex-1">Switch to the new menu</span>
+          <span className="rounded bg-brand-strong/15 px-1 font-mono text-[10px] text-brand-strong dark:bg-brand/15 dark:text-brand">v2</span>
+        </button>
         <AppUpdate />
         <Account email={p.me.email} theme={p.theme} onTheme={p.onTheme} onSignOut={p.onSignOut} onAccount={() => p.onTab("account")} />
       </SidebarFooter>
+        <SidebarRail />
+      </UISidebar>
+    );
+  }
+  // Version 2: the rail of areas, then the menu of the area you are in.
+  // Folded to icons, only the rail stays.
+  const first = (a: Area) => {
+    const own = everyModule.filter((m) => areaOfGroup(m.group).id === a.id);
+    return a.home && own.some((m) => m.tabs.includes(a.home!)) ? a.home : own[0]?.tabs[0];
+  };
+  const railItem = (key: string, label: string, icon: IconName, active: boolean, t: Tab | undefined, onClick: () => void, badge = 0) => (
+    <a
+      key={key}
+      href={t ? href(t) : undefined}
+      onClick={(e) => inPlace(e, onClick)}
+      aria-current={active ? "page" : undefined}
+      title={label}
+      className={cn(
+        "relative flex w-16 cursor-pointer flex-col items-center gap-0.5 rounded-md py-1.5 text-[10px] leading-tight text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none",
+        active && "bg-sidebar-accent font-medium text-foreground shadow-xs ring-1 ring-sidebar-border",
+      )}
+    >
+      <Icon name={icon} className={cn("size-[18px]", active && "text-brand-strong dark:text-brand")} />
+      <span className="max-w-full truncate px-0.5">{label}</span>
+      {badge > 0 && <span className="absolute top-0.5 right-1.5 rounded bg-brand-strong px-1 font-mono text-[9.5px] leading-[14px] text-white dark:bg-brand dark:text-neutral-950">{badge}</span>}
+    </a>
+  );
+  return (
+    <UISidebar collapsible="icon">
+      <div className="flex min-h-0 flex-1">
+        <nav aria-label="Areas" className="flex w-[4.5rem] shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r py-2.5 [scrollbar-width:none]">
+          {everyday.filter(shown).map((t) => railItem(t, tabNames[t], t as IconName, p.tab === t, t, go(t), t === "inbox" ? p.unread : p.counts?.[t] ?? 0))}
+          <div className="my-1 h-px w-8 bg-sidebar-border" />
+          {areas.filter((a) => first(a)).map((a) => railItem(a.id, a.label, a.icon, area?.id === a.id, first(a), () => { if (area?.id !== a.id) { track("ui.nav_area_opened", { area: a.id }); go(first(a)!)(); } }))}
+          <div className="min-h-2 flex-1" />
+          {shown("connectors") && railItem("connectors", "Connectors", "connectors", p.tab === "connectors", "connectors", go("connectors"))}
+          {railItem("settings", "Settings", "settings", isSettings(p.tab), "workspace", go(isSettings(p.tab) ? p.tab : "workspace"))}
+          {(p.links ?? []).map((l) => (
+            <a key={l.id} href={l.href} title={l.label} className="flex w-16 flex-col items-center gap-0.5 rounded-md py-1.5 text-[10px] leading-tight text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+              <Icon name={isIconName(l.icon) ? l.icon : "external"} className="size-[18px]" />
+              <span className="max-w-full truncate px-0.5">{l.label}</span>
+            </a>
+          ))}
+          <button type="button" onClick={() => setNavVersion("v1", "rail")} title="Go back to the old menu" className="flex w-16 flex-col items-center gap-0.5 rounded-md border border-dashed py-1.5 text-[10px] leading-tight text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+            <Icon name="collapse" className="size-[18px]" />
+            <span>Old menu</span>
+          </button>
+          <AppUpdate rail />
+          <div className="group mt-1 w-12" data-collapsible="icon">
+            <Account email={p.me.email} theme={p.theme} onTheme={p.onTheme} onSignOut={p.onSignOut} onAccount={() => p.onTab("account")} />
+          </div>
+        </nav>
+        <div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
+          {header}
+          {content}
+        </div>
+      </div>
       <SidebarRail />
     </UISidebar>
   );
@@ -833,27 +1103,31 @@ function inPlace(e: React.MouseEvent, go: () => void) {
   go();
 }
 
-function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, unread = 0, unreadLabel = "unread", pin, href, onClick }: { tab: Tab; label?: string; icon?: IconName; active: boolean; unread?: number; unreadLabel?: string; pin?: "pinned" | "sidebar"; href?: string; onClick: () => void }) {
+// A pin or recent as the menu shows it: a page, or one thing inside a page.
+type MenuEntry = { ref: string; tab: Tab; item?: string; label: string; at?: string };
+
+function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, unread = 0, unreadLabel = "unread", pin, extra, href, onClick }: { tab: Tab; label?: string; icon?: IconName; active: boolean; unread?: number; unreadLabel?: string; pin?: "pinned" | "sidebar"; extra?: React.ReactNode; href?: string; onClick: () => void }) {
   const inner = (
     <>
       <Icon name={icon} className={cn("size-4", active && "text-brand-strong dark:text-brand")} />
-      <span className="flex-1">{label}</span>
+      <span className="flex-1 truncate">{label}</span>
       {shortcuts[tab] && label === tabNames[tab] && unread === 0 && !pin && <span className="hidden font-mono text-[10px] text-muted-foreground md:group-hover/nav:inline">G {shortcuts[tab]!.toUpperCase()}</span>}
     </>
   );
   return (
-    <SidebarMenuItem className={cn(pin && "flex items-center")}>
+    <SidebarMenuItem className={cn((pin || extra) && "flex items-center")}>
       <SidebarMenuButton
         asChild={!!href}
         isActive={active}
         tooltip={label}
         onClick={href ? undefined : onClick}
         aria-current={active ? "page" : undefined}
-        className="group/nav h-10 text-[13px] md:h-7 data-[active=true]:shadow-xs data-[active=true]:ring-1 data-[active=true]:ring-sidebar-border"
+        className="group/nav h-10 text-[13px] md:h-6.5 data-[active=true]:shadow-xs data-[active=true]:ring-1 data-[active=true]:ring-sidebar-border"
       >
         {href ? <a href={href} onClick={(e) => inPlace(e, onClick)}>{inner}</a> : inner}
       </SidebarMenuButton>
       {pin && <PinButton tab={tab} from={pin} className={cn("ml-0.5 group-hover/menu-item:opacity-100", pin === "pinned" && "opacity-0")} />}
+      {extra}
       {unread > 0 && (
         <SidebarMenuBadge className="rounded bg-brand-strong px-1.5 font-mono text-[11px] text-white peer-hover/menu-button:text-white md:top-1 dark:bg-brand dark:text-neutral-950 dark:peer-hover/menu-button:text-neutral-950" aria-label={`${unread} ${unreadLabel}`}>
           {unread}
@@ -866,8 +1140,9 @@ function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, u
 // In the Outflare desktop app, the shell downloads a newer version in the
 // background and this button appears at the bottom of the sidebar, as in
 // other desktop apps. One click installs it and reopens the app; the person
-// does nothing else. In a browser it renders nothing.
-function AppUpdate() {
+// does nothing else. In a browser it renders nothing. On the rail of the
+// new menu it is a rail button, with the version under its label.
+function AppUpdate({ rail = false }: { rail?: boolean }) {
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -896,6 +1171,15 @@ function AppUpdate() {
       setBusy(false);
     }
   };
+  if (rail) {
+    return (
+      <button type="button" onClick={install} disabled={busy} title={busy ? "Updating…" : `Update to Outflare ${update.version ?? ""}`.trim()} className="flex w-16 flex-col items-center gap-0.5 rounded-md py-1.5 text-[10px] leading-tight text-primary hover:bg-sidebar-accent disabled:opacity-70">
+        <Icon name={busy ? "refresh" : "sparkles"} className={cn("size-[18px]", busy && "animate-spin")} />
+        <span className="text-center">{busy ? "Updating…" : "Update available"}</span>
+        {!busy && update.version && <span className="tabular-nums text-muted-foreground">{update.version}</span>}
+      </button>
+    );
+  }
   return (
     <SidebarMenu className="gap-px">
       <SidebarMenuItem>
@@ -1177,6 +1461,11 @@ function BrandSlash({ ws }: { ws: string }) {
 
 const uuidish = /^[0-9a-f]{8}-[0-9a-f]{4}-/i;
 
+// The tabs of Website analytics, as the address names them.
+// The views of the Brand profile page, by the word in its address.
+const profileViews: Record<string, string> = { company: "Company", offer: "Offer", customers: "Customers and segments", personas: "Personas", positioning: "Positioning", proof: "Proof", competitors: "Competitors", objections: "Objections", voice: "Voice", goals: "Goals", channels: "Channels", rules: "Rules", review: "Review", history: "History" };
+const analyticsViews: Record<string, string> = { pages: "Pages", sources: "Sources", websites: "Websites", countries: "Countries", devices: "Devices", search: "Search", tools: "Connected tools" };
+
 export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent, agentOpen = false }: { ws?: Workspace; tab: Tab; item?: string; itemName?: string; onTab: (t: Tab) => void; onApi: () => void; apiOpen: boolean; onAgent?: () => void; agentOpen?: boolean }) {
   // Pages can name the open item (a mission's name) with an
   // "outflare:item-name" event; otherwise IDs are shown shortened.
@@ -1189,9 +1478,25 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent
   const salesSection = tab === "crm" && item?.startsWith("sales:") ? item.split(":")[1] : undefined;
   const salesLabel = salesSection && salesPageName(item);
   // The CRM's own places (people, companies, deals and the rest) are named, not shown as a path under the conversations page.
-  const crmPlace = tab === "crm" && item && !salesSection ? ({ person: "People", account: "Companies", deal: "Deals", tasks: "My work", notes: "Notes", collections: "Lists", reports: "Reports", settings: "Settings" } as Record<string, string>)[item.split(":")[0]] : undefined;
+  const crmPlace = tab === "crm" && item && !salesSection ? ({ person: "People", event: "People", "add-from-event": "Add people from an event", cold: "Cold contacts", account: "Companies", customer_account: "Accounts", deal: "Deals", tasks: "My work", notes: "Notes", collections: "Pipelines", reports: "CRM reports", settings: "CRM settings" } as Record<string, string>)[item.split(":")[0]] : undefined;
   const itemID = salesSection ? (salesSection === "lead" ? item?.split(":")[2] : undefined) : item;
-  const itemLabel = item && (itemName ?? salesLabel ?? crmPlace ?? (item === "new" ? "New" : tab === "domains" ? item : named?.id === item ? named.name : uuidish.test(item) ? "…" : tab === "revenue" && item === "forecast" ? "Forecast" : tab === "revenue" && item === "team" ? "Sales team" : tab === "revenue" && item === "commissions" ? "Commissions" : item));
+  const partnershipPlace = tab === "partnerships" && item ? ({ find: "Find", offers: "Offers", deals: "Offers", live: "Live", affiliates: "Affiliates", payments: "Payments", results: "Results" } as Record<string, string>)[item.split("/")[0]] : undefined;
+  const itemLabel = item && (itemName ?? partnershipPlace ?? salesLabel ?? crmPlace ?? (item === "new" ? "New" : tab === "recordings" && item === "settings" ? "Settings" : tab === "recordings" ? "Visit" : tab === "errors" ? (item === "setup" ? "Set up" : item === "source-maps" ? "Source maps" : item === "ignore-rules" ? "Ignore rules" : item.startsWith("ignore-rules/") ? "Ignore rule" : "Error") : tab === "named-clicks" ? "Edit" : tab === "heatmaps" ? decodeURIComponent(item) : tab === "domains" ? item : named?.id === item ? named.name : uuidish.test(item) ? "…" : tab === "revenue" && item === "forecast" ? "Forecast" : tab === "revenue" && item === "team" ? "Sales team" : tab === "revenue" && item === "commissions" ? "Commissions" : tab === "analytics" ? (analyticsViews[item] ?? item) : tab === "brand-profile" ? (profileViews[item] ?? item) : item));
+  // What is open can be pinned to the menu, and a thing inside a page (a
+  // report, a funnel) is noted as opened once the person has stayed on it
+  // a moment, with its name remembered in this browser for the menu.
+  useBrand(ws?.id); // the ref carries the brand picked
+  const { pins } = useMenu();
+  const ref = ws ? refOf(ws.id, tab, item) : tab;
+  const thing = !!ws && isThing(tab, item);
+  const thingName = thing ? (itemName ?? (named && (named.id === item || named.id === itemID) ? named.name : undefined) ?? (tab === "heatmaps" && item ? `${decodeURIComponent(item)} heatmap` : undefined)) : undefined;
+  useEffect(() => {
+    if (!thing) return;
+    if (thingName) rememberLabel(ref, thingName);
+    const t = setTimeout(() => opened(ref), 1500);
+    return () => clearTimeout(t);
+  }, [thing, ref, thingName]);
+  const pinned = pins.includes(ref);
   return (
     <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
       <SidebarTrigger className="-ml-1 size-7 text-muted-foreground" />
@@ -1220,8 +1525,20 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent
           <>
             {!crmPlace && <span aria-hidden="true" className="text-muted-foreground/50">/</span>}
             <span aria-current="page" className={cn("truncate text-foreground", itemLabel === item && "font-mono text-[12px]")} title={item}>{itemLabel}</span>
-            {itemID && itemID !== "new" && !crmPlace && <CopyButton text={itemID} label={`Copy id ${itemID}`} />}
+            {itemID && itemID !== "new" && !crmPlace && tab !== "brand-profile" && <CopyButton text={itemID} label={`Copy id ${itemID}`} />}
           </>
+        )}
+        {ws && (
+          <button
+            type="button"
+            onClick={() => (thing ? togglePinItem(ref, tab, "topbar") : togglePin(tab, "topbar"))}
+            aria-pressed={pinned}
+            title={pinned ? "Take this off your menu's pins" : "Keep this at the top of your menu"}
+            className={cn("ml-1 hidden h-6 shrink-0 items-center gap-1 rounded-md border px-1.5 text-[11.5px] shadow-xs transition-colors md:inline-flex", pinned ? "border-brand/50 bg-brand/10 text-brand-strong dark:text-brand" : "text-muted-foreground hover:bg-accent hover:text-foreground")}
+          >
+            <Icon name="pin" className="size-3" />
+            {pinned ? "Pinned" : "Pin to menu"}
+          </button>
         )}
       </nav>
       <WhatsNewButton />
@@ -1338,6 +1655,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Reddit drafts waiting for approval", path: "/v1/brands/{brand}/social/actions", params: brandBase, query: { channel: "reddit", status: "draft" }, mcp: "list_social_replies", ask: "Find Reddit threads this week where we can genuinely help, and draft replies that disclose we work here.", scope: "social.read" };
     case "reddit-campaigns":
       return { title: "Reddit mentions, links, cost and lifespan", path: "/v1/brands/{brand}/reddit/report", params: brandBase, query: { group_by: "strategy" }, mcp: "get_reddit_report", ask: "Run Reddit marketing for our brand within this month's budget: read get_reddit_guide, test one idea, and report what stayed live.", scope: "social.read" };
+    case "mentions":
+      return { title: "Mentions of the brand and its competitors", path: "/v1/brands/{brand}/mentions", params: brandBase, mcp: "list_mentions", ask: "Who mentioned our competitors in videos and podcasts this week, and which of them should we reach out to first?", scope: "social.read" };
     case "social":
       return { title: "Social growth by channel", path: "/v1/brands/{brand}/social/growth", params: brandBase, mcp: "get_social_growth", ask: "How did our followers and engagement on X and LinkedIn move this month, and which posts did best?", scope: "social.read" };
     case "reviews":
@@ -1356,6 +1675,12 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Who is on the website right now", path: "/v1/brands/{brand}/analytics/live", params: brandBase, mcp: "get_site_live", ask: "How many people are on our website right now, where did they come from, and did anyone sign up in the last hour?", scope: "analytics.read" };
     case "page-speed":
       return { title: "Page speed from real visits", path: "/v1/brands/{brand}/analytics/page-speed", params: brandBase, mcp: "get_page_speed", ask: "Which of our pages got slower this week, and how slow is the pricing page on phones?", scope: "analytics.read" };
+    case "errors":
+      return { title: "Errors on the website or app, grouped into issues", path: "/v1/brands/{brand}/errors", params: brandBase, mcp: "list_error_issues", ask: "Which errors hit the most visitors on our website this week, and which ones are new?", scope: "analytics.read" };
+    case "named-clicks":
+      return { title: "Named clicks: event names for buttons and links", path: "/v1/brands/{brand}/click-actions", params: brandBase, mcp: "list_click_actions", ask: "Which buttons on our pricing page get the most clicks, and can you name the sign-up one Signup Clicked?", scope: "analytics.read" };
+    case "internal-people":
+      return { title: "Internal and test people left out of reports", path: "/v1/brands/{brand}/internal-people", params: brandBase, mcp: "get_internal_people", ask: "Are our own team and test accounts left out of our funnels?", scope: "analytics.read" };
     case "tracking":
       return { title: "Website tracking keys and their snippets", path: "/v1/brands/{brand}/site-keys", params: brandBase, mcp: "list_site_keys", ask: "Is our website snippet installed and sending visits on every site?", scope: "customers.read" };
     case "flags":
@@ -1366,6 +1691,10 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Your saved trends", path: "/v1/brands/{brand}/insights", params: { brand }, mcp: "run_trend", ask: "Plot visits, sign-ups and ad spend by week for the last 90 days, and the cost per sign-up.", scope: "analytics.read" };
     case "paths":
       return { title: "Your saved paths questions", path: "/v1/brands/{brand}/insights", params: { brand }, mcp: "run_paths", ask: "Where do people go after landing on the pricing page, and where do most of them leave?", scope: "analytics.read" };
+    case "recordings":
+      return { title: "Recordings of visits", path: "/v1/brands/{brand}/recordings", params: brandBase, mcp: "list_recordings", ask: "Find recordings from this week of visits to the pricing page that lasted over a minute, and tell me which ones to watch.", scope: "customers.read" };
+    case "heatmaps":
+      return { title: "Pages with a heatmap", path: "/v1/brands/{brand}/heatmaps/pages", params: brandBase, mcp: "list_heatmap_pages", ask: "On our pricing page, how far down do most phone visitors get, and where do they click most?", scope: "customers.read" };
     case "retention":
       return { title: "Your saved retention questions", path: "/v1/brands/{brand}/insights", params: { brand }, mcp: "run_retention", ask: "Of the people who signed up each week this quarter, what share came back the week after, and which cohort sticks best?", scope: "analytics.read" };
     case "dashboards":
@@ -1375,6 +1704,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "channels":
       return { title: "Visits, conversions, revenue and cost per channel", path: "/v1/brands/{brand}/attribution/channels", params: brandBase, mcp: "get_attribution_channels", ask: "Which channel brought the most revenue this month, and what did each sign-up cost us per channel?", scope: "analytics.read" };
     case "partners":
+    case "partnerships":
       return { title: "Partners and what they earned", path: "/v1/brands/{brand}/partners", params: brandBase, mcp: "list_partners", ask: "Which partners brought the most sales this month, and whose payouts are due?", scope: "partners.read" };
     case "tracker":
       return { title: "The drill-down report", path: "/v1/brands/{brand}/drilldown", params: brandBase, query: { group_by: "channel,country" }, mcp: "get_drilldown_report", ask: "Which campaigns made a profit last week, and in which countries?", scope: "analytics.read" };
@@ -1401,6 +1731,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "links":
       return { title: "Campaign links", path: "/v1/brands/{brand}/tracking-campaigns", params: brandBase, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Make a tagged link for our spring launch on LinkedIn ads, pointing at the pricing page.", scope: "analytics.read" };
     case "inbox":
+      // The one Inbox also opens support conversations, as "support-<id>".
+      if (item?.startsWith("support-")) return { title: "One conversation", path: "/v1/brands/{brand}/support/conversations/{id}", params: { brand, id: item.slice("support-".length) }, mcp: "get_support_conversation", ask: "Draft a reply to this customer.", scope: "inbox.read" };
       return item
         ? { title: "One conversation", path: "/v1/brands/{brand}/inbox/{id}", params: { brand, id: item }, mcp: "get_inbox_message", ask: "Summarise this reply and draft an answer.", scope: "inbox.read" }
         : { title: "Unread replies", path: "/v1/brands/{brand}/inbox", params: { brand }, query: { unread: true }, mcp: "list_inbox", ask: "Which replies are interested and need an answer?", scope: "inbox.read" };
@@ -1434,6 +1766,12 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return item && /^[0-9a-f-]{36}$/.test(item)
         ? { title: "One saved query", path: "/v1/brands/{brand}/queries/{saved_query}", params: { brand, saved_query: item }, mcp: "get_saved_query", ask: "Run this saved query and tell me what changed since last month.", scope: "customers.read" }
         : { title: "Saved queries", path: "/v1/brands/{brand}/queries", params: { brand }, mcp: "list_saved_queries", ask: "How many people signed up each week this quarter, by plan? Save the query for the team.", scope: "customers.read" };
+    case "data-catalog":
+      return item
+        ? { title: "One table of the data catalog", path: "/v1/brands/{brand}/data/catalog/{table}", params: { brand, table: item }, mcp: "describe_brand_data", ask: "What does this table hold, and which columns should I join on to tie it to payments?", scope: "customers.read" }
+        : { title: "The data catalog", path: "/v1/brands/{brand}/data/catalog", params: { brand }, mcp: "describe_brand_data", ask: "What data do we have for this brand, and how fresh is each table?", scope: "customers.read" };
+    case "query-endpoints":
+      return { title: "Published query endpoints", path: "/v1/brands/{brand}/query-endpoints", params: { brand }, ask: "Which published endpoints were called this week, and did any hit their row cap?", scope: "customers.read" };
     case "leads":
       return { title: "Leads", path: "/v1/brands/{brand}/leads", params: { brand }, query: { limit: 50 }, mcp: "list_leads", ask: "Find leads at companies in fintech.", scope: "leads.read" };
     case "lists":
@@ -1510,6 +1848,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return item
         ? { title: "A brand's context", path: "/v1/workspaces/{ws}/brands/{brand}/context", params: { ...base, brand: item }, mcp: "get_brand_context", ask: "Read this brand's website and fill in what it is, who it's for and how it sounds.", scope: "workspace.read" }
         : { title: "Brands", path: "/v1/workspaces/{ws}/brands", params: base, mcp: "list_brands", ask: "Which brands do we market, and what belongs to each?", scope: "workspace.read" };
+    case "brand-profile":
+      return { title: "The brand's profile", path: "/v1/brands/{brand}/profile", params: brandBase, mcp: "get_brand_profile", ask: "Read our website and suggest what is missing from our brand profile, with where you found each fact.", scope: "workspace.read" };
     case "ideal-customers":
       return { title: "Ideal customer profiles", path: "/v1/brands/{brand}/ideal-customer-profiles", params: brandBase, mcp: "list_ideal_customer_profiles", ask: "Write an ideal customer profile from our best customers and use it for the AU lead list.", scope: "profiles.read" };
     case "content":

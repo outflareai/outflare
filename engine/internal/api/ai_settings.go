@@ -74,9 +74,9 @@ type aiTask struct {
 }
 
 var aiTasks = []aiTask{
-	{taskPlan, "Planning", "Drafts a mission from your goal."},
-	{taskTurn, "Agent turns", "Outflare's agent starting a mission, answering you and acting on your decisions."},
-	{taskCheckIn, "Routine check-ins", "Outflare's agent looking in on a running mission when nothing new came from you."},
+	{taskPlan, "Planning", "Drafted plans for retired missions; nothing new uses it."},
+	{taskTurn, "Agent turns", "Outflare's agent starting a run, answering you and acting on your decisions."},
+	{taskCheckIn, "Routine check-ins", "Outflare's agent looking in on a running agent when nothing new came from you."},
 	{taskReplyLabelling, "Reply labelling", "Labelling replies to your outreach: interested, not now, out of office and so on."},
 	{taskDomainResearch, "Domain research", "Reading an unknown email domain's homepage to tell what kind of company it is."},
 	{taskAIVisibility, "AI visibility", "Reading what AI models answer about your brands, such as checking the answers against your brand's facts, and checking your own pages the way an AI answer reads them."},
@@ -97,16 +97,22 @@ var aiTasks = []aiTask{
 	{tgsession.SummaryTask, "Telegram summaries", "Summaries of chats from company Telegram accounts: on request, and for the new holder when an account is handed over."},
 	{taskConversationSignals, "Conversation signals", "Reading conversations with customers (support, company Telegram chats, email the team shares, call transcripts) for what sales should act on, in brands that switched it on."},
 	{taskMailPrivacy, "Email privacy check", "Reading the subject and first lines of a work email before team email sharing shows it to colleagues, so anything about pay, a job offer, HR, a legal dispute, health or family stays private."},
+	{taskInsights, "Analytics questions", "Turning a question asked in plain English on the analytics pages into a chart, from your event names and their descriptions, for a person to adjust and save."},
+	{taskCreativePrompts, "Creative prompts", "Drafting a skill for creatives from an ad described in plain English, from what your brand says about itself and its personas, for a person to read, change and save."},
+	{taskSmartLists, "Smart list rules", "Writing a smart list's rules from a description in plain English, from your field, event, page and list names, for a person to check and save."},
+	{taskQueries, "Query questions", "Turning a list or question described in plain English on the Queries page into a query, from your table, column and field names, for a person to adjust and save."},
 	{taskEventNames, "Event name check", "Comparing new event names your product sends with the names it already sends, to ask you only when one looks like a typo, such as sign_up for signed_up."},
 	{taskBrandKnowledge, "Brand knowledge", "Reading a brand's own website and writing what it offers: products, services, features, integrations, capabilities, who it serves and use cases, for a person to edit."},
+	{taskLeadChannels, "Sales channels", "Reading posts from the Slack channels a brand picked: who wrote in, their company, website and message, and whether it is spam."},
+	{taskSalesDraft, "Sales reply drafts", "Writing editable reply previews from a representative's template and conversation, for that person to review."},
 }
 
 // taskTier says which of the provider's cheaper models a task defaults to.
 func taskTier(task string, p llm.Provider) string {
 	switch task {
-	case taskCoverageReview, taskCheckIn, taskAIVisibility, taskSocialReplies, taskSocialPosts, taskReviewReplies, taskFixTickets, taskABTests, taskLinkPitches, taskKnowledge, taskSupport, taskJourneys, taskStories, taskBrandKnowledge:
+	case taskSalesDraft, taskCoverageReview, taskCheckIn, taskAIVisibility, taskSocialReplies, taskSocialPosts, taskReviewReplies, taskFixTickets, taskABTests, taskLinkPitches, taskKnowledge, taskSupport, taskJourneys, taskStories, taskBrandKnowledge:
 		return p.LightModel
-	case taskReplyLabelling, taskDomainResearch, taskEmailVerification, taskLinkPages, tgsession.MatchTask, taskMailPrivacy, taskEventNames:
+	case taskReplyLabelling, taskDomainResearch, taskEmailVerification, taskLinkPages, tgsession.MatchTask, taskMailPrivacy, taskEventNames, taskLeadChannels:
 		if p.CheapModel != "" {
 			return p.CheapModel
 		}

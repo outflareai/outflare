@@ -71,7 +71,7 @@ export function SetUp({ brand, setup, economics, error, canManage, reload, go }:
   return (
     <div className="space-y-6">
       <Card
-        title="Set up"
+        title="Getting started checklist"
         description="What Outflare needs to count each sign-up and first payment for the ad click that brought it. Each step opens the page that fixes it."
         action={setup && <Badge tone={setup.ready ? "green" : "amber"}>{setup.done} of {setup.total} done</Badge>}
       >
@@ -99,8 +99,50 @@ export function SetUp({ brand, setup, economics, error, canManage, reload, go }:
         )}
         {setup && <p className="mt-3 text-[12px] text-muted-foreground">Checked {ago(setup.checked_at)}.</p>}
       </Card>
+      <WeeklyReport brand={brand} go={go} />
       <OfferSheet brand={brand} canManage={canManage} reload={reload} go={go} />
     </div>
+  );
+}
+
+const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// The weekly report: the Paid ads section of the brand's digest, with when
+// it is made and who gets it by email. The schedule is the digest's own,
+// changed on its page.
+function WeeklyReport({ brand, go }: { brand: string; go: (tab: Tab, item?: string) => void }) {
+  type Settings = NonNullable<Awaited<ReturnType<typeof load>>["data"]>;
+  const load = () => api.GET("/v1/brands/{brand}/digest-settings", { params: { path: { brand } } });
+  const [settings, setSettings] = useState<Settings | null>(null);
+  useEffect(() => {
+    let live = true;
+    load().then(({ data }) => { if (live && data) setSettings(data); });
+    return () => { live = false; };
+  }, [brand]);
+  const on = settings !== null && settings.frequency !== "off";
+  const when = !settings ? "" : settings.frequency === "daily"
+    ? `every day at ${String(settings.hour).padStart(2, "0")}:00`
+    : `every ${weekdays[settings.weekday] ?? "week"} at ${String(settings.hour).padStart(2, "0")}:00`;
+  const who = !settings ? "" : settings.recipients === "none" ? "It is kept in Outflare and nobody gets it by email."
+    : settings.email_problem ? `It can't be emailed yet: ${settings.email_problem}`
+    : `${settings.recipient_count.toLocaleString()} ${settings.recipient_count === 1 ? "person gets" : "people get"} it by email.`;
+  return (
+    <Card
+      title="Weekly report"
+      description="Spend, the sign-ups and new paying customers your ads brought, cost per new paying customer against the week before, your top campaigns and what waits for a decision."
+      action={settings && <Badge tone={on ? "green" : "grey"}>{on ? "On" : "Off"}</Badge>}
+    >
+      {!settings ? <Loading /> : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[13px] text-muted-foreground" data-testid="ads-weekly-report">
+            {on ? `Part of this brand's digest, made ${when} (${settings.timezone}). ${who}` : "This brand's digest is switched off, so no report is made."}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => { track("ui.ads_weekly_report_opened", { on }); go("digests"); }}>{on ? "See the reports and change the schedule" : "Switch it on"}</Button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 

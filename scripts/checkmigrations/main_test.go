@@ -101,3 +101,33 @@ func TestCommentOnlyEdits(t *testing.T) {
 		}
 	}
 }
+
+func TestAdditive(t *testing.T) {
+	cases := []struct {
+		sql  string
+		want bool
+	}{
+		{"CREATE TABLE a (id uuid PRIMARY KEY, workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, kind text CHECK (kind IN ('x;y')));\nCREATE INDEX a_ws ON a (workspace_id);", true},
+		{"CREATE TABLE IF NOT EXISTS a (id int);\nCREATE UNIQUE INDEX a_u ON a (id);\nALTER TABLE a ADD CONSTRAINT a_c CHECK (id > 0);\nCOMMENT ON TABLE a IS 'new';", true},
+		{"-- only an index\nCREATE INDEX CONCURRENTLY IF NOT EXISTS records_x ON records (workspace_id, brand_id);", true},
+		// A foreign key that would stop the old code deleting the row it points at.
+		{"CREATE TABLE a (id int, brand_id uuid REFERENCES brands(id));", false},
+		{"CREATE TABLE a (id int, b uuid REFERENCES brands(id) ON DELETE CASCADE, c uuid REFERENCES records(id));", false},
+		// Anything on a table that already exists, however small.
+		{"ALTER TABLE records ADD COLUMN note text;", false},
+		{"ALTER TABLE records ADD COLUMN n int NOT NULL DEFAULT 0;", false},
+		{"CREATE UNIQUE INDEX records_u ON records (email);", false},
+		{"CREATE TABLE a (id int);\nUPDATE records SET x = 1;", false},
+		{"CREATE TABLE a (id int);\nINSERT INTO a VALUES (1);", false},
+		{"CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN RETURN NEW; END $$ LANGUAGE plpgsql;", false},
+		{"CREATE TABLE a (id int);\nCREATE TRIGGER t BEFORE INSERT ON records FOR EACH ROW EXECUTE FUNCTION f();", false},
+		{"-- migration-safety: nothing reads it\nCREATE TABLE a (id int);", false},
+		{"CREATE EXTENSION IF NOT EXISTS vector;", false},
+		{"-- nothing here\n", false},
+	}
+	for _, c := range cases {
+		if got := additive([]byte(c.sql)); got != c.want {
+			t.Errorf("additive(%q) = %v, want %v", c.sql, got, c.want)
+		}
+	}
+}

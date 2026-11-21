@@ -159,11 +159,26 @@ func planKit(ctx context.Context, tx pgx.Tx, ws, brand string, k playbooks.Kit) 
 		default:
 			var missing []string
 			it.options = slices.Clone(cur.Options)
-			for _, o := range ks.Options {
-				if !slices.ContainsFunc(cur.Options, func(have catalogOption) bool { return have.Key == o.Key }) {
-					missing = append(missing, o.Label)
-					it.options = append(it.options, catalogOption{Key: o.Key, Label: o.Label})
+			// A missing option goes before the kit's next option the list
+			// already has, so a stage added to a pipeline lands in order;
+			// with none after it, it goes at the end. The list's own
+			// options keep their places.
+			has := func(key string) int {
+				return slices.IndexFunc(it.options, func(have catalogOption) bool { return have.Key == key })
+			}
+			for i, o := range ks.Options {
+				if has(o.Key) >= 0 {
+					continue
 				}
+				missing = append(missing, o.Label)
+				at := len(it.options)
+				for _, next := range ks.Options[i+1:] {
+					if j := has(next.Key); j >= 0 {
+						at = j
+						break
+					}
+				}
+				it.options = slices.Insert(it.options, at, catalogOption{Key: o.Key, Label: o.Label})
 			}
 			if len(missing) == 0 {
 				it.Action, it.Detail = kitReuse, "already there"

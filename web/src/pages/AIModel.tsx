@@ -12,9 +12,8 @@ type Price = components["schemas"]["AIPrice"];
 type Task = "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "social_replies" | "social_posts" | "review_replies" | "email_verification";
 type TaskChoice = { model: string; inPrice: string; outPrice: string };
 const tasks: { id: Task; name: string; help: string }[] = [
-  { id: "plan", name: "Planning", help: "Drafting a mission from your goal" },
-  { id: "turn", name: "Agent turns", help: "Starting a mission, answering you, acting on your decisions" },
-  { id: "check_in", name: "Routine check-ins", help: "Looking in on a running mission when nothing new came from you" },
+  { id: "turn", name: "Agent turns", help: "Outflare's agent starting a run, answering you, acting on your decisions" },
+  { id: "check_in", name: "Routine check-ins", help: "Looking in on a running agent when nothing new came from you" },
   { id: "reply_labelling", name: "Reply labelling", help: "Labelling replies to your outreach: interested, not now, out of office" },
   { id: "classify_domain", name: "Domain research", help: "Reading an unknown email domain's homepage to tell what kind of company it is" },
   { id: "social_replies", name: "Social replies", help: "Drafting replies to posts your social watches found, for a person to approve" },
@@ -33,7 +32,7 @@ const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const toCents = (s: string) => (s.trim() === "" ? null : Math.round(parseFloat(s) * 100 * 10000) / 10000);
 const toDollars = (c: number | null | undefined) => (c == null ? "" : String(c / 100));
 
-// Which AI model plans missions and runs Outflare's own agent, and the most
+// Which AI model runs Outflare's own agent, and the most
 // AI may spend in a month. The key itself lives on the connection.
 export function AIModelCard({ ws, canManage }: { ws: string; canManage: boolean }) {
   const [s, setS] = useState<Settings | null>(null);
@@ -136,7 +135,7 @@ export function AIModelCard({ ws, canManage }: { ws: string; canManage: boolean 
 
   if (connections.length === 0) {
     return (
-      <Card title="AI model" description="Outflare plans missions and runs its own agent with an AI model you connect, using your own API key.">
+      <Card title="AI model" description="Outflare's agent runs on an AI model you connect, using your own API key.">
         <p className="mb-3 text-[13px] text-muted-foreground">No AI model is connected yet. Pick one:</p>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {s.providers.map((p) => (
@@ -153,7 +152,7 @@ export function AIModelCard({ ws, canManage }: { ws: string; canManage: boolean 
 
   const limitCents = noLimit ? null : Math.round(parseFloat(limit || "0") * 100);
   return (
-    <Card title="AI model" description="Which model plans missions from a goal and runs Outflare's own agent. Usage is billed by the provider, to your account.">
+    <Card title="AI model" description="Which model runs Outflare's own agent. Usage is billed by the provider, to your account.">
       <div className="mb-4 flex flex-wrap items-center gap-2 text-[13px]">
         {s.active && !s.problem ? (
           <Status tone="green">In use: {s.active.provider_name}, {s.active.model}</Status>
@@ -242,7 +241,7 @@ export function AIModelCard({ ws, canManage }: { ws: string; canManage: boolean 
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">
-              {conn ? "Loading models…" : `Choose a provider above to pick a model per task. Until then planning and agent turns use ${s.active?.model ?? "the default"}${s.tasks.find((t) => t.task === "check_in")?.model && s.tasks.find((t) => t.task === "check_in")?.model !== s.active?.model ? `, and check-ins ${s.tasks.find((t) => t.task === "check_in")?.model}` : ""}.`}
+              {conn ? "Loading models…" : `Choose a provider above to pick a model per task. Until then agent turns use ${s.active?.model ?? "the default"}${s.tasks.find((t) => t.task === "check_in")?.model && s.tasks.find((t) => t.task === "check_in")?.model !== s.active?.model ? `, and check-ins ${s.tasks.find((t) => t.task === "check_in")?.model}` : ""}.`}
             </p>
           )}
         </div>
@@ -261,7 +260,7 @@ export function AIModelCard({ ws, canManage }: { ws: string; canManage: boolean 
             </label>
           </div>
           <span className="mt-1 block text-xs text-muted-foreground">
-            {limitCents != null ? `Planning stops and Outflare's agent pauses once AI calls this month reach ${dollars(limitCents)}. Each mission's own spend limit still applies.` : "Only each mission's own spend limit applies."}
+            {limitCents != null ? `Outflare's agent pauses once AI calls this month reach ${dollars(limitCents)}. Each agent run's own spend limit still applies.` : "Only each agent run's own spend limit applies."}
           </span>
         </div>
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AdCampaign, AdTest } from "@outflare/sdk";
 import { DataTable } from "@/components/data-table";
 import { api, errorMessage } from "../api";
-import { ask, Badge, Button, Card, ErrorText, Loading, toast } from "../ui";
+import { ask, Badge, Button, Card, ErrorText, Loading, Menu, Status, toast } from "../ui";
 import { ago } from "../format";
 import { money, platformName, scopeQuery, type AdScope } from "./Ads";
 import { pickedBrandId } from "@/lib/brand";
@@ -43,8 +43,8 @@ function Arms({ t }: { t: AdTest }) {
   const cpa = (a: ArmNumbers) => (a.conversions ? money((a.spend_micros ?? 0) / a.conversions, t.currency) : "—");
   return (
     <div className="text-[13px] tabular-nums">
-      <div>Campaign: {Math.round(c.conversions ?? 0)} conversions at {cpa(c)}</div>
-      <div>Trial: {Math.round(tr.conversions ?? 0)} conversions at {cpa(tr)}</div>
+      <div>Trial {cpa(tr)} <span className="text-muted-foreground">· {Math.round(tr.conversions ?? 0)} conversions</span></div>
+      <div>Now {cpa(c)} <span className="text-muted-foreground">· {Math.round(c.conversions ?? 0)} conversions</span></div>
     </div>
   );
 }
@@ -108,81 +108,64 @@ export function AdTests({ ws, brand, scope, campaigns, canManage }: { ws: string
   if (error && !rows) return <ErrorText>{error}</ErrorText>;
   if (!rows) return <Loading />;
   const live = rows.filter((t) => ["starting", "running", "judged", "ending"].includes(t.status));
-  const ended = rows.filter((t) => !live.includes(t));
   const testing = new Set(live.map((t) => t.campaign_id));
   const ready = campaigns.filter((c) => c.status === "active" && testKinds[c.connector] && !testing.has(c.id));
+  // Running first, then the newest finished.
+  const ordered = [...live, ...rows.filter((t) => !live.includes(t)).sort((x, y) => (y.ended_at ?? "").localeCompare(x.ended_at ?? ""))];
+  const day = 86400000;
+  const progress = (t: AdTest) => {
+    if (t.status === "starting") return "Starts on the network tomorrow";
+    if (!live.includes(t)) return t.ended_at ? `Ended ${ago(t.ended_at)}` : "Ended";
+    const from = Date.parse(`${t.measure_from}T00:00:00Z`), until = Date.parse(`${t.ends_on}T00:00:00Z`);
+    if (!Number.isFinite(from) || !Number.isFinite(until)) return `Until ${t.ends_on}`;
+    const total = Math.max(1, Math.round((until - from) / day) + 1);
+    const done = Math.min(total, Math.max(0, Math.floor((Date.now() - from) / day) + 1));
+    return done === 0 ? `Counting starts ${t.measure_from} · ${total} days` : `Day ${done} of ${total}`;
+  };
+  const result = (t: AdTest): { tone: "green" | "red" | "grey" | "amber" | "blue"; word: string } => {
+    if (t.status === "failed") return { tone: "red", word: "Failed" };
+    if (t.status === "kept") return { tone: "green", word: "Kept the trial" };
+    if (t.status === "rolled_back") return { tone: "grey", word: "Rolled back" };
+    if (t.verdict) return { tone: verdictTone[t.verdict], word: verdictWord[t.verdict] };
+    return { tone: "grey", word: "Too early to call" };
+  };
   return (
     <>
       {error && <ErrorText>{error}</ErrorText>}
       <Card
-        title="Tests"
-        description="The network itself splits a campaign between how it is and a trial that tries one thing differently, on the same days, so the two compare fairly. Google Ads tries a different target cost per conversion, Meta a different daily budget. A test runs until the smaller side has about 30 conversions (two to six weeks); Outflare then says which did better, and you keep the trial's change or roll it back."
+        title="Experiments"
+        description="The network itself splits a campaign between how it is and a trial that tries one thing differently, on the same days, so the two compare fairly. A result is called once the smaller side has about 30 conversions (two to six weeks); then you keep the trial or roll it back. Source: the ad network's own experiments."
+        action={canManage && ready.length > 0 ? <Menu label="New experiment" aria="New experiment" items={ready.map((c) => ({ label: `${c.name} · ${testKinds[c.connector] === "budget" ? "daily budget" : "bidding target"}`, onClick: () => start(c) }))} /> : undefined}
       >
         <DataTable
-          data={live}
+          data={ordered}
           rowId={(t) => t.id}
           columnsMenu={false}
-          empty="No tests running."
+          empty={canManage && ready.length > 0 ? "No experiments yet. Press New experiment and pick a campaign. Nothing changes on the network until you start one." : "No experiments yet."}
           columns={[
+            { id: "status", header: "Status", accessorFn: (t) => statusWord[t.status], cell: ({ row: { original: t } }) => <Status tone={statusTone[t.status]}>{statusWord[t.status]}</Status> },
+            { id: "tries", header: "What is tested", enableSorting: false, accessorFn: (t) => t.kind, cell: ({ row: { original: t } }) => <Tries t={t} /> },
             { id: "campaign", header: "Campaign", accessorFn: (t) => t.campaign_name, cell: ({ row: { original: t } }) => <Campaign t={t} /> },
-            { id: "tries", header: "Tries", accessorFn: (t) => t.kind, cell: ({ row: { original: t } }) => <Tries t={t} /> },
-            { id: "arms", header: "So far", accessorFn: (t) => t.status, cell: ({ row: { original: t } }) => <Arms t={t} /> },
-            {
-              id: "status",
-              header: "Status",
-              accessorFn: (t) => t.status,
-              cell: ({ row: { original: t } }) => (
-                <div className="space-y-1">
-                  <Badge tone={statusTone[t.status]}>{statusWord[t.status]}</Badge>
-                  {t.verdict && <div><Badge tone={verdictTone[t.verdict]}>{verdictWord[t.verdict]}</Badge></div>}
-                  <div className="text-[12px] text-muted-foreground" title={t.window_note}>{t.status === "judged" ? t.verdict_note : `Until ${t.ends_on}`}</div>
-                  {t.error && <div className="text-[12px] text-destructive">{t.error}</div>}
-                </div>
-              ),
-            },
+            { id: "progress", header: "Progress", enableSorting: false, cell: ({ row: { original: t } }) => <span className="whitespace-nowrap text-muted-foreground" title={t.window_note}>{progress(t)}</span> },
+            { id: "arms", header: "Cost per conversion", enableSorting: false, cell: ({ row: { original: t } }) => <Arms t={t} /> },
+            { id: "result", header: "Result", accessorFn: (t) => result(t).word, cell: ({ row: { original: t } }) => (
+              <div className="max-w-xs space-y-1 whitespace-normal">
+                <Badge tone={result(t).tone}>{result(t).word}</Badge>
+                {(t.error || t.verdict_note) && <div className={t.error ? "text-[12px] text-destructive" : "text-[12px] text-muted-foreground"}>{t.error ?? t.verdict_note}</div>}
+              </div>
+            ) },
             ...(canManage
-              ? [{ id: "decide", header: "", cell: ({ row: { original: t } }: { row: { original: AdTest } }) =>
+              ? [{ id: "decide", header: "", enableSorting: false, cell: ({ row: { original: t } }: { row: { original: AdTest } }) =>
                   t.status === "running" || t.status === "judged" ? (
                     <div className="flex justify-end gap-2">
-                      <Button disabled={busy} onClick={() => end(t, true)}>Keep it</Button>
-                      <Button variant="ghost" disabled={busy} onClick={() => end(t, false)}>Roll back</Button>
+                      <Button variant={t.status === "judged" && t.verdict === "worked" ? "primary" : "ghost"} disabled={busy} onClick={() => end(t, true)}>Keep the trial</Button>
+                      <Button variant="ghost" disabled={busy} onClick={() => end(t, false)}>{t.status === "running" ? "Stop" : "Roll back"}</Button>
                     </div>
                   ) : null }]
               : []),
           ]}
         />
       </Card>
-      {canManage && ready.length > 0 && (
-        <Card title="Start a test" description="Running campaigns on Google Ads and Meta without a test. Nothing changes on the platform until you start one.">
-          <DataTable
-            data={ready}
-            rowId={(c) => c.id}
-            columnsMenu={false}
-            columns={[
-              { id: "campaign", header: "Campaign", accessorFn: (c) => c.name, cell: ({ row: { original: c } }) => <div><div className="font-medium">{c.name}</div><div className="text-[12px] text-muted-foreground">{platformName(c.connector)} · {c.account_name}</div></div> },
-              { id: "now", header: "Now", accessorFn: (c) => c.connector, cell: ({ row: { original: c } }) =>
-                  <span className="text-muted-foreground">{testKinds[c.connector] === "budget" ? `${money(c.daily_budget_micros, c.currency)} a day` : c.platform_target_cpa_micros != null ? `Bids to ${money(c.platform_target_cpa_micros, c.currency)}` : "No target"}</span> },
-              { id: "start", header: "", cell: ({ row: { original: c } }) => <div className="flex justify-end"><Button variant="ghost" disabled={busy} onClick={() => start(c)}>Test a change</Button></div> },
-            ]}
-          />
-        </Card>
-      )}
-      {ended.length > 0 && (
-        <Card title="Finished tests" description="What each test found, and what was kept.">
-          <DataTable
-            data={ended}
-            rowId={(t) => t.id}
-            columnsMenu={false}
-            columns={[
-              { id: "campaign", header: "Campaign", accessorFn: (t) => t.campaign_name, cell: ({ row: { original: t } }) => <Campaign t={t} /> },
-              { id: "tries", header: "Tried", accessorFn: (t) => t.kind, cell: ({ row: { original: t } }) => <Tries t={t} /> },
-              { id: "status", header: "Outcome", accessorFn: (t) => t.status, cell: ({ row: { original: t } }) => <Badge tone={statusTone[t.status]}>{statusWord[t.status]}</Badge> },
-              { id: "note", header: "", accessorFn: (t) => t.verdict_note, cell: ({ row: { original: t } }) => <span className="text-[13px] text-muted-foreground">{t.error ?? t.verdict_note}</span> },
-              { id: "when", header: "Ended", accessorFn: (t) => t.ended_at ?? "", cell: ({ row: { original: t } }) => <span className="text-muted-foreground">{t.ended_at ? ago(t.ended_at) : ""}</span> },
-            ]}
-          />
-        </Card>
-      )}
     </>
   );
 }

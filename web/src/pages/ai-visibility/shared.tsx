@@ -160,11 +160,52 @@ export function NotSetUp({ d, go }: { d: AIData; go: Go }) {
   );
 }
 
+// failWhy says why answers failed and what to do about it, by the error
+// code the answers carry.
+const failWhy: Record<string, string> = {
+  connector_needed: "a connection chosen under SEO → AI visibility → Settings is no longer connected. Reconnect it or choose another.",
+  ai_model_needed: "Outflare needs a model and its price under SEO → AI visibility → Settings.",
+  provider_auth: "the AI provider refused the key. Check the connection under Connectors.",
+  connector_auth: "DataForSEO refused the sign-in. Check the connection under Connectors.",
+  connector_quota: "the DataForSEO account is out of credit or over its limit.",
+  budget_reached: "the DataForSEO connection reached the budget set for it. Raise it under Connectors.",
+  connector_invalid: "DataForSEO can't ask in this question set's country.",
+  connector_unavailable: "DataForSEO didn't answer. Try again in a while.",
+  empty_answer: "the assistant gave no answer. Try again in a while.",
+  timeout: "the assistant took too long to answer. Try again in a while.",
+  provider_error: "the AI provider returned an error. Try again in a while.",
+};
+
+// A run is slow when it has made no progress for this long.
+const slowAfterMs = 10 * 60_000;
+
 // RunBar says where the brand's question set stands and runs it.
 export function RunBar({ d }: { ws: string; d: AIData }) {
   const c = d.cohort;
+  const run = c?.last_run ?? null;
+  // Why the last run's answers failed: the most common error code.
+  const [why, setWhy] = useState("");
+  const failedRun = run && !d.running && run.samples_failed > 0 ? run.id : "";
+  useEffect(() => {
+    setWhy("");
+    if (!failedRun) return;
+    let live = true;
+    api.GET("/v1/brands/{brand}/ai-samples", { params: { path: { brand: pickedBrandId() }, query: { run_id: failedRun, status: "failed", limit: 200 } } }).then(({ data }) => {
+      const count = new Map<string, number>();
+      for (const s of data?.data ?? []) if (s.error_code) count.set(s.error_code, (count.get(s.error_code) ?? 0) + 1);
+      const top = [...count.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+      if (live) setWhy(top);
+    });
+    return () => { live = false; };
+  }, [failedRun]);
   if (!c) return null;
-  const run = c.last_run;
+  async function stop() {
+    const { data, error } = await api.POST("/v1/brands/{brand}/ai-runs/{run}/stop", { params: { path: { brand: pickedBrandId(), run: run!.id } } });
+    if (error || !data) return toast(errorMessage(error), "error");
+    if (held(data)) return;
+    toast("Stopped. The answers read so far stay.");
+    d.reload();
+  }
   async function start() {
     const { data, error } = await api.POST("/v1/brands/{brand}/ai-cohorts/{cohort}/runs", { params: { path: { brand: pickedBrandId(), cohort: c!.id } } });
     if (error || !data) return toast(errorMessage(error), "error");
@@ -173,21 +214,44 @@ export function RunBar({ d }: { ws: string; d: AIData }) {
     d.reload();
   }
   const planned = run?.samples_planned ?? 0;
+  const read = run ? run.samples_done + run.samples_failed : 0;
+  // A run that hasn't started, or has stood still, for a long while.
+  const waited = run ? Date.now() - new Date(run.started_at ?? run.created_at).getTime() : 0;
+  const slow = d.running && !!run && (run.status === "queued" || read === 0) && waited > slowAfterMs;
+  const failed = !d.running && !!run && (run.status === "failed" || run.samples_failed > 0);
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-2.5 text-[13px]">
-      {d.running && run ? (
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <span className="whitespace-nowrap">Asking: {run.samples_done} of {planned} answers</span>
-          <div className="h-1.5 max-w-64 flex-1 overflow-hidden rounded bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${planned ? (run.samples_done / planned) * 100 : 5}%` }} /></div>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-2.5 text-[13px]">
+        {d.running && run ? (
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <span className="whitespace-nowrap">{run.status === "queued" ? "Waiting to start" : `Asking: ${read} of ${planned} answers`}</span>
+            <div className="h-1.5 max-w-64 flex-1 overflow-hidden rounded bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${planned ? (read / planned) * 100 : 5}%` }} /></div>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">
+            {c.prompts} {c.prompts === 1 ? "question" : "questions"} · {d.settings.models.length} {d.settings.models.length === 1 ? "assistant" : "assistants"} · {c.schedule === "off" ? "asked when you run it" : `asked every ${c.schedule === "daily" ? "day" : "week"}`}
+            {run && ` · last asked ${new Date(run.finished_at ?? run.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} for ${usd(run.cost_cents + Math.ceil(run.cost_micros / 10_000))}`}
+            {run?.reason && run.reason !== "stopped" && run.status !== "failed" && <> <Badge tone="amber">{`stopped early: ${run.reason.replaceAll("_", " ")}`}</Badge></>}
+          </span>
+        )}
+        <div className="flex items-center gap-2">
+          {d.running && run && <Button variant="ghost" onClick={stop}>Stop</Button>}
+          <Button variant="ghost" disabled={d.running || c.prompts === 0 || d.settings.models.length === 0} onClick={start}>Run now</Button>
         </div>
-      ) : (
-        <span className="text-muted-foreground">
-          {c.prompts} {c.prompts === 1 ? "question" : "questions"} · {d.settings.models.length} {d.settings.models.length === 1 ? "assistant" : "assistants"} · {c.schedule === "off" ? "asked when you run it" : `asked every ${c.schedule === "daily" ? "day" : "week"}`}
-          {run && ` · last asked ${new Date(run.finished_at ?? run.created_at).toLocaleDateString()} for ${usd(run.cost_cents + Math.ceil(run.cost_micros / 10_000))}`}
-          {run?.reason && run.reason !== "stopped" && <> <Badge tone="amber">{`stopped early: ${run.reason.replaceAll("_", " ")}`}</Badge></>}
-        </span>
+      </div>
+      {slow && run && (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-[13px]">
+          This run {run.status === "queued" ? "has waited to start" : "has read no answer"} for {Math.round(waited / 60_000)} minutes. Stop it and run it again; if that doesn't help, write to hello@outflare.ai.
+        </p>
       )}
-      <Button variant="ghost" disabled={d.running || c.prompts === 0 || d.settings.models.length === 0} onClick={start}>Run now</Button>
+      {failed && run && (
+        <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-[13px]">
+          {run.status === "failed"
+            ? `The last run failed after ${run.samples_done} of ${planned} answers. Run it again; the answers it read are kept.`
+            : `${run.samples_failed} of ${planned} answers failed in the last run${run.samples_done === 0 ? ", so there is nothing new to show" : ""}.`}
+          {why && ` Why: ${failWhy[why] ?? why.replaceAll("_", " ")}`}
+        </p>
+      )}
     </div>
   );
 }
@@ -270,8 +334,8 @@ export const marketName = (locale?: string | null) => {
   if (!locale) return "Any market";
   try {
     const [lang, region] = locale.split("-");
-    const l = new Intl.DisplayNames(undefined, { type: "language" }).of(lang) ?? lang;
-    return region ? `${l} (${new Intl.DisplayNames(undefined, { type: "region" }).of(region) ?? region})` : l;
+    const l = new Intl.DisplayNames(["en"], { type: "language" }).of(lang) ?? lang;
+    return region ? `${l} (${new Intl.DisplayNames(["en"], { type: "region" }).of(region) ?? region})` : l;
   } catch {
     return locale;
   }

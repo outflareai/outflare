@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/popover";
 import { useBrand } from "@/lib/brand";
 import { useCatalog, displayName, identity } from "@/lib/records";
+import { SubSourcePicker } from "@/components/sub-source-picker";
 import { plural } from "../format";
 
 // Adding and changing customer records: the add and edit dialog, an input
@@ -59,7 +60,8 @@ const starters: Record<string, string[]> = {
     "last_name",
     "job_title",
     "companies",
-    "lifecycle_stage",
+    "source",
+    "sub_source",
   ],
   account: ["website", "industry", "company_size", "lifecycle_stage"],
   deal: [
@@ -92,9 +94,21 @@ function localInput(iso: unknown): string {
 
 // FieldInput edits one value the way its field's type is written
 // (FieldValueType in api/openapi.yaml).
-export function FieldInput({ ws, brand, f, value, names, cat, onChange }: { ws: string; brand?: string; f: Field; value: unknown; names: Record<string, string>; cat: Catalog; onChange: (v: unknown) => void }) {
+export function FieldInput({ ws, brand, f, value, names, cat, onChange, values }: { ws: string; brand?: string; f: Field; value: unknown; names: Record<string, string>; cat: Catalog; onChange: (v: unknown) => void; values?: Record<string, unknown> }) {
   const id = `field-${f.key}`;
   const cls = `${field} w-full`;
+  // A person's Sub-source is picked from, or typed into, the brand's list
+  // for their Source: the event or conference, for Events and conferences.
+  if (f.key === "sub_source" && f.builtin && brand && values)
+    return (
+      <SubSourcePicker
+        id={id}
+        brand={brand}
+        source={typeof values.source === "string" ? values.source : null}
+        value={typeof value === "string" ? value : null}
+        onChange={(v) => onChange(v)}
+      />
+    );
   switch (f.value_type) {
     case "select":
     case "status":
@@ -1036,8 +1050,8 @@ export function RecordDialog({ ws, brand: specifiedBrand, type, rec, cat, names,
           <div className="grid gap-3 sm:grid-cols-2">
             {shown.map((f) => (
               <div key={f.key} className={f.value_type === "record_reference" || f.value_type === "location" || f.value_type === "url" ? "sm:col-span-2" : ""}>
-                <label htmlFor={`field-${f.key}`} className="mb-1 block font-medium" title={f.description || undefined}>{f.label}</label>
-                <FieldInput ws={ws} brand={rec?.brand_id ?? brand} f={f} value={values[f.key]} names={names} cat={cat} onChange={(v) => setValues({ ...values, [f.key]: v })} />
+                <label htmlFor={`field-${f.key}`} className="mb-1 block font-medium" title={f.description || undefined}>{f.key === "sub_source" && values.source === "event" ? "Event or conference" : f.label}</label>
+                <FieldInput ws={ws} brand={rec?.brand_id ?? brand} f={f} value={values[f.key]} values={values} names={names} cat={cat} onChange={(v) => setValues({ ...values, [f.key]: v, ...(f.key === "source" && v !== values.source ? { sub_source: null } : {}) })} />
               </div>
             ))}
           </div>

@@ -76,7 +76,9 @@ Every line shows its value, its weight and what it adds, so the total can be che
 
 **By owner** splits the same forecast by teammate (`owners` in the response): what each has won this quarter, what is expected from the renewals and open deals they own, and their best case. A deal or renewal with no owner of its own counts for the owner of the company it is with; what nobody owns is the last line, so the split adds up to the forecast. It shows once at least one deal or renewal has an owner.
 
-The forecast is arithmetic on what the CRM holds. No model predicts anything, and nothing is stored but the target and the weights, so correcting a deal or a health score changes the forecast the next time you look.
+**How the forecast moved** lists what the forecast said in each week of the quarter (`history` in the response): the forecast, how much of it was already won, the target that week, and how far it moved from the week before. Outflare saves a reading of every brand's current quarter once a day, and the last reading of a week stands for that week, so a new brand sees its first line within a day and a new one each week. Readings are kept for the quarter in progress; a quarter ahead has none until it starts. Nothing here is predicted: each line is the same arithmetic as the forecast, kept as it stood.
+
+The forecast is arithmetic on what the CRM holds. No model predicts anything, and nothing is stored but the target, the weights and each week's reading, so correcting a deal or a health score changes the forecast the next time you look.
 
 ```http
 GET /v1/brands/{brand}/revenue/forecast?quarter=2026-Q4

@@ -177,6 +177,10 @@ func (s *Server) uploadRows(ctx context.Context, a *access, src postbackSource, 
 				row.Outcome, row.Error, err = "failed", "no click of this brand has that click id", nil
 			case errors.Is(err, errExpiredClick):
 				row.Outcome, row.Error, err = "failed", "the click is older than the source's click expiry", nil
+			case errors.As(err, &inv):
+				// What only shows once the click is known, such as a
+				// date before it: this row's, not the file's.
+				row.Outcome, row.Error, err = "failed", string(inv), nil
 			}
 		}
 		if err != nil {

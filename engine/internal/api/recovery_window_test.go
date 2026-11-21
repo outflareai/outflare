@@ -24,7 +24,7 @@ func TestRecoveryWindow(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	acme := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
 	brand := "/v1/brands/" + acme
 
 	count := func(sql string, args ...any) int {
@@ -100,7 +100,7 @@ func TestRecoveryWindow(t *testing.T) {
 		t.Fatalf("list: %+v", res)
 	}
 	reader := agentToken(t, owner, base, "Reader", "customers.read")
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "summitly"})
 	other := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 
 	// ---- A record ----

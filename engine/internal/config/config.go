@@ -95,6 +95,11 @@ type Config struct {
 	// them back to the queue. Keep it under the time the host allows
 	// between SIGTERM and SIGKILL.
 	ShutdownGrace time.Duration
+	// AdsSyncInterval is OUTFLARE_ADS_SYNC_INTERVAL (a duration, default
+	// 1h): how often each connected ad platform is read. No platform is
+	// read more often than its floor (30 minutes for most), and none less
+	// often than once a day.
+	AdsSyncInterval time.Duration
 	// QueryConnections is OUTFLARE_QUERY_CONNECTIONS: how many Query runs
 	// at once on this server, each on its own database connection
 	// (default 3, 0 turns Query off). Count them in the database's
@@ -313,6 +318,13 @@ func Load() (Config, error) {
 			return c, fmt.Errorf("OUTFLARE_SHUTDOWN_GRACE must be a duration such as 10s or 1m, got %q", v)
 		}
 		c.ShutdownGrace = d
+	}
+	if v := os.Getenv("OUTFLARE_ADS_SYNC_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 15*time.Minute || d > 24*time.Hour {
+			return c, fmt.Errorf("OUTFLARE_ADS_SYNC_INTERVAL must be a duration from 15m to 24h, such as 30m, got %q", v)
+		}
+		c.AdsSyncInterval = d
 	}
 	if v := os.Getenv("OUTFLARE_QUERY_CONNECTIONS"); v != "" {
 		n, err := strconv.Atoi(v)

@@ -1,8 +1,14 @@
 package api
 
 import (
+	"context"
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
+
+	"github.com/outflareai/outflare/engine/internal/paidads"
 )
 
 // More of what the platforms report, from what the ad sync stored:
@@ -59,6 +65,37 @@ func (s *Server) listAdConversionActions(w http.ResponseWriter, r *http.Request)
 		s.internal(w, r, rows.Err())
 		return
 	}
+	rows.Close()
+	// In the brand's currency, an action on a connector is one row.
+	report, err := s.adReport(r)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	merged, at := []adConversionActionOut{}, map[string]int{}
+	for _, x := range out {
+		if k, ok := report.rates.Rate(x.Currency, report.to); ok && report.to != "" && x.Currency != report.to {
+			if x.ValueMicros != nil {
+				x.ValueMicros = ptr(int64(math.Round(float64(*x.ValueMicros) * k)))
+			}
+			x.Currency = report.to
+		}
+		key := x.Action + "\x00" + x.Connector + "\x00" + x.Currency
+		if i, ok := at[key]; ok {
+			merged[i].Conversions += x.Conversions
+			if x.ValueMicros != nil {
+				if merged[i].ValueMicros == nil {
+					merged[i].ValueMicros = x.ValueMicros
+				} else {
+					merged[i].ValueMicros = ptr(*merged[i].ValueMicros + *x.ValueMicros)
+				}
+			}
+			continue
+		}
+		at[key] = len(merged)
+		merged = append(merged, x)
+	}
+	out = merged
 	writeJSON(w, http.StatusOK, map[string]any{"from": f.from, "to": f.to, "data": out})
 }
 
@@ -66,7 +103,7 @@ func (s *Server) listAdConversionActions(w http.ResponseWriter, r *http.Request)
 // delivery numbers beside clicks.
 const searchSums = `COALESCE(sum(m.spend_micros), 0)::bigint, COALESCE(sum(m.impressions), 0)::bigint, COALESCE(sum(m.clicks), 0)::bigint,
 	sum(m.conversions)::float8, sum(m.conversion_value_micros)::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint,
-	NULL::float8, NULL::bigint`
+	NULL::float8, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint`
 
 // searchFilter adds campaign_id and ad_group_id to f's filters, on g (the
 // ad group) and its parent, and reads limit.
@@ -108,6 +145,11 @@ type adKeywordOut struct {
 	CampaignName string   `json:"campaign_name"`
 	Currency     string   `json:"currency"`
 	Totals       adTotals `json:"totals"`
+	// Currency is the ad account's; ReportCurrency is what totals are in
+	// (the brand's currency for one brand), and ExchangeRate how many of
+	// it one unit of Currency is.
+	ReportCurrency string  `json:"report_currency"`
+	ExchangeRate   float64 `json:"exchange_rate"`
 	// What Google estimates the keyword must bid to show on the first
 	// page, at the top of the page and in the first position, in micros,
 	// and its quality score (1 to 10), as of the last sync; null where
@@ -116,6 +158,80 @@ type adKeywordOut struct {
 	TopOfPageCPCMicros     *int64 `json:"top_of_page_cpc_micros"`
 	FirstPositionCPCMicros *int64 `json:"first_position_cpc_micros"`
 	QualityScore           *int   `json:"quality_score"`
+	// Outflare's own count of who the keyword's clicks brought (the paid
+	// ads ledger): people who signed up in the range, how many of those
+	// have paid since, people whose first payment fell in the range, and
+	// what each of those cost. PaidShare is SignupsPaid over Signups, null
+	// without a sign-up.
+	Signups               int      `json:"signups"`
+	SignupsPaid           int      `json:"signups_paid"`
+	NewPayers             int      `json:"new_payers"`
+	PaidShare             *float64 `json:"paid_share"`
+	CostPerNewPayerMicros *int64   `json:"cost_per_new_payer_micros"`
+}
+
+// adKeywordCount is the ledger's count for one keyword of an ad group.
+type adKeywordCount struct{ signups, paid, payers int }
+
+// adKeywordCounts reads, for the ad groups given, who each keyword's
+// clicks brought over the range (days from and to in loc): the ledger
+// keeps the keyword of the click behind every acquisition. The key is the
+// ad group, the keyword in lower case and its match type; the match type
+// is empty when the click wasn't one Google listed (the keyword came from
+// the landing page's tags), and such a count belongs to the keyword
+// whatever its match type.
+func (s *Server) adKeywordCounts(ctx context.Context, ws string, groups []string, from, to string, loc *time.Location) (map[string]adKeywordCount, error) {
+	out := map[string]adKeywordCount{}
+	if len(groups) == 0 {
+		return out, nil
+	}
+	f, _ := time.Parse(time.DateOnly, from)
+	t, _ := time.Parse(time.DateOnly, to)
+	rows, err := s.pool.Query(ctx, `
+		SELECT q.ad_group_entity_id::text, lower(q.keyword), COALESCE(c.match_type, ''),
+			count(*) FILTER (WHERE q.signed_up_at >= $3 AND q.signed_up_at < $4)::int,
+			count(*) FILTER (WHERE q.signed_up_at >= $3 AND q.signed_up_at < $4 AND q.first_paid_at IS NOT NULL)::int,
+			count(*) FILTER (WHERE q.first_paid_at >= $3 AND q.first_paid_at < $4)::int
+		FROM ad_acquisitions q LEFT JOIN ad_clicks c ON c.ad_account_id = q.ad_account_id AND c.click_id = q.click_id AND q.click_id <> ''
+		WHERE q.workspace_id = $1 AND q.ad_group_entity_id = ANY($2::uuid[]) AND q.keyword <> ''
+		  AND ((q.signed_up_at >= $3 AND q.signed_up_at < $4) OR (q.first_paid_at >= $3 AND q.first_paid_at < $4))
+		GROUP BY 1, 2, 3`, ws, groups, paidads.DayStart(f, loc), paidads.DayStart(t.AddDate(0, 0, 1), loc))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var group, text, match string
+		var n adKeywordCount
+		if err := rows.Scan(&group, &text, &match, &n.signups, &n.paid, &n.payers); err != nil {
+			return nil, err
+		}
+		out[group+" "+match+" "+text] = n
+	}
+	return out, rows.Err()
+}
+
+// adKeywordCountOf adds up a keyword's counts: those of its match type
+// and, with untyped, those without one.
+func adKeywordCountOf(counts map[string]adKeywordCount, group, text, match string, untyped bool) adKeywordCount {
+	text = strings.ToLower(text)
+	var n adKeywordCount
+	if untyped {
+		n = counts[group+"  "+text]
+	}
+	if match != "" {
+		m := counts[group+" "+match+" "+text]
+		n.signups, n.paid, n.payers = n.signups+m.signups, n.paid+m.paid, n.payers+m.payers
+	}
+	return n
+}
+
+func paidShare(signups, paid int) *float64 {
+	if signups == 0 {
+		return nil
+	}
+	v := float64(paid) / float64(signups)
+	return &v
 }
 
 func (s *Server) listAdKeywords(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +277,41 @@ func (s *Server) listAdKeywords(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, rows.Err())
 		return
 	}
+	rows.Close()
+	report, err := s.adReport(r)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	groups := []string{}
+	for _, x := range out {
+		groups = append(groups, x.AdGroupID)
+	}
+	counts, err := s.adKeywordCounts(r.Context(), accessFrom(r.Context()).WorkspaceID, groups, f.from, f.to, loc)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	// A count without a match type goes to one keyword only: of an ad
+	// group's keywords with the same words, the one that spent most (the
+	// rows are in that order).
+	given := map[string]bool{}
+	for i := range out {
+		x := &out[i]
+		x.ReportCurrency, x.ExchangeRate = report.apply(x.Currency, &x.Totals)
+		words := x.AdGroupID + " " + strings.ToLower(x.Text)
+		n := adKeywordCountOf(counts, x.AdGroupID, x.Text, x.MatchType, !given[words])
+		given[words] = true
+		x.Signups, x.SignupsPaid, x.NewPayers, x.PaidShare = n.signups, n.paid, n.payers, paidShare(n.signups, n.paid)
+		if n.payers > 0 {
+			v := x.Totals.SpendMicros / int64(n.payers)
+			x.CostPerNewPayerMicros = &v
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"from": f.from, "to": f.to, "data": out})
 }
 
@@ -178,6 +329,18 @@ type adSearchTermOut struct {
 	CampaignName string   `json:"campaign_name"`
 	Currency     string   `json:"currency"`
 	Totals       adTotals `json:"totals"`
+	// Currency is the ad account's; ReportCurrency is what totals are in
+	// (the brand's currency for one brand), and ExchangeRate how many of
+	// it one unit of Currency is.
+	ReportCurrency string  `json:"report_currency"`
+	ExchangeRate   float64 `json:"exchange_rate"`
+	// Who the keyword the search matched brought, on Outflare's own count
+	// (a network doesn't say which search a click came from, so these are
+	// the keyword's, not the search's own): sign-ups in the range, how
+	// many of those have paid since, and that share.
+	KeywordSignups     int      `json:"keyword_signups"`
+	KeywordSignupsPaid int      `json:"keyword_signups_paid"`
+	KeywordPaidShare   *float64 `json:"keyword_paid_share"`
 }
 
 func (s *Server) listAdSearchTerms(w http.ResponseWriter, r *http.Request) {
@@ -220,6 +383,33 @@ func (s *Server) listAdSearchTerms(w http.ResponseWriter, r *http.Request) {
 	if rows.Err() != nil {
 		s.internal(w, r, rows.Err())
 		return
+	}
+	rows.Close()
+	report, err := s.adReport(r)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	groups := []string{}
+	for _, x := range out {
+		groups = append(groups, x.AdGroupID)
+	}
+	counts, err := s.adKeywordCounts(r.Context(), accessFrom(r.Context()).WorkspaceID, groups, f.from, f.to, loc)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	for i := range out {
+		x := &out[i]
+		x.ReportCurrency, x.ExchangeRate = report.apply(x.Currency, &x.Totals)
+		if x.KeywordText != "" {
+			n := adKeywordCountOf(counts, x.AdGroupID, x.KeywordText, x.KeywordMatchType, true)
+			x.KeywordSignups, x.KeywordSignupsPaid, x.KeywordPaidShare = n.signups, n.paid, paidShare(n.signups, n.paid)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"from": f.from, "to": f.to, "data": out})
 }

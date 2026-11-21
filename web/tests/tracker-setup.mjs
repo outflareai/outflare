@@ -76,6 +76,10 @@ try {
   await list.waitFor();
   await page.getByText('Setup 4/6').waitFor();
   assert.equal(await list.getByText('(done)').count(), 4);
+  // The brand's tracking domain is set up here too: the same card as on
+  // Domains, shared by email and the tracker, so nobody leaves Ads for it.
+  await page.locator('#tracking-domain').getByText('go.acme.example', { exact: true }).first().waitFor();
+  await page.locator('#tracking-domain').getByText(/shared by email and the tracker/).waitFor();
   await page.getByRole('button', { name: 'Skip Add an offer that carries the click id' }).click();
   await page.getByText('Setup 5/6').waitFor();
   await page.reload();
@@ -83,9 +87,18 @@ try {
 
   // The builder: the network's own tokens, then a secret from a rotation.
   const preview = page.getByTestId('postback-preview');
-  assert.equal(await preview.innerText(), 'https://go.acme.example/t/<secret>?cid={sub1}&payout={payout_amount}&txid={conversion_id}&status={status}');
-  await page.getByLabel('Send Currency').check();
-  assert.match(await preview.innerText(), /&currency=\{currency\}&txid=/);
+  // Only what Everflow has a placeholder for: a made-up {status} would
+  // arrive unfilled.
+  assert.equal(await preview.innerText(), 'https://go.acme.example/t/<secret>?cid={sub1}&payout={payout_amount}&txid={conversion_id}');
+  assert.equal(await page.getByLabel('Send Status').isChecked(), false);
+  assert.equal(await page.getByLabel('Status token').getAttribute('placeholder'), 'Everflow has no placeholder for it');
+  // Typing a token turns its parameter on; clearing it turns it off.
+  await page.getByLabel('Status token').fill('{st}');
+  assert.match(await preview.innerText(), /&status=\{st\}$/);
+  await page.getByLabel('Status token').fill('');
+  assert.equal(await page.getByLabel('Send Status').isChecked(), false);
+  await page.getByLabel('Currency token').fill('{cur}');
+  assert.match(await preview.innerText(), /&currency=\{cur\}&txid=/);
   await page.getByRole('button', { name: '+ Parameters p1 to p20' }).click();
   await page.getByLabel('Parameter 1 token').fill('{sub2}');
   assert.match(await preview.innerText(), /&p1=\{sub2\}$/);

@@ -28,11 +28,67 @@ const (
 	MeasureSum = "sum"
 	// MeasureAverage averages a property.
 	MeasureAverage = "average"
+	// MeasureMedian, MeasureP90, MeasureP99, MeasureMin and MeasureMax
+	// read a property's spread: the middle value, the value 90% or 99%
+	// of rows are under, the smallest and the biggest.
+	MeasureMedian = "median"
+	MeasureP90    = "p90"
+	MeasureP99    = "p99"
+	MeasureMin    = "min"
+	MeasureMax    = "max"
+	// MeasurePerPersonAverage, MeasurePerPersonMedian and
+	// MeasurePerPersonMax count rows per person in each period, then
+	// take the average, middle or biggest of those counts: how often a
+	// typical person does it.
+	MeasurePerPersonAverage = "per_person_average"
+	MeasurePerPersonMedian  = "per_person_median"
+	MeasurePerPersonMax     = "per_person_max"
+	// MeasureWeeklyActive and MeasureMonthlyActive count the distinct
+	// people in the 7 or 30 days up to the end of each period (rolling
+	// weekly and monthly active people; people is daily active by day).
+	MeasureWeeklyActive  = "weekly_active"
+	MeasureMonthlyActive = "monthly_active"
 )
 
 // Measures lists the measures of event, page, visit, conversion and
 // payment series.
-var Measures = []string{MeasureCount, MeasurePeople, MeasureSum, MeasureAverage}
+var Measures = []string{
+	MeasureCount, MeasurePeople, MeasureSum, MeasureAverage,
+	MeasureMedian, MeasureP90, MeasureP99, MeasureMin, MeasureMax,
+	MeasurePerPersonAverage, MeasurePerPersonMedian, MeasurePerPersonMax,
+	MeasureWeeklyActive, MeasureMonthlyActive,
+}
+
+// propertyMeasure says whether a measure reads a property's values.
+func propertyMeasure(m string) bool {
+	switch m {
+	case MeasureSum, MeasureAverage, MeasureMedian, MeasureP90, MeasureP99, MeasureMin, MeasureMax:
+		return true
+	}
+	return false
+}
+
+// additive says whether a measure's groups add up to the whole: counts
+// and sums do; people, averages and spreads don't.
+func additive(m string) bool {
+	return m == "" || m == MeasureCount || m == MeasureSum
+}
+
+// countable says whether a series counts or adds things up, so that a
+// period with nothing in it is 0 rather than unknown.
+func countable(s Series) bool {
+	if s.Kind == KindAd {
+		return true
+	}
+	if isSourceKind(s.Kind) {
+		return sourceCountable(s)
+	}
+	switch s.Measure {
+	case "", MeasureCount, MeasurePeople, MeasureSum, MeasureWeeklyActive, MeasureMonthlyActive:
+		return true
+	}
+	return false
+}
 
 // AdMetrics are the measures of an ad series.
 var AdMetrics = []string{"clicks", "impressions", "spend", "conversions"}
@@ -56,7 +112,10 @@ type Series struct {
 	// Network and Campaign narrow an ad series.
 	Network  string `json:"network,omitempty"`
 	Campaign string `json:"campaign,omitempty"`
-	Label    string `json:"label,omitempty"`
+	// Connector narrows an analytics series to one tool, such as
+	// google_search_console or bing_webmaster; empty is every tool.
+	Connector string `json:"connector,omitempty"`
+	Label     string `json:"label,omitempty"`
 }
 
 // Trend is one or more series over time.
@@ -70,6 +129,9 @@ type Trend struct {
 	// Breakdown splits every series by a field of its rows; an ad
 	// series splits by network or campaign.
 	Breakdown string `json:"breakdown,omitempty"`
+	// Breakdown2 splits each of those groups again by a second field
+	// (country, then plan). Not with ad series.
+	Breakdown2 string `json:"breakdown_2,omitempty"`
 	// Formula combines the series as A, B, C with + - * / and brackets:
 	// "A / B" for cost per sign-up.
 	Formula string `json:"formula,omitempty"`
@@ -87,6 +149,9 @@ const MaxSeries = 6
 func (s Series) DefaultLabel(conversionName string) string {
 	if s.Label != "" {
 		return s.Label
+	}
+	if isSourceKind(s.Kind) {
+		return sourceLabel(s)
 	}
 	var what string
 	switch s.Kind {
@@ -143,7 +208,16 @@ func (t Trend) Validate() error {
 	}
 	for i, s := range t.Series {
 		at := fmt.Sprintf("series[%d]", i)
+		if isSourceKind(s.Kind) {
+			if err := validSource(t, s, at); err != nil {
+				return err
+			}
+			continue
+		}
 		if s.Kind == KindAd {
+			if s.Connector != "" {
+				return Invalid(at + ".connector is only for an analytics series")
+			}
 			if s.Measure != "" && !slices.Contains(AdMetrics, s.Measure) {
 				return Invalid(at + ".measure for ads is one of " + strings.Join(AdMetrics, ", "))
 			}
@@ -158,16 +232,22 @@ func (t Trend) Validate() error {
 			if t.Breakdown != "" && t.Breakdown != "network" && t.Breakdown != "campaign" {
 				return Invalid("breakdown with an ad series is network or campaign")
 			}
+			if t.Breakdown2 != "" {
+				return Invalid("breakdown_2 isn't for ad series")
+			}
 			continue
 		}
 		if !slices.Contains(Kinds, s.Kind) {
-			return Invalid(at + ".kind is one of " + strings.Join(Kinds, ", ") + ", ad")
+			return Invalid(at + ".kind is one of " + strings.Join(Kinds, ", ") + ", ad, " + strings.Join(SourceKinds, ", "))
+		}
+		if s.Connector != "" {
+			return Invalid(at + ".connector is only for an analytics series")
 		}
 		if s.Measure != "" && !slices.Contains(Measures, s.Measure) {
 			return Invalid(at + ".measure is one of " + strings.Join(Measures, ", "))
 		}
-		switch s.Measure {
-		case MeasureSum, MeasureAverage:
+		switch {
+		case propertyMeasure(s.Measure):
 			switch s.Kind {
 			case KindPayment:
 				if s.Property != "" && s.Property != "amount" {
@@ -210,6 +290,14 @@ func (t Trend) Validate() error {
 				return err
 			}
 		}
+		if t.Breakdown2 != "" {
+			if t.Breakdown == "" || t.Breakdown2 == t.Breakdown {
+				return Invalid("breakdown_2 needs a different breakdown first")
+			}
+			if _, err := breakdownExpr(s.Kind, t.Breakdown2); err != nil {
+				return err
+			}
+		}
 		if len(s.Label) > 80 {
 			return Invalid(at + ".label is at most 80 characters")
 		}
@@ -242,9 +330,16 @@ type SeriesResult struct {
 
 // TrendGroup is one breakdown value's series.
 type TrendGroup struct {
-	Value  string         `json:"value"`
+	// Value names the group: the breakdown's value, or with a second
+	// breakdown both, as "US / pro".
+	Value string `json:"value"`
+	// Values are the group's value per breakdown, one or two.
+	Values []string       `json:"values"`
 	Series []SeriesResult `json:"series"`
 }
+
+// bkSep joins a group's two breakdown values in SQL; no text has it.
+const bkSep = "\x1f"
 
 // TrendResult is a trend's answer.
 type TrendResult struct {
@@ -277,6 +372,9 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 	}
 	c := &CompiledTrend{ws: ws, brand: brand, t: t}
 	a := &c.args
+	if err := a.leaveOutInternal(ctx, q, ws, brand); err != nil {
+		return nil, err
+	}
 	pWS, pBrand := a.add(ws), a.add(brand)
 	pFrom, pTo := a.add(t.From), a.add(t.To)
 	c.from, c.to = len(a.list)-2, len(a.list)-1
@@ -289,16 +387,19 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 		}
 		c.labels = append(c.labels, s.DefaultLabel(conv.Name))
 		c.currency = append(c.currency, "")
+		if isSourceKind(s.Kind) {
+			parts = append(parts, sourceSeries(i, s, t.Breakdown, pWS, pBrand, pFrom, pTo, pInterval, pZone, a))
+			if m := sourceMeasure(s); s.Kind == KindLinkOrders && (m == "spend" || m == "committed") {
+				c.currency[i] = "?"
+			}
+			continue
+		}
 		if s.Kind == KindAd {
 			parts = append(parts, adSeries(i, s, t.Breakdown, pWS, pBrand, pFrom, pTo, pInterval, pZone, a))
 			if s.Measure == "spend" {
 				c.currency[i] = "?"
 			}
 			continue
-		}
-		src, err := source(s.Kind, s.Event, conv, s.Filters, s.First, pFrom, pTo, pWS, pBrand, a)
-		if err != nil {
-			return nil, err
 		}
 		bk := `''`
 		if t.Breakdown != "" {
@@ -307,10 +408,16 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 				return nil, err
 			}
 			bk = `COALESCE(NULLIF(left((` + x + `)::text, 200), ''), '')`
+			if t.Breakdown2 != "" {
+				x2, err := fieldExpr(s.Kind, t.Breakdown2, a)
+				if err != nil {
+					return nil, err
+				}
+				bk += ` || E'` + bkSep + `' || COALESCE(NULLIF(left((` + x2 + `)::text, 200), ''), '')`
+			}
 		}
 		var val string
-		switch s.Measure {
-		case MeasureSum, MeasureAverage:
+		if propertyMeasure(s.Measure) {
 			prop := s.Property
 			if s.Kind == KindPayment {
 				prop = "amount"
@@ -322,6 +429,25 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 			}
 			val = `(CASE WHEN (` + x + `)::text ~ '^\s*-?[0-9]+(\.[0-9]+)?\s*$' THEN trim((` + x + `)::text)::float8 END)`
 		}
+		if s.Measure == MeasureWeeklyActive || s.Measure == MeasureMonthlyActive {
+			days := "7"
+			if s.Measure == MeasureMonthlyActive {
+				days = "30"
+			}
+			// Rows from a window before the first period, so its first
+			// points count the days before too.
+			wfrom := `(` + pFrom + `::timestamptz - interval '` + days + ` days')`
+			wsrc, err := source(s.Kind, s.Event, conv, s.Filters, s.First, wfrom, pTo, pWS, pBrand, a)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, rollingSeries(i, wsrc, bk, days, t.Breakdown != "", pFrom, pTo, pInterval, pZone))
+			continue
+		}
+		src, err := source(s.Kind, s.Event, conv, s.Filters, s.First, pFrom, pTo, pWS, pBrand, a)
+		if err != nil {
+			return nil, err
+		}
 		// Every row carries its period, its person and its value; the
 		// outer query adds them up per period and over the range.
 		row := `SELECT ` + strconv.Itoa(i) + ` AS i, date_trunc(` + pInterval + `, ` + src.ts + ` AT TIME ZONE ` + pZone + `) AT TIME ZONE ` + pZone + ` AS p, ` +
@@ -332,6 +458,28 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 			row += val + ` AS v`
 		}
 		row += ` FROM ` + src.from + ` WHERE ` + strings.Join(src.where, " AND ")
+		sets := `GROUPING SETS ((i, p), (i))`
+		if t.Breakdown != "" {
+			sets = `GROUPING SETS ((i, p, bk), (i, bk), (i, p), (i))`
+		}
+		switch s.Measure {
+		case MeasurePerPersonAverage, MeasurePerPersonMedian, MeasurePerPersonMax:
+			// Each person's count per period (and over the range), then
+			// the average, middle or biggest of those counts.
+			per := `avg(n)`
+			switch s.Measure {
+			case MeasurePerPersonMedian:
+				per = `percentile_cont(0.5) WITHIN GROUP (ORDER BY n)`
+			case MeasurePerPersonMax:
+				per = `max(n)`
+			}
+			inner := `SELECT i, GROUPING(p)::int AS gp, GROUPING(bk)::int AS gb, p, bk, actor, count(*)::float8 AS n FROM (` + row + `) r WHERE actor IS NOT NULL GROUP BY GROUPING SETS ((i, p, bk, actor), (i, bk, actor), (i, p, actor), (i, actor))`
+			if t.Breakdown == "" {
+				inner = `SELECT i, GROUPING(p)::int AS gp, 1 AS gb, p, bk, actor, count(*)::float8 AS n FROM (` + row + `) r WHERE actor IS NOT NULL GROUP BY GROUPING SETS ((i, p, bk, actor), (i, bk, actor))`
+			}
+			parts = append(parts, `SELECT i, gp, gb, p, bk, `+per+`::float8 AS v, '' AS cur FROM (`+inner+`) x GROUP BY i, gp, gb, p, bk`)
+			continue
+		}
 		agg := `count(*)::float8`
 		switch s.Measure {
 		case MeasurePeople:
@@ -340,8 +488,22 @@ func CompileTrend(ctx context.Context, q Querier, ws, brand string, t Trend) (*C
 			agg = `sum(v)`
 		case MeasureAverage:
 			agg = `avg(v)`
+		case MeasureMedian:
+			agg = `percentile_cont(0.5) WITHIN GROUP (ORDER BY v)`
+		case MeasureP90:
+			agg = `percentile_cont(0.9) WITHIN GROUP (ORDER BY v)`
+		case MeasureP99:
+			agg = `percentile_cont(0.99) WITHIN GROUP (ORDER BY v)`
+		case MeasureMin:
+			agg = `min(v)`
+		case MeasureMax:
+			agg = `max(v)`
 		}
-		parts = append(parts, `SELECT i, GROUPING(p)::int AS gp, p, bk, `+agg+` AS v, '' AS cur FROM (`+row+`) r GROUP BY GROUPING SETS ((i, p, bk), (i, bk))`)
+		gb := `GROUPING(bk)::int`
+		if t.Breakdown == "" {
+			gb = `1`
+		}
+		parts = append(parts, `SELECT i, GROUPING(p)::int AS gp, `+gb+` AS gb, p, `+groupedBK(t.Breakdown != "")+`, (`+agg+`)::float8 AS v, '' AS cur FROM (`+row+`) r GROUP BY `+sets)
 	}
 	c.sql = strings.Join(parts, "\nUNION ALL\n")
 	return c, nil
@@ -377,14 +539,51 @@ func adSeries(i int, s Series, breakdown, pWS, pBrand, pFrom, pTo, pInterval, pZ
 	case "campaign":
 		bk = `left(e.name, 200)`
 	}
-	return `SELECT ` + strconv.Itoa(i) + ` AS i, GROUPING(p)::int AS gp, p, bk, sum(v) AS v, CASE WHEN count(DISTINCT cur) = 1 THEN min(cur) ELSE 'mixed' END AS cur FROM (
+	sets, gb := `GROUPING SETS ((i, p), (i))`, `1`
+	if breakdown != "" {
+		sets, gb = `GROUPING SETS ((i, p, bk), (i, bk), (i, p), (i))`, `GROUPING(bk)::int`
+	}
+	return `SELECT ` + strconv.Itoa(i) + ` AS i, GROUPING(p)::int AS gp, ` + gb + ` AS gb, p, ` + groupedBK(breakdown != "") + `, sum(v) AS v, CASE WHEN count(DISTINCT cur) = 1 THEN min(cur) ELSE 'mixed' END AS cur FROM (
 		SELECT date_trunc(` + pInterval + `, m.day::timestamp) AT TIME ZONE ` + pZone + ` AS p, ` + bk + ` AS bk, ` + val + ` AS v, ` + cur + ` AS cur
 		FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
 		JOIN ad_metrics_daily m ON m.ad_entity_id = e.id AND m.day >= (` + pFrom + ` AT TIME ZONE ` + pZone + `)::date AND m.day < (` + pTo + ` AT TIME ZONE ` + pZone + `)::date
 		WHERE e.workspace_id = ` + pWS + ` AND e.level = 'campaign' AND COALESCE(e.brand_id, a.brand_id) = ` + pBrand + `
 			AND (` + a.add(connector) + ` = '' OR a.connector = ` + a.add(connector) + `)
 			AND (` + a.add(s.Campaign) + ` = '' OR strpos(lower(e.name), lower(` + a.add(s.Campaign) + `)) > 0)
-		GROUP BY 1, 2, m.currency) r GROUP BY GROUPING SETS ((i, p, bk), (i, bk))`
+		GROUP BY 1, 2, m.currency) r GROUP BY ` + sets
+}
+
+// groupedBK is the group's breakdown value in an outer select: ” for
+// the rows across every group.
+func groupedBK(breakdown bool) string {
+	if !breakdown {
+		return `''::text AS bk`
+	}
+	return `COALESCE(bk, '') AS bk`
+}
+
+// rollingSeries counts the distinct people in the days days up to the end
+// of each period, and over the whole range for the total.
+func rollingSeries(i int, src rowSource, bk, days string, breakdown bool, pFrom, pTo, pInterval, pZone string) string {
+	step := `('1 ' || ` + pInterval + `)::interval`
+	rows := `SELECT ` + src.ts + ` AS ts, ` + bk + ` AS bk, ` + src.actor + ` AS actor FROM ` + src.from + ` WHERE ` + strings.Join(src.where, " AND ")
+	pointSets, totalSets := `GROUP BY g.p`, `GROUP BY ()`
+	pointBK, totalBK := `''::text`, `''::text`
+	pointGB, totalGB := `1`, `1`
+	if breakdown {
+		pointSets, totalSets = `GROUP BY GROUPING SETS ((g.p, r.bk), (g.p))`, `GROUP BY GROUPING SETS ((r.bk), ())`
+		pointBK, totalBK = `COALESCE(r.bk, '')`, `COALESCE(r.bk, '')`
+		pointGB, totalGB = `GROUPING(r.bk)::int`, `GROUPING(r.bk)::int`
+	}
+	n := strconv.Itoa(i)
+	points := `SELECT ` + n + ` AS i, 0 AS gp, ` + pointGB + ` AS gb, g.p AT TIME ZONE ` + pZone + ` AS p, ` + pointBK + ` AS bk, count(DISTINCT r.actor)::float8 AS v, '' AS cur
+		FROM generate_series(date_trunc(` + pInterval + `, ` + pFrom + ` AT TIME ZONE ` + pZone + `), (` + pTo + ` AT TIME ZONE ` + pZone + `) - interval '1 microsecond', ` + step + `) g(p)
+		JOIN (` + rows + `) r ON r.ts >= LEAST((g.p + ` + step + `) AT TIME ZONE ` + pZone + `, ` + pTo + `) - interval '` + days + ` days'
+			AND r.ts < LEAST((g.p + ` + step + `) AT TIME ZONE ` + pZone + `, ` + pTo + `)
+		` + pointSets
+	total := `SELECT ` + n + ` AS i, 1 AS gp, ` + totalGB + ` AS gb, NULL::timestamptz AS p, ` + totalBK + ` AS bk, count(DISTINCT r.actor)::float8 AS v, '' AS cur
+		FROM (` + rows + `) r WHERE r.ts >= ` + pFrom + ` AND r.ts < ` + pTo + ` ` + totalSets
+	return points + "\nUNION ALL\n" + total
 }
 
 // periods lists the interval starts between from and to, in loc.
@@ -485,11 +684,11 @@ func (c *CompiledTrend) run(ctx context.Context, q Querier, from, to time.Time) 
 	res := TrendResult{Series: blank(), Breakdown: []TrendGroup{}, From: from, To: to}
 	groups := map[string]*TrendGroup{}
 	for rows.Next() {
-		var i, gp int
+		var i, gp, gb int
 		var p *time.Time
 		var bk, cur string
 		var v *float64
-		if err := rows.Scan(&i, &gp, &p, &bk, &v, &cur); err != nil {
+		if err := rows.Scan(&i, &gp, &gb, &p, &bk, &v, &cur); err != nil {
 			return TrendResult{}, err
 		}
 		set := func(sr *SeriesResult) {
@@ -507,13 +706,14 @@ func (c *CompiledTrend) run(ctx context.Context, q Querier, from, to time.Time) 
 				sr.Points[j].Value = v
 			}
 		}
-		if c.t.Breakdown == "" {
+		if c.t.Breakdown == "" || gb == 1 {
 			set(&res.Series[i])
 			continue
 		}
 		g, ok := groups[bk]
 		if !ok {
-			g = &TrendGroup{Value: bk, Series: blank()}
+			values := strings.Split(bk, "\x1f")
+			g = &TrendGroup{Value: strings.Join(values, " / "), Values: values, Series: blank()}
 			groups[bk] = g
 		}
 		set(&g.Series[i])
@@ -522,15 +722,25 @@ func (c *CompiledTrend) run(ctx context.Context, q Querier, from, to time.Time) 
 		return TrendResult{}, err
 	}
 	if c.t.Breakdown != "" {
-		// Totals across groups: sums add up; people and averages don't,
-		// so they are recomputed from the points as a best effort.
+		// The series across every group come from the query itself, so
+		// people, averages and spreads are exact, not added up.
 		for _, g := range groups {
-			res.Breakdown = append(res.Breakdown, *g)
+			// A period with nothing in a group that has numbers is 0 for
+			// anything counted or added up, so the group's line has no
+			// gaps; an average or a spread of nothing stays empty.
 			for i := range g.Series {
-				res.Series[i] = addSeries(res.Series[i], g.Series[i], c.t.Series[i].Measure)
+				if !countable(c.t.Series[i]) || g.Series[i].Total == nil {
+					continue
+				}
+				for j := range g.Series[i].Points {
+					if g.Series[i].Points[j].Value == nil {
+						g.Series[i].Points[j].Value = new(float64)
+					}
+				}
 			}
+			res.Breakdown = append(res.Breakdown, *g)
 		}
-		res.Breakdown = topTrendGroups(res.Breakdown, c.labels)
+		res.Breakdown = topTrendGroups(res.Breakdown, c.labels, c.t.Series)
 	}
 	if c.t.Formula != "" {
 		f, _ := parseFormula(c.t.Formula, n)
@@ -571,7 +781,7 @@ func addSeries(a, b SeriesResult, measure string) SeriesResult {
 
 // topTrendGroups keeps the MaxGroups biggest by the first series' total
 // and adds the rest up as "$other".
-func topTrendGroups(groups []TrendGroup, labels []string) []TrendGroup {
+func topTrendGroups(groups []TrendGroup, labels []string, series []Series) []TrendGroup {
 	total := func(g TrendGroup) float64 {
 		if g.Series[0].Total == nil {
 			return 0
@@ -590,11 +800,16 @@ func topTrendGroups(groups []TrendGroup, labels []string) []TrendGroup {
 	if len(groups) <= MaxGroups {
 		return groups
 	}
-	other := TrendGroup{Value: "$other", Series: make([]SeriesResult, len(labels))}
+	other := TrendGroup{Value: "$other", Values: []string{"$other"}, Series: make([]SeriesResult, len(labels))}
 	for i := range labels {
 		other.Series[i] = SeriesResult{Label: labels[i], Points: slices.Clone(groups[MaxGroups].Series[i].Points)}
 		for j := range other.Series[i].Points {
 			other.Series[i].Points[j].Value = nil
+		}
+		// Only counts and sums add up; for people, averages and spreads
+		// "everything else" has no honest single number.
+		if !additive(series[i].Measure) {
+			continue
 		}
 		for _, g := range groups[MaxGroups:] {
 			other.Series[i] = addSeries(other.Series[i], g.Series[i], MeasureSum)
@@ -763,6 +978,15 @@ func applyFormula(f formula, label string, series []SeriesResult, ps []time.Time
 func TrendBreakdowns(kind string) []string {
 	if kind == KindAd {
 		return []string{"campaign", "network"}
+	}
+	if kind == KindAnalytics {
+		return []string{"connector"}
+	}
+	if kind == KindSearch {
+		return []string{"query", "page", "country", "device"}
+	}
+	if isSourceKind(kind) {
+		return []string{}
 	}
 	return Breakdowns(kind)
 }

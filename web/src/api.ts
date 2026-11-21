@@ -37,7 +37,7 @@ export function networkError(code: "network_error" | "offline"): Response {
 // errors people see, and where, is what tells us what frustrates them.
 export function errorMessage(error: unknown): string {
   const e = error as ApiError | undefined;
-  track("ui.error_shown", { outcome: "failure", error_code: e?.error?.code ?? "unknown" });
+  track("ui.error_shown", { outcome: "failure", error_code: e?.error?.code ?? "unknown", request_id: e?.error?.request_id || undefined });
   return e?.error?.message ?? "Something went wrong";
 }
 

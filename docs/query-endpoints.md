@@ -10,7 +10,7 @@ A published query endpoint lets another system, such as a BI tool, a spreadsheet
 
 ## Publishing
 
-Save the query in Query Studio first. Use `$1`, `$2`, … where the caller's values go:
+Save the query in Data → Queries first. Use `$1`, `$2`, … where the caller's values go:
 
 ```sql
 SELECT name, email, created_at FROM people
@@ -38,7 +38,9 @@ POST /v1/brands/{brand}/query-endpoints
 - `params` are bound in order as `$1`, `$2`, …, as values: they are never written into the SQL. Types are `text`, `integer`, `number`, `boolean`, `date`, `timestamp` and `uuid`. Publishing fails when the SQL uses a `$n` with no parameter declared for it.
 - The endpoint runs the saved query's current version (or `version`) and stays on it: editing the saved query changes nothing for callers until you move the endpoint (`PATCH … {"version": 3}`).
 - `row_cap` is 1 to 10,000 (default 1,000); `rate_per_minute` is 1 to 600 calls a minute per token (default 60).
+- `description` says what it returns, in plain English. Leave it out and Outflare writes one from the query: the table it reads, its filters, the parameters callers send, its order and its row limit, such as "People where country is the country you send and created is on or after the since you send, newest created first. Returns name, email and created, up to 1,000 rows a call. Callers send country (text) and since (date, optional, 2026-01-01 when left out)." It is written by rules, not by an AI model, so it costs nothing and needs no key. `POST /v1/brands/{brand}/query-endpoints/describe` with `saved_query_id` (and optionally `version`, `params` and `row_cap`) writes one without publishing (MCP: `describe_query_endpoint`). In the app the publish form fills the Description field with it and keeps it current as you name the parameters, until you type in it; Write it again puts the written one back, on the form and on the endpoint's page.
 - `PATCH /v1/brands/{brand}/query-endpoints/{endpoint}` changes the version, name, description, parameters, limits, or turns it off (`"status": "disabled"`) and on. Its saved query and slug never change. A change also fixes what it reads to the changer's read scopes.
+- `DELETE /v1/brands/{brand}/query-endpoints/{endpoint}` deletes it for good (owners and admins): calls to its address answer 404, the address can be used again, and its call log is deleted with it. Its saved query is kept, and the audit log keeps `query_endpoint.deleted` with what it was. To stop calls for a while, turn it off instead.
 
 ## Calling
 
@@ -57,7 +59,7 @@ The answer is the rows, as `POST …/query` returns them (`columns`, `rows`, `ro
 
 - `GET /v1/brands/{brand}/query-endpoints` lists the brand's endpoints with their calls in the last 24 hours and the last call.
 - `GET …/query-endpoints/{endpoint}/calls` is the call log, newest first.
-- The audit log has `query_endpoint.published`, `query_endpoint.updated`, `query_endpoint.disabled` and `query_endpoint.enabled`.
+- The audit log has `query_endpoint.published`, `query_endpoint.updated`, `query_endpoint.disabled`, `query_endpoint.enabled` and `query_endpoint.deleted`.
 - Operators see calls, errors and time on the Grafana row "Published query endpoints" ([monitoring](monitoring.md)).
 
 MCP has `list_query_endpoints` and `run_query_endpoint` (with a token that holds `query.endpoints`).

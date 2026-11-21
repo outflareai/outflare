@@ -157,6 +157,9 @@ func paymentResent(ctx context.Context, tx pgx.Tx, p *principal, ws string, v tr
 // with the same transaction stores nothing. A transaction that hasn't
 // succeeded, has no person or company, or is a credit counts nothing.
 func countPayment(ctx context.Context, tx pgx.Tx, ws string, t transactionView) (string, error) {
+	if err := notePaymentTrouble(ctx, tx, ws, t); err != nil {
+		return "", err
+	}
 	if t.RecordID == nil || t.Status != "succeeded" || t.Kind == "credit" {
 		return "", nil
 	}
@@ -209,6 +212,43 @@ func countPayment(ctx context.Context, tx pgx.Tx, ws string, t transactionView) 
 		}
 	}
 	return mid, nil
+}
+
+// notePaymentTrouble records, once each, the events that say a payment went
+// wrong for a known person: payment.failed for a payment whose status is
+// failed, and payment.disputed for a chargeback. Neither is money: revenue,
+// attribution and ad conversions never count them (a chargeback's money
+// comes off as payment.refunded, as before). They are there for segments,
+// journeys, alerts and reports, such as people whose card was declined.
+func notePaymentTrouble(ctx context.Context, tx pgx.Tx, ws string, t transactionView) error {
+	if t.RecordID == nil {
+		return nil
+	}
+	var name, slot string
+	switch {
+	case t.Kind == "payment" && t.Status == "failed":
+		name, slot = evPaymentFailed, "payment_failed"
+	case t.Kind == "chargeback" && t.Status != "failed":
+		name, slot = evPaymentDisputed, "payment_disputed"
+	default:
+		return nil
+	}
+	props := map[string]any{"amount_minor": t.AmountMinor, "currency": t.Currency, "transaction_id": t.ID, "source": t.Source}
+	if name == evPaymentDisputed {
+		props["dispute_id"] = t.SourceID
+		if t.RefundOf != nil {
+			props["payment_id"] = *t.RefundOf
+		}
+	} else {
+		props["payment_id"] = t.SourceID
+	}
+	ev := customers.Event{RecordID: *t.RecordID, Name: name, Source: "transactions", OccurredAt: t.OccurredAt,
+		MessageID: slot + ":" + t.BrandID + ":" + t.Source + ":" + t.SourceID, RequestID: RequestID(ctx), Properties: props}
+	if t.ProductID != nil {
+		ev.ProductID = *t.ProductID
+	}
+	_, err := customers.Record(ctx, tx, ws, ev)
+	return err
 }
 
 // countWaitingRefunds counts the brand's refunds of the payment with
@@ -350,10 +390,13 @@ func orderKey(props map[string]any, messageID string) string {
 // orderPayment counts a completed order (a server event with revenue, from
 // a known person) as a payment of brand, unless it is one already: the
 // same order id, or the same person, amount and currency within
-// paymentWindow, from the API or a billing connector. It returns the
-// message id of the payment.succeeded event the order is counted as, or ""
-// when the order holds no payment.
-func orderPayment(ctx context.Context, tx pgx.Tx, ws, brand, rec string, props map[string]any, messageID string, at time.Time) (string, error) {
+// paymentWindow, from the API or a billing connector. product is the
+// product the order names (its id), or nil: the payment is about that
+// product too, so its payment.succeeded moves lifecycle stages, and a
+// matching payment that names none learns it. It returns the message id of
+// the payment.succeeded event the order is counted as, or "" when the
+// order holds no payment.
+func orderPayment(ctx context.Context, tx pgx.Tx, ws, brand, rec string, product *string, props map[string]any, messageID string, at time.Time) (string, error) {
 	var brandCurrency string
 	if err := tx.QueryRow(ctx, `SELECT currency FROM brands WHERE id = $1 AND workspace_id = $2`, brand, ws).Scan(&brandCurrency); err != nil {
 		return "", err
@@ -374,6 +417,12 @@ func orderPayment(ctx context.Context, tx pgx.Tx, ws, brand, rec string, props m
 		if err := paymentMerged(ctx, tx, nil, ws, brand, orderSource, key, amount, cur, at, known); err != nil {
 			return "", err
 		}
+		// A payment that names no product learns it from the order.
+		if product != nil {
+			if _, err := tx.Exec(ctx, `UPDATE transactions SET product_id = $2, updated_at = now() WHERE id = $1 AND workspace_id = $3 AND brand_id = $4 AND product_id IS NULL`, known.id, *product, ws, brand); err != nil {
+				return "", err
+			}
+		}
 		if known.recordID != nil {
 			return paymentMessageID(brand, known.source, "payment", known.sourceID), nil
 		}
@@ -393,8 +442,12 @@ func orderPayment(ctx context.Context, tx pgx.Tx, ws, brand, rec string, props m
 			return "", err
 		}
 	}
+	productID := ""
+	if product != nil {
+		productID = *product
+	}
 	t, created, err := saveTransaction(ctx, tx, nil, ws, brand, newTransaction{RecordID: rec, Kind: "payment", Status: "succeeded", AmountMinor: amount,
-		Currency: cur, Source: orderSource, SourceID: key, Description: "Order Completed", OccurredAt: at})
+		Currency: cur, ProductID: productID, Source: orderSource, SourceID: key, Description: "Order Completed", OccurredAt: at})
 	if errors.Is(err, errTransactionDeleted) {
 		return "", nil
 	}

@@ -165,7 +165,7 @@ func (s *Server) sendSalesReply(w http.ResponseWriter, r *http.Request) {
 			return e
 		}
 		if l.State != "active" && l.State != "customer" {
-			return errInvalid("reopen this lead before sending")
+			return errInvalid("reopen this conversation before sending")
 		}
 		d, e := s.salesDraft(r.Context(), tx, a, l.ID)
 		if e != nil {
@@ -244,7 +244,7 @@ func (s *Server) salesSendJob(ctx context.Context, job jobs.Job) error {
 	// mail must never turn an uncertain attempt into a safely retryable failure.
 	var token string
 	if kind != "introduction" {
-		_, _, token, err = s.salesGrant(ctx, a, owner)
+		_, _, token, err = s.salesGrant(ctx, a, owner, true)
 		if err != nil {
 			return err
 		}
@@ -279,10 +279,19 @@ func (s *Server) salesSendJob(ctx context.Context, job jobs.Job) error {
 			return s.salesSendResult(ctx, a, l, msg, "failed", "assignee_disconnected", target)
 		}
 	}
-	decisions, err := policy.CheckRecipientsIn(ctx, s.pool, a.WorkspaceID, a.Brand, append(append([]string{}, msg.To...), msg.CC...))
+	decisions, err := policy.CheckRecipientsIn(ctx, s.pool, a.WorkspaceID, a.Brand, msg.To)
 	if err != nil {
 		return err
 	}
+	colleagues, err := s.salesCopyColleagues(ctx, a, l, target)
+	if err != nil {
+		return err
+	}
+	copies, err := policy.CheckSalesCopiesIn(ctx, s.pool, a.WorkspaceID, a.Brand, msg.CC, colleagues)
+	if err != nil {
+		return err
+	}
+	decisions = append(decisions, copies...)
 	for _, d := range decisions {
 		if !d.Allowed {
 			return s.salesSendResult(ctx, a, l, msg, "failed", "policy_blocked", target)
@@ -377,6 +386,54 @@ func (s *Server) salesSendJob(ctx context.Context, job jobs.Job) error {
 	}
 	return s.salesSendResult(ctx, a, l, msg, "accepted", "", target)
 }
+
+// Only connected participants on this conversation receive colleague copies. Merely
+// sharing a company domain, being in the workspace, or appearing on a source
+// email's CC line does not establish that relationship.
+func (s *Server) salesCopyColleagues(ctx context.Context, a *access, l salesLead, target *string) ([]string, error) {
+	ids := []string{}
+	for _, id := range []*string{l.OwnerID, l.SDRID, l.AEID, target} {
+		if id != nil && !slices.Contains(ids, *id) {
+			ids = append(ids, *id)
+		}
+	}
+	rows, err := s.pool.Query(ctx, `SELECT u.id::text,lower(u.email),c.workspace_integration_id::text
+	 FROM users u JOIN memberships m ON m.user_id=u.id AND m.workspace_id=$1
+	 JOIN sales_members sm ON sm.user_id=u.id AND sm.workspace_id=$1 AND sm.brand_id=$2 AND sm.role IN ('sdr','ae')
+	 JOIN sales_mail_connections c ON c.owner_id=u.id AND c.workspace_id=$1 AND c.brand_id=$2 AND c.status='connected'
+	 WHERE u.id=ANY($3::uuid[]) AND u.disabled_at IS NULL
+	 AND (m.brand_ids IS NULL OR cardinality(m.brand_ids)=0 OR $2::uuid=ANY(m.brand_ids))`, a.WorkspaceID, a.Brand, ids)
+	if err != nil {
+		return nil, err
+	}
+	type colleague struct {
+		id, email   string
+		integration *string
+	}
+	people, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (colleague, error) {
+		var person colleague
+		err := row.Scan(&person.id, &person.email, &person.integration)
+		return person, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	emails := []string{}
+	for _, person := range people {
+		if person.integration != nil {
+			current, eligible, err := s.salesWorkspaceFor(ctx, s.pool, a.WorkspaceID, a.Brand, person.id)
+			if err != nil {
+				return nil, err
+			}
+			if !eligible || current != *person.integration {
+				continue
+			}
+		}
+		emails = append(emails, person.email)
+	}
+	return emails, nil
+}
+
 func (s *Server) salesSendResult(ctx context.Context, a *access, l salesLead, msg salesMessage, status, code string, target *string) error {
 	changed := false
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -413,6 +470,13 @@ func (s *Server) salesSendResult(ctx context.Context, a *access, l salesLead, ms
 			if target != nil && (msg.Kind == "introduction" || msg.Kind == "handoff") {
 				if msg.Kind == "handoff" && deref(current.OwnerID) == a.UserID {
 					_, err = tx.Exec(ctx, `UPDATE sales_leads SET owner_id=$4,ae_id=$4,introduced_by=$5,introduced_at=now() WHERE workspace_id=$1 AND brand_id=$2 AND id=$3`, a.WorkspaceID, a.Brand, l.ID, *target, a.UserID)
+					if err == nil {
+						// The account manager now owns the person in the CRM too.
+						err = salesSetOwner(ctx, tx, a, l.RecordID, *target)
+					}
+					if err == nil {
+						err = s.salesEvent(ctx, tx, a, current, "sdr", "handoff_completed", nil, map[string]string{"message_id": msg.ID, "assignee_id": *target})
+					}
 				} else {
 					_, err = tx.Exec(ctx, `UPDATE sales_leads SET introduced_by=$4,introduced_at=now() WHERE workspace_id=$1 AND brand_id=$2 AND id=$3`, a.WorkspaceID, a.Brand, l.ID, a.UserID)
 				}

@@ -168,6 +168,17 @@ type Result struct {
 	OwnerID  *string `json:"owner_id"`
 }
 
+// AtWork is SQL for whether the routing_people row p says its person is
+// at work now: true with no row or no hours.
+const AtWork = `(p.user_id IS NULL OR (
+	(cardinality(p.days) = 0 OR extract(isodow FROM now() AT TIME ZONE p.timezone)::int = ANY(p.days))
+	AND (p.from_minute IS NULL OR CASE WHEN p.to_minute > p.from_minute
+		THEN (extract(hour FROM now() AT TIME ZONE p.timezone) * 60 + extract(minute FROM now() AT TIME ZONE p.timezone))::int >= p.from_minute
+			AND (extract(hour FROM now() AT TIME ZONE p.timezone) * 60 + extract(minute FROM now() AT TIME ZONE p.timezone))::int < p.to_minute
+		ELSE (extract(hour FROM now() AT TIME ZONE p.timezone) * 60 + extract(minute FROM now() AT TIME ZONE p.timezone))::int >= p.from_minute
+			OR (extract(hour FROM now() AT TIME ZONE p.timezone) * 60 + extract(minute FROM now() AT TIME ZONE p.timezone))::int < p.to_minute
+		END)))`
+
 // Route finds the rule for a record and, unless dry, makes the member it
 // picks the record's owner, in tx. rules are the brand's active rules for
 // the record's type, or nil to read them. A record with an owner keeps
@@ -220,12 +231,18 @@ func Route(ctx context.Context, tx pgx.Tx, ws, rec string, rules []Rule, replace
 		}
 	}
 	// The member of the pool who owns the fewest of the brand's records;
-	// on a tie, the one listed first.
+	// on a tie, the one listed first. Someone who is away or at their
+	// capacity gets nothing. People at work now come before people who are
+	// off, and when nobody is at work the record still goes to the next
+	// person, so nothing waits without an owner.
 	var owner string
 	err = tx.QueryRow(ctx, `SELECT m.user_id::text FROM memberships m
+		LEFT JOIN routing_people p ON p.brand_id = $3 AND p.user_id = m.user_id
+		CROSS JOIN LATERAL (SELECT count(*) AS n FROM records r WHERE r.workspace_id = $1 AND r.brand_id = $3 AND r.attributes->>'owner' = m.user_id::text
+			AND r.archived_at IS NULL AND r.merged_into IS NULL AND r.deleted_at IS NULL) owned
 		WHERE m.workspace_id = $1 AND m.user_id::text = ANY($2::text[])
-		ORDER BY (SELECT count(*) FROM records r WHERE r.workspace_id = $1 AND r.brand_id = $3 AND r.attributes->>'owner' = m.user_id::text
-			AND r.archived_at IS NULL AND r.merged_into IS NULL AND r.deleted_at IS NULL), array_position($2::text[], m.user_id::text)
+			AND NOT COALESCE(p.paused, false) AND (p.capacity IS NULL OR owned.n < p.capacity)
+		ORDER BY `+AtWork+` DESC, owned.n, array_position($2::text[], m.user_id::text)
 		LIMIT 1`, ws, pool, *brand).Scan(&owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		out.Outcome = "no_member"

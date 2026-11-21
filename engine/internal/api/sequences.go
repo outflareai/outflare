@@ -958,6 +958,9 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		LeadIDs []string `json:"lead_ids"`
 		ListID  *string  `json:"list_id"`
+		// People from the CRM's People list: each gets the brand's lead
+		// for their email (made when they have none) and is added.
+		RecordIDs []string `json:"record_ids"`
 		// Leave out leads already active in another sequence, so nobody
 		// gets two sequences at once. Default true.
 		SkipActiveElsewhere *bool `json:"skip_active_elsewhere"`
@@ -965,8 +968,18 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if (len(req.LeadIDs) == 0) == (req.ListID == nil) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "send either lead_ids or list_id")
+	given := 0
+	for _, ok := range []bool{len(req.LeadIDs) > 0, req.ListID != nil, len(req.RecordIDs) > 0} {
+		if ok {
+			given++
+		}
+	}
+	if given != 1 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "send one of lead_ids, list_id or record_ids")
+		return
+	}
+	if len(req.RecordIDs) > 10000 || slices.ContainsFunc(req.RecordIDs, func(s string) bool { return !validUUID(s) }) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "record_ids must be up to 10000 person record ids")
 		return
 	}
 	if len(req.LeadIDs) > 10000 || slices.ContainsFunc(req.LeadIDs, func(s string) bool { return !validUUID(s) }) || (req.ListID != nil && !validUUID(*req.ListID)) {
@@ -1000,9 +1013,20 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		var err error
+		noEmail := 0
+		if len(req.RecordIDs) > 0 {
+			if req.LeadIDs, noEmail, err = leadsForPeople(ctx, tx, a.WorkspaceID, id, req.RecordIDs); err != nil {
+				return err
+			}
+			if len(req.LeadIDs) == 0 {
+				res.NoEmail = noEmail
+				return nil
+			}
+		}
 		if res, err = enrollLeads(ctx, tx, a.WorkspaceID, id, req.LeadIDs, req.ListID, skip); err != nil {
 			return err
 		}
+		res.NoEmail = noEmail
 		if res.Enrolled == 0 {
 			return nil
 		}
@@ -1024,6 +1048,70 @@ type enrollCounts struct {
 	// Left out by the sequence's exclusion.
 	Excluded        int `json:"excluded"`
 	ActiveElsewhere int `json:"active_elsewhere"`
+	// People sent as record_ids with no email to write to.
+	NoEmail int `json:"no_email"`
+}
+
+// leadsForPeople is the sequence's brand's lead for each of these people,
+// made from their email when they have none (a verified one first, then
+// the newest), and how many had no email. People of another brand are
+// left out, as if they weren't sent.
+func leadsForPeople(ctx context.Context, tx pgx.Tx, ws, sequenceID string, recordIDs []string) ([]string, int, error) {
+	rows, err := tx.Query(ctx, `SELECT r.id::text, s.brand_id::text,
+			(SELECT l.id::text FROM leads l WHERE l.workspace_id = r.workspace_id AND l.record_id = r.id AND l.brand_id = s.brand_id ORDER BY l.created_at LIMIT 1),
+			COALESCE((SELECT i.value FROM record_identities i WHERE i.record_id = r.id AND i.namespace = 'email' AND i.valid_to IS NULL
+				ORDER BY i.preferred DESC, i.verified DESC, i.valid_from DESC, i.id LIMIT 1), ''),
+			COALESCE(r.attributes->>'first_name', ''), COALESCE(r.attributes->>'last_name', ''), COALESCE(r.attributes->>'job_title', ''),
+			COALESCE((SELECT c.name FROM records c WHERE c.id::text = r.attributes->'companies'->>0 AND c.workspace_id = r.workspace_id), '')
+		FROM records r JOIN sequences s ON s.id = $3 AND s.workspace_id = r.workspace_id
+		WHERE r.workspace_id = $1 AND r.id = ANY($2::uuid[]) AND r.record_type = 'person' AND r.merged_into IS NULL
+			AND r.brand_id IS NOT DISTINCT FROM s.brand_id`, ws, recordIDs, sequenceID)
+	if err != nil {
+		return nil, 0, err
+	}
+	type person struct{ id, brand, lead, email, first, last, title, company string }
+	var people []person
+	for rows.Next() {
+		var p person
+		var brand, lead *string
+		if err := rows.Scan(&p.id, &brand, &lead, &p.email, &p.first, &p.last, &p.title, &p.company); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		p.brand, p.lead = deref(brand), deref(lead)
+		people = append(people, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var out []string
+	noEmail := 0
+	for _, p := range people {
+		switch {
+		case p.lead != "":
+			out = append(out, p.lead)
+			continue
+		case p.email == "":
+			noEmail++
+			continue
+		}
+		if _, err := leads.ImportIn(ctx, tx, ws, p.brand, "crm", nil, []leads.Lead{{Email: p.email, FirstName: p.first, LastName: p.last, Title: p.title, Company: p.company}}); err != nil {
+			return nil, 0, err
+		}
+		var lead string
+		err := tx.QueryRow(ctx, `UPDATE leads SET record_id = COALESCE(record_id, $4::uuid) WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($2, '')::uuid
+			AND lower(email) = lower($3) RETURNING id::text`, ws, p.brand, p.email, p.id).Scan(&lead)
+		if errors.Is(err, pgx.ErrNoRows) {
+			noEmail++ // another brand's lead already, see leads.ImportIn
+			continue
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, lead)
+	}
+	return out, noEmail, nil
 }
 
 // enrollLeads adds workspace leads, by id or from a list, to a sequence the

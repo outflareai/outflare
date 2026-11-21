@@ -94,26 +94,33 @@ type savedQueryView struct {
 	CurrentVersion int         `json:"current_version"`
 	SQL            string      `json:"sql"`
 	Chart          *queryChart `json:"chart"`
-	CreatedBy      *string     `json:"created_by"`
-	UpdatedBy      *string     `json:"updated_by"`
-	ArchivedAt     *time.Time  `json:"archived_at"`
-	CreatedAt      time.Time   `json:"created_at"`
-	UpdatedAt      time.Time   `json:"updated_at"`
+	// Builder is the builder the SQL was written from, or null for SQL
+	// written by hand (query_builder.go).
+	Builder json.RawMessage `json:"builder"`
+	// Question is the description in English it was made from, or "".
+	Question   string     `json:"question"`
+	CreatedBy  *string    `json:"created_by"`
+	UpdatedBy  *string    `json:"updated_by"`
+	ArchivedAt *time.Time `json:"archived_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 type savedQueryVersionView struct {
-	Version      int         `json:"version"`
-	SQL          string      `json:"sql"`
-	Chart        *queryChart `json:"chart"`
-	Note         string      `json:"note"`
-	RestoredFrom *int        `json:"restored_from"`
-	Current      bool        `json:"current"`
-	CreatedBy    *string     `json:"created_by"`
-	CreatedAt    time.Time   `json:"created_at"`
+	Version      int             `json:"version"`
+	SQL          string          `json:"sql"`
+	Chart        *queryChart     `json:"chart"`
+	Builder      json.RawMessage `json:"builder"`
+	Question     string          `json:"question"`
+	Note         string          `json:"note"`
+	RestoredFrom *int            `json:"restored_from"`
+	Current      bool            `json:"current"`
+	CreatedBy    *string         `json:"created_by"`
+	CreatedAt    time.Time       `json:"created_at"`
 }
 
 const savedQueryColumns = `q.id, q.brand_id, q.name, q.description, q.visibility, q.owner_id, q.current_version, v.sql, v.chart,
-	q.created_by, q.updated_by, q.archived_at, q.created_at, q.updated_at
+	COALESCE(v.builder, 'null'::jsonb), v.question, q.created_by, q.updated_by, q.archived_at, q.created_at, q.updated_at
 	FROM saved_queries q JOIN saved_query_versions v ON v.query_id = q.id AND v.version = q.current_version`
 
 type rowScanner interface {
@@ -124,7 +131,7 @@ func scanSavedQuery(row rowScanner, a *access) (savedQueryView, error) {
 	var v savedQueryView
 	var chart []byte
 	err := row.Scan(&v.ID, &v.BrandID, &v.Name, &v.Description, &v.Visibility, &v.OwnerID, &v.CurrentVersion, &v.SQL, &chart,
-		&v.CreatedBy, &v.UpdatedBy, &v.ArchivedAt, &v.CreatedAt, &v.UpdatedAt)
+		&v.Builder, &v.Question, &v.CreatedBy, &v.UpdatedBy, &v.ArchivedAt, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		return v, err
 	}
@@ -229,8 +236,12 @@ type savedQueryInput struct {
 	Description *string              `json:"description"`
 	SQL         *string              `json:"sql"`
 	Chart       optional[queryChart] `json:"chart"`
-	Visibility  *string              `json:"visibility"`
-	Note        *string              `json:"note"`
+	// Builder, when sent, writes the SQL (sql is then left out); null
+	// keeps the SQL and drops the builder.
+	Builder    optional[json.RawMessage] `json:"builder"`
+	Question   *string                   `json:"question"`
+	Visibility *string                   `json:"visibility"`
+	Note       *string                   `json:"note"`
 }
 
 // check validates the fields sent, trimming them in place.
@@ -258,6 +269,12 @@ func (in *savedQueryInput) check() string {
 			return msg
 		}
 	}
+	if in.Question != nil {
+		*in.Question = strings.TrimSpace(*in.Question)
+		if len([]rune(*in.Question)) > queryAskMaxLen {
+			return fmt.Sprintf("question is at most %d characters", queryAskMaxLen)
+		}
+	}
 	if in.Visibility != nil && *in.Visibility != "private" && *in.Visibility != "brand" {
 		return "visibility is private (only you) or brand (everyone who can query the brand)"
 	}
@@ -268,6 +285,39 @@ func (in *savedQueryInput) check() string {
 		}
 	}
 	return ""
+}
+
+// builderSQL writes a builder sent with a save as its SQL, normalised for
+// storing. It answers false after answering the request when the builder
+// can't be written.
+func (s *Server) builderSQL(w http.ResponseWriter, r *http.Request, a *access, in *savedQueryInput) ([]byte, bool) {
+	if !in.Builder.Set || in.Builder.Value == nil {
+		return nil, true
+	}
+	b, err := parseBuilder(*in.Builder.Value)
+	if s.builderFailed(w, r, err) {
+		return nil, false
+	}
+	cat, err := s.builderCatalogFor(r.Context(), a)
+	if err != nil {
+		s.internal(w, r, err)
+		return nil, false
+	}
+	sql, err := compileBuilder(b, cat)
+	if s.builderFailed(w, r, err) {
+		return nil, false
+	}
+	in.SQL = &sql
+	raw, _ := json.Marshal(b)
+	return raw, true
+}
+
+// rawOrNil stores an absent builder as SQL null.
+func rawOrNil(b json.RawMessage) []byte {
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	return b
 }
 
 func chartJSON(c *queryChart) []byte {
@@ -302,13 +352,21 @@ func (s *Server) createSavedQuery(w http.ResponseWriter, r *http.Request) {
 	case in.Name == nil:
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "name is required")
 		return
-	case in.SQL == nil:
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "sql is required: the query to save")
+	case in.SQL == nil && in.Builder.Value == nil:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "sql or builder is required: the query to save")
 		return
 	}
 	if msg := in.check(); msg != "" {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
 		return
+	}
+	builder, ok := s.builderSQL(w, r, a, &in)
+	if !ok {
+		return
+	}
+	question := ""
+	if in.Question != nil {
+		question = *in.Question
 	}
 	visibility := "private"
 	if in.Visibility != nil {
@@ -333,13 +391,13 @@ func (s *Server) createSavedQuery(w http.ResponseWriter, r *http.Request) {
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $7) RETURNING id`, a.WorkspaceID, a.Brand, *in.Name, desc, visibility, owner, actorOrNil(a)).Scan(&id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO saved_query_versions (query_id, workspace_id, brand_id, version, sql, chart, note, created_by)
-			VALUES ($1, $2, $3, 1, $4, $5, $6, $7)`, id, a.WorkspaceID, a.Brand, *in.SQL, chartJSON(in.Chart.Value), note, actorOrNil(a)); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO saved_query_versions (query_id, workspace_id, brand_id, version, sql, chart, builder, question, note, created_by)
+			VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, $9)`, id, a.WorkspaceID, a.Brand, *in.SQL, chartJSON(in.Chart.Value), builder, question, note, actorOrNil(a)); err != nil {
 			return err
 		}
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "query.saved", "saved_query", id,
 			map[string]any{"brand_id": a.Brand, "name": *in.Name, "visibility": visibility, "version": 1},
-			map[string]any{"visibility": visibility, "version": 1, "chart": chartKind(in.Chart.Value)})
+			map[string]any{"visibility": visibility, "version": 1, "chart": chartKind(in.Chart.Value), "builder": builder != nil, "from_question": question != ""})
 	})
 	if err != nil {
 		s.internal(w, r, err)
@@ -372,6 +430,10 @@ func (s *Server) updateSavedQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
 		return
 	}
+	newBuilder, ok := s.builderSQL(w, r, a, &in)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	done := false
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -385,14 +447,25 @@ func (s *Server) updateSavedQuery(w http.ResponseWriter, r *http.Request) {
 			done = true
 			return nil
 		}
-		sql, chart := v.SQL, v.Chart
+		sql, chart, builder, question := v.SQL, v.Chart, rawOrNil(v.Builder), v.Question
 		if in.SQL != nil {
 			sql = *in.SQL
 		}
 		if in.Chart.Set {
 			chart = in.Chart.Value
 		}
-		newVersion := sql != v.SQL || string(chartJSON(chart)) != string(chartJSON(v.Chart))
+		switch {
+		case in.Builder.Set:
+			builder = newBuilder
+		case sql != v.SQL:
+			// SQL changed by hand no longer says what the builder says.
+			builder = nil
+		}
+		if in.Question != nil {
+			question = *in.Question
+		}
+		newVersion := sql != v.SQL || string(chartJSON(chart)) != string(chartJSON(v.Chart)) ||
+			string(builder) != string(rawOrNil(v.Builder)) || question != v.Question
 		var fields []string
 		if in.Name != nil && *in.Name != v.Name {
 			fields = append(fields, "name")
@@ -411,8 +484,8 @@ func (s *Server) updateSavedQuery(w http.ResponseWriter, r *http.Request) {
 			if in.Note != nil {
 				note = *in.Note
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO saved_query_versions (query_id, workspace_id, brand_id, version, sql, chart, note, created_by)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, v.ID, a.WorkspaceID, a.Brand, version, sql, chartJSON(chart), note, actorOrNil(a)); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO saved_query_versions (query_id, workspace_id, brand_id, version, sql, chart, builder, question, note, created_by)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, v.ID, a.WorkspaceID, a.Brand, version, sql, chartJSON(chart), builder, question, note, actorOrNil(a)); err != nil {
 				return err
 			}
 		}
@@ -424,7 +497,7 @@ func (s *Server) updateSavedQuery(w http.ResponseWriter, r *http.Request) {
 		if newVersion {
 			if err := recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "query.version_created", "saved_query", v.ID,
 				map[string]any{"brand_id": a.Brand, "version": version, "previous_version": v.CurrentVersion},
-				map[string]any{"version": version, "chart": chartKind(chart), "sql_changed": sql != v.SQL}); err != nil {
+				map[string]any{"version": version, "chart": chartKind(chart), "sql_changed": sql != v.SQL, "builder": builder != nil}); err != nil {
 				return err
 			}
 		}
@@ -488,7 +561,7 @@ func (s *Server) archiveSavedQuery(w http.ResponseWriter, r *http.Request) {
 func scanVersion(row rowScanner, current int) (savedQueryVersionView, error) {
 	var v savedQueryVersionView
 	var chart []byte
-	if err := row.Scan(&v.Version, &v.SQL, &chart, &v.Note, &v.RestoredFrom, &v.CreatedBy, &v.CreatedAt); err != nil {
+	if err := row.Scan(&v.Version, &v.SQL, &chart, &v.Builder, &v.Question, &v.Note, &v.RestoredFrom, &v.CreatedBy, &v.CreatedAt); err != nil {
 		return v, err
 	}
 	if len(chart) > 0 {
@@ -501,7 +574,7 @@ func scanVersion(row rowScanner, current int) (savedQueryVersionView, error) {
 	return v, nil
 }
 
-const versionColumns = `version, sql, chart, note, restored_from, created_by, created_at FROM saved_query_versions`
+const versionColumns = `version, sql, chart, COALESCE(builder, 'null'::jsonb), question, note, restored_from, created_by, created_at FROM saved_query_versions`
 
 func (s *Server) listSavedQueryVersions(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -597,8 +670,8 @@ func (s *Server) restoreSavedQueryVersion(w http.ResponseWriter, r *http.Request
 			note = strings.TrimSpace(*in.Note)
 		}
 		version := q.CurrentVersion + 1
-		if _, err := tx.Exec(ctx, `INSERT INTO saved_query_versions (query_id, workspace_id, brand_id, version, sql, chart, note, restored_from, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, q.ID, a.WorkspaceID, a.Brand, version, old.SQL, chartJSON(old.Chart), note, old.Version, actorOrNil(a)); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO saved_query_versions (query_id, workspace_id, brand_id, version, sql, chart, builder, question, note, restored_from, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, q.ID, a.WorkspaceID, a.Brand, version, old.SQL, chartJSON(old.Chart), rawOrNil(old.Builder), old.Question, note, old.Version, actorOrNil(a)); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE saved_queries SET current_version = $2, updated_by = $3, updated_at = now() WHERE id = $1`, q.ID, version, actorOrNil(a)); err != nil {

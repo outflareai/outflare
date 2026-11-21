@@ -154,7 +154,7 @@ func (s *Server) adSetupSteps(ctx context.Context, ws, brand string) (adSetupVie
 		add("knowledge_sheet", "Review what Outflare thinks you sell", true, "Reviewed on "+c.reviewedAt.UTC().Format("2 Jan 2006")+".", "get_brand_context", "company", "person")
 	}
 	add("consent", "Choose who conversions are sent for", c.hasConsent,
-		map[bool]string{true: "The consent setting is chosen.", false: "Choose opt_out (everyone unless they said no) or opt_in (only people who said yes)."}[c.hasConsent],
+		map[bool]string{true: "The consent setting is chosen.", false: "Choose opt_out (everyone unless they said no) or opt_in (only people who said yes). A person can also choose collected in the web app when the site already collects consent from everyone."}[c.hasConsent],
 		"set_ad_settings", "ads", "person")
 	v.Ready = v.Done == v.Total
 	return v, nil

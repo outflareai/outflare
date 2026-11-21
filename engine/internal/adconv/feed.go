@@ -150,9 +150,13 @@ func firstPaymentSQL(ledger bool) string {
 // for a repeat_payment rule only later ones; other roles take every event
 // of their name. A payment with no record cannot be told apart and goes to
 // neither.
-func roleFilterSQL(ledger bool) string {
-	return `(r.feed_role NOT IN ('first_payment', 'repeat_payment')
-		OR (e.record_id IS NOT NULL AND ((r.feed_role = 'first_payment') = ` + firstPaymentSQL(ledger) + `)))`
+func roleFilterSQL(ledger bool) string { return roleFilterOn("r.feed_role", ledger) }
+
+// roleFilterOn is roleFilterSQL with the rule's role given as SQL (a
+// column or a parameter), for queries that read events without the rule.
+func roleFilterOn(role string, ledger bool) string {
+	return `(` + role + ` NOT IN ('first_payment', 'repeat_payment')
+		OR (e.record_id IS NOT NULL AND ((` + role + ` = 'first_payment') = ` + firstPaymentSQL(ledger) + `)))`
 }
 
 // hasLedger says whether the paid ads ledger's ad_revenue table exists.

@@ -22,10 +22,10 @@ func TestBrandRoutes(t *testing.T) {
 		t.Fatalf("first brand: %v", first)
 	}
 	acme := first["id"].(string)
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
 
 	// The owner reads either brand by its id alone.
-	if b := owner.must(200, "GET", "/v1/brands/"+rp, nil); b["handle"] != "repocket" {
+	if b := owner.must(200, "GET", "/v1/brands/"+rp, nil); b["handle"] != "summitly" {
 		t.Fatalf("brand: %v", b)
 	}
 	owner.must(200, "GET", "/v1/brands/"+acme, nil)
@@ -33,13 +33,13 @@ func TestBrandRoutes(t *testing.T) {
 	owner.must(404, "GET", "/v1/brands/00000000-0000-0000-0000-000000000000", nil)
 
 	// A token made for one brand sees only that one; the other is 404.
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket app", "scopes": []string{"workspace.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly app", "scopes": []string{"workspace.read"}, "brand": "summitly"})
 	app := &client{t: t, h: h, bearer: tok["token"].(string)}
 	app.must(200, "GET", "/v1/brands/"+rp, nil)
 	app.must(404, "GET", "/v1/brands/"+acme, nil)
 
 	// A token without the scope is refused for its own brand.
-	bare := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Leads only", "scopes": []string{"leads.read"}, "brand": "repocket"})
+	bare := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Leads only", "scopes": []string{"leads.read"}, "brand": "summitly"})
 	(&client{t: t, h: h, bearer: bare["token"].(string)}).must(403, "GET", "/v1/brands/"+rp, nil)
 
 	// Another workspace's token can't see it at all, even with every scope

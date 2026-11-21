@@ -7,7 +7,7 @@ import time
 import httpx
 import pytest
 
-from outflare import Outflare, OutflareError, WebhookVerificationError, is_held, verify_webhook
+from outflare import Outflare, OutflareError, WebhookVerificationError, identify_signature, is_held, verify_webhook
 
 WS = "11111111-1111-4111-8111-111111111111"
 BRAND = "22222222-2222-4222-8222-222222222222"
@@ -172,3 +172,10 @@ def test_flags_bootstrap_tag_is_escaped():
         "flags": {"hero": "faster", "chat": False},
         "payloads": {"hero": {"headline": "</script><b>Ship & go</b>"}},
     }
+
+
+def test_identify_signature():
+    assert (
+        identify_signature("ofid_test_not_a_real_secret", "u-ana")
+        == "7df1355d27af7ca41cfa82daf55981e57222ef17f006829f2da8bf8df8501bbc"
+    )

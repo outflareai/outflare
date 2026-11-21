@@ -358,7 +358,7 @@ type conversionResult struct {
 	Credited bool `json:"credited"`
 	// Reason says why it wasn't credited: no_partner, partner_inactive,
 	// program_inactive, self_referral, sale_not_found, currency,
-	// lead_expired or country_blocked.
+	// lead_expired, country_blocked or before_credits_from.
 	Reason     string                 `json:"reason,omitempty"`
 	Duplicate  bool                   `json:"duplicate"`
 	PartnerID  *string                `json:"partner_id"`
@@ -376,16 +376,17 @@ type membershipRow struct {
 	groupID, brandID                                                      *string
 	windowDays, holdDays                                                  int
 	autoApprove, codesWin, blockSelf                                      bool
+	creditsFrom                                                           *time.Time
 }
 
 const membershipCols = `m.id::text, m.program_id::text, m.record_id::text, m.status, p.status, p.currency, p.kind, p.credit_model,
-	m.group_id::text, p.brand_id::text, p.credit_window_days, p.hold_days, p.auto_approve, p.codes_win, p.block_self_referrals
+	m.group_id::text, p.brand_id::text, p.credit_window_days, p.hold_days, p.auto_approve, p.codes_win, p.block_self_referrals, p.credits_from
 	FROM partner_memberships m JOIN partner_programs p ON p.id = m.program_id`
 
 func scanMembership(row pgx.Row) (membershipRow, error) {
 	var m membershipRow
 	err := row.Scan(&m.id, &m.programID, &m.recordID, &m.status, &m.programStatus, &m.currency, &m.kind, &m.model,
-		&m.groupID, &m.brandID, &m.windowDays, &m.holdDays, &m.autoApprove, &m.codesWin, &m.blockSelf)
+		&m.groupID, &m.brandID, &m.windowDays, &m.holdDays, &m.autoApprove, &m.codesWin, &m.blockSelf, &m.creditsFrom)
 	return m, err
 }
 
@@ -728,6 +729,9 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	switch {
 	case m == nil:
 		c.res.Reason = "no_partner"
+		return nil
+	case m.creditsFrom != nil && in.at.Before(*m.creditsFrom):
+		c.res.Reason = "before_credits_from"
 		return nil
 	case m.recordID == rec && m.blockSelf:
 		c.res.Reason = "self_referral"

@@ -16,7 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { errorMessage } from "@/api";
 import { ProposalDocument } from "./ProposalDocument";
-import { proposalStage, type Proposal } from "./proposals";
+import { CounterForm, CounterHistory, LockedTerms } from "./CounterOffer";
+import { maxCounterRounds, proposalStage, type Proposal } from "./proposals";
 import { request, type Me, type Program, money } from "./client";
 export const invitationToken =
   /(?:^#|&)invite=(ofpi_[A-Za-z0-9_-]+)/.exec(location.hash)?.[1] || "";
@@ -231,6 +232,7 @@ export function PartnerProposals({
     [busy, setBusy] = useState(false),
     [agree, setAgree] = useState(false),
     [quote, setQuote] = useState(""),
+    [countering, setCountering] = useState(false),
     [note, setNote] = useState("");
   const load = useCallback(
     async () =>
@@ -258,12 +260,14 @@ export function PartnerProposals({
             accept: "Proposal accepted",
             decline: "Proposal declined",
             quote: "Quote submitted",
+            counter: "Changes sent to the brand",
             billing: "Invoice instructions saved",
             submit: "Work submitted for brand review",
           } as Record<string, string>
         )[action] || "Saved",
       );
       setAgree(false);
+      setCountering(false);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -301,8 +305,24 @@ export function PartnerProposals({
               proposal={p}
               currency={me.currency}
             />
-            {p.status === "offered" && (
+            {(p.progress.counters || []).length > 0 && (
+              <section className="space-y-3 border-t pt-6">
+                <h3 className="text-base font-semibold">Changes so far</h3>
+                <CounterHistory proposal={p} currency={me.currency} />
+              </section>
+            )}
+            {p.status === "offered" && countering && (
+              <CounterForm
+                proposal={p}
+                currency={me.currency}
+                disabled={busy || me.read_only}
+                onCancel={() => setCountering(false)}
+                onSend={(body) => void act("counter", body)}
+              />
+            )}
+            {p.status === "offered" && !countering && (
               <div className="space-y-4 border-t pt-6">
+                {p.config.removal && <LockedTerms rule={p.config.removal} />}
                 <label className="flex items-start gap-3 text-sm leading-6">
                   <input
                     type="checkbox"
@@ -320,6 +340,15 @@ export function PartnerProposals({
                   >
                     Accept proposal
                   </Button>
+                  {(p.progress.counters || []).length < maxCounterRounds && (
+                    <Button
+                      variant="outline"
+                      disabled={busy || me.read_only}
+                      onClick={() => setCountering(true)}
+                    >
+                      Suggest changes
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     disabled={busy || me.read_only}
@@ -370,12 +399,18 @@ export function PartnerProposals({
                 </Button>
               </form>
             )}
-            {p.status === "quote_received" && (
-              <p className="rounded-lg bg-muted/40 p-4 text-sm">
-                Quote submitted: {money(p.progress.quoted_cents, me.currency)}.
-                The brand will prepare a final offer for you to review.
-              </p>
-            )}
+            {p.status === "quote_received" &&
+              ((p.progress.counters || []).length ? (
+                <p className="rounded-lg bg-muted/40 p-4 text-sm">
+                  Your changes were sent. The brand can accept them, which makes
+                  them the agreement, or send you a new offer.
+                </p>
+              ) : (
+                <p className="rounded-lg bg-muted/40 p-4 text-sm">
+                  Quote submitted: {money(p.progress.quoted_cents, me.currency)}
+                  . The brand will prepare a final offer for you to review.
+                </p>
+              ))}
           </Card>
           {p.status === "accepted" && (
             <>

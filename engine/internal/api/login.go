@@ -89,6 +89,14 @@ func (s *Server) googleStart(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	// Gmail consent for CRM email and Sales comes back here too, so the
+	// Google OAuth client needs only this one redirect URI (see
+	// google_mail_callback.go). Their states carry a prefix that a sign-in
+	// state (base64 JSON) never starts with.
+	if h := s.mailConsentHandler(r.URL.Query().Get("state")); h != nil {
+		h(w, r)
+		return
+	}
 	back := "/"
 	finish := func(params url.Values) {
 		http.SetCookie(w, &http.Cookie{Name: loginNonceCookie, Value: "", Path: "/v1/auth/google", MaxAge: -1, HttpOnly: true, Secure: s.secureCookies})

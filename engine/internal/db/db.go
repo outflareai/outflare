@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -91,4 +92,30 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
 		applied = append(applied, name)
 	}
 	return applied, nil
+}
+
+var madeTable = regexp.MustCompile(`(?i)(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:UNLOGGED\s+|MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?|RENAME\s+TO\s+)"?(\w+)`)
+
+// KnownTables are the tables and views this version's own migrations create
+// or rename to. A test that walks the live schema uses it to leave alone the
+// tables a newer version added: CI also runs the previous version's tests
+// on the new schema (the rollback check), and that version's lists and
+// seeders can't know a table made after it. The newer version's own run
+// checks it.
+func KnownTables() (map[string]bool, error) {
+	names, err := fs.Glob(migrationFS, "migrations/*.sql")
+	if err != nil {
+		return nil, err
+	}
+	known := map[string]bool{}
+	for _, name := range names {
+		b, err := migrationFS.ReadFile(name)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range madeTable.FindAllStringSubmatch(string(b), -1) {
+			known[strings.ToLower(m[1])] = true
+		}
+	}
+	return known, nil
 }

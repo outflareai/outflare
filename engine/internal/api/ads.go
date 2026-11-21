@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/adsync"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/paidads"
 )
 
 // Paid media: the workspace's ad accounts on Google Ads, Meta, Microsoft
@@ -33,6 +35,8 @@ func (s *Server) routesAds(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/brands/{brand}/ads/items", s.onBrand(read, s.listAdItems))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/items", s.inBrand(read, s.listAdItems))
 	mux.HandleFunc("GET /v1/brands/{brand}/ads/conversion-actions", s.onBrand(read, s.listAdConversionActions))
+	mux.HandleFunc("GET /v1/brands/{brand}/ads/conversion-check", s.onBrand(read, s.adConversionCheck))
+	mux.HandleFunc("GET /v1/brands/{brand}/ads/match-quality", s.onBrand(read, s.adMatchQuality))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/conversion-actions", s.inBrand(read, s.listAdConversionActions))
 	mux.HandleFunc("GET /v1/brands/{brand}/ads/keywords", s.onBrand(read, s.listAdKeywords))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/keywords", s.inBrand(read, s.listAdKeywords))
@@ -51,10 +55,15 @@ type adConnection struct {
 	Name      string             `json:"name"`
 	Status    string             `json:"status"`
 	Setup     []connectors.Field `json:"setup_needed"`
-	Accounts  int                `json:"accounts"`
-	LastRunAt *time.Time         `json:"last_run_at"`
-	LastOKAt  *time.Time         `json:"last_ok_at"`
-	LastError *string            `json:"last_error"`
+	// ConversionFields are the optional fields the platform takes to
+	// send conversions (a pixel ID, a conversions key); ConversionSet
+	// names the ones the connection already holds.
+	ConversionFields []connectors.Field `json:"conversion_fields"`
+	ConversionSet    []string           `json:"conversion_fields_set"`
+	Accounts         int                `json:"accounts"`
+	LastRunAt        *time.Time         `json:"last_run_at"`
+	LastOKAt         *time.Time         `json:"last_ok_at"`
+	LastError        *string            `json:"last_error"`
 }
 
 // setupDone is the connection config key the setup endpoint sets, so
@@ -81,13 +90,16 @@ func (s *Server) adConnections(ctx context.Context, ws, id string) ([]adConnecti
 		if err := rows.Scan(&c.ID, &c.Connector, &c.Name, &c.Status, &done, &c.Accounts, &c.LastRunAt, &c.LastOKAt, &c.LastError); err != nil {
 			return nil, err
 		}
-		c.Setup = []connectors.Field{}
-		if conn, ok := s.integrations.Registry.Get(c.Connector); ok && !done {
+		c.Setup, c.ConversionFields, c.ConversionSet = []connectors.Field{}, []connectors.Field{}, []string{}
+		if conn, ok := s.integrations.Registry.Get(c.Connector); ok {
 			if n, ok := conn.(connectors.SetupNeeder); ok {
 				// Optional fields (Reddit's conversions token) never hold
-				// the connection up; the conversions screens ask for them.
+				// the connection up; they are listed apart, so the
+				// connection's own screen can ask for them.
 				for _, f := range n.SetupFields() {
-					if !f.Optional {
+					if f.Optional {
+						c.ConversionFields = append(c.ConversionFields, f)
+					} else if !done {
 						c.Setup = append(c.Setup, f)
 					}
 				}
@@ -95,7 +107,27 @@ func (s *Server) adConnections(ctx context.Context, ws, id string) ([]adConnecti
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Which optional fields a connection holds is in its sealed
+	// credentials, opened only for the connections that have any.
+	for i := range out {
+		if len(out[i].ConversionFields) == 0 {
+			continue
+		}
+		o, err := s.integrations.Open(ctx, s.pool, ws, out[i].ID)
+		if err != nil {
+			continue
+		}
+		for _, f := range out[i].ConversionFields {
+			if strings.TrimSpace(o.Creds[f.Name]) != "" {
+				out[i].ConversionSet = append(out[i].ConversionSet, f.Name)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (s *Server) listAdConnections(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +188,9 @@ func (s *Server) setAdConnectionSetup(w http.ResponseWriter, r *http.Request) {
 	var names []string
 	for _, f := range needer.SetupFields() {
 		v := strings.TrimSpace(req.Values[f.Name])
-		if v == "" && !f.Optional {
+		// A required field the connection already holds can be left
+		// out, so the optional ones can be changed on their own.
+		if v == "" && !f.Optional && strings.TrimSpace(creds[f.Name]) == "" {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", f.Label+" is required")
 			return
 		}
@@ -394,6 +428,18 @@ type adTotals struct {
 	LinkClicks       *int64   `json:"link_clicks"`
 	LandingPageViews *int64   `json:"landing_page_views"`
 	VideoViews       *int64   `json:"video_views"`
+	// How far a video ad was watched; null where no day had it. Hook rate
+	// is the plays (video_views) over impressions on the days that had
+	// plays, hold rate the thruplays over the plays, both 0 to 1.
+	VideoThruPlays *int64   `json:"video_thruplays"`
+	VideoP25       *int64   `json:"video_p25"`
+	VideoP50       *int64   `json:"video_p50"`
+	VideoP75       *int64   `json:"video_p75"`
+	VideoP100      *int64   `json:"video_p100"`
+	HookRate       *float64 `json:"hook_rate"`
+	HoldRate       *float64 `json:"hold_rate"`
+	// videoImpressions are the impressions on days with video plays.
+	videoImpressions *int64
 	// Every conversion the platform counted, its secondary actions
 	// included (Google's all conversions), and their value; null where no
 	// day had them.
@@ -406,7 +452,8 @@ type adTotals struct {
 // dest is where a row of adSums scans to.
 func (t *adTotals) dest() []any {
 	return []any{&t.SpendMicros, &t.Impressions, &t.Clicks, &t.Conversions, &t.ConversionValueMicros,
-		&t.DailyReach, &t.reachImpressions, &t.LinkClicks, &t.LandingPageViews, &t.VideoViews, &t.AllConversions, &t.AllConversionValueMicros}
+		&t.DailyReach, &t.reachImpressions, &t.LinkClicks, &t.LandingPageViews, &t.VideoViews, &t.AllConversions, &t.AllConversionValueMicros,
+		&t.VideoThruPlays, &t.VideoP25, &t.VideoP50, &t.VideoP75, &t.VideoP100, &t.videoImpressions}
 }
 
 func (t *adTotals) derive() {
@@ -430,13 +477,136 @@ func (t *adTotals) derive() {
 		v := float64(*t.reachImpressions) / float64(*t.DailyReach)
 		t.Frequency = &v
 	}
+	if t.VideoViews != nil && t.videoImpressions != nil && *t.videoImpressions > 0 {
+		v := float64(*t.VideoViews) / float64(*t.videoImpressions)
+		t.HookRate = &v
+	}
+	if t.VideoThruPlays != nil && t.VideoViews != nil && *t.VideoViews > 0 {
+		v := float64(*t.VideoThruPlays) / float64(*t.VideoViews)
+		t.HoldRate = &v
+	}
+}
+
+// scale turns the totals' money into another currency (k units per unit)
+// and works the costs out again.
+func (t *adTotals) scale(k float64) {
+	mul := func(v *int64) *int64 {
+		if v == nil {
+			return nil
+		}
+		return ptr(int64(math.Round(float64(*v) * k)))
+	}
+	t.SpendMicros = int64(math.Round(float64(t.SpendMicros) * k))
+	t.ConversionValueMicros, t.AllConversionValueMicros = mul(t.ConversionValueMicros), mul(t.AllConversionValueMicros)
+	t.derive()
+}
+
+// add adds another set of totals in the same currency.
+func (t *adTotals) add(o adTotals) {
+	sum := func(a, b *int64) *int64 {
+		if a == nil {
+			return b
+		}
+		if b == nil {
+			return a
+		}
+		return ptr(*a + *b)
+	}
+	sumF := func(a, b *float64) *float64 {
+		if a == nil {
+			return b
+		}
+		if b == nil {
+			return a
+		}
+		return ptr(*a + *b)
+	}
+	t.SpendMicros, t.Impressions, t.Clicks = t.SpendMicros+o.SpendMicros, t.Impressions+o.Impressions, t.Clicks+o.Clicks
+	t.Conversions, t.AllConversions = sumF(t.Conversions, o.Conversions), sumF(t.AllConversions, o.AllConversions)
+	t.ConversionValueMicros, t.AllConversionValueMicros = sum(t.ConversionValueMicros, o.ConversionValueMicros), sum(t.AllConversionValueMicros, o.AllConversionValueMicros)
+	t.DailyReach, t.reachImpressions = sum(t.DailyReach, o.DailyReach), sum(t.reachImpressions, o.reachImpressions)
+	t.LinkClicks, t.LandingPageViews, t.VideoViews = sum(t.LinkClicks, o.LinkClicks), sum(t.LandingPageViews, o.LandingPageViews), sum(t.VideoViews, o.VideoViews)
+	t.VideoThruPlays, t.videoImpressions = sum(t.VideoThruPlays, o.VideoThruPlays), sum(t.videoImpressions, o.videoImpressions)
+	t.VideoP25, t.VideoP50, t.VideoP75, t.VideoP100 = sum(t.VideoP25, o.VideoP25), sum(t.VideoP50, o.VideoP50), sum(t.VideoP75, o.VideoP75), sum(t.VideoP100, o.VideoP100)
+	t.CPCMicros, t.CTR, t.CostPerConvMicros, t.PlatformROAS, t.Frequency, t.HookRate, t.HoldRate = nil, nil, nil, nil, nil, nil, nil
+	t.derive()
+}
+
+// adReportCurrency is the currency a brand's ad money is shown in, with
+// the rates that convert to it: the brand's own (Paid ads, Settings), so
+// accounts billed in other currencies add up. Empty with no brand picked,
+// where every account stays in its own currency.
+func (s *Server) adReportCurrency(r *http.Request) (string, paidads.Rates, error) {
+	a := accessFrom(r.Context())
+	if a.Brand == "" {
+		return "", nil, nil
+	}
+	econ, err := paidads.Load(r.Context(), s.pool, a.WorkspaceID, a.Brand)
+	if errors.Is(err, paidads.ErrNoBrand) {
+		return "", nil, nil
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	rates, err := paidads.LoadRates(r.Context(), s.pool)
+	return econ.Currency, rates, err
+}
+
+// adReport converts a row's totals into the brand's currency.
+type adReport struct {
+	to    string
+	rates paidads.Rates
+}
+
+func (s *Server) adReport(r *http.Request) (adReport, error) {
+	to, rates, err := s.adReportCurrency(r)
+	return adReport{to: to, rates: rates}, err
+}
+
+// apply scales the totals of a row in the account's currency cur, and
+// returns the currency they are now in with how many of it one unit of cur
+// is (cur and 1 when nothing converts).
+func (c adReport) apply(cur string, ts ...*adTotals) (string, float64) {
+	k, ok := c.rates.Rate(cur, c.to)
+	if !ok || c.to == "" || cur == c.to {
+		return cur, 1
+	}
+	for _, t := range ts {
+		t.scale(k)
+	}
+	return c.to, k
+}
+
+// convertAdSummary puts rows in the report currency and merges the rows
+// that now share a key. Rows in a currency with no rate stay as they are.
+func convertAdSummary(rows []adSummaryRow, to string, rates paidads.Rates) []adSummaryRow {
+	if to == "" {
+		return rows
+	}
+	out, at := []adSummaryRow{}, map[string]int{}
+	for _, x := range rows {
+		if k, ok := rates.Rate(x.Currency, to); ok && x.Currency != to {
+			x.Totals.scale(k)
+			x.Currency = to
+		}
+		key := x.Key + " " + x.Currency
+		if i, ok := at[key]; ok {
+			out[i].Totals.add(x.Totals)
+			continue
+		}
+		at[key] = len(out)
+		out = append(out, x)
+	}
+	return out
 }
 
 const adSums = `COALESCE(sum(m.spend_micros), 0)::bigint, COALESCE(sum(m.impressions), 0)::bigint, COALESCE(sum(m.clicks), 0)::bigint,
 	sum(m.conversions)::float8, sum(m.conversion_value_micros)::bigint,
 	sum(m.reach)::bigint, sum(m.impressions) FILTER (WHERE m.reach IS NOT NULL)::bigint,
 	sum(m.link_clicks)::bigint, sum(m.landing_page_views)::bigint, sum(m.video_views)::bigint,
-	sum(m.all_conversions)::float8, sum(m.all_conversion_value_micros)::bigint`
+	sum(m.all_conversions)::float8, sum(m.all_conversion_value_micros)::bigint,
+	sum(m.video_thruplays)::bigint, sum(m.video_p25)::bigint, sum(m.video_p50)::bigint, sum(m.video_p75)::bigint, sum(m.video_p100)::bigint,
+	sum(m.impressions) FILTER (WHERE m.video_views IS NOT NULL)::bigint`
 
 type adFilter struct {
 	from, to string
@@ -497,19 +667,36 @@ func (s *Server) adQuery(w http.ResponseWriter, r *http.Request) (adFilter, bool
 }
 
 type adCampaignOut struct {
-	ID                string   `json:"id"`
-	AdAccountID       string   `json:"ad_account_id"`
-	Connector         string   `json:"connector"`
-	AccountName       string   `json:"account_name"`
-	ExternalID        string   `json:"external_id"`
-	Name              string   `json:"name"`
-	Status            string   `json:"status"`
-	ProviderStatus    string   `json:"provider_status"`
-	Objective         string   `json:"objective"`
-	DailyBudgetMicros *int64   `json:"daily_budget_micros"`
-	BrandID           *string  `json:"brand_id"`
-	Currency          string   `json:"currency"`
-	Totals            adTotals `json:"totals"`
+	ID                string  `json:"id"`
+	AdAccountID       string  `json:"ad_account_id"`
+	Connector         string  `json:"connector"`
+	AccountName       string  `json:"account_name"`
+	ExternalID        string  `json:"external_id"`
+	Name              string  `json:"name"`
+	Status            string  `json:"status"`
+	ProviderStatus    string  `json:"provider_status"`
+	Objective         string  `json:"objective"`
+	DailyBudgetMicros *int64  `json:"daily_budget_micros"`
+	BrandID           *string `json:"brand_id"`
+	// Currency is the ad account's: the budget and the targets are in it,
+	// as they are set there. ReportCurrency is what totals and
+	// previous_totals are in (the brand's currency on a brand route), and
+	// ExchangeRate how many of it one unit of Currency is.
+	Currency       string   `json:"currency"`
+	ReportCurrency string   `json:"report_currency"`
+	ExchangeRate   float64  `json:"exchange_rate"`
+	Totals         adTotals `json:"totals"`
+	// Whether the campaign is really serving, in the platform's words
+	// (eligible, limited, learning, not_eligible, ended), why, and the
+	// platform's own 0 to 1 score; empty and null when it says none.
+	PrimaryStatus        string   `json:"primary_status"`
+	PrimaryStatusReasons []string `json:"primary_status_reasons"`
+	OptimizationScore    *float64 `json:"optimization_score"`
+	// Room to grow: the share of searches the campaign missed over the
+	// last 7 days because its budget ran out, or because others ranked
+	// higher, 0 to 1; null when the platform gives none.
+	BudgetLostShare *float64 `json:"budget_lost_share"`
+	RankLostShare   *float64 `json:"rank_lost_share"`
 	// How the platform bids and the target it bids to, from the platform.
 	BiddingStrategy string   `json:"bidding_strategy"`
 	PlatformCPA     *int64   `json:"platform_target_cpa_micros"`
@@ -593,16 +780,33 @@ func (s *Server) listAdCampaigns(w http.ResponseWriter, r *http.Request) {
 		f.args = append(f.args, st)
 		where += ` AND e.status = $` + strconv.Itoa(len(f.args))
 	}
+	// One campaign by id is returned whatever it spent, so its page opens
+	// for a paused campaign with nothing in the range.
+	having := `HAVING sum(m.spend_micros) > 0 OR e.status = 'active'`
+	// idle=true lists every campaign, also one that is paused and never
+	// spent, so a table filtered to "All" finds it.
+	if r.URL.Query().Get("idle") == "true" {
+		having = ""
+	}
+	if id := r.URL.Query().Get("id"); id != "" {
+		if !isUUID(id) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "id is a campaign id")
+			return
+		}
+		f.args = append(f.args, id)
+		where += ` AND e.id = $` + strconv.Itoa(len(f.args))
+		having = ""
+	}
 	f.args = append(f.args, limit)
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT e.id, a.id, a.connector, a.name, e.external_id, e.name, e.status, e.provider_status, e.objective, e.daily_budget_micros,
 			COALESCE(e.brand_id, a.brand_id), a.currency, e.bidding_strategy, e.platform_target_cpa_micros, e.platform_target_roas,
-			e.target_cost_per_conversion_micros, a.target_cost_per_conversion_micros, `+adSums+`
+			e.target_cost_per_conversion_micros, a.target_cost_per_conversion_micros, e.details, `+adSums+`
 		FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
 		LEFT JOIN ad_metrics_daily m ON m.ad_entity_id = e.id AND m.day BETWEEN $2 AND $3
 		WHERE e.workspace_id = $1 AND e.level = 'campaign'`+where+`
 		GROUP BY e.id, a.id
-		HAVING sum(m.spend_micros) > 0 OR e.status = 'active'
+		`+having+`
 		ORDER BY COALESCE(sum(m.spend_micros), 0) DESC, lower(e.name), e.id
 		LIMIT $`+strconv.Itoa(len(f.args)), f.args...)
 	if err != nil {
@@ -614,11 +818,25 @@ func (s *Server) listAdCampaigns(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c adCampaignOut
 		var accountTarget *int64
+		var details map[string]string
 		t := &c.Totals
 		if err := rows.Scan(append([]any{&c.ID, &c.AdAccountID, &c.Connector, &c.AccountName, &c.ExternalID, &c.Name, &c.Status, &c.ProviderStatus, &c.Objective,
-			&c.DailyBudgetMicros, &c.BrandID, &c.Currency, &c.BiddingStrategy, &c.PlatformCPA, &c.PlatformROAS, &c.TargetCPAMicros, &accountTarget}, t.dest()...)...); err != nil {
+			&c.DailyBudgetMicros, &c.BrandID, &c.Currency, &c.BiddingStrategy, &c.PlatformCPA, &c.PlatformROAS, &c.TargetCPAMicros, &accountTarget, &details}, t.dest()...)...); err != nil {
 			s.internal(w, r, err)
 			return
+		}
+		c.PrimaryStatus, c.PrimaryStatusReasons = details[connectors.AdDetailPrimaryStatus], []string{}
+		if why := details[connectors.AdDetailPrimaryReasons]; why != "" {
+			c.PrimaryStatusReasons = strings.Split(why, ",")
+		}
+		if v, err := strconv.ParseFloat(details[connectors.AdDetailOptimizationScore], 64); err == nil {
+			c.OptimizationScore = &v
+		}
+		if v, err := strconv.ParseFloat(details[connectors.AdDetailBudgetLostShare], 64); err == nil {
+			c.BudgetLostShare = &v
+		}
+		if v, err := strconv.ParseFloat(details[connectors.AdDetailRankLostShare], 64); err == nil {
+			c.RankLostShare = &v
 		}
 		t.derive()
 		if c.TargetCPAMicros != nil {
@@ -637,8 +855,21 @@ func (s *Server) listAdCampaigns(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	to, rates, err := s.adReportCurrency(r)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	for i := range out {
-		out[i].judge()
+		c := &out[i]
+		// Judged in the account's currency, where its target is set.
+		c.judge()
+		c.ReportCurrency, c.ExchangeRate = c.Currency, 1
+		if k, ok := rates.Rate(c.Currency, to); ok && to != "" && c.Currency != to {
+			c.Totals.scale(k)
+			c.PreviousTotals.scale(k)
+			c.ReportCurrency, c.ExchangeRate = to, k
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"from": f.from, "to": f.to, "data": out})
 }
@@ -750,8 +981,14 @@ func (s *Server) adsSummary(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	to, rates, err := s.adReportCurrency(r)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	data, totals = convertAdSummary(data, to, rates), convertAdSummary(totals, to, rates)
 	writeJSON(w, http.StatusOK, map[string]any{"from": f.from, "to": f.to, "group": group, "data": data, "totals": totals,
-		"notes": []string{"Money is in micros (millionths) of each account's currency; rows in different currencies are never added together.",
+		"notes": []string{"Money is in micros (millionths). For one brand it is converted into the brand's currency at the latest daily reference rate, so accounts billed in other currencies add up; elsewhere, and for a currency with no rate, it stays in the account's currency and such rows are never added together.",
 			"Conversions, their value and platform_roas are what each platform claims. Platforms count overlapping conversions, so never add them across platforms.",
 			"all_conversions also counts the platform's secondary conversion actions (Google's all conversions); conversions are the primary ones its bidding uses."}})
 }

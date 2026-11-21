@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -70,6 +71,7 @@ type Host struct {
 	stages          *pipeline.Runner
 	inboundEmail    *inboundemail.Service
 	supportAuto     func(ctx context.Context, workspaceID string) bool
+	adSyncInterval  func(ctx context.Context, workspaceID string) time.Duration
 	adAutoApprove   func(ctx context.Context, workspaceID, brandID, kind string) bool
 }
 
@@ -217,6 +219,18 @@ func (h *Host) SetSupportAutoReplies(fn func(ctx context.Context, workspaceID st
 func (h *Host) SetAdAutoApprove(fn func(ctx context.Context, workspaceID, brandID, kind string) bool) {
 	h.adAutoApprove = fn
 	h.AddCapability("ad_suggestions_auto")
+}
+
+// SetAdSyncInterval decides how often a workspace's connected ad
+// platforms are read (spend, clicks and conversions per campaign, ad
+// group and ad). fn gets the workspace and answers the interval; zero or
+// less leaves the server's own (OUTFLARE_ADS_SYNC_INTERVAL, an hour by
+// default). The engine never reads a platform more often than its floor
+// (half an hour for most, a quarter for Zeropark) or less often than once
+// a day, whatever fn answers. fn runs on every scheduling pass (every
+// five minutes) for each workspace with a connection, so keep it quick.
+func (h *Host) SetAdSyncInterval(fn func(ctx context.Context, workspaceID string) time.Duration) {
+	h.adSyncInterval = fn
 }
 
 // AdSavingKinds are the paid ads savings an extension may offer to let

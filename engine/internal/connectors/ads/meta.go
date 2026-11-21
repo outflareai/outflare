@@ -72,13 +72,24 @@ func (m MetaAds) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Accou
 		Name string `json:"name"`
 	}
 	if err := m.call(cl, creds).get(ctx, m.base(cl)+"/me?fields=id,name", &me); err != nil {
-		return c.Account{}, err
+		return c.Account{}, metaAppOff(err)
 	}
 	accts, err := m.AdAccounts(ctx, cl, creds)
 	if err != nil {
-		return c.Account{}, err
+		return c.Account{}, metaAppOff(err)
 	}
 	return c.Account{ID: me.ID, Name: me.Name, Details: map[string]string{"accounts": fmt.Sprint(len(accts))}}, nil
+}
+
+// metaAppOff says in plain words what Meta's "API access deactivated"
+// refusal (error_subcode 5258007) means: the token is good, but Meta has
+// switched off API access for the app it was generated for. Any other error
+// is returned as it is.
+func metaAppOff(err error) error {
+	if err == nil || !strings.Contains(err.Error(), "5258007") {
+		return err
+	}
+	return c.Errf(c.ErrInvalid, "The token is fine, but Meta has switched off API access for the app it was made for. Either generate the token again and choose a different app of your business, or open that app at developers.facebook.com/apps and follow the notice at the top of its dashboard to reactivate it. Then try again.")
 }
 
 // pages follows a Graph API list through paging.next.
@@ -210,6 +221,51 @@ func (m MetaAds) SetCampaignDailyBudget(ctx context.Context, cl *c.Client, creds
 	return m.call(cl, creds).post(ctx, m.base(cl)+"/"+esc(campaignID), map[string]any{"daily_budget": strconv.FormatInt(minor, 10)}, nil)
 }
 
+var (
+	_ c.AdGroupManager       = MetaAds{}
+	_ c.AdGroupBudgetManager = MetaAds{}
+	_ c.AdStatusManager      = MetaAds{}
+)
+
+// SetAdGroupStatus pauses or resumes an ad set (POST /{ad set} with
+// status), leaving its campaign and the other ad sets as they are.
+func (m MetaAds) SetAdGroupStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID string, active bool) error {
+	return m.setStatus(ctx, cl, creds, "ad set", adGroupID, active)
+}
+
+// SetAdStatus pauses or resumes one ad (POST /{ad} with status).
+func (m MetaAds) SetAdStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID, adID string, active bool) error {
+	return m.setStatus(ctx, cl, creds, "ad", adID, active)
+}
+
+func (m MetaAds) setStatus(ctx context.Context, cl *c.Client, creds c.Creds, what, id string, active bool) error {
+	if !metaID(id) {
+		return c.Errf(c.ErrInvalid, "Meta %s ids are numbers", what)
+	}
+	st := "PAUSED"
+	if active {
+		st = "ACTIVE"
+	}
+	return m.call(cl, creds).post(ctx, m.base(cl)+"/"+esc(id), map[string]any{"status": st}, nil)
+}
+
+// SetAdGroupDailyBudget sets an ad set's own daily budget, in the
+// currency's minor unit like a campaign's. Meta refuses it for an ad set
+// whose campaign holds the budget.
+func (m MetaAds) SetAdGroupDailyBudget(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID string, micros int64) error {
+	if !metaID(adGroupID) {
+		return c.Errf(c.ErrInvalid, "Meta ad set ids are numbers")
+	}
+	if micros <= 0 {
+		return c.Errf(c.ErrInvalid, "the daily budget must be more than nothing")
+	}
+	minor := (micros*minorUnits(acct.Currency) + 500_000) / 1e6
+	if minor < 1 {
+		minor = 1
+	}
+	return m.call(cl, creds).post(ctx, m.base(cl)+"/"+esc(adGroupID), map[string]any{"daily_budget": strconv.FormatInt(minor, 10)}, nil)
+}
+
 // metaID is a Meta object id: digits only, so it can go in a path.
 func metaID(id string) bool {
 	if id == "" || len(id) > 40 {
@@ -223,6 +279,34 @@ func metaID(id string) bool {
 	return true
 }
 
+// metaVideoFields are the insights fields that say how far a video ad was
+// watched. Each comes back as a list of actions (one, of type video_view)
+// and is absent on a row with no video.
+const metaVideoFields = "video_thruplay_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions"
+
+type metaVideo struct {
+	ThruPlays []metaAction `json:"video_thruplay_watched_actions"`
+	P25       []metaAction `json:"video_p25_watched_actions"`
+	P50       []metaAction `json:"video_p50_watched_actions"`
+	P75       []metaAction `json:"video_p75_watched_actions"`
+	P100      []metaAction `json:"video_p100_watched_actions"`
+}
+
+// into sets the watch counts a row carried; a field Meta left out stays nil.
+func (v metaVideo) into(x *c.AdExtra) {
+	count := func(list []metaAction) *int64 {
+		if len(list) == 0 {
+			return nil
+		}
+		var n float64
+		for _, a := range list {
+			n = max(n, float64(a.Value))
+		}
+		return ptrI(int64(n))
+	}
+	x.VideoThruPlays, x.VideoP25, x.VideoP50, x.VideoP75, x.VideoP100 = count(v.ThruPlays), count(v.P25), count(v.P50), count(v.P75), count(v.P100)
+}
+
 type metaAction struct {
 	ActionType string  `json:"action_type"`
 	Value      flexNum `json:"value"`
@@ -234,7 +318,7 @@ func (m MetaAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c
 		"level":          {"campaign"},
 		"time_increment": {"1"},
 		"time_range":     {string(tr)},
-		"fields":         {"campaign_id,campaign_name,spend,impressions,clicks,reach,actions,action_values"},
+		"fields":         {"campaign_id,campaign_name,spend,impressions,clicks,reach,actions,action_values," + metaVideoFields},
 		"limit":          {"500"},
 	}
 	var out []c.AdDay
@@ -249,11 +333,13 @@ func (m MetaAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c
 			Reach        *flexInt     `json:"reach"`
 			Actions      []metaAction `json:"actions"`
 			ActionValues []metaAction `json:"action_values"`
+			metaVideo
 		}
 		if json.Unmarshal(raw, &r) != nil || r.CampaignID == "" {
 			return nil
 		}
 		conv, value, extra := metaResults(r.Actions, r.ActionValues, r.Reach)
+		r.metaVideo.into(&extra)
 		out = append(out, c.AdDay{CampaignID: r.CampaignID, CampaignName: r.CampaignName, Date: r.DateStart,
 			SpendMicros: c.MicrosOf(r.Spend), Impressions: int64(r.Impressions), Clicks: int64(r.Clicks),
 			Conversions: ptrF(conv), ConversionValueMicros: ptrI(c.Micros(value)), AdExtra: extra})
@@ -353,7 +439,7 @@ func (m MetaAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, ac
 		"level":          {metaLevel},
 		"time_increment": {"1"},
 		"time_range":     {string(tr)},
-		"fields":         {fields + ",spend,impressions,clicks,reach,actions,action_values"},
+		"fields":         {fields + ",spend,impressions,clicks,reach,actions,action_values," + metaVideoFields},
 		"limit":          {"500"},
 	}
 	var out []c.AdItemDay
@@ -371,6 +457,7 @@ func (m MetaAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, ac
 			Reach        *flexInt     `json:"reach"`
 			Actions      []metaAction `json:"actions"`
 			ActionValues []metaAction `json:"action_values"`
+			metaVideo
 		}
 		if json.Unmarshal(raw, &r) != nil {
 			return nil
@@ -383,6 +470,7 @@ func (m MetaAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, ac
 			return nil
 		}
 		conv, value, extra := metaResults(r.Actions, r.ActionValues, r.Reach)
+		r.metaVideo.into(&extra)
 		d.AdExtra = extra
 		d.Date, d.SpendMicros, d.Impressions, d.Clicks = r.DateStart, c.MicrosOf(r.Spend), int64(r.Impressions), int64(r.Clicks)
 		d.Conversions, d.ConversionValueMicros = ptrF(conv), ptrI(c.Micros(value))
@@ -458,8 +546,10 @@ func minorUnits(currency string) int64 {
 
 // ---- conversions ----
 
-// metaEvents are Meta's standard events a rule can send as.
-var metaEvents = []string{"Purchase", "Lead", "CompleteRegistration", "StartTrial", "Subscribe", "Contact", "SubmitApplication", "Schedule"}
+// metaEvents are Meta's standard events a rule can send as. The first is
+// the default for a rule that names none, so new ones go at the end.
+var metaEvents = []string{"Purchase", "Lead", "CompleteRegistration", "StartTrial", "Subscribe", "Contact", "SubmitApplication", "Schedule",
+	"InitiateCheckout", "AddPaymentInfo", "AddToCart", "ViewContent", "Search"}
 
 // ConversionTargets lists the pixels (datasets) the account can use.
 func (m MetaAds) ConversionTargets(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]c.ConversionTarget, error) {
@@ -514,6 +604,14 @@ func (m MetaAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Cred
 			results[i].Skipped, results[i].Reason = true, "no identifier or click id to match on"
 			continue
 		}
+		// Where the person was, beside the identifiers above and never the
+		// only thing sent: the platform matches on them unhashed.
+		if cv.IPAddress != "" {
+			user["client_ip_address"], keys = cv.IPAddress, append(keys, "ip_address")
+		}
+		if cv.UserAgent != "" {
+			user["client_user_agent"], keys = cv.UserAgent, append(keys, "user_agent")
+		}
 		event := cv.EventType
 		if event == "" {
 			event = "Lead"
@@ -544,6 +642,65 @@ func (m MetaAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Cred
 
 // ---- audiences ----
 
+// metaQualityFields asks for each web event's match quality: the score,
+// the share of events that carried each identifier, and the problems Meta
+// found.
+const metaQualityFields = "web{event_name,event_match_quality{composite_score,match_key_feedback{identifier,coverage{percentage}},diagnostics{name,description,solution,percentage}}}"
+
+// MatchQuality reads a pixel's event match quality from the Dataset Quality
+// API: per event the pixel received from a server, Meta's score out of 10
+// for how well its customer information matches Meta accounts. The token
+// needs ads_read with ads_management or business_management, and its user
+// access to the pixel.
+func (m MetaAds) MatchQuality(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, targetID string) ([]c.MatchQuality, error) {
+	if !metaID(targetID) {
+		return nil, c.Errf(c.ErrInvalid, "a Meta pixel id is a number")
+	}
+	var got struct {
+		Web []struct {
+			Event   string `json:"event_name"`
+			Quality *struct {
+				Score *float64 `json:"composite_score"`
+				Keys  []struct {
+					Identifier string `json:"identifier"`
+					Coverage   struct {
+						Percentage float64 `json:"percentage"`
+					} `json:"coverage"`
+				} `json:"match_key_feedback"`
+				Diagnostics []struct {
+					Name        string  `json:"name"`
+					Description string  `json:"description"`
+					Solution    string  `json:"solution"`
+					Percentage  float64 `json:"percentage"`
+				} `json:"diagnostics"`
+			} `json:"event_match_quality"`
+		} `json:"web"`
+	}
+	q := url.Values{"dataset_id": {targetID}, "fields": {metaQualityFields}}
+	if err := m.call(cl, creds).do(ctx, http.MethodGet, m.base(cl)+"/dataset_quality?"+q.Encode(), nil, &got); err != nil {
+		return nil, err
+	}
+	var out []c.MatchQuality
+	for _, w := range got.Web {
+		if w.Event == "" || w.Quality == nil {
+			continue
+		}
+		mq := c.MatchQuality{Event: w.Event, Score: w.Quality.Score}
+		for _, k := range w.Quality.Keys {
+			if k.Identifier != "" {
+				mq.Keys = append(mq.Keys, c.MatchKey{Key: k.Identifier, Percent: k.Coverage.Percentage})
+			}
+		}
+		for _, d := range w.Quality.Diagnostics {
+			if d.Name != "" {
+				mq.Issues = append(mq.Issues, c.MatchIssue{Name: d.Name, Description: d.Description, Solution: d.Solution, Percent: d.Percentage})
+			}
+		}
+		out = append(out, mq)
+	}
+	return out, nil
+}
+
 // Audiences lists the account's custom audiences made from a customer
 // list, the only kind people can be added to by hand.
 func (m MetaAds) Audiences(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]c.AdAudience, error) {
@@ -563,28 +720,92 @@ func (m MetaAds) Audiences(ctx context.Context, cl *c.Client, creds c.Creds, acc
 }
 
 // SyncAudience adds the person's hashed emails and phone numbers to a
-// custom audience, or removes them, one identifier kind per call. Meta
-// matches them on its side and never says whether they matched.
+// custom audience, or removes them. Meta matches them on its side and
+// never says whether they matched.
 func (m MetaAds) SyncAudience(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, audienceID, change string, p c.AudienceMember) error {
+	_, err := m.IngestAudience(ctx, cl, creds, acct, audienceID, change, []c.AudienceMember{p})
+	return err
+}
+
+// metaUsersMax is how many identifiers Meta takes in one call.
+const metaUsersMax = 10000
+
+// IngestAudience adds many people to a custom audience, or removes them,
+// one identifier kind per call and at most metaUsersMax identifiers in
+// each. Meta gives no request id.
+func (m MetaAds) IngestAudience(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, audienceID, change string, members []c.AudienceMember) (string, error) {
 	method := http.MethodPost
 	if change == c.AudienceRemove {
 		method = http.MethodDelete
 	}
-	for _, k := range []struct {
-		schema string
-		ids    []string
-	}{{"EMAIL_SHA256", p.Emails}, {"PHONE_SHA256", p.PhoneDigits}} {
-		if len(k.ids) == 0 {
-			continue
+	var emails, phones [][]string
+	for _, p := range members {
+		for _, id := range p.Emails {
+			emails = append(emails, []string{id})
 		}
-		rows := make([][]string, len(k.ids))
-		for i, id := range k.ids {
-			rows[i] = []string{id}
-		}
-		body := map[string]any{"payload": map[string]any{"schema": []string{k.schema}, "data": rows}}
-		if err := m.call(cl, creds).do(ctx, method, m.base(cl)+"/"+esc(audienceID)+"/users", body, nil); err != nil {
-			return err
+		for _, id := range p.PhoneDigits {
+			phones = append(phones, []string{id})
 		}
 	}
-	return nil
+	for _, k := range []struct {
+		schema string
+		rows   [][]string
+	}{{"EMAIL_SHA256", emails}, {"PHONE_SHA256", phones}} {
+		for start := 0; start < len(k.rows); start += metaUsersMax {
+			end := min(start+metaUsersMax, len(k.rows))
+			body := map[string]any{"payload": map[string]any{"schema": []string{k.schema}, "data": k.rows[start:end]}}
+			if err := m.call(cl, creds).do(ctx, method, m.base(cl)+"/"+esc(audienceID)+"/users", body, nil); err != nil {
+				return "", err
+			}
+		}
+	}
+	return "", nil
 }
+
+// CreateAudience makes a custom audience from a customer list, or finds
+// the one with that name, and returns its id.
+func (m MetaAds) CreateAudience(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, name, description string) (string, error) {
+	have, err := m.Audiences(ctx, cl, creds, acct)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range have {
+		if a.Name == name {
+			return a.ID, nil
+		}
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	body := map[string]any{"name": name, "description": description, "subtype": "CUSTOM", "customer_file_source": "USER_PROVIDED_ONLY"}
+	if err := m.call(cl, creds).do(ctx, http.MethodPost, m.base(cl)+"/act_"+esc(acct.ID)+"/customaudiences", body, &out); err != nil {
+		return "", err
+	}
+	if out.ID == "" {
+		return "", c.Errf(c.ErrUnavailable, "Meta made no custom audience")
+	}
+	return out.ID, nil
+}
+
+// AudienceSize reads Meta's estimate of how many people a custom audience
+// matched (the lower bound; Meta gives a range, and -1 while it counts).
+func (m MetaAds) AudienceSize(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, audienceID string) (c.AudienceSize, error) {
+	var out c.AudienceSize
+	var got struct {
+		Lower *flexInt `json:"approximate_count_lower_bound"`
+	}
+	if err := m.call(cl, creds).do(ctx, http.MethodGet, m.base(cl)+"/"+esc(audienceID)+"?fields=approximate_count_lower_bound", nil, &got); err != nil {
+		return out, err
+	}
+	if got.Lower != nil && *got.Lower >= 0 {
+		n := int64(*got.Lower)
+		out.Display = &n
+	}
+	return out, nil
+}
+
+var (
+	_ c.AudienceCreator    = MetaAds{}
+	_ c.AudienceSizer      = MetaAds{}
+	_ c.MatchQualityReader = MetaAds{}
+)

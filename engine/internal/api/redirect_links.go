@@ -38,7 +38,7 @@ const (
 	redirectCodeLen = 8
 	clickKeyLen     = 16
 	// ClickKeyParam carries a redirect click's key to the destination.
-	clickKeyParam = "ofclk"
+	clickKeyParam = utm.ClickKeyParam
 )
 
 // addRedirectCode gives a link a redirect code. Codes are random from 32^8;
@@ -144,22 +144,20 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 	} else if len(t.dests) > 0 || len(t.paths) > 0 {
 		routeMetric("shared_domain")
 	}
-	if strings.ContainsAny(link.URL, "{%") {
-		link.URL = tokens.ExpandKnown(link.URL, destinationValues(t, c, cost), trafficsources.DestinationTokens)
-	}
-	target := tagLink(t.campaign, link)
 	// The click is written a moment later (RunClicks); the person goes on
-	// now. With the buffer full, the click is lost but the redirect isn't.
+	// now. With the buffer full, the click is lost but the redirect isn't,
+	// and it carries no key, since no click has it.
 	if s.clicks.add(c) {
 		if bot {
 			metrics.RedirectClick("bot")
 		} else {
 			metrics.RedirectClick("counted")
 		}
-		target = withParam(target, clickKeyParam, key)
 	} else {
 		metrics.RedirectClick("dropped")
+		key = ""
 	}
+	target := clickDestination(t, link, c, cost, key)
 	mode := t.campaign.RedirectMode
 	if !own {
 		mode = "302"
@@ -189,6 +187,35 @@ func clickDetails(r *http.Request) clickDetail {
 	c.detail = parseDevice(ua, c.os, c.browser)
 	c.language = visitLanguage(r.Header.Get("Accept-Language"))
 	return c
+}
+
+// clickDestination builds the URL a tracker click goes on to: a lander, an
+// offer, a page or the link's own (the fallback), on the first redirect
+// and on a lander's click alike. It is the one place that decides what a
+// destination carries:
+//
+//   - Tokens in the URL ({click_id}, {field1}, {country}) get the click's
+//     values, wherever they are written. A network's own parameter, such as
+//     subid={click_id}, is kept as written.
+//   - utm_* and ofc are the campaign's and the link's. Any the URL had are
+//     replaced, never added to.
+//   - ofclk is the click's key, added once, last; key is "" for a click
+//     that wasn't counted, which carries none. An ofclk the URL had, as
+//     ofclk={click_id} or a value saved before they were refused, is
+//     replaced by it, so a page never gets two.
+//   - Every other parameter, repeated ones included, and the fragment stay
+//     as written.
+//
+// Building the result again for the same click gives the same URL.
+func clickDestination(t redirectTarget, link trackingLinkView, c bufferedClick, cost, key string) string {
+	if strings.ContainsAny(link.URL, "{%") {
+		link.URL = tokens.ExpandKnown(link.URL, destinationValues(t, c, cost), trafficsources.DestinationTokens)
+	}
+	target := tagLink(t.campaign, link)
+	if key == "" {
+		return target
+	}
+	return withParam(target, clickKeyParam, key)
 }
 
 // withParam adds one query parameter last, keeping the order of the others

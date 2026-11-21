@@ -71,7 +71,7 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "Over 2% of requests for visitors' feature flags fail: sites show their default instead of their variants. Look for errors on POST /v1/site/flags and .../flags/evaluate in the logs (usually the database)."
+          summary: "Over 2% of requests for visitors' feature flags fail: sites show their default instead of their variants. Look for errors on POST /v1/site/flags, .../flags/evaluate and GET .../flags/definitions in the logs (usually the database)."
 
       - alert: OutflareFlagsSlow
         expr: histogram_quantile(0.95, sum by (le) (rate(outflare_flags_request_seconds_bucket[5m]))) > 0.25
@@ -157,6 +157,11 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Redirect link clicks have failed to be written for 10 minutes (people are still sent on): look for tracking_link.click_failed in the logs, usually the database. Past 100,000 waiting in a process, new clicks are dropped. See the Redirect links row."
+      - alert: OutflareRedirectClicksDropped
+        expr: sum(increase(outflare_redirect_click_writes_total{outcome="dropped_invalid"}[1h])) > 0
+        labels: { severity: info }
+        annotations:
+          summary: "Redirect link clicks were left out in the last hour because the database refused their values (the rest of each batch was written, people were sent on): look for tracking_link.click_dropped in the logs to see which value, and make the click path clean or shorten it before it is stored. See the Redirect links row."
 
       - alert: OutflareTrackerPostbacksFailing
         expr: sum(rate(outflare_tracker_postbacks_total{outcome="error"}[5m])) > 0
@@ -207,12 +212,54 @@ groups:
         annotations:
           summary: "Over a fifth of the network spend reconciled in 6 hours had no tracker click to go on, so reports show less cost than the network charged: a campaign URL probably lacks {campaign_id} or {target}, or visits aren't reaching the tracker. Check GET /v1/brands/{brand}/network-costs for the campaigns with unattributed spend."
 
+      - alert: OutflareTrackerPageChecksDiscarded
+        expr: sum(increase(outflare_tracker_page_checks_total{outcome="discarded"}[30m])) > 0 and sum(increase(outflare_tracker_page_checks_total{outcome=~"ok|failed|refused"}[30m])) == 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Every lander and offer check for 30 minutes was thrown away because no page could be reached at all, so nobody would hear about a page that stopped answering: check that this server can reach the web (outbound network, DNS) and look for tracker.page_checks_failed in the logs. See the Tracker pages row."
+
+      - alert: OutflareTrackerPageChecksBehind
+        expr: max(outflare_tracker_page_checks_overdue) > 0
+        for: 6h
+        labels: { severity: warning }
+        annotations:
+          summary: "Some landers in use haven't been checked for over 6 hours, or offers for over 24: the checks are being discarded or can't keep up (30 of each every 2 minutes). See the Tracker pages row for the outcomes and how many are overdue."
+
+      - alert: OutflareTrackingDomainExpiryReadsFailing
+        expr: sum(increase(outflare_tracking_domain_expiry_checks_total{outcome="failed"}[6h])) > 0 and sum(increase(outflare_tracking_domain_expiry_checks_total{outcome=~"checked|no_date"}[6h])) == 0
+        for: 6h
+        labels: { severity: warning }
+        annotations:
+          summary: "Every read of a tracking domain's registration record has failed for 6 hours, so nobody is warned before a tracking domain runs out: check that this server reaches rdap.org and the registries it redirects to (outbound network), and look for tracking_domain.expiry_check_failed in the logs. See the Tracking domains row."
+
+      - alert: OutflareTrackingDomainExpiryReadsBehind
+        expr: max(outflare_tracking_domain_expiry_overdue) > 0
+        for: 24h
+        labels: { severity: warning }
+        annotations:
+          summary: "Some verified tracking domains haven't had their registration read for over two weeks: the weekly reads are failing or can't keep up (20 every 10 minutes). See the Tracking domains row for the failed reads and how many are overdue."
+
+      - alert: OutflareMailboxStatsReadsFailing
+        expr: sum by (connector) (increase(outflare_mailbox_stats_syncs_total{outcome!="success"}[6h])) > 0 and sum by (connector) (increase(outflare_mailbox_stats_syncs_total{outcome="success"}[6h])) == 0
+        for: 6h
+        labels: { severity: warning }
+        annotations:
+          summary: "Every read of mailboxes' sent, reply and bounce counts from {{ $labels.connector }} has failed for 6 hours, so mailbox health and activity for those mailboxes are going stale: look for mailbox.stats_sync_failed in the logs (its error_code says whether the sequencer refused the key, limited the calls or was down). See the Mailbox counts from sequencers row."
+
       - alert: OutflareTrackerSourcePostbacksFailing
         expr: sum(rate(outflare_tracker_source_postbacks_total{outcome=~"unreachable|invalid"}[15m])) > 0
         for: 30m
         labels: { severity: warning }
         annotations:
           summary: "Conversions sent back to traffic sources have been given up on for 30 minutes, so networks aren't told of conversions and can't optimise: check the source postback sends (GET .../traffic-sources/{id}/postbacks) and the job logs. See the Conversions sent back panel on the Redirect links row."
+
+      - alert: OutflareTrackerCostUpdatesFailing
+        expr: sum(increase(outflare_tracker_cost_updates_total{outcome="error"}[1h])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "A campaign cost entered by hand couldn't be shared out over its clicks in five tries, so that campaign's reports miss the cost someone entered: look for tracking_campaign.cost_update_failed and the tracker.cost_update job in the logs. See the Tracker costs entered by hand row."
 
       - alert: OutflareTrackerSuspectClicksHigh
         expr: sum(rate(outflare_tracker_fraud_flags_total{subject="click"}[30m])) > 0.5 * sum(rate(outflare_redirect_clicks_total{outcome="counted"}[30m])) and sum(rate(outflare_redirect_clicks_total{outcome="counted"}[30m])) > 0.1
@@ -778,6 +825,15 @@ groups:
         annotations:
           summary: "More than 50 open signals are past their due date, and they outnumber the ones on time; owners aren't working the Needs attention queue, or rules raise more signals than people can act on. Check the signal types' results and the rules that raise them."
 
+      - alert: OutflareForecastHistoryFailing
+        # Each brand's forecast is read once a day for its week-by-week
+        # history; a brand whose reading keeps failing loses weeks.
+        expr: sum(increase(outflare_forecast_history_kept_total{outcome="error"}[6h])) > 5
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Readings of brands' revenue forecasts keep failing, so their forecast pages are missing weeks of history. See forecast_history.keep_failed and forecast_history.sweep_failed in the engine log, and the Forecast readings kept panel."
+
       - alert: OutflareScoresPassStuck
         # A pass scores every record of a brand again after a score was
         # added or changed, and once a day; until it ends, records keep
@@ -1063,6 +1119,32 @@ groups:
         annotations:
           summary: "One support SLA check takes over 5 seconds at the 95th percentile; many conversations fall due at once, or the database is slow. See the Support inbox row."
 
+      - alert: OutflareSupportImportFailing
+        # A support import (conversations copied from Intercom) keeps failing:
+        # the support inbox falls behind the tool, and the data the AI learns
+        # from goes stale.
+        expr: max by (source) (outflare_support_imports_failing) > 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "A support import from {{ $labels.source }} has failed for 30 minutes; look for support_import.sync_failed in the engine log. connector_auth means the workspace must reconnect the tool; anything else is the tool's API failing or rate limiting."
+
+      - alert: OutflareSupportImportBehind
+        # Caught-up imports look again every five minutes; one this far
+        # behind is stuck or reading a very long history.
+        expr: max by (source) (outflare_support_import_lag_seconds) > 6 * 3600
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "A support import from {{ $labels.source }} hasn't caught up in over 6 hours; check the support.import jobs in the job queue row and the Support inbox row's import panels. A first import of years of history can take this long."
+
+      - alert: OutflareSupportImportSlow
+        expr: histogram_quantile(0.95, sum by (le, source) (rate(outflare_support_import_step_seconds_bucket[30m]))) > 120
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Support import steps from {{ $labels.source }} take over 2 minutes at the 95th percentile; the tool's API is slow or rate limiting. See the Support inbox row."
+
       - alert: OutflareSupportAssistantFailing
         # The support assistant's AI calls keep breaking: customers' messages
         # get no draft and go to a person.
@@ -1146,6 +1228,24 @@ groups:
         annotations:
           summary: "A conversion has waited over 30 minutes to go to its ad platform; check the jobs queue for ads.conversions_send and the engine log for ad_conversions."
 
+      - alert: OutflareDestinationsBehind
+        # Customer events queued for a destination but not sent: the
+        # sender loop or its jobs are not running, or a tool is down.
+        expr: max(outflare_destination_sends_oldest_queued_seconds) > 1800
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A customer event has waited over 30 minutes to go to a destination; check the jobs queue for destinations.send and the engine log for destination."
+
+      - alert: OutflareDestinationSendsFailing
+        # A kind of destination refusing most of what it is sent: a
+        # changed API, or a payload it no longer takes.
+        expr: sum by (kind) (increase(outflare_destination_sends_total{outcome="failed"}[1h])) > 50 and sum by (kind) (increase(outflare_destination_sends_total{outcome="failed"}[1h])) / sum by (kind) (increase(outflare_destination_sends_total[1h])) > 0.5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half the customer events sent to one kind of destination failed in the last hour; look at the kind label and the engine log for destination.events_sent."
+
       - alert: OutflareAdsFeedSendsFailing
         # Google refusing conversions sent through the conversion feed
         # (Data Manager, or the Ads API fallback): a bad row shape, a
@@ -1177,6 +1277,26 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Refreshing the paying customers lists on Google Ads failed more than twice in a day; ad_payers.refreshed failures carry the error code, and GET .../ads/accounts/{id}/feed shows payers_list.error."
+
+      - alert: OutflareAdAudienceSyncFailing
+        # The daily sync of audiences to ad networks keeps failing, so the
+        # networks' customer lists go stale: people who left stay in, and
+        # new people aren't added.
+        expr: sum(increase(outflare_ads_feed_batches_total{transport="audience", outcome="failed"}[24h])) > 2
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Syncing audiences to ad networks failed more than twice in a day; ad_audience.synced failures carry the error code, and GET /v1/brands/{brand}/ads/audiences shows each destination's error."
+
+      - alert: OutflareAdMatchQualityReadFailing
+        # The daily read of the ad networks' match quality keeps failing,
+        # so the send log shows old scores and a falling score raises no
+        # alert.
+        expr: sum(increase(outflare_ads_feed_batches_total{transport="match_quality", outcome="failed"}[24h])) > 2
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Reading match quality from ad networks failed more than twice in a day; ad_match_quality.read failures carry the error code (connector_auth usually means the token lacks ads_read or access to the pixel)."
 
       - alert: OutflarePartnerRewardsBehind
         # Rewards past their hold aren't being approved: the approver loop
@@ -1301,6 +1421,34 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Over half of news search runs fail with a provider or internal error; check the news_search.run_failed events by error code and the engine log."
+      - alert: OutflareMentionScansFailing
+        # A failed YouTube search doesn't fail a scan (it is kept on the
+        # brand's settings), so a failed scan is Outflare's own to fix.
+        expr: sum(rate(outflare_mentions_scans_total{outcome!="success"}[6h])) / sum(rate(outflare_mentions_scans_total[6h])) > 0.2 and sum(increase(outflare_mentions_scans_total[6h])) > 10
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over a fifth of mention scans fail; check the brand_mentions.scan_failed events and the engine log for the mentions.scan job."
+      - alert: OutflareMentionVideoReadsFailing
+        # Reading a found video's watch page and captions through the
+        # workspace's page reader. A missing connection or a spent budget is
+        # the workspace's to fix; internal errors mean YouTube's page changed
+        # (engine/internal/mentions/youtube.go) or a bug.
+        expr: sum(rate(outflare_mentions_video_reads_total{outcome="internal"}[6h])) / sum(rate(outflare_mentions_video_reads_total[6h])) > 0.3 and sum(increase(outflare_mentions_video_reads_total[6h])) > 20
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 30% of video caption reads fail inside Outflare; check the mention_video.read_failed events and whether YouTube's watch page changed (engine/internal/mentions/youtube.go)."
+      - alert: OutflareMentionPodcastSearchesFailing
+        # Searching Podcast Index for episodes, on each workspace's own key.
+        # One workspace's bad key fails only its own searches; most of them
+        # failing means Podcast Index is down or its API changed
+        # (engine/internal/connectors/podcasts/podcastindex.go).
+        expr: sum(rate(outflare_mentions_podcast_searches_total{outcome!="success"}[6h])) / sum(rate(outflare_mentions_podcast_searches_total[6h])) > 0.5 and sum(increase(outflare_mentions_podcast_searches_total[6h])) > 20
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of podcast searches fail; check the brand_mentions.podcast_search_failed events and whether Podcast Index's API changed (engine/internal/connectors/podcasts/podcastindex.go)."
       - alert: OutflareReviewPagesStuck
         # A page that failed 3 reads in a row, retries included, with an
         # error Outflare has to fix: the site changed its page (the parser in
@@ -1642,6 +1790,27 @@ groups:
         annotations:
           summary: "DB-IP file downloads failed at every check for a day: the files in use stay until they're stale. Check geoip.download_failed in the engine log. See the IP geolocation row."
 
+      - alert: OutflareLinkOrderSheetsUnreachable
+        expr: sum(increase(outflare_link_orders_catalog_tables_read_total{source="google_sheet",outcome="error"}[1h])) >= 3
+        for: 5m
+        labels: { severity: info }
+        annotations:
+          summary: "Google Sheet links for the Link orders catalog import failed to reach Google 3 or more times in an hour (outcome error): docs.google.com blocked from the servers or Google down. People can still upload a CSV or .xlsx file. See the Link building row."
+
+      - alert: OutflareDonorAhrefsChecksFailing
+        expr: sum(increase(outflare_link_orders_ahrefs_checks_total{status="failed"}[6h])) >= 5 and sum(increase(outflare_link_orders_ahrefs_checks_total{status="failed"}[6h])) / sum(increase(outflare_link_orders_ahrefs_checks_total[6h])) > 0.5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of the Ahrefs checks of catalog sites in 6 hours failed (Ahrefs refused or broke, not a missing connection or a spent budget). Check link_order.ahrefs_checked and job.failed for link_orders.ahrefs_check in the engine log. See the Link building row."
+
+      - alert: OutflareDonorEmailSearchesFailing
+        expr: sum(increase(outflare_link_orders_email_searches_total{status="failed"}[6h])) >= 5 and sum(increase(outflare_link_orders_email_searches_total{status="failed"}[6h])) / sum(increase(outflare_link_orders_email_searches_total[6h])) > 0.5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of the donor email searches in 6 hours failed (status failed): Outflare could not read or store them, not a site's refusal. Check link_order.emails_searched and job.failed for link_orders.find_emails in the engine log. See the Link building row."
+
       - alert: OutflareReviewRequestsBehind
         expr: max(outflare_jobs_oldest_due_seconds{kind="reviews.dispatch"}) > 300
         for: 5m
@@ -1760,6 +1929,12 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "No ad sync has succeeded for over three hours though they run hourly: connections are failing (ads.synced events with an error code in the log) or no worker runs them. Today's spend, the alerts and the suggestions are stale. Check the Paid media (sync and alerts) row."
+      - alert: OutflareAdSyncOverdue
+        expr: max by (connector) (outflare_ads_sync_overdue) > 0
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Connections to {{ $labels.connector }} have had no successful ad sync for over twice their sync interval, for an hour: that platform's syncs are failing (ads.synced events with an error code in the log) or the workers can't keep up with the interval. Their spend, alerts and suggestions are stale. Check the Paid media (sync interval) row."
       - alert: OutflareAdSyncsFailing
         expr: sum(increase(outflare_ads_sync_runs_total{outcome!="success"}[3h])) > 5 and sum(increase(outflare_ads_sync_runs_total{outcome!="success"}[3h])) > sum(increase(outflare_ads_sync_runs_total{outcome="success"}[3h]))
         for: 15m
@@ -1829,11 +2004,11 @@ groups:
 
       # Sales introductions, personal replies and continuous mailbox catch-up.
       - alert: OutflareSalesJobsFailing
-        expr: sum by (kind) (increase(outflare_jobs_processed_total{kind=~"sales[.](send|sync)",outcome=~"retried|dead"}[30m])) > 5
+        expr: sum by (kind) (increase(outflare_jobs_processed_total{kind=~"sales[.](send|sync|reply_import)",outcome=~"retried|dead"}[30m])) > 5
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "Sales send or sync jobs repeatedly fail. Check the Sales email row, the job log and the affected person's connection status."
+          summary: "Sales send, sync or reply import jobs repeatedly fail. Check the Sales email row, the job log and the affected person's connection status; for sales.reply_import, the workspace's EmailBison connection."
       - alert: OutflareSalesSyncDelayed
         expr: max(outflare_jobs_oldest_due_seconds{kind="sales.sync"}) > 900
         for: 10m
@@ -1859,7 +2034,7 @@ groups:
         annotations:
           summary: "A definitely failed Sales send has waited for repair for over thirty minutes. Check its policy or connection error before using Retry send."
       - alert: OutflareSalesJobsSlow
-        expr: histogram_quantile(0.95, sum by (le,kind) (rate(outflare_jobs_duration_seconds_bucket{kind=~"sales[.](send|sync)"}[30m]))) > 120
+        expr: histogram_quantile(0.95, sum by (le,kind) (rate(outflare_jobs_duration_seconds_bucket{kind=~"sales[.](send|sync|reply_import)"}[30m]))) > 120
         for: 15m
         labels: { severity: info }
         annotations:
@@ -1876,3 +2051,103 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "Sales reporting source reads are slow. Check source query performance; origin lookups stop after eight seconds and leave the queue usable."
+      - alert: OutflareRecordingsNotStored
+        # Parts of session recordings the server could not write to file
+        # storage: the bucket is down, full or its keys stopped working.
+        expr: sum(increase(outflare_replay_parts_total{outcome="error"}[15m])) > 20
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Session recordings are not being stored. Check the file storage bucket (OUTFLARE_S3_*) and the engine log for recording.store_failed."
+      - alert: OutflareBrandFilesNotStored
+        # Uploads to brands' files that file storage refused: the bucket
+        # is down, full or its keys stopped working.
+        expr: sum(increase(outflare_assets_uploads_total{outcome="error"}[15m])) > 5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Files uploaded to brands are not being stored. Check the file storage bucket (OUTFLARE_S3_*) and the engine log for asset.store_failed."
+      - alert: OutflareBrandFilesGrowingFast
+        # Storage is paid by size: a day of uploads over 20 GB is worth a look.
+        expr: sum(increase(outflare_assets_bytes_total[24h])) > 20e9
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Over 20 GB of brand files were uploaded in a day. Check which workspace is uploading and whether it is expected."
+      - alert: OutflareGenerationsFailing
+        # Pictures, video and voice that ended without a file for a reason
+        # that isn't the brand's to fix: the provider broke, file storage
+        # refused the file, or Outflare was interrupted mid-request.
+        expr: sum(increase(outflare_media_generations_total{outcome="failed"}[1h])) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Pictures, videos or voice recordings brands asked for are failing. Check the engine log for 'generation failed' and its error_code, the provider's status page and the file storage bucket (OUTFLARE_S3_*)."
+      - alert: OutflareGenerationsTimingOut
+        # A provider that takes over 45 minutes: the brand may have paid
+        # for a file it never got.
+        expr: sum(increase(outflare_media_generations_total{outcome="timed_out"}[2h])) > 2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Requests for pictures, video or voice are not finishing within 45 minutes. Check the provider's status page, and that asset.generate jobs are running (the Jobs row)."
+      - alert: OutflareTalkingVideosFailing
+        # Talking videos that end without a video, or edits that are not
+        # made. A brand has usually paid a provider for the stages before
+        # the one that failed.
+        expr: sum(increase(outflare_media_videos_total{outcome=~"failed|edit_failed"}[2h])) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Talking videos or their edits are failing. Check the engine log for 'video failed' (it names the stage and error_code), the providers' status pages, and that ffmpeg on the server still runs."
+      - alert: OutflareVideoFinishSlow
+        # ffmpeg stops after 10 minutes; a finish or stitch near that will
+        # start failing.
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_media_video_stage_seconds_bucket{stage=~"finish|edit_cut|edit_stitch"}[1h]))) > 300
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Finishing or stitching talking videos with ffmpeg takes over 5 minutes. The workers need more CPU, or videos are longer than expected: see the talking videos panels."
+      - alert: OutflareCreativeRendersFailing
+        # A creative whose picture can't be read or drawn shows as a
+        # broken image in the library.
+        expr: sum(increase(outflare_creative_renders_total{outcome="failed"}[30m])) > 10
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Ads are failing to draw from their creatives. Check the engine log for 'creative render failed' and the file storage bucket (OUTFLARE_S3_*)."
+      - alert: OutflareCreativeRendersSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_creative_render_seconds_bucket[30m]))) > 4
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Drawing an ad from a creative takes over 4 seconds at p95. Check CPU on the API servers (the Server row) and the size of the pictures being drawn."
+      - alert: OutflareRecordingDeletesBehind
+        # Deleted and expired recordings whose files are still there.
+        expr: max(outflare_replay_recordings_waiting_delete) > 1000
+        for: 2h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over a thousand deleted or expired session recordings have waited two hours for their files to be removed. Check the engine log for recording.sweep_failed and the file storage bucket."
+      - alert: OutflareRecordingsGrowingFast
+        # Storage is paid by size: a day of recordings over 50 GB is worth a look.
+        expr: sum(increase(outflare_replay_bytes_total[24h])) > 50e9
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Over 50 GB of session recordings were stored in a day. Check which sites turned recordings on and whether the share of visits recorded should come down."
+
+      - alert: OutflareSalesDraftsStuck
+        expr: max(outflare_sales_oldest_draft_seconds) > 120
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sales AI previews are stuck. Check sales.draft_assist worker errors and workspace AI connections. Starting a new preview recovers expired requests."
+      - alert: OutflareSalesDraftsFailing
+        expr: sum(increase(outflare_sales_draft_results_total{status="failed"}[15m])) >= 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sales AI previews repeatedly fail. Check provider availability and workspace budgets; failures do not send email or overwrite saved replies."

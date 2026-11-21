@@ -18,12 +18,19 @@
 # "light i of n" splits it: shard 1 runs the other packages and its share of
 # the API tests, the rest only their share.
 #
+# "quick" is what CI runs on a pull request since 2026-11-18: only the
+# packages holding the files in $CHANGED and the bring-your-own-keys scan,
+# not their importers and never the API package. Most batches hold a single
+# pull request, so the light set ran the same tests as the batch that
+# followed it, for a third of all Actions minutes.
+#
 # RACE (default -race) is the race detector flag. CI runs the race detector
 # nightly on main and leaves it off elsewhere: it makes the tests two to three
 # times slower and finds the same failures only in rare cases.
 #
 # Packages whose tests use TEST_DATABASE_URL share one database, so they run
 # one at a time (-p 1); the others run in parallel.
+# An API part runs as two processes (PROCS), each with a copy of the database.
 #
 # A test that fails is run once more on its own. If it passes then, the part
 # passes and the test's name is written to $FLAKY_FILE (when set) so CI can
@@ -76,7 +83,7 @@ split_db() {
 	fi
 }
 
-case "${1:?usage: scripts/test-shard.sh api <i> <n> | rest | light [<i> <n>]}" in
+case "${1:?usage: scripts/test-shard.sh api <i> <n> | rest | light [<i> <n>] | quick}" in
 api)
 	i="${2:?shard number}"
 	n="${3:?shard count}"
@@ -86,6 +93,60 @@ api)
 	if [ -z "$tests" ]; then
 		echo "api part $i of $n has no tests" >&2
 		exit 1
+	fi
+	# Two test processes share the part (PROCS, default 2; 1 under the race
+	# detector, which needs several times the memory), each with a database
+	# of its own: the API tests don't run in parallel inside one process
+	# (they share its database), and one process left half of a two-core
+	# runner idle. On 2026-11-18 a part's tests took 283 seconds in one
+	# process, 207 in two, and 163 in two with the saved schema loaded
+	# (ci.yml); three or four processes were no faster than two, and six ran
+	# out of memory. Needs psql to copy the database; without it, when the
+	# copy fails, or with PROCS=1, one process runs the part as before.
+	procs=${PROCS:-2}
+	[ -z "$race" ] || procs=${PROCS:-1}
+	copied=false
+	if [ "$procs" -gt 1 ] && [ -n "${TEST_DATABASE_URL:-}" ] && command -v psql >/dev/null 2>&1; then
+		name=$(printf '%s' "$TEST_DATABASE_URL" | sed 's|^.*/\([^/?]*\).*$|\1|')
+		# The other databases are copies of the first, made before anything
+		# connects to it: when CI loaded the saved schema into it, none of
+		# them applies the migrations again.
+		copied=true
+		k=2
+		while [ "$k" -le "$procs" ]; do
+			psql "$TEST_DATABASE_URL" -q -c "DROP DATABASE IF EXISTS \"${name}_$k\"" >/dev/null 2>&1 || true
+			psql "$TEST_DATABASE_URL" -q -c "CREATE DATABASE \"${name}_$k\" TEMPLATE \"$name\"" || copied=false
+			k=$((k + 1))
+		done
+		[ "$copied" = true ] || echo "Could not copy the test database; running the part in one process." >&2
+	fi
+	if [ "$copied" = true ]; then
+		# Build once, so the processes don't compile the same packages side
+		# by side.
+		go test $race -exec /bin/true "$api" >/dev/null
+		dir=$(mktemp -d)
+		k=1
+		while [ "$k" -le "$procs" ]; do
+			(
+				mine=$(printf '%s\n' "$tests" | tr '|' '\n' | awk -v k="$k" -v n="$procs" '(NR - 1) % n == k - 1' | paste -sd '|' -)
+				[ -n "$mine" ] || exit 0
+				if [ "$k" -gt 1 ]; then
+					TEST_DATABASE_URL=$(printf '%s' "$TEST_DATABASE_URL" | sed "s|/$name?|/${name}_$k?|; s|/$name\$|/${name}_$k|")
+					export TEST_DATABASE_URL
+				fi
+				log=$(mktemp)
+				trap 'rm -f "$log" "$log.rc"' EXIT
+				run_tests -run "^($mine)\$" "$api"
+			) &
+			echo $! >"$dir/$k"
+			k=$((k + 1))
+		done
+		rc=0
+		for f in "$dir"/*; do
+			wait "$(cat "$f")" || rc=1
+		done
+		rm -rf "$dir"
+		exit $rc
 	fi
 	run_tests -run "^($tests)\$" "$api"
 	;;
@@ -101,7 +162,8 @@ rest)
 	# shellcheck disable=SC2086
 	run_tests $others
 	;;
-light)
+light | quick)
+	mode=$1
 	mod=$(go list -m)
 	# Every package as "<dir relative to here> <import path>".
 	all=$(go list -f '{{.Dir}} {{.ImportPath}}' ./... | sed "s|^$(pwd)/||; s|^$(pwd) |. |")
@@ -111,6 +173,10 @@ light)
 	changed=$(printf '%s\n' "${CHANGED:-}" | while read -r f; do
 		[ -n "$f" ] || continue
 		case "$f" in deploy/monitoring/*) echo "$mod/engine/internal/metrics"; continue ;; esac
+		# The SDKs are generated from the contract, and the command line's
+		# tests say when one is stale: on 2026-11-18 a contract change with
+		# no new Python SDK passed the quick check and failed its batch.
+		case "$f" in api/* | sdk/*) echo "$mod/engine/internal/cli" ;; esac
 		d=$(dirname "$f")
 		while :; do
 			p=$(printf '%s\n' "$all" | awk -v d="$d" '$1 == d { print $2 }')
@@ -122,9 +188,11 @@ light)
 	# And the packages that import them, tests included.
 	importers=$(go list -f '{{.ImportPath}}{{range .Imports}} {{.}}{{end}}{{range .TestImports}} {{.}}{{end}}{{range .XTestImports}} {{.}}{{end}}' ./... |
 		awk -v c="$changed" 'BEGIN { n = split(c, a, "\n"); for (k = 1; k <= n; k++) want[a[k]] = 1 } { for (i = 2; i <= NF; i++) if (want[$i]) { print $1; next } }')
+	[ "$mode" = light ] || importers=
 	pkgs=$(printf '%s\n%s\n%s\n' "$changed" "$importers" "$mod/engine/internal/ownkeys" | sed '/^$/d' | sort -u | sed "s|^$mod|.|")
-	# The API package only when it changed itself (api/ is its data).
-	if ! printf '%s\n' "$changed" | grep -qxF "$mod/engine/internal/api"; then
+	# The API package only when it changed itself (api/ is its data), and
+	# never in the quick part.
+	if [ "$mode" = quick ] || ! printf '%s\n' "$changed" | grep -qxF "$mod/engine/internal/api"; then
 		pkgs=$(printf '%s\n' "$pkgs" | grep -vxF "$api" || true)
 	fi
 	i="${2:-1}"
@@ -137,7 +205,7 @@ light)
 		run_tests -run "^($tests)\$" "$api"
 	fi
 	if [ "$i" = 1 ] && [ -n "$others" ]; then
-		echo "Testing the changed packages and their importers:" >&2
+		echo "Testing the changed packages${importers:+ and their importers}:" >&2
 		echo "$others" >&2
 		# shellcheck disable=SC2086
 		split_db $others

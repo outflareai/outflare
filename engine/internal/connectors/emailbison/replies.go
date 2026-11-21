@@ -30,6 +30,7 @@ type reply struct {
 	References     string `json:"references"`
 	ID             id     `json:"id"`
 	SenderEmailID  id     `json:"sender_email_id"`
+	CampaignID     id     `json:"campaign_id"`
 	FromEmail      string `json:"from_email_address"`
 	FromEmailAlt   string `json:"from_email"`
 	FromName       string `json:"from_name"`
@@ -100,6 +101,9 @@ func toReply(r reply) c.Reply {
 		out.Direction = "outgoing"
 	}
 	out.InReplyTo, out.References = r.InReplyTo, r.References
+	if c := string(r.CampaignID); c != "null" {
+		out.CampaignExternalID = c
+	}
 	for _, p := range r.ToList {
 		out.To = append(out.To, p.Address)
 	}

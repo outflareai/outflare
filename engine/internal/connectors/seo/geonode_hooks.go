@@ -141,7 +141,7 @@ func geonodeError(status int, raw []byte) error {
 		e.body = *e.Error
 	}
 	if e.Code != "" {
-		return c.Errf(geonodeKind(e.Code), "Geonode: %s", strings.TrimSpace(fmt.Sprintf("%s %s", e.Code, e.Message)))
+		return geonodeErrf(e.Code, "Geonode: %s", strings.TrimSpace(fmt.Sprintf("%s %s", e.Code, e.Message)))
 	}
 	return c.HTTPError("Geonode", status, string(raw))
 }

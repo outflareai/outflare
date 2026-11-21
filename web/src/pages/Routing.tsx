@@ -11,11 +11,12 @@ import { useBrand } from "@/lib/brand";
 import { nameItem, useCatalog } from "@/lib/records";
 import { track } from "@/lib/analytics";
 import { ops, readValue, useFieldNames } from "./Scores";
+import { RoutingPeople, type RoutingPerson } from "./RoutingPeople";
 import type { Tab } from "../App";
 
 type Kind = "account" | "person";
 type Draft = RoutingRuleInput & { assigned?: number };
-type Member = { user_id: string; name: string; email: string };
+type Member = { user_id: string; name: string; email: string; avatar_url?: string | null };
 type Team = { id: string; name: string; member_ids: string[] };
 type Country = { key: string; label: string };
 
@@ -64,6 +65,7 @@ function RoutingFor({ ws, brand, canManage, go }: { ws: string; brand: string; c
   const [unowned, setUnowned] = useState<Record<Kind, number>>({ account: 0, person: 0 });
   const [members, setMembers] = useState<Member[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [people, setPeople] = useState<RoutingPerson[]>([]);
   const countries: Country[] = useCatalog(ws, brand).catalog?.option_sets.find((x) => x.key === "country")?.options ?? [];
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
@@ -78,6 +80,7 @@ function RoutingFor({ ws, brand, canManage, go }: { ws: string; brand: string; c
     setError("");
     take(data.data);
     setUnowned(data.unowned);
+    setPeople(data.people);
     setDirty(false);
     setEditing(null);
   }, [brand]);
@@ -237,6 +240,8 @@ function RoutingFor({ ws, brand, canManage, go }: { ws: string; brand: string; c
           </span>
         </div>
       )}
+
+      <RoutingPeople brand={brand} members={members.filter((m) => !!m.user_id)} saved={people} canManage={canManage} onSaved={setPeople} />
 
       <p className="text-[12px] text-muted-foreground">
         A journey can route too: its "Assign an owner" step has "Use the routing rules" (<button className="underline" onClick={() => go("journeys")}>Journeys</button>). To move someone who already has an owner, open their page and change the owner there.

@@ -1,12 +1,13 @@
 id: partnerships-seo
-version: 1
+version: 2
 title: SEO link partnerships
-summary: A pipeline for backlink outreach (guest posts, link inserts, resource pages and mentions), from first pitch to a live link Presence keeps checking.
+summary: A pipeline for backlink outreach (guest posts, link inserts, resource pages and mentions), from a site you are researching to a live link Presence keeps checking.
 
 option_sets:
   - key: link_partnership_stage
     name: SEO partnership stage
     options:
+      - { key: researching, label: Researching }
       - { key: prospect, label: Prospect }
       - { key: pitched, label: Pitched }
       - { key: replied, label: Replied }

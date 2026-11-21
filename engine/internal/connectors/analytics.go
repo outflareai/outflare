@@ -56,7 +56,22 @@ type AnalyticsQuery struct {
 	// mark as internal or test users. Only tools that are TestAccountFilterers
 	// read it.
 	TestAccounts bool `json:"test_accounts,omitempty"`
+	// Page and Keyword narrow a search engine's report to one page or one
+	// search query: the queries that showed a page, the pages a query
+	// showed, or the days of either. Only SearchNarrowers read them.
+	Page    string `json:"page,omitempty"`
+	Keyword string `json:"keyword,omitempty"`
 }
+
+// SearchNarrower is a search engine's tool (Search Console, Bing) whose
+// traffic, pages and search_queries reports can be narrowed to one page
+// and one search query.
+type SearchNarrower interface {
+	NarrowsSearch() bool
+}
+
+// Narrowed reports whether the query names a page or a search query.
+func (q AnalyticsQuery) Narrowed() bool { return q.Page != "" || q.Keyword != "" }
 
 // TestAccountFilterer is a tool whose projects keep their own filters for
 // internal and test users (bots, staff, a fake crawler), which reports can
@@ -214,6 +229,15 @@ func CheckAnalyticsQuery(q AnalyticsQuery, now time.Time) (AnalyticsQuery, error
 	}
 	if to.Sub(from) > 5*366*24*time.Hour {
 		return q, Errf(ErrInvalid, "ask for at most five years at a time")
+	}
+	if len(q.Page) > 2048 {
+		return q, Errf(ErrInvalid, "page should be a URL of at most 2,048 characters")
+	}
+	if len(q.Keyword) > 500 {
+		return q, Errf(ErrInvalid, "keyword should be at most 500 characters")
+	}
+	if q.Narrowed() && q.Report != ReportTraffic && q.Report != ReportPages && q.Report != ReportSearchQueries {
+		return q, Errf(ErrInvalid, "page and keyword narrow only the traffic, pages and search_queries reports")
 	}
 	switch {
 	case q.Limit <= 0:

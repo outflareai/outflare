@@ -13,12 +13,12 @@ func TestRequestLogs(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	bb := brandBase(t, e, ws)
 
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
 	owner.must(201, "POST", base+"/leads", map[string]any{"email": "ada@example.com"})
 	owner.must(200, "GET", base+"/leads?q=ada@example.com", nil)
 	owner.must(404, "GET", base+"/leads/00000000-0000-0000-0000-000000000000", nil)
-	owner.must(200, "GET", base+"/sequences?brand=repocket", nil)
+	owner.must(200, "GET", base+"/sequences?brand=summitly", nil)
 
 	// An agent through MCP.
 	agent := agentToken(t, owner, base, "Agent", "leads.read", "audit.read")
@@ -179,7 +179,7 @@ func TestRequestLogs(t *testing.T) {
 	}
 
 	// A brand token sees only calls about its brand.
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": []string{"audit.read", "sequences.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly agent", "scopes": []string{"audit.read", "sequences.read"}, "brand": "summitly"})
 	rpAgent := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	rpAgent.must(200, "GET", base+"/sequences", nil)
 	rpAgent.must(200, "GET", base+"/logs", nil)

@@ -42,9 +42,14 @@ func testPool(t *testing.T) *pgxpool.Pool {
 // the addresses it is asked to verify.
 type fakeFinder struct{}
 
+// profiles is the LinkedIn profile the finder was given for each person
+// it was asked to find, by first name.
+var profiles sync.Map
+
 func (fakeFinder) Resolve(_ context.Context, _ string, req emailfind.FindRequest) (emailfind.FindResult, error) {
 	var out emailfind.FindResult
 	for _, it := range req.Items {
+		profiles.Store(it.FirstName, it.LinkedInURL)
 		r := emailfind.ItemResult{Ref: it.Ref, Code: emailfind.CodeFound, Confidence: 80,
 			Email: strings.ToLower(it.FirstName + "." + it.LastName + "@" + it.Domain)}
 		switch it.FirstName {
@@ -98,7 +103,7 @@ func TestPeopleSteps(t *testing.T) {
 
 	// The feature's own data: who each item is, and what happened to it.
 	people := map[string]*Contact{
-		"ana":    {FirstName: "Ana", LastName: "Diaz", Title: "CFO", Domain: "acme.example", CompanyID: acme},
+		"ana":    {FirstName: "Ana", LastName: "Diaz", Title: "CFO", Domain: "acme.example", CompanyID: acme, LinkedInURL: " https://www.linkedin.com/in/ana-diaz-example "},
 		"bea":    {FirstName: "Bea", LastName: "Lee", Domain: "acme.example", CompanyID: acme},
 		"cal":    {FirstName: "Cal", LastName: "Ng", Domain: "acme.example", CompanyID: acme},
 		"dee":    {FirstName: "Dee", LastName: "Ray", Domain: "acme.example", CompanyID: acme},
@@ -206,6 +211,13 @@ func TestPeopleSteps(t *testing.T) {
 
 	if len(spent) != 1 || spent["ana"] != 1 {
 		t.Fatalf("spent: %v", spent)
+	}
+	// The finder is given the profile of a person who has one.
+	if p, _ := profiles.Load("Ana"); p != "https://www.linkedin.com/in/ana-diaz-example" {
+		t.Fatalf("ana's profile reached the finder as %q", p)
+	}
+	if p, ok := profiles.Load("Maybe"); !ok || p != "" {
+		t.Fatalf("maybe's profile reached the finder as %q (%v)", p, ok)
 	}
 	if stops["bea"] != OptedOut || stops["cal"] != Bounced || stops["nobody"] != NotFound || len(stops) != 3 {
 		t.Fatalf("stops: %v", stops)

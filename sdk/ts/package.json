@@ -1,7 +1,6 @@
 {
   "name": "@outflare/sdk",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.110.0",
   "description": "TypeScript client for the Outflare API",
   "license": "Apache-2.0",
   "repository": {

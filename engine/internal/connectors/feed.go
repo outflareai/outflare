@@ -80,6 +80,66 @@ type AudienceFeeder interface {
 	IngestAudience(ctx context.Context, c *Client, creds Creds, acct AdAccount, audienceID, change string, members []AudienceMember) (string, error)
 }
 
+// AudienceCreator makes a customer list audience on the account, for an
+// audience Outflare keeps in step with one of the brand's lists. A list
+// with the same name is found instead of made twice.
+type AudienceCreator interface {
+	AudienceFeeder
+	CreateAudience(ctx context.Context, c *Client, creds Creds, acct AdAccount, name, description string) (string, error)
+}
+
+// AudienceSize is what the platform says about a customer list audience:
+// how many people it could match for each kind of placement, and the share
+// of the people sent that it matched. Nil is something the platform didn't
+// say (small lists are hidden for privacy).
+type AudienceSize struct {
+	Search    *int64   `json:"search"`
+	Display   *int64   `json:"display"`
+	MatchRate *float64 `json:"match_rate"`
+}
+
+// AudienceSizer reads an audience's size from the platform.
+type AudienceSizer interface {
+	AudienceSize(ctx context.Context, c *Client, creds Creds, acct AdAccount, audienceID string) (AudienceSize, error)
+}
+
+// MatchQuality is what the platform says about how well one event's
+// conversions match its own accounts.
+type MatchQuality struct {
+	// Event is the platform's event name, such as Purchase.
+	Event string
+	// Score is out of 10; nil when the platform gave none.
+	Score *float64
+	// Keys is the share of events that carried each identifier.
+	Keys []MatchKey
+	// Issues is what the platform says is wrong, worst first as it gave
+	// them.
+	Issues []MatchIssue
+}
+
+// MatchKey is one identifier and the share of events that carried it, in
+// percent.
+type MatchKey struct {
+	Key     string  `json:"key"`
+	Percent float64 `json:"percent"`
+}
+
+// MatchIssue is one problem the platform found: its words for what is
+// wrong and how to fix it, and the share of events it touches, in percent.
+type MatchIssue struct {
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Solution    string  `json:"solution"`
+	Percent     float64 `json:"percent"`
+}
+
+// MatchQualityReader is a ConversionSender whose platform reports how well
+// the conversions sent to a target match. It only reads.
+type MatchQualityReader interface {
+	ConversionSender
+	MatchQuality(ctx context.Context, c *Client, creds Creds, acct AdAccount, targetID string) ([]MatchQuality, error)
+}
+
 // ConversionActionSpec is a conversion action Outflare makes on an
 // account for the feed.
 type ConversionActionSpec struct {
@@ -140,6 +200,31 @@ type ConversionFeedManager interface {
 	// SetNewCustomerGoal sets, changes or removes the account's new
 	// customer acquisition goal on the campaigns named.
 	SetNewCustomerGoal(ctx context.Context, c *Client, creds Creds, acct AdAccount, goal NewCustomerGoal) error
+}
+
+// FeedRequestStatus is how the platform processed one feed request.
+type FeedRequestStatus struct {
+	// Status is PROCESSING, SUCCESS, PARTIAL_SUCCESS or FAILED.
+	Status  string
+	Records int64
+	// Errors counts the records that failed by reason, with the rows;
+	// Warnings the records it took but had a remark about.
+	Errors   []FeedRequestError
+	Warnings []FeedRequestError
+}
+
+// FeedRequestError is one reason records failed or were warned about.
+type FeedRequestError struct {
+	Reason  string
+	Count   int64
+	Indices []int
+}
+
+// FeedStatusReader is a connector that can say how it processed a feed
+// request after accepting it: accepting only means the request was well
+// formed.
+type FeedStatusReader interface {
+	RequestStatus(ctx context.Context, c *Client, creds Creds, requestID string) (FeedRequestStatus, error)
 }
 
 // ReconnectNeeder is a connector whose sign-in may predate a permission a

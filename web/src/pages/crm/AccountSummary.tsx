@@ -427,8 +427,34 @@ export function AccountSummary({
 
   return (
     <div className="space-y-4">
-      {/* Where they are in the lifecycle. */}
-      {stages.length > 0 && (
+      {/* A person has no pipeline: where they came from and whether
+          marketing email may go to them. Progress lives on their deals. */}
+      {record.type === "person" && (
+        <section aria-label="Source and marketing email" className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border px-3 py-2 text-xs">
+          <span className="flex items-center gap-2">
+            <span className="text-muted-foreground">Source</span>
+            {typeof record.attributes.source === "string" ? (
+              <Badge title="Where they came from, set once when they were added.">
+                {cat.labels.get("person_source")?.get(record.attributes.source) ?? words(record.attributes.source)}
+              </Badge>
+            ) : (
+              <span className="text-muted-foreground">Not set</span>
+            )}
+          </span>
+          {record.contactability && (
+            <span className="flex items-center gap-2" title={record.contactability.why}>
+              <span className="text-muted-foreground">Marketing email</span>
+              <Status tone={record.contactability.allowed.marketing ? "green" : "grey"}>
+                {record.contactability.allowed.marketing ? "Yes" : "No"}
+              </Status>
+              <span className="text-muted-foreground">{record.contactability.why}</span>
+            </span>
+          )}
+        </section>
+      )}
+
+      {/* Where a company is in the lifecycle. */}
+      {record.type !== "person" && stages.length > 0 && (
         <section aria-label="Lifecycle stage">
           <ol className="flex overflow-hidden rounded-lg border text-xs">
             {stages.map((s, i) => {

@@ -73,6 +73,10 @@ func TestAnalyticsChangesAndCatalog(t *testing.T) {
 			exec(row, ws, sc, "google_search_console", "search_queries", day(n), "cold email", nil, nil, q, q*10, 5)
 		}
 	}
+	// The stand-in Search Console reads its own site, as a real one does
+	// (sc-domain:): two connections to one site would count it once.
+	exec(`UPDATE analytics_daily SET site = 'sc-domain:example.com' WHERE integration_id = $1`, sc)
+	exec(`UPDATE analytics_syncs SET site = 'sc-domain:example.com' WHERE integration_id = $1`, sc)
 	snap := `INSERT INTO seo_snapshots (workspace_id, integration_id, connector, host, report, day, country, key, metrics) VALUES ($1, $2, 'dataforseo', 'example.com', $3, $4, 'US', $5, $6)`
 	exec(snap, ws, dfs, "overview", day(7), "", `{"domain_rating": 40, "organic_keywords": 1000, "top3": 12}`)
 	exec(snap, ws, dfs, "overview", day(0), "", `{"domain_rating": 42, "organic_keywords": 1100, "top3": 15}`)

@@ -170,6 +170,7 @@ func (s *Server) syncNetworkSource(ctx context.Context, src networkCostSource) (
 	}
 	now := time.Now().In(loc)
 	done := 0
+	var seen []string // every campaign the recent days' clicks named
 	for back := range networkCostDays {
 		start := time.Date(now.Year(), now.Month(), now.Day()-back, 0, 0, 0, 0, loc)
 		end := start.AddDate(0, 0, 1)
@@ -179,6 +180,9 @@ func (s *Server) syncNetworkSource(ctx context.Context, src networkCostSource) (
 			return done, err
 		}
 		for _, ref := range refs {
+			if !slices.Contains(seen, ref) {
+				seen = append(seen, ref)
+			}
 			list, err := targets.AdTargetDays(ctx, o.Client, o.Creds, acct, ref, day)
 			if err != nil {
 				return done, s.networkCostFailed(ctx, src, err)
@@ -188,6 +192,12 @@ func (s *Server) syncNetworkSource(ctx context.Context, src networkCostSource) (
 			}
 			done++
 			metrics.TrackerNetworkCostSync(network, "synced")
+		}
+	}
+	// Then each campaign's targets as the network holds them now.
+	if lister, ok := o.Connector.(connectors.AdTargetStateReader); ok {
+		if err := s.syncNetworkTargets(ctx, src, lister, o, acct, seen); err != nil {
+			return done, err
 		}
 	}
 	return done, nil
@@ -392,6 +402,7 @@ func share(total int64, weights []int64) []int64 {
 
 func (s *Server) routesNetworkCosts(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/brands/{brand}/network-costs", s.onBrand(auth.ScopeAnalyticsRead, s.listNetworkCosts))
+	mux.HandleFunc("GET /v1/brands/{brand}/network-targets", s.onBrand(auth.ScopeAnalyticsRead, s.listNetworkTargets))
 }
 
 type networkCostView struct {

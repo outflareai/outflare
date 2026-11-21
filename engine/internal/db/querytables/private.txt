@@ -1,0 +1,36 @@
+# Brand tables agents never read through SQL: secrets, sign-in material and
+# machinery with no meaning of its own. Every other table with brand data is
+# read through a view in the query schema (AGENTS.md, "Data: agents can see
+# all of it"), and TestEveryBrandTableIsQueryable fails on one that is in
+# neither this list nor pending.txt. Each entry says why; add one only for
+# the same reasons.
+
+# Secrets, tokens and sign-in material: sealed credentials, token hashes,
+# signing secrets, OAuth codes and flows, sign-in links and sessions.
+api_tokens
+brand_account_attempts
+brand_account_secrets
+crm_google_connections
+crm_mail_oauth_flows
+journey_signing_secrets
+journey_step_secrets
+oauth_codes
+partner_sessions
+partner_sign_in_links
+sales_mail_connections
+sales_oauth_flows
+telegram_sessions
+
+# Machinery: locks, who is looking at what right now, read markers and caches
+# of answers the other tables already hold.
+analytics_cache
+conversation_reads
+inbox_presence
+inbox_viewing
+mailbox_locks
+sales_lead_alerts
+sales_seen
+
+# Rows a person deleted, kept only so the deletion can be undone: reading
+# them would bring deleted data back.
+deleted_rows

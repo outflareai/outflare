@@ -462,21 +462,11 @@ func (g GoogleAds) IngestAudience(ctx context.Context, cl *c.Client, creds c.Cre
 	return requestID, nil
 }
 
-// FeedRequestStatus is how Google processed one request, per destination.
-type FeedRequestStatus struct {
-	// Status is PROCESSING, SUCCESS, PARTIAL_SUCCESS or FAILED.
-	Status  string
-	Records int64
-	// Errors counts the records that failed by reason, with the rows.
-	Errors []FeedRequestError
-}
+// FeedRequestStatus is how Google processed one request (see connectors).
+type FeedRequestStatus = c.FeedRequestStatus
 
-// FeedRequestError is one reason records failed.
-type FeedRequestError struct {
-	Reason  string
-	Count   int64
-	Indices []int
-}
+// FeedRequestError is one reason records failed or were warned about.
+type FeedRequestError = c.FeedRequestError
 
 // RequestStatus asks how a request was processed (requestStatus:
 // retrieve). Google answers from about 30 minutes after the request and
@@ -500,6 +490,12 @@ func (g GoogleAds) RequestStatus(ctx context.Context, cl *c.Client, creds c.Cred
 					RecordIndices []int   `json:"recordIndices"`
 				} `json:"errorCounts"`
 			} `json:"errorInfo"`
+			WarningInfo struct {
+				WarningCounts []struct {
+					Reason      string  `json:"reason"`
+					RecordCount flexInt `json:"recordCount"`
+				} `json:"warningCounts"`
+			} `json:"warningInfo"`
 		} `json:"requestStatusPerDestination"`
 	}
 	err := g.dmCall(ctx, cl, creds, http.MethodGet, g.dmBase(cl)+"/requestStatus:retrieve?requestId="+esc(requestID), nil, &resp)
@@ -518,6 +514,9 @@ func (g GoogleAds) RequestStatus(ctx context.Context, cl *c.Client, creds c.Cred
 	}
 	for _, e := range d.ErrorInfo.ErrorCounts {
 		st.Errors = append(st.Errors, FeedRequestError{Reason: e.Reason, Count: int64(e.RecordCount), Indices: e.RecordIndices})
+	}
+	for _, e := range d.WarningInfo.WarningCounts {
+		st.Warnings = append(st.Warnings, FeedRequestError{Reason: e.Reason, Count: int64(e.RecordCount)})
 	}
 	return st, nil
 }

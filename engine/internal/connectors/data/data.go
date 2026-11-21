@@ -22,7 +22,7 @@ import (
 
 // All returns every available data connector.
 func All() []c.Connector {
-	return []c.Connector{Apollo{}, PDL{}, MoltSets{}, Prospeo{}, LeadMagic{}, Findymail{}, Snitcher{}, RB2B{}, Vector{}, Warmly{}}
+	return []c.Connector{Apollo{}, PDL{}, MoltSets{}, Blitz{}, Prospeo{}, LeadMagic{}, Findymail{}, Treg{}, Snitcher{}, RB2B{}, Vector{}, Warmly{}}
 }
 
 // Planned lists data and signal providers we intend to add. Listing them
@@ -81,7 +81,7 @@ func call(ctx context.Context, cl *c.Client, name string, req *http.Request, v a
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return resp.StatusCode, c.HTTPError(name, resp.StatusCode, string(body))
+		return resp.StatusCode, c.HTTPErrorFor(name, resp, string(body))
 	}
 	if v != nil {
 		if err := json.Unmarshal(body, v); err != nil {

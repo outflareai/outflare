@@ -311,6 +311,40 @@ func TestLinksReports(t *testing.T) {
 // Ahrefs answers 403 for a report the plan doesn't include: that report
 // is refused, the key isn't wrong, so the connection isn't marked broken.
 // A 401 still is.
+// The donor report asks only for what judges a site to buy a link on:
+// rating, worldwide traffic, referring and linked domains, and three top
+// pages.
+func TestAhrefsDonor(t *testing.T) {
+	cl, calls := fake(t, map[string]any{
+		"GET /site-explorer/domain-rating":   map[string]any{"domain_rating": map[string]any{"domain_rating": 61}},
+		"GET /site-explorer/metrics":         map[string]any{"metrics": map[string]any{"org_traffic": 10000}},
+		"GET /site-explorer/backlinks-stats": map[string]any{"metrics": map[string]any{"live_refdomains": 900}},
+		"GET /site-explorer/outlinks-stats":  map[string]any{"metrics": map[string]any{"linked_domains": 120, "linked_domains_dofollow": 80}},
+		"GET /site-explorer/top-pages": map[string]any{"pages": []any{
+			map[string]any{"url": "https://news.example/", "sum_traffic": 5000},
+			map[string]any{"url": "https://news.example/a", "sum_traffic": 1500},
+			map[string]any{"url": "https://news.example/b", "sum_traffic": 1000},
+		}},
+	})
+	q := c.SEOQuery{Report: c.SEODonor, Target: "news.example", Country: "US", Limit: 3}
+	rep, err := Ahrefs{}.SEOReport(ctx, cl, c.Creds{"api_key": "k"}, q)
+	if err != nil || val(rep.Totals.DomainRating) != 61 || val(rep.Totals.OrganicTraffic) != 10000 || val(rep.Totals.ReferringDomains) != 900 ||
+		val(rep.Totals.LinkedDomains) != 120 || len(rep.Rows) != 3 || rep.Rows[0].URL != "https://news.example/" || val(rep.Rows[0].OrganicTraffic) != 5000 {
+		t.Fatalf("donor: %+v %v", rep, err)
+	}
+	if len(*calls) != 5 {
+		t.Fatalf("calls: %v", *calls)
+	}
+	for _, call := range *calls {
+		if strings.Contains(call, "country=") {
+			t.Fatalf("a donor's traffic is worldwide: %s", call)
+		}
+		if strings.Contains(call, "top-pages") && !strings.Contains(call, "limit=3") {
+			t.Fatalf("top pages: %s", call)
+		}
+	}
+}
+
 func TestAhrefsPlanRefusalIsNotABadKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "Bearer bad" {

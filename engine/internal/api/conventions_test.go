@@ -30,6 +30,7 @@ var unpagedLists = map[string]string{
 	"listAdFindings":                 "a queue ranked for a person, open decisions by impact first, at most 500",
 	"listBrandAdTests":               "live tests first, then finished ones, at most 500",
 	"listAdDrafts":                   "a queue in status order, those waiting for a person first, at most 500",
+	"listDestinationSends":           "the tail of a log: a destination's newest events, at most 200",
 	"listEmailBisonCompatCalls":      "mirrors the EmailBison API's own shape",
 	"getBrandSiteSearch":             "the top rows of a report bounded by from and to, with totals of every row",
 	"getBrandSiteCannibalisation":    "the most shown searches, at most 200; the fixes list holds the top 50",

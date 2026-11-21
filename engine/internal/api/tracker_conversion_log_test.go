@@ -87,7 +87,7 @@ func TestTrackerConversionLog(t *testing.T) {
 		t.Fatalf("page: %v", page)
 	}
 	owner.must(400, "GET", base+"/tracker-conversion-log?via=fax", nil)
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	if n := len(owner.must(200, "GET", "/v1/brands/"+other["id"].(string)+"/tracker-conversion-log", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("another brand sees %d calls", n)
 	}

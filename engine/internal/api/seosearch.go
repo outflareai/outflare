@@ -25,6 +25,7 @@ func (s *Server) routesSEOSearch(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/search", s.inBrand(read, s.siteSearch))
 	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/search/history", s.onBrand(read, s.siteSearchHistory))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/search/history", s.inBrand(read, s.siteSearchHistory))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/search/performance", s.onBrand(read, s.siteSearchPerformance))
 	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/indexing", s.onBrand(read, s.siteIndexing))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/indexing", s.inBrand(read, s.siteIndexing))
 	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/sitemaps", s.onBrand(read, s.siteSitemaps))

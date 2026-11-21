@@ -19,7 +19,7 @@ let regionNames: Intl.DisplayNames | null = null;
 function country(code: string) {
   if (!code || code === "(none)") return "";
   try {
-    regionNames ??= new Intl.DisplayNames(undefined, { type: "region" });
+    regionNames ??= new Intl.DisplayNames(["en"], { type: "region" });
     return regionNames.of(code) ?? code;
   } catch {
     return code;

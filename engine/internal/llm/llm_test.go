@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -138,5 +139,52 @@ func TestVercelAIGatewayChecksTheKey(t *testing.T) {
 	cfg.Key = "vck-wrong-test-not-a-real-key"
 	if _, err := ListModels(context.Background(), cfg); !errors.Is(err, ErrAuth) {
 		t.Errorf("a refused key = %v, want ErrAuth", err)
+	}
+}
+
+// Through OpenRouter, an Anthropic model gets its stable prefix (the system
+// prompt and the reference) marked for caching, and the cached reads it
+// reports are counted apart; other models are sent as before.
+func TestOpenRouterMarksAnthropicPrefixForCaching(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		bodies = append(bodies, b)
+		w.Write([]byte(`{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":10000,"completion_tokens":100,"prompt_tokens_details":{"cached_tokens":6000},"cost":0.01}}`))
+	}))
+	defer srv.Close()
+	ask := func(model string) Response {
+		t.Helper()
+		m, err := New(Config{Provider: OpenRouter, Key: "sk-or-test-not-a-real-key", BaseURL: srv.URL, Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := m.Chat(context.Background(), Request{System: "Judge companies.", Reference: "The brief.", Messages: []Message{{Role: "user", Text: "Page text"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	res := ask("anthropic/claude-haiku-5.5")
+	sys := bodies[0]["messages"].([]any)[0].(map[string]any)
+	parts, ok := sys["content"].([]any)
+	if !ok || len(parts) != 1 {
+		t.Fatalf("system message = %v, want one marked text part", sys)
+	}
+	part := parts[0].(map[string]any)
+	if part["text"] != "Judge companies.\n\nThe brief." || part["cache_control"] == nil {
+		t.Errorf("system part = %v, want the prefix with cache_control", part)
+	}
+	if res.Usage.CacheRead != 6000 || res.Usage.InputTokens != 4000 || res.Usage.CostUSD != 0.01 {
+		t.Errorf("usage = %+v", res.Usage)
+	}
+	if !CapabilitiesOf(OpenRouter.ID, "anthropic/claude-haiku-5.5").Cache || CapabilitiesOf(OpenRouter.ID, "openai/gpt-5").Cache {
+		t.Error("caching is claimed for the wrong OpenRouter models")
+	}
+	ask("openai/gpt-5")
+	if _, ok := bodies[1]["messages"].([]any)[0].(map[string]any)["content"].(string); !ok {
+		t.Errorf("another model's system message = %v, want plain text", bodies[1]["messages"])
 	}
 }

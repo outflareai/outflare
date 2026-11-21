@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
 
@@ -331,6 +332,210 @@ func (t TikTokAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct
 	return out, nil
 }
 
+// tiktokVideoMetrics say how far a video ad was watched: plays, plays of 2
+// and of 6 seconds or more, and plays that reached each quarter.
+var tiktokVideoMetrics = []string{"video_play_actions", "video_watched_2s", "video_watched_6s", "video_views_p25", "video_views_p50", "video_views_p75", "video_views_p100"}
+
+// ---- ad groups and ads ----
+
+var _ c.AdItemsReader = TikTokAds{}
+
+// AdItems lists the account's ad groups (/adgroup/get/) or ads
+// (/ad/get/), with each ad's text and landing page. TikTok leaves deleted
+// ones out unless asked.
+func (t TikTokAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level string) ([]c.AdItem, error) {
+	path, fields := "/adgroup/get/", []string{"adgroup_id", "adgroup_name", "campaign_id", "operation_status", "secondary_status", "budget", "budget_mode"}
+	switch level {
+	case c.AdLevelGroup:
+	case c.AdLevelAd:
+		path, fields = "/ad/get/", []string{"ad_id", "ad_name", "adgroup_id", "operation_status", "secondary_status", "ad_text", "landing_page_url"}
+	default:
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	var out []c.AdItem
+	for page := 1; page <= maxPages; page++ {
+		var data struct {
+			List []struct {
+				AdgroupID       string  `json:"adgroup_id"`
+				AdgroupName     string  `json:"adgroup_name"`
+				CampaignID      string  `json:"campaign_id"`
+				AdID            string  `json:"ad_id"`
+				AdName          string  `json:"ad_name"`
+				OperationStatus string  `json:"operation_status"`
+				SecondaryStatus string  `json:"secondary_status"`
+				Budget          flexNum `json:"budget"`
+				BudgetMode      string  `json:"budget_mode"`
+				AdText          string  `json:"ad_text"`
+				LandingPageURL  string  `json:"landing_page_url"`
+			} `json:"list"`
+			PageInfo tiktokPage `json:"page_info"`
+		}
+		if err := t.get(ctx, cl, creds["access_token"], path, map[string]any{"advertiser_id": acct.ID, "page": page, "page_size": 1000, "fields": fields}, &data); err != nil {
+			return nil, err
+		}
+		for _, x := range data.List {
+			it := c.AdItem{Status: tiktokStatus(x.OperationStatus, x.SecondaryStatus), ProviderStatus: x.OperationStatus}
+			if level == c.AdLevelGroup {
+				it.ID, it.Name, it.ParentID = x.AdgroupID, x.AdgroupName, x.CampaignID
+				if x.BudgetMode == "BUDGET_MODE_DAY" && x.Budget > 0 {
+					it.DailyBudgetMicros = ptrI(c.Micros(float64(x.Budget)))
+				}
+			} else {
+				it.ID, it.Name, it.ParentID = x.AdID, x.AdName, x.AdgroupID
+				it.Details = adDetails(map[string]string{c.AdDetailText: x.AdText, c.AdDetailURL: x.LandingPageURL})
+				if x.LandingPageURL != "" {
+					it.Details[c.AdDetailTemplated] = strconv.FormatBool(adtrack.HasTemplate(x.LandingPageURL))
+				}
+			}
+			if it.ID != "" {
+				out = append(out, it)
+			}
+		}
+		if data.PageInfo.TotalPage <= page {
+			break
+		}
+	}
+	return out, nil
+}
+
+// AdItemDays reads the integrated report by ad group or ad and day, in
+// windows of at most 30 days like AdDays.
+func (t TikTokAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level, from, to string) ([]c.AdItemDay, error) {
+	dataLevel, dim, name, parent := "AUCTION_ADGROUP", "adgroup_id", "adgroup_name", "campaign_id"
+	switch level {
+	case c.AdLevelGroup:
+	case c.AdLevelAd:
+		dataLevel, dim, name, parent = "AUCTION_AD", "ad_id", "ad_name", "adgroup_id"
+	default:
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	var out []c.AdItemDay
+	end := mustDate(to)
+	for start := mustDate(from); !start.After(end); start = start.AddDate(0, 0, 30) {
+		stop := start.AddDate(0, 0, 29)
+		if stop.After(end) {
+			stop = end
+		}
+		for page := 1; page <= maxPages; page++ {
+			var data struct {
+				List []struct {
+					Dimensions map[string]string `json:"dimensions"`
+					Metrics    map[string]any    `json:"metrics"`
+				} `json:"list"`
+				PageInfo tiktokPage `json:"page_info"`
+			}
+			err := t.get(ctx, cl, creds["access_token"], "/report/integrated/get/", map[string]any{
+				"advertiser_id": acct.ID, "report_type": "BASIC", "data_level": dataLevel,
+				"dimensions": []string{dim, "stat_time_day"},
+				"metrics":    append([]string{name, parent, "spend", "impressions", "clicks", "conversion"}, tiktokVideoMetrics...),
+				"start_date": start.Format("2006-01-02"), "end_date": stop.Format("2006-01-02"),
+				"page": page, "page_size": 1000,
+			}, &data)
+			if err != nil {
+				return nil, err
+			}
+			for _, row := range data.List {
+				id, date := row.Dimensions[dim], row.Dimensions["stat_time_day"]
+				if id == "" || len(date) < 10 {
+					continue
+				}
+				// TikTok sends numbers as strings, or as numbers.
+				text := func(k string) string {
+					switch v := row.Metrics[k].(type) {
+					case string:
+						return v
+					case float64:
+						return strconv.FormatFloat(v, 'f', -1, 64)
+					}
+					return ""
+				}
+				day := c.AdItemDay{ID: id, ParentID: text(parent), Name: text(name), Date: date[:10], SpendMicros: c.MicrosOf(text("spend"))}
+				if n := c.ParseNum(text("impressions")); n != nil {
+					day.Impressions = int64(*n)
+				}
+				if n := c.ParseNum(text("clicks")); n != nil {
+					day.Clicks = int64(*n)
+				}
+				if n := c.ParseNum(text("conversion")); n != nil {
+					day.Conversions = ptrF(*n)
+				}
+				// How far the video was watched. A row with no plays at all
+				// is an ad without a video, and keeps these empty.
+				watched := func(k string) *int64 {
+					if n := c.ParseNum(text(k)); n != nil && *n >= 0 {
+						return ptrI(int64(*n))
+					}
+					return nil
+				}
+				if started, plays := watched("video_play_actions"), watched("video_watched_2s"); plays != nil && (*plays > 0 || (started != nil && *started > 0)) {
+					day.VideoViews, day.VideoThruPlays = plays, watched("video_watched_6s")
+					day.VideoP25, day.VideoP50, day.VideoP75, day.VideoP100 = watched("video_views_p25"), watched("video_views_p50"), watched("video_views_p75"), watched("video_views_p100")
+				}
+				out = append(out, day)
+			}
+			if data.PageInfo.TotalPage <= page {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// Changes below the campaign: an ad group or an ad is paused or resumed
+// (/adgroup/status/update/, /ad/status/update/), and an ad group's own
+// daily budget set (/adgroup/update/).
+var (
+	_ c.AdGroupManager       = TikTokAds{}
+	_ c.AdGroupBudgetManager = TikTokAds{}
+	_ c.AdStatusManager      = TikTokAds{}
+)
+
+func tiktokOp(active bool) string {
+	if active {
+		return "ENABLE"
+	}
+	return "DISABLE"
+}
+
+// tiktokID is an id TikTok gave: digits, checked before it is sent back.
+func tiktokID(id string) bool {
+	if id == "" || len(id) > 40 {
+		return false
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func (t TikTokAds) SetAdGroupStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID string, active bool) error {
+	if !tiktokID(adGroupID) {
+		return c.Errf(c.ErrInvalid, "TikTok ad group ids are numbers")
+	}
+	return t.post(ctx, cl, creds["access_token"], "/adgroup/status/update/", map[string]any{"advertiser_id": acct.ID, "adgroup_ids": []string{adGroupID}, "operation_status": tiktokOp(active)})
+}
+
+func (t TikTokAds) SetAdStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID, adID string, active bool) error {
+	if !tiktokID(adID) {
+		return c.Errf(c.ErrInvalid, "TikTok ad ids are numbers")
+	}
+	return t.post(ctx, cl, creds["access_token"], "/ad/status/update/", map[string]any{"advertiser_id": acct.ID, "ad_ids": []string{adID}, "operation_status": tiktokOp(active)})
+}
+
+// SetAdGroupDailyBudget sets an ad group's own daily budget, to the cent.
+// TikTok refuses it for an ad group whose campaign holds the budget.
+func (t TikTokAds) SetAdGroupDailyBudget(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID string, micros int64) error {
+	if !tiktokID(adGroupID) {
+		return c.Errf(c.ErrInvalid, "TikTok ad group ids are numbers")
+	}
+	if micros <= 0 {
+		return c.Errf(c.ErrInvalid, "the daily budget must be more than nothing")
+	}
+	return t.post(ctx, cl, creds["access_token"], "/adgroup/update/", map[string]any{"advertiser_id": acct.ID, "adgroup_id": adGroupID, "budget": float64((micros+5_000)/10_000) / 100})
+}
+
 // ---- conversions ----
 
 // tiktokEvents are TikTok's standard web events a rule can send as.
@@ -398,6 +603,14 @@ func (t TikTokAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Cr
 		if len(keys) == 0 {
 			results[i].Skipped, results[i].Reason = true, "no TikTok click id or identifier to match on"
 			continue
+		}
+		// Where the person was, beside the identifiers above and never the
+		// only thing sent: the platform matches on them unhashed.
+		if cv.IPAddress != "" {
+			user["ip"], keys = cv.IPAddress, append(keys, "ip_address")
+		}
+		if cv.UserAgent != "" {
+			user["user_agent"], keys = cv.UserAgent, append(keys, "user_agent")
 		}
 		kind := cv.EventType
 		if kind == "" {

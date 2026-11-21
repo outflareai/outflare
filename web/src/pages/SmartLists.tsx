@@ -1,193 +1,37 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type { LeadList, NewsSearch, SmartList, SmartListPerson, SmartListRule } from "@outflare/sdk";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import type { Schemas, SmartList, SmartListPerson, SmartListRule } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
+import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, confirmAction, ErrorText, field, Loading, Menu, PageHeader, Stat, Stats, toast } from "../ui";
-import { ago, plural } from "../format";
+import { Badge, Button, Card, confirmAction, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, toast } from "../ui";
+import { ago } from "../format";
+import { Sparkles } from "lucide-react";
+import type { Tab } from "@/lib/paths";
+import { AppLink } from "./PartnerPage";
 import { BulkEditSheet } from "./BulkEdit";
+import { Builder, conditions, negative, newRule, plainText, ready, useNames, useRuleChoices } from "./SmartListRules";
 
 // Smart lists: people on customer records who match rules now. They sit
 // beside lead lists on the Lists page; this file has their editor and
 // detail page.
 
-type Field = { key: string; label: string };
-
-// useRuleChoices loads what rules can pick from: the person fields and
-// approved events in the catalog, the workspace's lead lists, and its news
-// searches (for media lists; empty without seo.read).
-export function useRuleChoices(ws: string, brand: string) {
-  const [fields, setFields] = useState<Field[]>([]);
-  const [events, setEvents] = useState<string[]>([]);
-  const [leadLists, setLeadLists] = useState<LeadList[]>([]);
-  const [newsSearches, setNewsSearches] = useState<NewsSearch[]>([]);
-  useEffect(() => {
-    if (!brand) return;
-    api.GET("/v1/brands/{brand}/catalog", { params: { path: { brand } } }).then(({ data }) => {
-      const person = data?.types.find((t) => t.key === "person");
-      setFields((person?.fields ?? []).filter((f) => !f.archived).map((f) => ({ key: f.key, label: f.label })));
-      setEvents((data?.events ?? []).filter((e) => e.status === "approved").map((e) => e.name));
-    });
-    api.GET("/v1/brands/{brand}/lead-lists", { params: { path: { brand } } }).then(({ data }) => setLeadLists(data?.data ?? []));
-    api.GET("/v1/brands/{brand}/news-searches", { params: { path: { brand } } }).then(({ data }) => setNewsSearches(data?.data ?? []));
-  }, [ws, brand]);
-  return { fields, events, leadLists, newsSearches };
-}
-
-const opText: Record<SmartListRule["op"], string> = { eq: "is", neq: "is not", gt: "is more than", lt: "is less than", contains: "contains", exists: "is set", not_exists: "is not set" };
-
-type Test = "attribute" | "event" | "in_list" | "news_search";
-const testOf = (r: SmartListRule): Test =>
-  r.event !== undefined ? "event" : r.in_list !== undefined ? "in_list" : r.news_search !== undefined ? "news_search" : "attribute";
-
-function parseValue(v: string): unknown {
-  if (v === "true" || v === "false") return v === "true";
-  if (v.trim() !== "" && !Number.isNaN(Number(v))) return Number(v);
-  return v;
-}
-
-// ruleText says a rule in words: "plan is pro", "did payment_succeeded in
-// the last 90 days", "is in Webinar".
-export function ruleText(r: SmartListRule, fieldLabel: (k: string) => string, listName: (id: string) => string) {
-  switch (testOf(r)) {
-    case "event": {
-      const when = r.within_days ? ` in the last ${plural(r.within_days, "day")}` : "";
-      return `${r.op === "exists" ? "did" : "didn't do"} ${r.event}${when}`;
-    }
-    case "in_list":
-      return `${r.op === "exists" ? "is" : "isn't"} in ${listName(r.in_list ?? "")}`;
-    case "news_search": {
-      const when = r.within_days ? ` in the last ${plural(r.within_days, "day")}` : "";
-      return `${r.op === "exists" ? "wrote" : "didn't write"} about ${listName(r.news_search ?? "")}${when}`;
-    }
-  }
-  const value = r.op === "exists" || r.op === "not_exists" ? "" : ` ${String(r.value)}`;
-  return `${fieldLabel(r.attribute ?? "")} ${opText[r.op]}${value}`;
-}
-
-export function rulesText(l: Pick<SmartList, "rules" | "match">, fieldLabel: (k: string) => string, listName: (id: string) => string) {
-  if (l.rules.length === 0) return "Everyone";
-  return l.rules.map((r) => ruleText(r, fieldLabel, listName)).join(l.match === "any" ? ", or " : ", and ");
-}
-
-export function Rules({ rules, onChange, fields, events, leadLists, newsSearches }: {
-  rules: SmartListRule[]; onChange: (r: SmartListRule[]) => void; fields: Field[]; events: string[]; leadLists: LeadList[]; newsSearches: NewsSearch[];
-}) {
-  const set = (i: number, r: SmartListRule) => onChange(rules.map((x, k) => (k === i ? r : x)));
-  return (
-    <div className="space-y-2">
-      {rules.map((r, i) => {
-        const t = testOf(r);
-        return (
-          <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
-            <select aria-label="Test" className={field} value={t} onChange={(e) => {
-              const v = e.target.value as Test;
-              set(i, v === "event" ? { event: "", op: "exists" } : v === "in_list" ? { in_list: leadLists[0]?.id ?? "", op: "exists" }
-                : v === "news_search" ? { news_search: newsSearches[0]?.id ?? "", op: "exists" } : { attribute: "", op: "eq", value: "" });
-            }}>
-              <option value="attribute">Their field</option>
-              <option value="event">They did an event</option>
-              {leadLists.length > 0 && <option value="in_list">They're in a lead list</option>}
-              {newsSearches.length > 0 && <option value="news_search">They wrote about a news topic</option>}
-            </select>
-            {t === "attribute" && (
-              <>
-                {fields.length > 0 ? (
-                  <select aria-label="Field" className={field} value={r.attribute ?? ""} onChange={(e) => set(i, { ...r, attribute: e.target.value })} required>
-                    <option value="" disabled>Pick a field</option>
-                    {r.attribute && !fields.some((f) => f.key === r.attribute) && <option value={r.attribute}>{r.attribute}</option>}
-                    {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
-                  </select>
-                ) : (
-                  <input aria-label="Field" className={field} placeholder="billing_plan" value={r.attribute ?? ""} onChange={(e) => set(i, { ...r, attribute: e.target.value.trim() })} required />
-                )}
-                <select aria-label="Op" className={field} value={r.op} onChange={(e) => set(i, { ...r, op: e.target.value as SmartListRule["op"] })}>
-                  {(Object.keys(opText) as SmartListRule["op"][]).map((o) => <option key={o} value={o}>{opText[o]}</option>)}
-                </select>
-                {r.op !== "exists" && r.op !== "not_exists" && (
-                  <input aria-label="Value" className={field} placeholder="pro" value={r.value === undefined ? "" : String(r.value)} onChange={(e) => set(i, { ...r, value: parseValue(e.target.value) })} required />
-                )}
-              </>
-            )}
-            {t === "event" && (
-              <>
-                <select aria-label="Did" className={field} value={r.op} onChange={(e) => set(i, { ...r, op: e.target.value as SmartListRule["op"] })}>
-                  <option value="exists">did</option>
-                  <option value="not_exists">didn't do</option>
-                </select>
-                <input aria-label="Event" className={field} placeholder="payment_succeeded" list="smart-events" value={r.event ?? ""} onChange={(e) => set(i, { ...r, event: e.target.value.trim() })} required pattern="[a-z][a-z0-9_]*(\.[a-z0-9_]+)*" />
-                <select aria-label="When" className={field} value={r.within_days ?? 0} onChange={(e) => set(i, { ...r, within_days: Number(e.target.value) || undefined })}>
-                  <option value={0}>ever</option>
-                  <option value={7}>in the last 7 days</option>
-                  <option value={30}>in the last 30 days</option>
-                  <option value={90}>in the last 90 days</option>
-                  <option value={365}>in the last year</option>
-                </select>
-              </>
-            )}
-            {t === "in_list" && (
-              <>
-                <select aria-label="Is" className={field} value={r.op} onChange={(e) => set(i, { ...r, op: e.target.value as SmartListRule["op"] })}>
-                  <option value="exists">is in</option>
-                  <option value="not_exists">isn't in</option>
-                </select>
-                <select aria-label="Lead list" className={field} value={r.in_list ?? ""} onChange={(e) => set(i, { ...r, in_list: e.target.value })}>
-                  {leadLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
-              </>
-            )}
-            {t === "news_search" && (
-              <>
-                <select aria-label="Wrote" className={field} value={r.op} onChange={(e) => set(i, { ...r, op: e.target.value as SmartListRule["op"] })}>
-                  <option value="exists">wrote about</option>
-                  <option value="not_exists">didn't write about</option>
-                </select>
-                <select aria-label="News search" className={field} value={r.news_search ?? ""} onChange={(e) => set(i, { ...r, news_search: e.target.value })}>
-                  {newsSearches.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-                </select>
-                <select aria-label="When" className={field} value={r.within_days ?? 0} onChange={(e) => set(i, { ...r, within_days: Number(e.target.value) || undefined })}>
-                  <option value={0}>ever</option>
-                  <option value={30}>in the last 30 days</option>
-                  <option value={90}>in the last 90 days</option>
-                  <option value={365}>in the last year</option>
-                </select>
-              </>
-            )}
-            <Button type="button" variant="ghost" className="ml-auto" onClick={() => onChange(rules.filter((_, k) => k !== i))}>Remove</Button>
-          </div>
-        );
-      })}
-      <datalist id="smart-events">{events.map((e) => <option key={e} value={e} />)}</datalist>
-      {rules.length < 20 && <Button type="button" variant="ghost" onClick={() => onChange([...rules, { attribute: "", op: "eq", value: "" }])}>Add a rule</Button>}
-    </div>
-  );
-}
-
-// ready reports whether every rule is filled in enough to count.
-const ready = (rules: SmartListRule[]) =>
-  rules.every((r) => {
-    switch (testOf(r)) {
-      case "event":
-        return !!r.event;
-      case "in_list":
-        return !!r.in_list;
-      case "news_search":
-        return !!r.news_search;
-    }
-    return !!r.attribute && (r.op === "exists" || r.op === "not_exists" || (r.value !== undefined && r.value !== ""));
-  });
+export { Rules, ruleText, rulesText, useRuleChoices } from "./SmartListRules";
 
 export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; list: SmartList | null; onClose: () => void; onSaved: (l: SmartList) => void }) {
   const { brand, byId } = useBrand(ws);
   // A list belongs to one brand: its own, or the one picked for a new one.
   const brandID = (list ? list.brand_id : brand?.id) ?? "";
-  const { fields, events, leadLists, newsSearches } = useRuleChoices(ws, brandID);
+  const choices = useRuleChoices(ws, brandID);
+  const names = useNames(choices);
+  const recordType = list?.record_type ?? "person";
   const [name, setName] = useState(list?.name ?? "");
   const [description, setDescription] = useState(list?.description ?? "");
+  const [describing, setDescribing] = useState(!!list?.description);
   const [match, setMatch] = useState<SmartList["match"]>(list?.match ?? "all");
-  const [rules, setRules] = useState<SmartListRule[]>(list?.rules ?? [{ attribute: "", op: "eq", value: "" }]);
+  const [rules, setRules] = useState<SmartListRule[]>(list?.rules ?? [newRule()]);
   // A list fills from its rules, or from a saved query's record_id column.
   const [from, setFrom] = useState<"rules" | "query">(list?.kind === "query" ? "query" : "rules");
   const [queryID, setQueryID] = useState(list?.saved_query_id ?? "");
@@ -231,39 +75,43 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
     }
   }
 
+  const who = recordType === "account" ? "Companies that" : "People who";
+  const tab = (on: boolean) => `rounded-md px-3 py-1 text-[13px] ${on ? "bg-background font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"}`;
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+      <SheetContent className="w-full overflow-y-auto sm:max-w-5xl">
         <SheetHeader>
           <SheetTitle>{list ? `Edit ${list.name}` : "New smart list"}</SheetTitle>
           <SheetDescription>
-            {from === "query"
-              ? "The people a saved query returns, from its record_id (or id) column. It runs again every 15 minutes: people join when the query starts returning them and leave when it stops."
-              : "People on your customer records who match these rules. It keeps itself up to date: people join when they start matching and leave when they stop."}
+            A smart list keeps itself up to date: {recordType === "account" ? "companies" : "people"} join when they start matching and leave when they stop. {byId(brandID)?.name ?? "This brand"}'s {recordType === "account" ? "companies" : "people"} only.
           </SheetDescription>
         </SheetHeader>
-        <form onSubmit={submit} className="space-y-6 px-4 pb-6 text-[13px]">
-          <div className="space-y-3">
-            <label className="block">
+        <form onSubmit={submit} className="space-y-5 px-4 pb-6 text-[13px]">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="block min-w-[14rem] flex-1">
               <span className="mb-1 block font-medium">Name</span>
               <input className={`${field} w-full`} required maxLength={200} placeholder="e.g. Paying customers" value={name} onChange={(e) => setName(e.target.value)} />
             </label>
-            <label className="block">
-              <span className="mb-1 block font-medium">Description <span className="font-normal text-muted-foreground">(optional)</span></span>
-              <input className={`${field} w-full`} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
-            </label>
-            <p className="text-[12px] text-muted-foreground">{byId(brandID)?.name ?? "This brand"}'s people only: a list belongs to one brand.</p>
+            {describing ? (
+              <label className="block min-w-[14rem] flex-[2]">
+                <span className="mb-1 block font-medium">Description <span className="font-normal text-muted-foreground">(optional)</span></span>
+                <input className={`${field} w-full`} maxLength={2000} autoFocus={!description} value={description} onChange={(e) => setDescription(e.target.value)} />
+              </label>
+            ) : (
+              <button type="button" className="h-8 text-muted-foreground hover:text-foreground" onClick={() => setDescribing(true)}>+ Add a description</button>
+            )}
           </div>
 
           {!list && (
-            <div className="flex flex-wrap gap-4" role="radiogroup" aria-label="Fill it from">
-              <label className="flex items-center gap-1.5"><input type="radio" checked={from === "rules"} onChange={() => setFrom("rules")} /> Rules</label>
-              <label className="flex items-center gap-1.5"><input type="radio" checked={from === "query"} onChange={() => setFrom("query")} /> A saved query</label>
+            <div className="inline-flex gap-0.5 rounded-lg border bg-muted/60 p-0.5" role="tablist" aria-label="Fill it from">
+              <button type="button" role="tab" aria-selected={from === "rules"} className={tab(from === "rules")} onClick={() => setFrom("rules")}>Choose who's in it</button>
+              <button type="button" role="tab" aria-selected={from === "query"} className={tab(from === "query")} onClick={() => setFrom("query")}>Use a saved query</button>
             </div>
           )}
 
           {from === "query" ? (
-            <div className="space-y-2">
+            <div className="max-w-2xl space-y-2">
+              <p className="text-muted-foreground">For lists that conditions can't say. A saved query is a question you wrote and saved under Data, Queries. The list holds the people it returns and runs it again every 15 minutes.</p>
               <label className="block">
                 <span className="mb-1 block font-medium">Saved query</span>
                 <select className={`${field} w-full`} required value={queryID} onChange={(e) => setQueryID(e.target.value)}>
@@ -273,48 +121,121 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
                 </select>
               </label>
               <p className="text-[12px] text-muted-foreground">
-                Return a <span className="font-mono">record_id</span> column, for example <span className="font-mono">SELECT id AS record_id FROM people WHERE …</span>. Up to 50,000 people. If the query fails, the list keeps who it had and says why. Save queries in Query.
+                Return a <span className="font-mono">record_id</span> column, for example <span className="font-mono">SELECT id AS record_id FROM people WHERE …</span>. Up to 50,000 people. If the query fails, the list keeps who it had and says why.
               </p>
             </div>
           ) : (
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2 font-medium">
-              People who match
-              <select aria-label="Match" className={field} value={match} onChange={(e) => setMatch(e.target.value as SmartList["match"])}>
-                <option value="all">all</option>
-                <option value="any">any</option>
-              </select>
-              of these rules
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_17rem]">
+            <div className="min-w-0 space-y-5">
+              <DescribeBox ws={ws} brand={brandID} recordType={recordType} onRules={(d) => {
+                setRules(d.rules ?? []);
+                setMatch(d.match === "any" ? "any" : "all");
+                if (!name.trim()) setName(d.name);
+              }} />
+              <Builder rules={rules} match={match} onChange={(r, m) => { setRules(r); setMatch(m); }} self={list?.id} recordType={recordType} {...choices} />
             </div>
-            <Rules rules={rules} onChange={setRules} fields={fields} events={events} leadLists={leadLists} newsSearches={newsSearches} />
-          </div>
-          )}
 
-          {from === "rules" && (
-          <div aria-live="polite" className="rounded-md border bg-muted/40 p-3">
-            {!ready(rules) ? (
-              <p className="text-muted-foreground">Finish the rules to see who matches.</p>
-            ) : countError ? (
-              <ErrorText>{countError}</ErrorText>
-            ) : count ? (
-              <div className={counting ? "opacity-60" : ""}>
-                <p><span className="font-mono text-base font-medium tabular-nums">{count.members.toLocaleString()}</span> {count.members === 1 ? "person matches" : "people match"} now</p>
-                {count.sample.length > 0 && <p className="mt-1 truncate text-[12px] text-muted-foreground">{count.sample.map((p) => p.name || p.email).join(", ")}{count.members > count.sample.length ? ", …" : ""}</p>}
+            <aside aria-live="polite" className="space-y-3 rounded-lg border p-4 lg:sticky lg:top-4">
+              <div>
+                <p className="text-[12px] text-muted-foreground">{recordType === "account" ? "Companies" : "People"} who match right now</p>
+                {!ready(rules) || rules.length === 0 ? (
+                  <p className="mt-1 text-muted-foreground">{rules.length === 0 ? "Add a condition to see who matches." : "Finish the conditions to see who matches."}</p>
+                ) : countError ? (
+                  <ErrorText>{countError}</ErrorText>
+                ) : count ? (
+                  <p className={`text-3xl font-semibold tracking-tight tabular-nums ${counting ? "opacity-50" : ""}`} data-count>{count.members.toLocaleString()}</p>
+                ) : (
+                  <p className="mt-1 text-muted-foreground">Counting…</p>
+                )}
+                {ready(rules) && rules.length > 0 && !countError && count && count.sample.length > 0 && (
+                  <p className="mt-1 truncate text-[12px] text-muted-foreground">{count.sample.map((p) => p.name || p.email).join(", ")}{count.members > count.sample.length ? ", …" : ""}</p>
+                )}
               </div>
-            ) : (
-              <p className="text-muted-foreground">Counting…</p>
-            )}
+              {ready(rules) && rules.length > 0 && (
+                <div className="border-t pt-3">
+                  <p className="font-semibold">In plain words</p>
+                  <p><span className="text-muted-foreground">{who} </span>{plainText(rules, match, names)}.</p>
+                </div>
+              )}
+              {ready(rules) && negative(rules, match) && (
+                <p className="border-t pt-3 text-[12px] text-amber-700 dark:text-amber-400">{match === "any" && rules.length > 1
+                  ? "One of these conditions only leaves people out, and any one is enough, so this list will hold nearly everyone. Switch \"or\" to \"and\", or move it under \"But leave out\"."
+                  : "Nothing here says who to include, so this list will hold nearly everyone. Add something they did or are under \"Include\"."}</p>
+              )}
+            </aside>
           </div>
           )}
 
           <ErrorText>{error}</ErrorText>
           <div className="flex flex-wrap gap-2 border-t pt-4">
-            <Button disabled={busy || !name.trim() || (from === "rules" ? !ready(rules) : !queryID)}>{busy ? "Saving…" : list ? "Save" : "Create smart list"}</Button>
+            <Button disabled={busy || !name.trim() || (from === "rules" ? !ready(rules) || rules.length === 0 : !queryID)}>{busy ? "Saving…" : list ? "Save" : "Create smart list"}</Button>
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           </div>
         </form>
       </SheetContent>
     </Sheet>
+  );
+}
+
+type Draft = Schemas["SmartListDraft"];
+
+// DescribeBox writes a list's rules from a sentence, on the workspace's own
+// AI model, and hands them to the builder to check and save.
+function DescribeBox({ ws, brand, recordType, onRules }: { ws: string; brand: string; recordType: string; onRules: (d: Draft) => void }) {
+  const [text, setText] = useState("");
+  const [d, setD] = useState<Draft | null>(null);
+  const [error, setError] = useState<{ message: string; noModel?: boolean } | null>(null);
+  const waiting = d?.status === "queued" || d?.status === "running";
+  const rulesTo = useRef(onRules);
+  rulesTo.current = onRules;
+
+  // While the model works, look again every second or so, for two minutes.
+  useEffect(() => {
+    if (!d || !waiting) return;
+    const started = Date.parse(d.created_at);
+    const t = setTimeout(async () => {
+      const { data, error } = await api.GET("/v1/brands/{brand}/smart-list-drafts/{draft}", { params: { path: { brand, draft: d.id } } });
+      if (!data) return setError({ message: errorMessage(error) });
+      const late = Date.now() - started > 120000 && (data.status === "queued" || data.status === "running");
+      setD(late ? { ...data, status: "failed", error: "This is taking too long. Try again in a moment." } : data);
+      if (data.status === "ready" && data.rules) rulesTo.current(data);
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [d, waiting, brand]);
+
+  async function write() {
+    if (!text.trim() || waiting) return;
+    setError(null);
+    setD(null);
+    const { data, error } = await api.POST("/v1/brands/{brand}/smart-list-drafts", { params: { path: { brand } }, body: { description: text.trim(), record_type: recordType as "person" } });
+    if (!data || !("id" in data)) {
+      const code = (error as { error?: { code?: string } } | undefined)?.error?.code;
+      const noModel = code === "connector_needed" || code === "ai_model_needed";
+      return setError({ message: data ? "Held for approval in the mission." : noModel ? "Connect an AI model with your own key to fill in a list from a description. Outflare never supplies one." : errorMessage(error), noModel });
+    }
+    setD(data);
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
+      <label htmlFor="describe-list" className="flex items-center gap-1.5 font-semibold"><Sparkles className="size-4 text-emerald-600" />Describe who should be in it</label>
+      <p className="text-[12px] text-muted-foreground">Type it in your own words and your AI model fills in the conditions below. You check them before anything is saved.</p>
+      <Textarea id="describe-list" rows={2} maxLength={500} className="resize-none bg-background"
+        placeholder="For example: paid in the last 90 days but never opened the app" value={text} onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void write(); } }} />
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" disabled={!text.trim() || waiting} onClick={() => void write()} title="Your own AI model fills in the conditions from your field, event and page names. It never sees people.">{waiting ? "Filling in…" : "Fill in for me"}</Button>
+        <span className="text-[12px] text-muted-foreground">Or skip this and add the conditions yourself below.</span>
+      </div>
+      {error && (
+        <div className="flex flex-wrap items-center gap-3">
+          <ErrorText>{error.message}</ErrorText>
+          {error.noModel && <AppLink ws={ws} tab="connectors" className="text-[13px] text-blue-700 underline dark:text-blue-400">Connect an AI model</AppLink>}
+        </div>
+      )}
+      {d?.status === "failed" && <ErrorText>{d.error || "That didn't work. Try again."}</ErrorText>}
+      {d?.status === "ready" && <p className="text-[13px]">{d.rules ? `Filled in below. Check it before you save. ${d.explanation}` : d.explanation}</p>}
+    </div>
   );
 }
 
@@ -325,9 +246,23 @@ const queryListError: Record<string, string> = {
   too_many: "Its query returns more than 50,000 people, so the list keeps who it had. Narrow the query.",
 };
 
-export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, onChanged }: { ws: string; list: SmartList; canManage: boolean; onBack: () => void; onEdit: (l: SmartList) => void; onChanged: () => void }) {
+// What a member has paid, in its own currency ("€60.00"), or a dash.
+function lifetimeValue(p: SmartListPerson): string {
+  const v = p.lifetime_revenue;
+  if (!v) return "—";
+  try {
+    const f = new Intl.NumberFormat(undefined, { style: "currency", currency: v.currency });
+    return f.format(v.amount_minor / 10 ** (f.resolvedOptions().maximumFractionDigits ?? 2));
+  } catch {
+    return `${(v.amount_minor / 100).toFixed(2)} ${v.currency}`;
+  }
+}
+
+const day = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—");
+
+export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, onChanged, go }: { ws: string; list: SmartList; canManage: boolean; onBack: () => void; onEdit: (l: SmartList) => void; onChanged: () => void; go: (t: Tab, item?: string) => void }) {
   const brand = initial.brand_id ?? "";
-  const { fields, leadLists, newsSearches } = useRuleChoices(ws, brand);
+  const names = useNames(useRuleChoices(ws, brand));
   const [list, setList] = useState(initial);
   const [people, setPeople] = useState<SmartListPerson[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
@@ -339,6 +274,28 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
   const isQuery = initial.kind === "query";
   const [waiting, setWaiting] = useState(!isStatic && !initial.refreshed_at);
   const [bulk, setBulk] = useState(false);
+  // Renaming it and changing its description, in place, with Save and Cancel.
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(initial.name);
+  const [description, setDescription] = useState(initial.description);
+  const [saving, setSaving] = useState(false);
+
+  function edit() {
+    setName(list.name);
+    setDescription(list.description);
+    setEditing(true);
+  }
+  async function saveDetails(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand, id: list.id } }, body: { name: name.trim(), description: description.trim() } });
+    setSaving(false);
+    if (error || !data || !("id" in data)) return toast(errorMessage(error), "error");
+    setList(data as SmartList);
+    setEditing(false);
+    toast("Saved.");
+    onChanged();
+  }
 
   const load = useCallback(async () => {
     const [l, m] = await Promise.all([
@@ -410,29 +367,49 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
     onBack();
   }
 
-  const fieldLabel = (k: string) => fields.find((f) => f.key === k)?.label ?? k;
-  const listName = (id: string) => leadLists.find((l) => l.id === id)?.name ?? newsSearches.find((n) => n.id === id)?.name ?? "a list";
+  // A member's name, linked to their record.
+  const open = (p: SmartListPerson, label: string) => (
+    <AppLink ws={ws} tab="people" item={p.id} onOpen={() => go("people", p.id)} className="font-medium text-blue-700 underline-offset-2 hover:underline dark:text-blue-400">{label}</AppLink>
+  );
+  const fieldLabel = names.field;
+  const listName = names.list;
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        back={{ label: "Lists", onClick: onBack }}
-        title={<>{list.name} <Badge tone="blue">{isStatic ? "Static list" : isQuery ? "From a query" : "Smart list"}</Badge> <BrandBadge id={list.brand_id} /></>}
-        description={list.description || (isStatic ? "The people put in it by hand, a journey, an import or a bulk edit." : isQuery ? "Keeps itself up to date from a saved query." : "Keeps itself up to date from its rules.")}
-        action={canManage && (
-          <>
-            {!isStatic && <Button variant="ghost" onClick={refresh} disabled={waiting}>{waiting ? "Updating…" : "Refresh now"}</Button>}
-            {!isStatic && <Button onClick={() => onEdit(list)}>{isQuery ? "Change query" : "Edit rules"}</Button>}
-            <Menu
-              items={[
-                { label: "Bulk edit everyone in it", onClick: () => setBulk(true) },
-                ...(list.record_type === "person" ? [{ label: "Save a copy", onClick: copy }] : []),
-                { label: "Delete list", danger: true, onClick: remove },
-              ]}
-            />
-          </>
-        )}
-      />
+      {editing ? (
+        <form className="mb-6 max-w-xl space-y-4 border-b pb-5" onSubmit={saveDetails}>
+          <Input label="Name" required maxLength={200} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <label className="block text-sm">
+            <span className="mb-1.5 block text-[13px] font-medium">Description <span className="font-normal text-muted-foreground">(optional)</span></span>
+            <textarea className={`${field} w-full`} rows={3} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
+            <span className="mt-1 block text-xs text-muted-foreground">Shown under the name, so everyone knows what the list is for.</span>
+          </label>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save"}</Button>
+            <Button type="button" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+          </div>
+        </form>
+      ) : (
+        <PageHeader
+          back={{ label: "Lists", onClick: onBack }}
+          title={<>{list.name} <Badge tone="blue">{isStatic ? "Static list" : isQuery ? "From a query" : "Smart list"}</Badge> <BrandBadge id={list.brand_id} /></>}
+          description={list.description || (isStatic ? "The people put in it by hand, a journey, an import or a bulk edit." : isQuery ? "Keeps itself up to date from a saved query." : "Keeps itself up to date: people join when they start matching and leave when they stop.")}
+          action={canManage && (
+            <>
+              <Button variant="ghost" onClick={edit}>Edit name and description</Button>
+              {!isStatic && <Button variant="ghost" onClick={refresh} disabled={waiting}>{waiting ? "Updating…" : "Refresh now"}</Button>}
+              {!isStatic && <Button onClick={() => onEdit(list)}>{isQuery ? "Change query" : "Edit who's in it"}</Button>}
+              <Menu
+                items={[
+                    { label: "Bulk edit everyone in it", onClick: () => setBulk(true) },
+                  ...(list.record_type === "person" ? [{ label: "Save a copy", onClick: copy }] : []),
+                  { label: "Delete list", danger: true, onClick: remove },
+                ]}
+              />
+            </>
+          )}
+        />
+      )}
       {isStatic ? (
         <Stats cols={2}>
           <Stat label={list.record_type === "account" ? "Companies" : "People"} value={list.members.toLocaleString()} />
@@ -442,7 +419,7 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
         <Stats cols={3}>
           <Stat label="People" value={list.refreshed_at ? list.members.toLocaleString() : "…"} />
           <Stat label="Updated" value={list.refreshed_at ? ago(list.refreshed_at) : "filling"} sub="every 15 minutes" />
-          {isQuery ? <Stat label="Source" value="Saved query" sub="up to 50,000 people" /> : <Stat label="Rules" value={list.rules.length} sub={list.match === "any" ? "any must match" : "all must match"} />}
+          {isQuery ? <Stat label="Source" value="Saved query" sub="up to 50,000 people" /> : <Stat label="Conditions" value={conditions(list.rules)} sub="that decide who is in" />}
         </Stats>
       )}
       {list.error_code && (
@@ -457,7 +434,7 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
                 : "The last update failed. It tries again in 15 minutes.")}
         </p>
       )}
-      <Card title="Who's in it" description={isStatic ? "People join through a bulk edit (from another list, a saved query or ids), a journey or an import." : isQuery ? "The records in its saved query's record_id (or id) column." : rulesText(list, fieldLabel, listName)}>
+      <Card title="Who's in it" description={isStatic ? "People join through a bulk edit (from another list, a saved query or ids), a journey or an import." : isQuery ? "The records in its saved query's record_id (or id) column." : `${list.record_type === "account" ? "Companies that" : "People who"} ${plainText(list.rules, list.match, { field: fieldLabel, list: listName })}.`}>
         <ErrorText>{error}</ErrorText>
         {people === null && !error && <Loading />}
         {people !== null && (
@@ -466,18 +443,23 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
             rowId={(p) => p.id}
             searchPlaceholder="Search people"
             empty={isStatic ? "Nobody is in this list yet." : waiting ? "Filling the list…" : isQuery ? "The query returns nobody right now." : "Nobody matches these rules right now."}
+            view={list.record_type === "account" ? "list-companies" : "list-people"}
+            hidden={["first_seen"]}
             mobile={(p) => (
               <div className="space-y-0.5">
-                <div className="font-medium">{p.name || p.email || "Unnamed person"}</div>
-                <div className="text-[12px] text-muted-foreground">{p.email} · joined {ago(p.entered_at)}</div>
+                {open(p, p.name || p.email || "Unnamed person")}
+                <div className="text-[12px] text-muted-foreground">{[p.email, p.lifetime_revenue ? lifetimeValue(p) : "", `joined ${ago(p.entered_at)}`].filter(Boolean).join(" · ")}</div>
               </div>
             )}
             columns={[
-              { id: "name", header: "Name", accessorFn: (p) => p.name, cell: ({ row: { original: p } }) => <span className="font-medium">{p.name || <span className="text-muted-foreground">Unnamed</span>}</span> },
-              { id: "email", header: "Email", accessorFn: (p) => p.email },
-              { id: "joined", header: "Joined", accessorFn: (p) => p.entered_at ?? "", cell: ({ row: { original: p } }) => <span className="text-muted-foreground">{ago(p.entered_at)}</span> },
+              { id: "name", header: "Name", enableHiding: false, accessorFn: (p) => p.name || p.email, cell: ({ row: { original: p } }) => open(p, p.name || p.email || "Unnamed") },
+              { id: "email", header: list.record_type === "account" ? "Domain" : "Email", accessorFn: (p) => p.email },
+              { id: "lifetime_value", header: "Lifetime value", accessorFn: (p) => p.lifetime_revenue?.amount_minor ?? -1, meta: { align: "right", csv: (p: SmartListPerson) => lifetimeValue(p) }, cell: ({ row: { original: p } }) => <span className="font-mono tabular-nums" title="Everything they have paid, less refunds.">{lifetimeValue(p)}</span> },
+              { id: "signed_up", header: "Signed up", accessorFn: (p) => p.signed_up_at ?? "", cell: ({ row: { original: p } }) => <span className="text-muted-foreground" title={p.signed_up_at ? new Date(p.signed_up_at).toLocaleString() : "No sign-up event from them yet."}>{day(p.signed_up_at)}</span> },
+              { id: "first_seen", header: "First seen", accessorFn: (p) => p.created_at ?? "", cell: ({ row: { original: p } }) => <span className="text-muted-foreground" title={p.created_at ? new Date(p.created_at).toLocaleString() : undefined}>{day(p.created_at)}</span> },
+              { id: "joined", header: "Joined list", accessorFn: (p) => p.entered_at ?? "", cell: ({ row: { original: p } }) => <span className="text-muted-foreground">{ago(p.entered_at)}</span> },
               ...(isStatic && canManage
-                ? [{ id: "remove", header: "", enableSorting: false, cell: ({ row: { original: p } }: { row: { original: SmartListPerson } }) => <Button variant="ghost" onClick={() => takeOut(p)}>Remove</Button> }]
+                ? [{ id: "remove", header: "", enableSorting: false, enableHiding: false, cell: ({ row: { original: p } }: { row: { original: SmartListPerson } }) => <Button variant="ghost" onClick={() => takeOut(p)}>Remove</Button> }]
                 : []),
             ]}
           />

@@ -151,7 +151,7 @@ try {
     });
     await mock(page, { signedIn: true, account: meInApp });
     await page.goto(`${origin}/acme`);
-    await page.getByRole('button', { name: /Settings/ }).first().waitFor({ timeout: 20000 });
+    await page.getByRole('button', { name: 'Old menu' }).waitFor({ timeout: 20000 });
     assert.equal(await page.getByText('Update available').count(), 0, 'no update, no button');
     await page.evaluate(() => window.__listeners['update-ready']?.({ payload: { version: '0.3.0' } }));
     await page.getByText('Update available').waitFor();

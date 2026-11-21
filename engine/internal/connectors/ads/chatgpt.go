@@ -43,13 +43,15 @@ func (ChatGPTAds) Definition() c.Definition {
 	d := def("chatgpt_ads", "ChatGPT Ads", "https://ads.openai.com",
 		"https://developers.openai.com/ads", "https://ads.openai.com/settings",
 		"Spend, impressions, clicks and conversions per campaign from your ChatGPT ad account, and pause, resume and budget changes.",
-		"Uses your own Advertiser API key from OpenAI Ads Manager (Settings). A key reaches one ad account, so connect each account with its own key. Add a pixel ID and a conversion key to send conversions back through OpenAI's Conversions API.")
+		"Uses your own Advertiser API key from OpenAI Ads Manager (Settings). A key reaches one ad account, so connect each account with its own key. Add a pixel ID and a conversion key to send conversions back through OpenAI's Conversions API. The same key lets Outflare keep your custom audiences up to date from your lists, as hashed emails and phone numbers; you choose in Ads Manager which campaigns target or exclude them.")
 	d.Auth = c.AuthAPIKey
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsManage)
-	d.Fields = []c.Field{
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsManage, c.CapAdsAudiences)
+	// The conversion fields are asked for when connecting too, so nobody
+	// has to find them later; they stay optional.
+	d.Fields = append([]c.Field{
 		{Name: "api_key", Label: "Advertiser API key", Secret: true,
 			Help: "In OpenAI Ads Manager (ads.openai.com), Settings, create an API key for this ad account."},
-	}
+	}, ChatGPTAds{}.SetupFields()...)
 	return d
 }
 
@@ -477,9 +479,18 @@ func (g ChatGPTAds) SendConversions(ctx context.Context, cl *c.Client, creds c.C
 			results[i].Skipped, results[i].Reason = true, "no ChatGPT click (oppref) or identifier to match on"
 			continue
 		}
-		if len(user) > 0 {
-			ev["user"] = user
+		// Where the person was: OpenAI matches on these beside the
+		// identifiers above, unhashed. Never the only thing sent.
+		if cv.IPAddress != "" {
+			user["ip_address"], keys = cv.IPAddress, append(keys, "ip_address")
 		}
+		if cv.UserAgent != "" {
+			user["user_agent"], keys = cv.UserAgent, append(keys, "user_agent")
+		}
+		if cv.Country != "" {
+			user["countries"], keys = []string{cv.Country}, append(keys, "country")
+		}
+		ev["user"] = user
 		if site != "" {
 			ev["action_source"], ev["source_url"] = "web", site
 		} else {

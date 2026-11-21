@@ -29,6 +29,8 @@ import (
 var (
 	_ c.AdKeywordEditor    = GoogleAds{}
 	_ c.AdStatusManager    = GoogleAds{}
+	_ c.AdGroupManager     = GoogleAds{}
+	_ c.AdUnitBidManager   = GoogleAds{}
 	_ c.AdTargetManager    = GoogleAds{}
 	_ c.AdExclusionManager = GoogleAds{}
 	_ c.AdSignalsReader    = GoogleAds{}
@@ -137,6 +139,83 @@ func (g GoogleAds) SetAdStatus(ctx context.Context, cl *c.Client, creds c.Creds,
 	return g.update(ctx, cl, creds, acct, "adGroupAds", map[string]any{"resourceName": g.resource(acct, "adGroupAds", adGroupID+"~"+adID), "status": enabledOrPaused(active)}, "status")
 }
 
+// SetAdGroupStatus pauses or resumes an ad group (adGroups:mutate on its
+// status alone).
+func (g GoogleAds) SetAdGroupStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID string, active bool) error {
+	if _, err := strconv.ParseInt(adGroupID, 10, 64); err != nil {
+		return c.Errf(c.ErrInvalid, "Google Ads ad group ids are numbers")
+	}
+	return g.update(ctx, cl, creds, acct, "adGroups", map[string]any{"resourceName": g.resource(acct, "adGroups", adGroupID), "status": enabledOrPaused(active)}, "status")
+}
+
+// ---- manual bids ----
+
+// Google takes a bid in steps of the currency's smallest billable unit,
+// a hundredth for most, so bids are rounded to it.
+const googleBidStep = 10_000
+
+// UnitBidRange: a cent to a thousand of the account's currency.
+func (GoogleAds) UnitBidRange() (int64, int64) { return googleBidStep, 1_000_000_000 }
+
+func googleUnitIDs(adGroupID, keywordID string) error {
+	if _, err := strconv.ParseInt(adGroupID, 10, 64); err != nil {
+		return c.Errf(c.ErrInvalid, "Google Ads ad group ids are numbers")
+	}
+	if keywordID != "" {
+		if _, err := strconv.ParseInt(keywordID, 10, 64); err != nil {
+			return c.Errf(c.ErrInvalid, "Google Ads keyword ids are numbers")
+		}
+	}
+	return nil
+}
+
+// UnitBid reads an ad group's default bid for a click (ad_group.
+// cpc_bid_micros), or a keyword's bid in effect: its own, else its ad
+// group's (ad_group_criterion.effective_cpc_bid_micros).
+func (g GoogleAds) UnitBid(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID, keywordID string) (c.AdBid, error) {
+	if err := googleUnitIDs(adGroupID, keywordID); err != nil {
+		return c.AdBid{}, err
+	}
+	q := "SELECT ad_group.id, ad_group.cpc_bid_micros FROM ad_group WHERE ad_group.id = " + adGroupID
+	if keywordID != "" {
+		q = "SELECT ad_group_criterion.criterion_id, ad_group_criterion.cpc_bid_micros, ad_group_criterion.effective_cpc_bid_micros FROM ad_group_criterion " +
+			"WHERE ad_group.id = " + adGroupID + " AND ad_group_criterion.criterion_id = " + keywordID
+	}
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
+	if err != nil {
+		return c.AdBid{}, err
+	}
+	if len(rows) == 0 {
+		return c.AdBid{}, c.Errf(c.ErrInvalid, "Google Ads no longer has this ad group or keyword")
+	}
+	if keywordID == "" {
+		return c.AdBid{Micros: int64(rows[0].AdGroup.CpcBidMicros)}, nil
+	}
+	k := rows[0].AdGroupCriterion
+	if k.CpcBidMicros > 0 {
+		return c.AdBid{Micros: int64(k.CpcBidMicros)}, nil
+	}
+	return c.AdBid{Micros: int64(k.EffectiveCpcBidMicros)}, nil
+}
+
+// SetUnitBid sets the ad group's default bid (adGroups:mutate) or the
+// keyword's own (adGroupCriteria:mutate), on cpc_bid_micros alone.
+func (g GoogleAds) SetUnitBid(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID, keywordID string, micros int64) error {
+	if err := googleUnitIDs(adGroupID, keywordID); err != nil {
+		return err
+	}
+	lo, hi := g.UnitBidRange()
+	micros = (micros + googleBidStep/2) / googleBidStep * googleBidStep
+	if micros < lo || micros > hi {
+		return c.Errf(c.ErrInvalid, "a Google Ads bid is from 0.01 to 1000 of the account's currency")
+	}
+	bid := strconv.FormatInt(micros, 10)
+	if keywordID == "" {
+		return g.update(ctx, cl, creds, acct, "adGroups", map[string]any{"resourceName": g.resource(acct, "adGroups", adGroupID), "cpcBidMicros": bid}, "cpc_bid_micros")
+	}
+	return g.update(ctx, cl, creds, acct, "adGroupCriteria", map[string]any{"resourceName": g.resource(acct, "adGroupCriteria", adGroupID+"~"+keywordID), "cpcBidMicros": bid}, "cpc_bid_micros")
+}
+
 func enabledOrPaused(active bool) string {
 	if active {
 		return "ENABLED"
@@ -217,7 +296,7 @@ func (g GoogleAds) SetCampaignTarget(ctx context.Context, cl *c.Client, creds c.
 // ---- exclusions ----
 
 func (GoogleAds) ExclusionKinds() []string {
-	return []string{c.ExcludeDevice, c.ExcludeLocation, c.ExcludePlacement, c.ExcludeNetwork, c.ExcludeSchedule, c.ExcludeBrand}
+	return []string{c.ExcludeDevice, c.ExcludeLocation, c.ExcludePlacement, c.ExcludeNetwork, c.ExcludeSchedule, c.ExcludeBrand, c.ExcludeAudience}
 }
 
 // AddExclusion makes the campaign stop showing on x.
@@ -305,8 +384,40 @@ func (g GoogleAds) AddExclusion(ctx context.Context, cl *c.Client, creds c.Creds
 		return nil
 	case c.ExcludeBrand:
 		return g.excludeBrand(ctx, cl, creds, acct, campaignID, x.Value)
+	case c.ExcludeAudience:
+		return g.excludeAudience(ctx, cl, creds, acct, campaignID, x.Value, true)
 	}
 	return c.Errf(c.ErrInvalid, "Google Ads takes no exclusion of kind %q", x.Kind)
+}
+
+// excludeAudience adds a customer list to a campaign as a negative user
+// list criterion, or takes that criterion out. A list the campaign
+// targets is left alone: Google refuses the same list both ways, and its
+// error says so.
+func (g GoogleAds) excludeAudience(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID, audienceID string, add bool) error {
+	if _, err := strconv.ParseInt(audienceID, 10, 64); err != nil {
+		return c.Errf(c.ErrInvalid, "Google Ads audience ids are numbers")
+	}
+	list := g.resource(acct, "userLists", audienceID)
+	crit, err := g.criteria(ctx, cl, creds, acct, campaignID)
+	if err != nil {
+		return err
+	}
+	for _, r := range crit {
+		cc := r.CampaignCriterion
+		if cc.Type == "USER_LIST" && cc.Negative && cc.UserList.UserList == list {
+			if add {
+				return nil
+			}
+			return g.removeCriterion(ctx, cl, creds, acct, cc.ResourceName)
+		}
+	}
+	if !add {
+		return nil
+	}
+	_, err = g.mutate(ctx, cl, creds, acct, "campaignCriteria", map[string]any{"campaign": g.resource(acct, "campaigns", campaignID), "negative": true,
+		"userList": map[string]any{"userList": list}})
+	return err
 }
 
 // RemoveExclusion is AddExclusion's inverse.
@@ -389,6 +500,8 @@ func (g GoogleAds) RemoveExclusion(ctx context.Context, cl *c.Client, creds c.Cr
 			}
 		}
 		return nil
+	case c.ExcludeAudience:
+		return g.excludeAudience(ctx, cl, creds, acct, campaignID, x.Value, false)
 	}
 	return c.Errf(c.ErrInvalid, "Google Ads takes no exclusion of kind %q", x.Kind)
 }

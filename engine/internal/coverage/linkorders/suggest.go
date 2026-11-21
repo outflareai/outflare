@@ -28,12 +28,22 @@ import (
 //     or more behind (keyword_gap), and
 //   - sites link to the competitor's page that competes for the same
 //     keywords, or whose address matches the page's (competitor_links).
+//   - SE Ranking says the page ranks in positions nearTop to nearBottom
+//     for a keyword (near_top): close enough that links can move it onto
+//     the first page or to the top 3. Positions 4 to 10 weigh more.
 // The score only orders the list. It does not create orders, and a
 // person still ticks the page.
 
 const (
 	gapTop    = 20
 	gapBehind = 3
+	// nearTop and nearBottom bound the SE Ranking positions where a link
+	// most likely moves a page (striking distance); up to nearFirstPage
+	// it weighs nearFirstPageWeight times more.
+	nearTop             = 4
+	nearBottom          = 20
+	nearFirstPage       = 10
+	nearFirstPageWeight = 1.5
 	// maxReasons keeps each suggestion's evidence short.
 	maxReasons = 8
 	// maxAnchorOptions caps each anchor list.
@@ -43,6 +53,7 @@ const (
 // Reason kinds on a suggestion.
 const (
 	ReasonKeywordGap      = "keyword_gap"
+	ReasonNearTop         = "near_top"
 	ReasonCompetitorLinks = "competitor_links"
 	ReasonSaved           = "saved"
 )
@@ -230,6 +241,7 @@ func buildSuggestions(in targetInputs, kind string, limit int) Suggestions {
 		se       bool
 	}
 	ours := map[string]ourKw{}         // keyword -> best page
+	seBest := map[string]kwRow{}       // keyword -> SE Ranking's best page
 	seByURL := map[string][]kwRow{}    // page -> SE Ranking keywords
 	otherByURL := map[string][]kwRow{} // page -> other connections' keywords
 	for _, k := range in.OurKeywords {
@@ -243,6 +255,10 @@ func buildSuggestions(in targetInputs, kind string, limit int) Suggestions {
 		if se {
 			seByURL[u] = append(seByURL[u], k)
 			out.Sources.SERankingKeywords++
+			if b, ok := seBest[key]; !ok || better(k.Position, b.Position) {
+				k.URL = u
+				seBest[key] = k
+			}
 		} else {
 			otherByURL[u] = append(otherByURL[u], k)
 			out.Sources.OtherKeywords++
@@ -295,6 +311,20 @@ func buildSuggestions(in targetInputs, kind string, limit int) Suggestions {
 			p.s.Competitors = append(p.s.Competitors, r.Competitor)
 		}
 		p.s.Reasons = append(p.s.Reasons, r)
+	}
+
+	// Near the top: SE Ranking has the page in striking distance.
+	for key, k := range seBest {
+		if k.Position == nil || *k.Position < nearTop || *k.Position > nearBottom {
+			continue
+		}
+		w := volumeWeight(k.Volume)
+		if *k.Position <= nearFirstPage {
+			w *= nearFirstPageWeight
+		}
+		addReason(page(k.URL), ReasonNearTop+"|"+key, TargetReason{
+			Kind: ReasonNearTop, Keyword: key, YourPosition: k.Position, Volume: k.Volume,
+		}, w)
 	}
 
 	// Keyword gap: competitors rank well where the page is missing or behind.
@@ -416,7 +446,7 @@ func buildSuggestions(in targetInputs, kind string, limit int) Suggestions {
 		s.Score = math.Round(s.Score*100) / 100
 		slices.SortFunc(s.Reasons, func(a, b TargetReason) int {
 			if a.Kind != b.Kind {
-				return strings.Compare(b.Kind, a.Kind) // keyword_gap before competitor_links
+				return cmp.Compare(reasonOrder(a.Kind), reasonOrder(b.Kind))
 			}
 			return cmp.Compare(volOf(b.Volume)+float64(b.ReferringDomains), volOf(a.Volume)+float64(a.ReferringDomains))
 		})
@@ -438,6 +468,18 @@ func buildSuggestions(in targetInputs, kind string, limit int) Suggestions {
 	}
 	out.Data = list
 	return out
+}
+
+// reasonOrder lists a suggestion's evidence: SE Ranking's own positions,
+// then keyword gaps, then competitors' links.
+func reasonOrder(kind string) int {
+	switch kind {
+	case ReasonNearTop:
+		return 0
+	case ReasonKeywordGap:
+		return 1
+	}
+	return 2
 }
 
 func volOf(v *float64) float64 {

@@ -14,7 +14,9 @@ import (
 )
 
 // AI crawlers in request logs: what the analytics sync stored from
-// connections with logs (Cloudflare), per host, crawler and day.
+// connections with logs (Cloudflare), per host, crawler and day, and what
+// a brand's own server reported (ai_bot_reports) for the hosts and days no
+// connection's logs cover.
 
 type aiBotHitsBot struct {
 	crawl.AIBot
@@ -36,6 +38,9 @@ type aiBotHitsHost struct {
 	Training int64          `json:"training"`
 	Bots     []aiBotHitsBot `json:"bots"`
 	Days     []aiBotHitsDay `json:"days"`
+	// Source says where the counts came from: a connection's logs, the
+	// site's own server, or both (on different days).
+	Source string `json:"source"`
 }
 
 type aiBotSyncView struct {
@@ -67,9 +72,14 @@ func (s *Server) getAIBotHits(w http.ResponseWriter, r *http.Request) {
 		purpose[b.Token] = b
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT host, to_char(day, 'YYYY-MM-DD'), token, sum(requests)::bigint FROM ai_bot_hits
-		WHERE workspace_id = $1 AND day >= $2::date AND ($3 = '' OR host = $3)
-		GROUP BY host, day, token ORDER BY host, day`, a.WorkspaceID, from, host)
+		SELECT host, to_char(day, 'YYYY-MM-DD'), token, sum(requests)::bigint, bool_or(reported) FROM (
+			SELECT host, day, token, requests, false AS reported FROM ai_bot_hits
+			WHERE workspace_id = $1 AND day >= $2::date AND ($3 = '' OR host = $3)
+			UNION ALL
+			SELECT r.host, r.day, r.token, r.requests, true FROM ai_bot_reports r
+			WHERE r.workspace_id = $1 AND r.day >= $2::date AND ($3 = '' OR r.host = $3)
+			  AND NOT EXISTS (SELECT 1 FROM ai_bot_hits h WHERE h.workspace_id = r.workspace_id AND h.host = r.host AND h.day = r.day)
+		) x GROUP BY host, day, token ORDER BY host, day`, a.WorkspaceID, from, host)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -79,7 +89,14 @@ func (s *Server) getAIBotHits(w http.ResponseWriter, r *http.Request) {
 	perDay := map[string]map[string]*aiBotHitsDay{}
 	var h, day, token string
 	var n int64
-	if _, err := pgx.ForEachRow(rows, []any{&h, &day, &token, &n}, func() error {
+	var reported bool
+	fromLogs, fromServer := map[string]bool{}, map[string]bool{}
+	if _, err := pgx.ForEachRow(rows, []any{&h, &day, &token, &n, &reported}, func() error {
+		if reported {
+			fromServer[h] = true
+		} else {
+			fromLogs[h] = true
+		}
 		x := byHost[h]
 		if x == nil {
 			x = &aiBotHitsHost{Host: h, Bots: []aiBotHitsBot{}, Days: []aiBotHitsDay{}}
@@ -117,6 +134,14 @@ func (s *Server) getAIBotHits(w http.ResponseWriter, r *http.Request) {
 			x.Days = append(x.Days, *d)
 		}
 		sort.Slice(x.Days, func(i, j int) bool { return x.Days[i].Day < x.Days[j].Day })
+		switch {
+		case fromLogs[h] && fromServer[h]:
+			x.Source = "both"
+		case fromServer[h]:
+			x.Source = "server"
+		default:
+			x.Source = "logs"
+		}
 		out = append(out, *x)
 	}
 	sort.Slice(out, func(i, j int) bool {

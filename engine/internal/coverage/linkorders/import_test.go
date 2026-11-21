@@ -38,6 +38,30 @@ func TestCSVColMapsIntermediaryHeaders(t *testing.T) {
 	}
 }
 
+// A broker export whose headers carry line breaks inside quotes, a price
+// that names its currency twice, and Ahrefs' "Ref. IPs / Subnets": every
+// column is read, none is dropped as a duplicate.
+func TestCSVHeaderReadsAhrefsStyleBrokerExport(t *testing.T) {
+	f, err := ParseCatalogCSV(strings.NewReader("URL,\"Price USD, $\",Date Added,\"Geo Ahrefs\nTop 1\",\"Geo Ahrefs\nTop 2\",\"Main\nlanguage\",\"Article\ntype\",Traffic / Organic,DR,\"Main\ncategory\",Subcategory,Organic / Total Keywords,Ref. domains / All,Ref. domains / Followed,Ref. domains / Not followed,Ref. IPs / IPs,Ref. IPs / Subnets,Backlinks / All,Backlinks / Followed,Backlinks / Not followed,Backlinks / Redirects,Backlinks / Internal,Outgoing domains / Followed,Outgoing domains / All time,Outgoing links / Followed,Outgoing links / All time\n" +
+		"a.example,84,07.11.2026,United States,,English,,3000,40,Gaming,Game Guides,900,2000,1500,500,2800,200,6000,5000,1000,0,20000,40,50,60,200\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.ignored) != 0 {
+		t.Fatalf("ignored columns %v, want none", f.ignored)
+	}
+	_, in, err := csvRow(f.idx, f.Rows[0], time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Prices == nil || len(*in.Prices) != 1 || (*in.Prices)[0].Currency != CurrencyUSD || (*in.Prices)[0].AmountMinor != 8400 {
+		t.Fatalf("prices = %+v, want USD 84.00", in.Prices)
+	}
+	if in.Metrics[MetricReferringIPs] != int64(2800) || in.Metrics[MetricReferringSubnets] != int64(200) {
+		t.Fatalf("ips/subnets = %v/%v, want 2800/200", in.Metrics[MetricReferringIPs], in.Metrics[MetricReferringSubnets])
+	}
+}
+
 func TestCSVColNormalizesPunctuationAndAliases(t *testing.T) {
 	for h, want := range map[string]string{
 		"Traffic / Organic":            "traffic",
@@ -68,6 +92,13 @@ func TestCSVColNormalizesPunctuationAndAliases(t *testing.T) {
 		"amount_minor":                 "amount_minor",
 		"Price, $":                     "price_usd",
 		"Price €":                      "price_eur",
+		"Price USD, $":                 "price_usd",
+		"Price (EUR)":                  "price_eur",
+		"Guest post price":             "price",
+		"Цена, $":                      "price_usd",
+		"Price minor":                  "amount_minor",
+		"Ref. IPs / IPs":               MetricReferringIPs,
+		"Ref. IPs / Subnets":           MetricReferringSubnets,
 		"Currency":                     "currency",
 		"Paid traffic cost":            "",
 		"Sample post":                  "",
@@ -235,7 +266,7 @@ func TestParseCatalogCSVKeepsTheFirstColumnForAField(t *testing.T) {
 func TestExportColumnsRoundTrip(t *testing.T) {
 	cols := map[string]string{
 		"domain": "domain", "intermediary": "intermediary", "theme": "theme", "site_since": "site_age",
-		"pbn": "pbn", "country": "country", "languages": "languages", "niches": "niches",
+		"pbn": "pbn", "best_link": "best_link", "country": "country", "languages": "languages", "niches": "niches",
 		"casino_allowed": "casino_allowed", "rel_offered": "rel_offered", "slot_types": "slot_types",
 		"duration": "duration", "tat_days": "tat_days", "guarantee_days": "guarantee_days",
 		"domain_rating": "domain_rating", "traffic": "traffic", "amount_minor": "amount_minor",

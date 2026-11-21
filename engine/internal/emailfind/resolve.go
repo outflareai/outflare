@@ -2,6 +2,7 @@ package emailfind
 
 import (
 	"context"
+	"time"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/verify"
@@ -14,12 +15,18 @@ const highConfidence = 75
 
 // Resolve runs the full waterfall for a batch of people. Free, first-party
 // tiers run first: a proven first-party history, then the data network
-// when the server has one, then the learned pattern checked with the free
-// built-in checks. Only when we cannot prove an address
-// and confidence stays low does it roll up to the workspace's own connected
-// verifier, which is BYO-key and billed to that workspace's account. Every
+// when the server has one, then the learned pattern. When those leave only
+// a guess below highConfidence, or no address at all, the workspace's own
+// connected email finder is asked (finder.go). The address that comes out,
+// a finder's or a guess, gets the free built-in checks, and rolls up to the
+// workspace's own connected verifier when it is still unconfirmed. Finder
+// and verifier are BYO-key and billed to that workspace's account. Every
 // tier is logged to the training corpus. One item never spends another's
-// budget: the third-party tier uses this workspace's connection only.
+// budget: the third-party tiers use this workspace's connections only.
+//
+// A repeat for the same person does not spend again: a finder's answer is
+// remembered per person (enrichment_cache) and a verifier's per address
+// (email_verifications).
 func (s *Service) Resolve(ctx context.Context, ws string, req FindRequest) (FindResult, error) {
 	set, err := verify.LoadSettings(ctx, s.Pool, ws)
 	if err != nil {
@@ -31,14 +38,23 @@ func (s *Service) Resolve(ctx context.Context, ws string, req FindRequest) (Find
 	if err != nil {
 		return FindResult{}, err
 	}
+	found, err := s.askFinders(ctx, ws, req.Items, native.Items)
+	if err != nil {
+		return FindResult{}, err
+	}
 	out := FindResult{Items: make([]ItemResult, 0, len(native.Items))}
-	for _, r := range native.Items {
-		out.Items = append(out.Items, s.waterfall(ctx, ws, r, hasVerifier))
+	for i, r := range native.Items {
+		var fa *finderAnswer
+		if i < len(found) {
+			fa = found[i]
+		}
+		out.Items = append(out.Items, s.resolveOne(ctx, ws, r, hasVerifier, fa))
 	}
 	return out, nil
 }
 
-// waterfall takes one native find result up the tiers.
+// waterfall takes one native find result up the tiers, when no finder
+// answered for the person.
 func (s *Service) waterfall(ctx context.Context, ws string, r ItemResult, hasVerifier bool) ItemResult {
 	// Proven by our own history, or nothing to check: native already decided.
 	if r.Code == CodeVerified {
@@ -83,7 +99,7 @@ func (s *Service) waterfall(ctx context.Context, ws string, r ItemResult, hasVer
 			r.Code, r.StopCode = CodeStop, stopCode(k)
 			return r
 		}
-		r.Code, r.RetryAfter = CodeRetry, 0
+		r.Code, r.RetryAfter = CodeRetry, verifyRetryAfter(err)
 		return r
 	}
 	if len(res) == 0 {
@@ -96,7 +112,7 @@ func (s *Service) waterfall(ctx context.Context, ws string, r ItemResult, hasVer
 	r.Cost = Cost{Provider: v.Provider}
 	if v.IntegrationID != nil {
 		// One credit an address, as the spend ledger books it.
-		r.Cost.Connection, r.Cost.Units = *v.IntegrationID, 1
+		r.Cost.Connection, r.Cost.Units, r.Cost.Micros = *v.IntegrationID, 1, micros(v.CostMicros)
 	}
 	if v.Score != nil {
 		r.Confidence = *v.Score
@@ -109,3 +125,18 @@ func (s *Service) waterfall(ctx context.Context, ws string, r ItemResult, hasVer
 		map[string]any{"reason": v.Reason, "catch_all": v.CatchAll, "provider_status": v.ProviderStatus})
 	return r
 }
+
+// verifyRetryAfter is how long to wait before checking an address again
+// after the verifier failed: what a busy verifier (a rate limit answer)
+// said, and at least verifyBusyWait, or zero (the caller's own backoff)
+// for any other failure. A busy verifier is never a stop: nothing needs a
+// person.
+func verifyRetryAfter(err error) time.Duration {
+	if wait, busy := connectors.IsBusy(err); busy {
+		return max(wait, verifyBusyWait)
+	}
+	return 0
+}
+
+// verifyBusyWait is the shortest wait after a busy verifier.
+const verifyBusyWait = 30 * time.Second

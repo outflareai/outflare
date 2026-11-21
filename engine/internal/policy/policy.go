@@ -131,6 +131,39 @@ func CheckRecipientsIn(ctx context.Context, q Querier, workspaceID, brand string
 	return out, nil
 }
 
+// CheckSalesCopiesIn checks CC recipients in an existing Sales conversation.
+// colleagues must contain only the server-verified, connected Sales members
+// assigned to this lead (including the pending handoff recipient). An outreach
+// blocklist entry, for their domain or their own address (a sequencer's
+// blocklist often lists staff both ways), keeps colleagues out of prospecting,
+// but does not block their copy of a conversation they agreed to handle. Every
+// other block (complaint, bounce, manual), withdrawn consent and review holds
+// still apply.
+// Never use this for To recipients or infer colleagues from a shared domain.
+func CheckSalesCopiesIn(ctx context.Context, q Querier, workspaceID, brand string, emails, colleagues []string) ([]Decision, error) {
+	out, err := CheckRecipientsIn(ctx, q, workspaceID, brand, emails)
+	if err != nil {
+		return nil, err
+	}
+	known := make(map[string]bool, len(colleagues))
+	for _, email := range colleagues {
+		known[strings.ToLower(strings.TrimSpace(email))] = true
+	}
+	for i, d := range out {
+		if d.Allowed || !known[strings.ToLower(d.Email)] {
+			continue
+		}
+		keep := []string{}
+		for _, reason := range d.Reasons {
+			if reason != SuppressedDomain+":blocklist" && reason != SuppressedEmail+":blocklist" {
+				keep = append(keep, reason)
+			}
+		}
+		out[i].Reasons, out[i].Allowed = keep, len(keep) == 0
+	}
+	return out, nil
+}
+
 // OtherBrands applies the cross-brand contact rule: for each of emails, the
 // handle of another brand than brandID that emailed the person in the days
 // before now. People with no such email are left out. Emails from shared
@@ -279,7 +312,7 @@ func CheckContactsIn(ctx context.Context, q Querier, workspaceID, brand, purpose
 		return out, nil
 	}
 	rows, err := queryRows(ctx, q, `
-		SELECT e, COALESCE(r.origin, ''), COALESCE((SELECT c.status FROM consents c WHERE c.workspace_id = $1 AND c.record_id = r.id
+		SELECT e, COALESCE(outflare_contact_origin(r.origin, r.attributes), ''), COALESCE((SELECT c.status FROM consents c WHERE c.workspace_id = $1 AND c.record_id = r.id
 				AND c.channel = 'email' AND c.topic = '' AND c.purpose = 'marketing' ORDER BY c.occurred_at DESC, c.created_at DESC LIMIT 1), '')
 				|| ':' || (SELECT customer_marketing FROM workspaces WHERE id = $1)
 		FROM unnest($2::text[]) AS e

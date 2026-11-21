@@ -75,7 +75,10 @@ export function Authorize({ email, onSignOut }: { email?: string; onSignOut: () 
         code_challenge: q.get("code_challenge") ?? undefined,
         code_challenge_method: "S256",
         workspace_id: ws,
-        scopes: offered(ws).filter((g) => !off.has(g.id)).flatMap((g) => g.scopes),
+        // The browser extension only ever looks people up and adds them.
+        scopes: info?.app === "extension"
+          ? (info.workspaces.find((w) => w.id === ws)?.full_scopes ?? []).filter((sc) => sc === "customers.manage")
+          : offered(ws).filter((g) => !off.has(g.id)).flatMap((g) => g.scopes),
         brand: info?.workspaces.find((w) => w.id === ws)?.brands ? brandFor(ws) : undefined,
         approve,
       },
@@ -98,7 +101,8 @@ export function Authorize({ email, onSignOut }: { email?: string; onSignOut: () 
   if (!info) return <CenteredForm title="Connect your AI"><Loading /></CenteredForm>;
 
   const known = info.app !== "unknown";
-  const appName = info.app === "claude" || info.app === "chatgpt" || info.app === "cursor" || info.app === "vscode" ? appLabels[info.app] : info.client.name;
+  const extension = info.app === "extension";
+  const appName = info.app === "claude" || info.app === "chatgpt" || info.app === "cursor" || info.app === "vscode" || extension ? appLabels[info.app] : info.client.name;
   const chosen = info.workspaces.find((w) => w.id === ws);
   const toggles = offered(ws);
   const flip = (id: string, on: boolean) => setOff((prev) => { const next = new Set(prev); if (on) next.delete(id); else next.add(id); return next; });
@@ -111,7 +115,7 @@ export function Authorize({ email, onSignOut }: { email?: string; onSignOut: () 
   }
 
   return (
-    <CenteredForm title={`Connect ${appName} to Outflare`} subtitle={`${appName} wants to work in your Outflare workspace for you.`}>
+    <CenteredForm title={`Connect ${appName} to Outflare`} subtitle={extension ? "The side panel in your browser shows what Outflare knows about the person or company in front of you." : `${appName} wants to work in your Outflare workspace for you.`}>
       <div className="flex items-center justify-center py-2" aria-hidden>
         <AppMark app={info.app} className="size-14 rounded-xl p-2.5 [&_svg]:size-7" />
         <span className="flex w-16 items-center">
@@ -151,7 +155,17 @@ export function Authorize({ email, onSignOut }: { email?: string; onSignOut: () 
         </label>
       )}
 
-      <fieldset className="space-y-2">
+      {extension && (
+        <div className="divide-y rounded-md border text-[13px]">
+          <p className="px-3 py-2.5"><span className="block font-medium">See your people and companies</span><span className="block text-[12px] text-muted-foreground">Look up who an email or a website belongs to, with their deals, support and notes.</span></p>
+          {chosen?.full_scopes.includes("customers.manage") && (
+            <p className="px-3 py-2.5"><span className="block font-medium">Add and edit them</span><span className="block text-[12px] text-muted-foreground">Add a person or company, and their notes and to-dos, when you press the button. Nothing is added on its own.</span></p>
+          )}
+          <p className="px-3 py-2.5 text-[12px] text-muted-foreground">It can&apos;t send email or change settings. The sites you visit are never sent to Outflare.</p>
+        </div>
+      )}
+
+      {!extension && <fieldset className="space-y-2">
         <div className="flex items-baseline justify-between">
           <legend className="text-[13px] font-medium">What {appName} may do</legend>
           {toggles.length > 0 && (
@@ -189,7 +203,7 @@ export function Authorize({ email, onSignOut }: { email?: string; onSignOut: () 
             Every change it makes waits for your approval on the Agents page. You can turn this off for it under Connect your AI.
           </p>
         )}
-      </fieldset>
+      </fieldset>}
 
       <ErrorText>{error}</ErrorText>
       <div className="flex gap-2">
@@ -197,7 +211,7 @@ export function Authorize({ email, onSignOut }: { email?: string; onSignOut: () 
         <Button className="flex-1" disabled={busy || !ws || (!!chosen?.brands && !brandFor(ws))} onClick={() => answer(true)}>{busy ? "Connecting…" : `Allow ${appName}`}</Button>
       </div>
       <p className="text-center text-[12px] text-muted-foreground">
-        You'll go back to <span className="font-mono">{info.redirect_host}</span>. Change this or disconnect any time under Connect your AI.
+        {extension ? "You'll go back to the side panel." : <>You'll go back to <span className="font-mono">{info.redirect_host}</span>.</>} Change this or disconnect any time under Connect your AI.
         <br />
         Signed in as {email}. <button type="button" onClick={onSignOut} className="underline">Not you?</button>
       </p>

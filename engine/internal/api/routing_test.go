@@ -198,8 +198,123 @@ func TestRouting(t *testing.T) {
 	}
 
 	// Another brand has no rules of this one.
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})["id"].(string)
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly", "handle": "summitly"})["id"].(string)
 	if got := owner.must(200, "GET", "/v1/brands/"+other+"/routing", nil); len(got["data"].([]any)) != 0 {
 		t.Fatalf("another brand's rules: %v", got)
+	}
+}
+
+// Hours and capacity: routing skips someone who is away or at their
+// capacity, and prefers someone at work over someone who is off.
+func TestRoutingHoursAndCapacity(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var brand string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&brand); err != nil {
+		t.Fatal(err)
+	}
+	base := "/v1/brands/" + brand
+	me := owner.must(200, "GET", "/v1/me", nil)["user"].(map[string]any)["id"].(string)
+	acc := &api.Accounts{Pool: e.pool, PublicURL: "https://app.example.com", Mailer: e.outbox, Log: log}
+	bea, _, err := acc.CreateAccount(ctx, nil, httptest.NewRecorder(), httptest.NewRequest("POST", "/", nil),
+		api.NewAccount{Email: "bea@example.com", Name: "Bea", Password: "correct horse battery", WorkspaceName: "Bea's"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO memberships (workspace_id, user_id, role) VALUES ($1, $2, 'operator')`, ws, bea); err != nil {
+		t.Fatal(err)
+	}
+	captured := track.Capture(t)
+	owner.must(200, "PUT", base+"/routing", map[string]any{"rules": []any{
+		map[string]any{"name": "Everyone", "record_type": "account", "members": []string{me, bea}},
+	}})
+	n := 0
+	route := func() map[string]any {
+		t.Helper()
+		n++
+		rec := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": fmt.Sprintf("Company %d", n)})["id"].(string)
+		return owner.must(200, "POST", base+"/records/"+rec+"/routing", nil)
+	}
+	people := func(list ...map[string]any) map[string]any {
+		t.Helper()
+		if list == nil {
+			list = []map[string]any{}
+		}
+		return owner.must(200, "PUT", base+"/routing/people", map[string]any{"people": list})
+	}
+
+	// Away: the first in the pool is skipped.
+	out := people(map[string]any{"user_id": me, "paused": true})
+	who := out["people"].([]any)
+	if len(who) != 1 || who[0].(map[string]any)["paused"] != true || who[0].(map[string]any)["at_work"] != true {
+		t.Fatalf("people: %v", who)
+	}
+	if got := route(); got["owner_id"] != bea {
+		t.Fatalf("away: %v", got)
+	}
+
+	// Capacity: Bea owns one and takes no more, so the next goes to me
+	// though I would otherwise be level; at capacity both, nobody gets it.
+	people(map[string]any{"user_id": bea, "capacity": 1})
+	if got := route(); got["owner_id"] != me {
+		t.Fatalf("capacity: %v", got)
+	}
+	out = people(map[string]any{"user_id": bea, "capacity": 1}, map[string]any{"user_id": me, "capacity": 1})
+	for _, p := range out["people"].([]any) {
+		if p.(map[string]any)["owned"] != float64(1) {
+			t.Fatalf("owned: %v", p)
+		}
+	}
+	if got := route(); got["outcome"] != "no_member" {
+		t.Fatalf("both full: %v", got)
+	}
+
+	// Hours: I own fewer after Bea gets two more, but I am off (my hours
+	// are a minute that isn't now), so the next still goes to Bea; with
+	// both off it goes to whoever owns the fewest, so nothing waits.
+	if _, err := e.pool.Exec(ctx, `UPDATE records SET attributes = attributes || jsonb_build_object('owner', $2::text) WHERE brand_id = $1 AND record_type = 'account' AND COALESCE(attributes->>'owner', '') = ''`, brand, bea); err != nil {
+		t.Fatal(err)
+	}
+	var off string
+	if err := e.pool.QueryRow(ctx, `SELECT to_char(now() AT TIME ZONE 'UTC' + interval '6 hours', 'HH24:MI')`).Scan(&off); err != nil {
+		t.Fatal(err)
+	}
+	var offEnd string
+	if err := e.pool.QueryRow(ctx, `SELECT to_char(now() AT TIME ZONE 'UTC' + interval '7 hours', 'HH24:MI')`).Scan(&offEnd); err != nil {
+		t.Fatal(err)
+	}
+	out = people(map[string]any{"user_id": me, "from": off, "to": offEnd, "timezone": "UTC"})
+	if p := out["people"].([]any)[0].(map[string]any); p["at_work"] != false || p["from"] != off {
+		t.Fatalf("off: %v", p)
+	}
+	if got := route(); got["owner_id"] != bea {
+		t.Fatalf("hours: %v", got)
+	}
+	people(map[string]any{"user_id": me, "from": off, "to": offEnd}, map[string]any{"user_id": bea, "from": off, "to": offEnd})
+	if got := route(); got["owner_id"] != me {
+		t.Fatalf("both off: %v", got)
+	}
+
+	// Bad input is refused, and an empty list clears everything.
+	for _, bad := range []map[string]any{
+		{"user_id": me, "from": "09:00"},
+		{"user_id": me, "from": "09:00", "to": "09:00"},
+		{"user_id": me, "days": []int{8}},
+		{"user_id": me, "timezone": "Mars/Olympus"},
+		{"user_id": "00000000-0000-4000-8000-000000000000"},
+	} {
+		owner.must(400, "PUT", base+"/routing/people", map[string]any{"people": []any{bad}})
+	}
+	if out := people(); len(out["people"].([]any)) != 0 {
+		t.Fatalf("cleared: %v", out)
+	}
+	found := false
+	for _, ev := range captured() {
+		found = found || ev.Name == "routing.people_updated"
+	}
+	if !found {
+		t.Fatal("no routing.people_updated event")
 	}
 }

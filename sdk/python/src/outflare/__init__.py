@@ -14,8 +14,9 @@ from ._client import _Base
 from ._errors import OutflareError, WebhookVerificationError
 from ._operations import Operations
 from ._version import __version__
-from .flags import flags_bootstrap_tag
-from .webhooks import verify_webhook
+from .flags import LocalFlags, decide_flag, decide_flags, flag_bucket, flag_device, flags_bootstrap_tag
+from .track import Tracker, describe_error, error_hash, looks_like_crawler
+from .webhooks import identify_signature, verify_webhook
 
 
 class Outflare(Operations, _Base):
@@ -42,11 +43,21 @@ def is_held(answer: Any) -> bool:
 
 
 __all__ = [
+    "LocalFlags",
     "Outflare",
     "OutflareError",
+    "Tracker",
     "WebhookVerificationError",
     "__version__",
+    "decide_flag",
+    "decide_flags",
+    "describe_error",
+    "error_hash",
+    "flag_bucket",
+    "flag_device",
     "flags_bootstrap_tag",
+    "identify_signature",
     "is_held",
+    "looks_like_crawler",
     "verify_webhook",
 ]

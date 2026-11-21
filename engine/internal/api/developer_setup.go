@@ -331,22 +331,25 @@ func paymentChecks(ctx context.Context, q setupQuerier, ws, brand string, out *d
 	}
 	out.Checks = append(out.Checks, c)
 
-	// The same payment under two ids from the same source: a retry that
-	// made a new id.
+	// The same live payment under two ids from the same source: a retry
+	// that made a new id. A day allows delivery delays without treating
+	// older history imported together as live retries.
 	var retried int
 	if err := q.QueryRow(ctx, `SELECT count(*)::int FROM transactions a
-		WHERE a.brand_id = $1 AND a.kind = 'payment' AND a.source IN ('api', 'events') AND a.record_id IS NOT NULL
+		WHERE a.workspace_id = $1 AND a.brand_id = $2 AND a.kind = 'payment' AND a.source IN ('api', 'events') AND a.record_id IS NOT NULL
 		  AND a.created_at > now() - interval '30 days'
-		  AND EXISTS (SELECT 1 FROM transactions b WHERE b.brand_id = a.brand_id AND b.kind = 'payment' AND b.source = a.source
+		  AND a.created_at <= a.occurred_at + interval '24 hours'
+		  AND EXISTS (SELECT 1 FROM transactions b WHERE b.workspace_id = a.workspace_id AND b.brand_id = a.brand_id AND b.kind = 'payment' AND b.source = a.source
 			AND b.record_id = a.record_id AND b.amount_minor = a.amount_minor AND b.currency = a.currency AND b.source_id <> a.source_id
 			AND b.created_at BETWEEN a.created_at - interval '10 minutes' AND a.created_at AND b.id <> a.id
-			AND b.occurred_at BETWEEN a.occurred_at - interval '10 minutes' AND a.occurred_at + interval '10 minutes')`, brand).Scan(&retried); err != nil {
+			AND b.created_at <= b.occurred_at + interval '24 hours'
+			AND b.occurred_at BETWEEN a.occurred_at - interval '10 minutes' AND a.occurred_at + interval '10 minutes')`, ws, brand).Scan(&retried); err != nil {
 		return err
 	}
 	c = setupCheck{Key: "retries", Title: "A retry keeps its payment's id", Count: retried, Status: "ok",
 		Fix: "Make the id when the payment happens (your invoice id) and send that same id on every retry: Outflare keeps one payment per id, so a retry with the same id is never counted twice."}
 	if retried > 0 {
-		c.Status, c.Detail = "warning", nOf(retried, "payment", "payments")+" in the last 30 days came minutes after another from the same person, of the same amount, under a different id. If those were retries of one payment, each is counted twice: delete the extra ones on the Transactions page and keep the id on retries. If they were real separate payments, nothing needs to change."
+		c.Status, c.Detail = "warning", nOf(retried, "payment", "payments")+" in the last 30 days came minutes after another from the same person, of the same amount, under a different id, with both received within 24 hours of occurring. If those were retries of one payment, each is counted twice: delete the extra ones on the Transactions page and keep the id on retries. If they were real separate payments, nothing needs to change."
 	}
 	out.Checks = append(out.Checks, c)
 

@@ -58,8 +58,8 @@ func TestSmartLists(t *testing.T) {
 		return out
 	}
 
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "https://geonode.com"})["id"].(string)
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com"})["id"].(string)
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "https://northpeak.example"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "https://summitly.example"})["id"].(string)
 	// Everyone starts in the workspace's first brand, where a list made
 	// without a brand also goes; Bo and Cy move to their brands below.
 	ana := person("ana@example.org", `{"plan": "pro", "seats": 12, "tags": ["beta", "vip"]}`, nil)
@@ -97,6 +97,38 @@ func TestSmartLists(t *testing.T) {
 	if p := owner.must(200, "POST", base+"/smart-lists/preview", map[string]any{}); p["members"] != 3.0 {
 		t.Fatalf("preview everyone = %v", p)
 	}
+
+	// Groups nest rules: all, any or none of them. "Paid ever, and none of
+	// (on free, signed up)" is Ana; "(plan pro) or (seats under 2 and paid)"
+	// is Ana, Bo and Cy.
+	paidNotFree := []map[string]any{{"event": "payment_succeeded", "op": "exists"},
+		{"match": "none", "rules": []map[string]any{{"attribute": "plan", "op": "eq", "value": "free"}, {"event": "signed_up", "op": "exists"}}}}
+	if p := owner.must(200, "POST", base+"/smart-lists/preview", map[string]any{"rules": paidNotFree}); p["members"] != 1.0 ||
+		p["sample"].([]any)[0].(map[string]any)["email"] != "ana@example.org" {
+		t.Fatalf("preview none group = %v", p)
+	}
+	either := []map[string]any{{"attribute": "plan", "op": "eq", "value": "pro"},
+		{"match": "all", "rules": []map[string]any{{"attribute": "seats", "op": "lt", "value": 2}, {"event": "payment_succeeded", "op": "exists"}}}}
+	if p := owner.must(200, "POST", base+"/smart-lists/preview", map[string]any{"rules": either, "match": "any"}); p["members"] != 3.0 {
+		t.Fatalf("preview any with group = %v", p)
+	}
+	deep := map[string]any{"match": "any", "rules": []map[string]any{{"match": "all", "rules": []map[string]any{{"attribute": "plan", "op": "exists"}}}}}
+	for _, rules := range [][]map[string]any{
+		{{"match": "all", "rules": []map[string]any{}}},
+		{{"match": "most", "rules": []map[string]any{{"attribute": "plan", "op": "exists"}}}},
+		{{"match": "all", "op": "exists", "rules": []map[string]any{{"attribute": "plan", "op": "exists"}}}},
+		{{"match": "all", "rules": []map[string]any{deep}}},
+	} {
+		owner.must(400, "POST", base+"/smart-lists/preview", map[string]any{"rules": rules})
+	}
+	g := owner.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Paid, not free", "rules": paidNotFree})
+	if r := g["rules"].([]any)[1].(map[string]any); r["match"] != "none" || len(r["rules"].([]any)) != 2 {
+		t.Fatalf("saved group = %v", g)
+	}
+	if res := refresh(g["id"].(string)); res.Members != 1 {
+		t.Fatalf("group refresh = %+v", res)
+	}
+	owner.must(204, "DELETE", base+"/smart-lists/"+g["id"].(string), nil)
 
 	l := owner.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Paying customers", "rules": paid})
 	if l["match"] != "all" || l["members"] != 0.0 || l["refreshed_at"] != nil || len(l["rules"].([]any)) != 2 {
@@ -166,16 +198,16 @@ func TestSmartLists(t *testing.T) {
 		t.Fatalf("first brand's list after Cy moved = %v", m)
 	}
 	person("dee@example.org", `{"plan": "pro"}`, &geo)
-	everyone := owner.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Geonode people", "brand_id": "geonode"})
+	everyone := owner.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Northpeak people", "brand_id": "northpeak"})
 	if everyone["brand_id"] != geo {
 		t.Fatalf("brand list = %v", everyone)
 	}
 	refresh(everyone["id"].(string))
 	if m := members(everyone["id"].(string)); len(m) != 2 || !m["dee@example.org"] || !m["bo@example.org"] {
-		t.Fatalf("geonode members = %v", m)
+		t.Fatalf("northpeak members = %v", m)
 	}
-	if ls := owner.must(200, "GET", base+"/smart-lists?brand=geonode", nil)["data"].([]any); len(ls) != 1 {
-		t.Fatalf("geonode lists = %v", ls)
+	if ls := owner.must(200, "GET", base+"/smart-lists?brand=northpeak", nil)["data"].([]any); len(ls) != 1 {
+		t.Fatalf("northpeak lists = %v", ls)
 	}
 
 	// A lead list feeds a smart list.
@@ -190,7 +222,7 @@ func TestSmartLists(t *testing.T) {
 
 	// A brand-limited token sees its brand's lists and people only.
 	scopes := []string{"customers.read", "customers.manage"}
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": scopes, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly agent", "scopes": scopes, "brand": "summitly"})
 	agent := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	agent.must(404, "GET", base+"/smart-lists/"+everyone["id"].(string), nil)
 	agent.must(404, "GET", base+"/smart-lists/"+id, nil)
@@ -202,7 +234,7 @@ func TestSmartLists(t *testing.T) {
 	if p := agent.must(200, "POST", base+"/smart-lists/preview", map[string]any{}); p["members"] != 1.0 {
 		t.Fatalf("agent preview = %v", p)
 	}
-	own := agent.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Repocket people", "brand_id": rp})
+	own := agent.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Summitly people", "brand_id": rp})
 	refresh(own["id"].(string))
 	if m := agent.must(200, "GET", base+"/smart-lists/"+own["id"].(string)+"/members", nil)["data"].([]any); len(m) != 1 || m[0].(map[string]any)["email"] != "cy@example.org" {
 		t.Fatalf("agent's list members = %v", m)
@@ -230,7 +262,7 @@ func TestSmartLists(t *testing.T) {
 	for _, ev := range got() {
 		names[ev.Name]++
 	}
-	if names["smart_list.created"] != 5 || names["smart_list.updated"] < 9 || names["smart_list.deleted"] != 1 {
+	if names["smart_list.created"] != 6 || names["smart_list.updated"] < 9 || names["smart_list.deleted"] != 2 {
 		t.Fatalf("events = %v", names)
 	}
 }

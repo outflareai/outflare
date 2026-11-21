@@ -14,7 +14,7 @@ type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Resp
 
 const read = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
-const brandRef = z.string().min(1).describe("The brand's handle (such as repocket) or id, from list_brands.");
+const brandRef = z.string().min(1).describe("The brand's handle (such as summitly) or id, from list_brands.");
 const steps = ["business_model", "site_script", "verify_site", "analytics", "search", "email", "payments", "ads", "social", "crm"] as const;
 const installSteps = ["site_script", "verify_site"] as const;
 

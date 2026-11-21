@@ -4,7 +4,7 @@ Status: accepted (2026-10-26)
 
 ## Context
 
-Companies market several businesses from one team: Geonode runs geonode.com, repocket.com and games, on web, mobile and TV, and each has its own website as its point of truth. Separate workspaces would mean reconnecting every connector and re-inviting every person, and nobody could see everything without switching accounts or API keys. But agents need each brand's own context, sending must not mix brands, and reports should split by brand.
+Companies market several businesses from one team: Northpeak runs northpeak.example, summitly.example and games, on web, mobile and TV, and each has its own website as its point of truth. Separate workspaces would mean reconnecting every connector and re-inviting every person, and nobody could see everything without switching accounts or API keys. But agents need each brand's own context, sending must not mix brands, and reports should split by brand.
 
 ## Decision
 

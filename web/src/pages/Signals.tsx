@@ -4,6 +4,7 @@
 // or say it wasn't useful. The types and the events that raise them are
 // edited behind "Signal types".
 
+import { useUrlParam } from "@/lib/urlParam";
 import { useCallback, useEffect, useState } from "react";
 import { Flag } from "lucide-react";
 import type { Schemas } from "@outflare/sdk";
@@ -32,7 +33,7 @@ const filters: { id: Filter; label: string }[] = [
 ];
 
 const outcomeText: Record<string, string> = { won: "Won", no_change: "Done, no change", not_useful: "Not useful", duplicate: "Duplicate" };
-const sourceText: Record<string, string> = { event: "Raised by a rule or event", journey: "Raised by a journey", manual: "Raised by a person", agent: "Raised by an agent", api: "Raised through the API" };
+const sourceText: Record<string, string> = { event: "Raised by a rule or event", journey: "Raised by a journey", manual: "Raised by a person", agent: "Raised by an agent", api: "Raised through the API", feed: "Raised from a Slack channel" };
 
 // Where a signal came from, in words: "Found by AI in a support
 // conversation", "Flagged from a Telegram chat", "Raised by a journey".
@@ -80,7 +81,10 @@ function SignalsPage({ ws, canManage, go, brandId }: { ws: string; canManage: bo
   const [counts, setCounts] = useState({ open: 0, mine: 0, late: 0, no_owner: 0 });
   const [types, setTypes] = useState<SignalType[]>([]);
   const [error, setError] = useState("");
-  const [view, setView] = useState<"queue" | "types" | "credit" | "conversations">("queue");
+  // The page showing is in the URL (?view=types), so each has an address.
+  const [viewParam, setViewParam] = useUrlParam("view");
+  const view = viewParam === "types" || viewParam === "credit" || viewParam === "conversations" ? viewParam : "queue";
+  const setView = (v: "queue" | "types" | "credit" | "conversations") => setViewParam(v === "queue" ? "" : v);
   const editing = view === "types";
   const [busy, setBusy] = useState("");
 
@@ -450,11 +454,14 @@ export function FlagButton({
   recordId,
   onRaised,
   conversation,
+  label,
 }: {
   brandId: string;
   recordId: string;
   onRaised?: () => void;
   conversation?: { channel: "support" | "telegram" | "email" | "call"; ref: string };
+  // The button's words, when the page has its own way to hand to sales.
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [types, setTypes] = useState<SignalType[]>([]);
@@ -484,7 +491,7 @@ export function FlagButton({
     return (
       <Button variant="ghost" onClick={show}>
         <Flag className="size-3.5" />
-        {conversation ? "Flag for sales" : "Flag for attention"}
+        {label ?? (conversation ? "Flag for sales" : "Flag for attention")}
       </Button>
     );
   }

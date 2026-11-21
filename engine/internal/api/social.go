@@ -758,6 +758,33 @@ func beforeTime(w http.ResponseWriter, r *http.Request) (*time.Time, bool) {
 	return &t, true
 }
 
+// beforeTimeID reads ?cursor= for a list that pages newest first by time
+// and then by id, so rows that share a time (everything one call wrote) are
+// told apart and none is skipped between pages. An older cursor that holds
+// only a time still works: id is "" then.
+func beforeTimeID(w http.ResponseWriter, r *http.Request) (t *time.Time, id string, ok bool) {
+	before, ok := pageCursor(w, r, pageBefore)
+	if !ok || before == "" {
+		return nil, "", ok
+	}
+	at, id, _ := strings.Cut(before, "|")
+	parsed, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil || (id != "" && !validUUID(id)) {
+		invalidCursor(w, r)
+		return nil, "", false
+	}
+	return &parsed, id, true
+}
+
+// timeIDCursor is the next_cursor after a page's last row, for beforeTimeID.
+func timeIDCursor(at time.Time, id string) any {
+	return nextCursor(pageBefore, at.UTC().Format(time.RFC3339Nano)+"|"+id)
+}
+
+// firstUUID sorts before every id: beside a time-only position it keeps
+// "strictly before that time", as such positions always meant.
+const firstUUID = "00000000-0000-0000-0000-000000000000"
+
 // pageLimit reads ?limit, def when absent.
 func pageLimit(w http.ResponseWriter, r *http.Request, def, max int) (int, bool) {
 	v := r.URL.Query().Get("limit")

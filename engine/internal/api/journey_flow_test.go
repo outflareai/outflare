@@ -174,6 +174,34 @@ func TestJourneyFlowControl(t *testing.T) {
 		t.Fatalf("step stats: %v", stats)
 	}
 
+	// History sent later starts nothing and moves no one: Dee's trial from
+	// last week, and Eve's order from last week while she waits, arrive
+	// today.
+	dee, eve := person("dee@acme.example"), person("eve@acme.example")
+	lastWeek := time.Now().Add(-7 * 24 * time.Hour)
+	old := func(rec, name string, props map[string]any) {
+		t.Helper()
+		id, err := customers.RecordEvent(ctx, e.pool, ws, customers.Event{RecordID: rec, Name: name, Properties: props, OccurredAt: lastWeek})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitFor("the late event's job", func() bool {
+			var done bool
+			err := e.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE idempotency_key = $1 AND status = 'succeeded')`, "journey-event:"+id).Scan(&done)
+			return err == nil && done
+		})
+	}
+	old(dee, "trial.started", nil)
+	if r := runOf(jid, dee); r != nil {
+		t.Fatalf("a trial from last week started a run: %v", r)
+	}
+	event(eve, "trial.started", nil)
+	waiting(eve)
+	old(eve, "order_completed", map[string]any{"amount": 50})
+	if r := runOf(jid, eve); r["step"] != "wait" {
+		t.Fatalf("an order from last week moved eve on: %v", r)
+	}
+
 	// A random split's holdout ends the run; an entry limit of one an hour
 	// turns the second person away.
 	hold := owner.must(201, "POST", base+"/journeys", map[string]any{"name": "Holdout", "entry_limit": map[string]any{"count": 1, "per": "hour"},

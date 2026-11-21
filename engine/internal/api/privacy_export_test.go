@@ -46,7 +46,7 @@ func TestPrivacyExport(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	acme := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
 
 	q := jobs.New(e.pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	q.PollInterval = 20 * time.Millisecond
@@ -85,11 +85,11 @@ func TestPrivacyExport(t *testing.T) {
 		return id
 	}
 	ana := person(acme, "u_ana", "Acme")
-	anaRP := person(rp, "u_ana_rp", "Repocket")
+	anaRP := person(rp, "u_ana_rp", "Summitly")
 	// A row that points at her but is another brand's is never hers to see
 	// from this brand.
 	if _, err := e.pool.Exec(ctx, `INSERT INTO emails (workspace_id, record_id, brand_id, purpose, from_address, to_addresses, subject)
-		VALUES ($1, $2, $3, 'transactional', 'hello@example.com', ARRAY['ana@example.com'], 'Repocket only')`, ws, ana, rp); err != nil {
+		VALUES ($1, $2, $3, 'transactional', 'hello@example.com', ARRAY['ana@example.com'], 'Summitly only')`, ws, ana, rp); err != nil {
 		t.Fatal(err)
 	}
 	// An email to her with no brand (shared, from before brands owned
@@ -104,7 +104,7 @@ func TestPrivacyExport(t *testing.T) {
 	// Another brand's record is not found, from either side.
 	owner.must(404, "POST", "/v1/brands/"+acme+"/records/"+anaRP+"/privacy-exports", nil)
 	owner.must(404, "POST", "/v1/brands/"+rp+"/records/"+ana+"/privacy-exports", nil)
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "summitly"})
 	app := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	app.must(404, "POST", ask, nil)
 	app.must(404, "GET", exports, nil)
@@ -145,7 +145,7 @@ func TestPrivacyExport(t *testing.T) {
 			t.Fatalf("%s: %v rows; counts %v", table, counts[table], counts)
 		}
 	}
-	// Her Acme email and her brandless one; not the Repocket one.
+	// Her Acme email and her brandless one; not the Summitly one.
 	if counts["emails"] != 2.0 || counts["deals"] != 1.0 {
 		t.Fatalf("only this brand's rows: %v", counts)
 	}
@@ -194,7 +194,7 @@ func TestPrivacyExport(t *testing.T) {
 		}
 	}
 	// Nothing of the other brand's Ana, nor the row of the other brand.
-	for _, never := range []string{"Repocket", "u_ana_rp", anaRP, rp} {
+	for _, never := range []string{"Summitly", "u_ana_rp", anaRP, rp} {
 		if strings.Contains(text, never) {
 			t.Fatalf("the file has %q, which is another brand's", never)
 		}

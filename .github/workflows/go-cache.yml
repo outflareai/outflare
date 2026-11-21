@@ -17,7 +17,7 @@ name: Go cache
 on:
   push:
     branches: [main]
-    paths: ["**.go", go.mod, go.sum, .github/workflows/go-cache.yml]
+    paths: ["**.go", go.mod, go.sum, "engine/internal/db/migrations/**", .github/workflows/go-cache.yml]
 
 # Only the newest commit's cache is worth filling.
 concurrency:
@@ -74,3 +74,55 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
           key: go-build-v3-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+
+
+  # The migrated test database, as a dump the test parts load instead of
+  # applying every migration (ci.yml, "Load the saved schema"). Saved once
+  # per set of migrations.
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: outflare_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/outflare_test?sslmode=disable
+      # The development key (AGENTS.md): the migrations need one to start.
+      OUTFLARE_SECRET_KEY: ZGV2LW9ubHktZGV2LW9ubHktZGV2LW9ubHktZGV2LTA=
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Already saved?
+        id: saved
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/schema.sql.gz
+          key: schema-v1-${{ hashFiles('engine/internal/db/migrations/**') }}
+          lookup-only: true
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: steps.saved.outputs.cache-hit != 'true'
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Migrate an empty database and dump it
+        if: steps.saved.outputs.cache-hit != 'true'
+        env:
+          CONTAINER: ${{ job.services.postgres.id }}
+          DUMP: ${{ runner.temp }}/schema.sql.gz
+        run: |
+          go run ./engine/cmd/outflare migrate
+          # The server's own pg_dump, so the versions always match.
+          docker exec "$CONTAINER" pg_dump -U postgres -d outflare_test | gzip >"$DUMP"
+          ls -l "$DUMP"
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.saved.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/schema.sql.gz
+          key: schema-v1-${{ hashFiles('engine/internal/db/migrations/**') }}

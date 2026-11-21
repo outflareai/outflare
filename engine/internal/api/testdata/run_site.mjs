@@ -27,6 +27,19 @@
 // they were taken off again. links lists the hrefs of the page's links
 // that ask for the click key ({ofclk}); it prints them after the script ran,
 // with the script's clickId().
+// capture is what the events answer says to capture ({clicks, forms});
+// clicks and submits are elements to click or forms to submit once the
+// page loaded: {tag, text, attrs, value, fields, parent}, where parent is
+// another such element around it. scriptAttrs adds attributes to the tag.
+// errors are uncaught errors after the page loaded ({error: {name, message,
+// stack}, filename, lineno, colno}), earlyErrors ones thrown before the
+// first answer arrived, and rejections reasons of rejected promises.
+// pixels is what the events answer says about ad pixels ({chatgpt: {id,
+// user}, meta: {id, events, user}, tiktok: {...}}); with oaiq the page
+// carries OpenAI's own pixel snippet, with fbq Meta's and with ttq
+// TikTok's. It prints the calls each pixel got (metaq and ttq for the
+// ones the script loaded) and the scripts added to <head>. trackProps
+// are the properties of the track event, trackId its messageId.
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
@@ -46,6 +59,14 @@ if (opt.flagsAttr !== undefined) attrs["data-flags"] = opt.flagsAttr;
 if (opt.bannerOff) attrs["data-banner"] = "off";
 if (opt.reopenOff) attrs["data-reopen"] = "off";
 if (opt.cookiesOff) attrs["data-cookies"] = "off";
+Object.assign(attrs, opt.scriptAttrs || {});
+const listeners = {};
+const fakeEl = (e) => e && ({
+  tagName: e.tag.toUpperCase(), id: (e.attrs || {}).id || "", value: e.value, textContent: e.text || "",
+  elements: e.fields === undefined ? undefined : { length: e.fields },
+  getAttribute: (k) => (e.attrs || {})[k] ?? null,
+  parentNode: fakeEl(e.parent),
+});
 let shown = null;
 const classes = new Set(opt.htmlClass ? [opt.htmlClass] : []);
 const storage = new Map(Object.entries(opt.stored || {}));
@@ -102,7 +123,7 @@ const document = {
     if (rest.some((r) => r.trim() === "max-age=0")) jar.delete(k.trim());
     else jar.set(k.trim(), v);
   },
-  addEventListener() {},
+  addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
   getElementById: (id) =>
     id === "outflare-flags" && opt.bootstrap !== undefined
       ? { textContent: typeof opt.bootstrap === "string" ? opt.bootstrap : JSON.stringify(opt.bootstrap) }
@@ -132,6 +153,8 @@ let posts = 0;
 const statuses = opt.statuses || [200];
 const timers = [];
 let flagAsks = 0;
+const flagBodies = [];
+const identifies = [];
 const choices = [];
 let bannerAsks = 0;
 const cookieReports = [];
@@ -158,27 +181,44 @@ const fetch = (url, init) => {
     bodies.push(body);
     for (const e of body.batch) if (e.type === "track") tracked.push({ event: e.event, properties: e.properties });
   }
+  if (url.endsWith("/v1/site/identify")) {
+    identifies.push(JSON.parse(init.body));
+    return Promise.resolve({ ok: opt.identifyOK !== false, status: opt.identifyOK === false ? 403 : 200, json: () => Promise.resolve({ ok: true }) });
+  }
   if (url.endsWith("/v1/site/flags")) {
     flagAsks++;
+    flagBodies.push(JSON.parse(init.body));
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(opt.flags) });
   }
   const answer = statuses[Math.min(posts++, statuses.length - 1)];
-  return answer === "error" ? Promise.reject(new TypeError("network")) : Promise.resolve({ status: answer });
+  if (answer === "error") return Promise.reject(new TypeError("network"));
+  return Promise.resolve((opt.capture || opt.pixels) && answer === 200 ? { ok: true, status: 200, json: () => Promise.resolve({ accepted: 1, capture: opt.capture, pixels: opt.pixels }) } : { status: answer });
 };
 const fbq = [];
-const window = { addEventListener() {}, crypto: globalThis.crypto, fetch };
+const winListeners = {};
+const window = { addEventListener(type, fn) { (winListeners[type] ||= []).push(fn); }, crypto: globalThis.crypto, fetch };
+// An error event as the browser gives it: error is what was thrown.
+const throwAll = (list) => { for (const e of list || []) for (const fn of winListeners.error || []) fn({ error: e.error, message: e.message || (e.error || {}).message, filename: e.filename, lineno: e.lineno, colno: e.colno }); };
 if (opt.fbq) window.fbq = (...a) => fbq.push(a);
+const oaiq = [];
+if (opt.oaiq) window.oaiq = (...a) => oaiq.push(a);
+if (opt.ttq) window.ttq = [];
 const ctx = vm.createContext({
   window, document, history, location: loc, URL, URLSearchParams, Intl, Date, Math, JSON, Array,
   navigator: { language: opt.language || "en", sendBeacon: () => true, globalPrivacyControl: !!opt.gpc },
   crypto: globalThis.crypto, fetch, setTimeout: (f) => timers.push(f), sessionStorage, localStorage,
 });
 vm.runInContext(readFileSync(file, "utf8"), ctx);
+throwAll(opt.earlyErrors);
 // Let the banner's settings arrive before acting like the visitor.
 for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
 let state = null;
 for (const [name, ...args] of opt.calls || []) state = window.outflare[name](...args);
-if (opt.track) window.outflare.track(opt.track, { plan: "pro" });
+if (opt.track) window.outflare.track(opt.track, opt.trackProps || { plan: "pro" }, opt.trackId ? { messageId: opt.trackId } : undefined);
+for (const c of opt.clicks || []) for (const fn of listeners.click || []) fn({ target: fakeEl(c) });
+throwAll(opt.errors);
+for (const reason of opt.rejections || []) for (const fn of winListeners.unhandledrejection || []) fn({ reason });
+for (const f of opt.submits || []) for (const fn of listeners.submit || []) fn({ target: fakeEl(f) });
 let got = null;
 if (opt.flags && !opt.quiet) window.outflare.onFlags((f) => { got = { flags: { ...f }, payload: window.outflare.flagPayload("hero") }; });
 for (const k of opt.read || []) window.outflare.onFlags(() => window.outflare.flag(k));
@@ -187,8 +227,10 @@ for (let i = 0; i < 10; i++) {
   await new Promise((r) => setImmediate(r));
   while (timers.length) timers.shift()();
 }
-console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage),
+console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, flagBodies, identifies, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage),
   choices, bannerAsks, cookieReports, policy: spots.map((s) => s.innerHTML), local: Object.fromEntries(local), state, consent: window.outflare.consent(), dataLayer: (window.dataLayer || []).map((a) => [...a]), uetq: window.uetq || null, fbq, ran,
+  metaq: opt.fbq ? [] : ((window.fbq || {}).queue || []).map((a) => [...a]), ttq: opt.ttq ? [...window.ttq] : [...(window.ttq || [])].map((a) => [...a]),
+  oaiq: opt.oaiq ? oaiq : ((window.oaiq || {}).q || []).map((a) => [...a]), scripts: appended.filter((n) => n.src).map((n) => n.src),
   cookies: Object.fromEntries(jar), bodies, shown: shown ? shown.innerHTML : null, links: links.map((a) => a.href), clickId: window.outflare.clickId(),
   hidden: appended.filter((n) => n.id === "of-hide").map((n) => ({ css: n.textContent, removed: !!n.removed })),
   elements: Object.fromEntries(Object.entries(elements).map(([k, els]) => [k, els.map((e) => ({ text: e.textContent, attrs: e.attrs, display: e.display }))])) }));

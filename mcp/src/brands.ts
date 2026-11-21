@@ -1,5 +1,5 @@
 // Brands: the businesses one company markets, each with its own website,
-// such as Geonode and Repocket. Connectors, members, tokens and leads are
+// such as Northpeak and Summitly. Connectors, members, tokens and leads are
 // the workspace's and shared; a brand owns its context, memories, lists,
 // sequences and sending setup. get_context with a brand reads its context,
 // which no other brand shares.
@@ -14,7 +14,7 @@ type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Resp
 const id = z.string().uuid();
 const read = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
-const brandRef = z.string().min(1).describe("The brand's handle (such as repocket) or id, from list_brands.");
+const brandRef = z.string().min(1).describe("The brand's handle (such as summitly) or id, from list_brands.");
 const platforms = z.array(z.enum(["web", "ios", "android", "tv", "desktop", "console", "extension", "api"]));
 const links = z
   .array(
@@ -48,7 +48,7 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
     {
       title: "List brands",
       description:
-        "The businesses this company markets, each with its own website (such as Geonode and Repocket), with their domains, platforms and what each owns. " +
+        "The businesses this company markets, each with its own website (such as Northpeak and Summitly), with their domains, platforms and what each owns. " +
         "Empty for a company with one brand. When there are several, work out which brand a task is for (from its sequence or list, or ask) " +
         "and pass brand to get_context and the list tools.",
       inputSchema: { status: z.enum(["active", "archived", "all"]).optional().describe("Default: active brands.") },
@@ -106,7 +106,7 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
         "Then save what you know about it with update_brand_context (offer to read its website) and move its domains and sequences in with add_to_brand.",
       inputSchema: {
         name: z.string().min(1).max(100),
-        website: z.string().max(253).optional().describe("Its main site, such as repocket.com."),
+        website: z.string().max(253).optional().describe("Its main site, such as summitly.example."),
         domains: z.array(z.string()).max(100).optional().describe("Its other domains. The website is always included."),
         platforms: platforms.optional().describe("Where it ships."),
         links: links.optional(),

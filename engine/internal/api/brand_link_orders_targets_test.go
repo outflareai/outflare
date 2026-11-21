@@ -120,7 +120,11 @@ func TestLinkOrderTargetsSuggestionsAndAnchors(t *testing.T) {
 	if free == nil || rows[0].(map[string]any)["url"] != "https://northpeak.example/free-proxy-list" {
 		t.Fatalf("free-proxy-list should rank first: %v", rows)
 	}
-	reason := free["reasons"].([]any)[0].(map[string]any)
+	// SE Ranking has it at 13 (near_top, listed first), then the gap.
+	if near := free["reasons"].([]any)[0].(map[string]any); near["kind"] != "near_top" || near["keyword"] != "free proxy" || near["your_position"] != 13.0 {
+		t.Fatalf("free near_top reason: %v", near)
+	}
+	reason := free["reasons"].([]any)[1].(map[string]any)
 	if reason["kind"] != "keyword_gap" || reason["competitor"] != "rival.example" || reason["keyword"] != "free proxy" || reason["your_position"] != 13.0 {
 		t.Fatalf("free reason: %v", reason)
 	}

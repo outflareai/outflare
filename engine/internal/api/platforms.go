@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -199,7 +200,28 @@ func (s *Server) syncPlatform(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "platform account not found")
 		return
 	}
-	res, err := s.platforms.Sync(r.Context(), a.WorkspaceID, id)
+	var in struct {
+		LinkCampaigns []string `json:"link_campaigns"`
+	}
+	if !decodeOptional(w, r, &in) {
+		return
+	}
+	link := []string{}
+	for _, c := range in.LinkCampaigns {
+		c = strings.TrimSpace(c)
+		if c == "" || len(c) > 200 {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "link_campaigns takes the platform's campaign ids, 1 to 200 characters each")
+			return
+		}
+		if !slices.Contains(link, c) {
+			link = append(link, c)
+		}
+	}
+	if len(link) > 50 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "link_campaigns takes at most 50 campaigns")
+		return
+	}
+	res, err := s.platforms.SyncLinking(r.Context(), a.WorkspaceID, id, link)
 	switch {
 	case errors.Is(err, connectors.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", "platform account not found")
@@ -213,7 +235,8 @@ func (s *Server) syncPlatform(w http.ResponseWriter, r *http.Request) {
 	}
 	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "platform.synced", "integration", id, map[string]any{
-			"mailboxes": res.Mailboxes, "campaigns": res.Campaigns, "accepted": res.Accepted, "confirmed": res.Confirmed})
+			"mailboxes": res.Mailboxes, "campaigns": res.Campaigns, "accepted": res.Accepted, "confirmed": res.Confirmed,
+			"linked": len(res.Linked), "not_linked": len(res.NotLinked)})
 	})
 	if err != nil {
 		s.internal(w, r, err)

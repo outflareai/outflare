@@ -82,3 +82,71 @@ func TestOwnPlaybooks(t *testing.T) {
 	owner.must(200, "GET", base+"/rules/"+rule, nil)
 	owner.must(200, "GET", base+"/journeys/"+journey, nil)
 }
+
+// A playbook of the brand's own can also hold a score, a routing rule, an
+// email and a metric, and says whether its journeys worked.
+func TestOwnPlaybookPartsAndLift(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	ctx := context.Background()
+	var brand string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&brand); err != nil {
+		t.Fatal(err)
+	}
+	base := "/v1/brands/" + brand
+	me := owner.must(200, "GET", "/v1/me", nil)["user"].(map[string]any)["id"].(string)
+	score := owner.must(201, "POST", base+"/scores", map[string]any{"key": "fit", "label": "Fit", "record_type": "account", "base": 50,
+		"high_from": 60, "low_below": 40, "factors": []any{map[string]any{"label": "Has a name", "points": 10,
+			"conditions": []map[string]any{{"attribute": "name", "op": "exists"}}}}})["id"].(string)
+	routed := owner.must(200, "PUT", base+"/routing", map[string]any{"rules": []any{
+		map[string]any{"name": "Everyone", "record_type": "account", "members": []string{me}},
+	}})["data"].([]any)[0].(map[string]any)["id"].(string)
+	email := owner.must(201, "POST", base+"/email-templates", map[string]any{"name": "Welcome back", "subject": "Hello", "html": "<p>Hello</p>"})["id"].(string)
+	var metric string
+	if err := e.pool.QueryRow(ctx, `INSERT INTO metric_definitions (workspace_id, brand_id, key, name, aggregate, events, window_days)
+		VALUES ($1, $2, 'logins_30d', 'Logins', 'count', '{user.login}', 30) RETURNING id::text`, ws, brand).Scan(&metric); err != nil {
+		t.Fatal(err)
+	}
+	plain := owner.must(201, "POST", base+"/journeys", map[string]any{"name": "Plain", "steps": []map[string]any{{"id": "done", "kind": "exit"}}})["id"].(string)
+	split := owner.must(201, "POST", base+"/journeys", map[string]any{"name": "Win back", "steps": []map[string]any{
+		{"id": "test", "kind": "split", "split_by": "random", "paths": []map[string]any{
+			{"id": "go", "weight": 80, "next": "later"}, {"id": "control", "weight": 20, "holdout": true}}},
+		{"id": "later", "kind": "wait", "wait_seconds": 60},
+	}})["id"].(string)
+
+	part := func(kind, id string) map[string]any { return map[string]any{"kind": kind, "id": id} }
+	// Another kind's id is not one of this kind.
+	owner.must(400, "POST", base+"/own-playbooks", map[string]any{"title": "x", "parts": []any{part("routing_rule", score)}})
+	owner.must(400, "POST", base+"/own-playbooks", map[string]any{"title": "x", "parts": []any{part("email", metric)}})
+	made := owner.must(201, "POST", base+"/own-playbooks", map[string]any{"title": "Win back quiet accounts",
+		"parts": []any{part("score", score), part("routing_rule", routed), part("email", email), part("metric", metric), part("journey", plain), part("journey", split)}})
+	parts := made["parts"].([]any)
+	if len(parts) != 6 {
+		t.Fatalf("parts: %v", parts)
+	}
+	want := []string{"Fit", "Everyone", "Welcome back", "Logins"}
+	for i, name := range want {
+		if p := parts[i].(map[string]any); p["name"] != name || p["status"] != "active" {
+			t.Fatalf("part %d: %v", i, p)
+		}
+	}
+	if parts[3].(map[string]any)["count"] != float64(0) || parts[3].(map[string]any)["kind"] != "metric" {
+		t.Fatalf("metric: %v", parts[3])
+	}
+
+	id := made["id"].(string)
+	lift := owner.must(200, "GET", base+"/own-playbooks/"+id+"/lift", nil)
+	js := lift["journeys"].([]any)
+	if lift["measured"] != true || lift["playbook_id"] != id || len(js) != 2 {
+		t.Fatalf("lift: %v", lift)
+	}
+	if p, w := js[0].(map[string]any), js[1].(map[string]any); p["name"] != "Plain" || p["measured"] != false || w["measured"] != true || w["holdout_percent"] != float64(20) || w["ran"] == nil {
+		t.Fatalf("journeys: %v", js)
+	}
+	owner.must(404, "GET", base+"/own-playbooks/00000000-0000-4000-8000-000000000000/lift", nil)
+	// A playbook with no journey has nothing to measure.
+	none := owner.must(201, "POST", base+"/own-playbooks", map[string]any{"title": "Scores only", "parts": []any{part("score", score)}})["id"].(string)
+	if got := owner.must(200, "GET", base+"/own-playbooks/"+none+"/lift", nil); got["measured"] != false || len(got["journeys"].([]any)) != 0 {
+		t.Fatalf("no journeys: %v", got)
+	}
+}

@@ -1,0 +1,254 @@
+# Publishes the libraries in sdk/ to their package registries when a version
+# tag arrives in the public outflareai/outflare (docs/releasing.md,
+# "Libraries"). It runs beside Release and is separate from it, so a registry
+# that is down or refuses a package never stops the image or the GitHub
+# release.
+#
+# Every library carries the release's version: the release is stamped with
+# scripts/library-version.mjs before it reaches the public repository, and
+# each job here first checks that the tag and the library agree, then runs
+# the library's tests, and only then publishes.
+#
+#   npm            @outflare/sdk, @outflare/react-native
+#   PyPI           outflare
+#   RubyGems       outflare
+#   Maven Central  ai.outflare:outflare-android
+#   pub.dev        outflare
+#
+# Go, PHP and Swift need no job: Go reads the tag sdk/go/<tag>, and Composer
+# (Packagist) and Swift Package Manager read composer.json and Package.swift
+# at the top of the repository at the tag.
+#
+# A registry is published to only once it is named in the LIBRARY_REGISTRIES
+# repository variable (Settings > Secrets and variables > Actions >
+# Variables), for example "npm pypi rubygems maven pub". Until then its job
+# is skipped, so a registry nobody has set up yet never fails a release.
+# What each registry needs:
+#
+#   npm       a trusted publisher on each package (this workflow's file name,
+#             no environment). A package's very first version needs the
+#             NPM_TOKEN secret, because npm takes a trusted publisher only
+#             for a package that exists.
+#   pypi      a trusted publisher with the environment "pypi".
+#   rubygems  a trusted publisher with the environment "rubygems".
+#   maven     the secrets MAVEN_CENTRAL_USERNAME and MAVEN_CENTRAL_PASSWORD
+#             (a Central Portal user token), MAVEN_SIGNING_KEY (the armoured
+#             private key) and MAVEN_SIGNING_PASSWORD. The upload waits in
+#             the Portal for someone to press Publish unless the
+#             MAVEN_PUBLISHING_TYPE variable is AUTOMATIC.
+#   pub       automated publishing switched on for the package on pub.dev,
+#             with the tag pattern v{{version}}. pub.dev takes a package's
+#             first version only from a person.
+#
+# A version a registry already has is skipped, so a run can be started again
+# after a failure. In the private repository every job is skipped: packages
+# come only from the public code. Pre-release tags (v1.2.3-rc.1) publish no
+# libraries.
+name: Publish libraries
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  npm:
+    if: github.repository == 'outflareai/outflare' && !contains(github.ref_name, '-') && contains(vars.LIBRARY_REGISTRIES, 'npm')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: The libraries carry this release's version
+        run: node scripts/library-version.mjs --check "$TAG"
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - name: Build and test
+        run: |
+          pnpm --filter @outflare/sdk build
+          pnpm --filter @outflare/sdk test
+          pnpm --filter @outflare/react-native build
+          pnpm --filter @outflare/react-native test
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          version="${TAG#v}"
+          for dir in sdk/ts sdk/react-native; do
+            name=$(node -p "require('./$dir/package.json').name")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "::notice::$name $version is already on npm."
+              continue
+            fi
+            if [ -z "$NODE_AUTH_TOKEN" ] && ! npm view "$name" name >/dev/null 2>&1; then
+              echo "::warning::$name isn't on npm yet and there is no NPM_TOKEN secret, so its first version can't be published. Skipped."
+              continue
+            fi
+            (cd "$dir" && npm publish --access public)
+          done
+
+  pypi:
+    if: github.repository == 'outflareai/outflare' && !contains(github.ref_name, '-') && contains(vars.LIBRARY_REGISTRIES, 'pypi')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # PyPI trusted publishing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: The libraries carry this release's version
+        run: node scripts/library-version.mjs --check "$TAG"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Test and build
+        working-directory: sdk/python
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q -e '.[test]' build
+          .venv/bin/pytest -q
+          .venv/bin/python -m build
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: sdk/python/dist
+          skip-existing: true
+
+  rubygems:
+    if: github.repository == 'outflareai/outflare' && !contains(github.ref_name, '-') && contains(vars.LIBRARY_REGISTRIES, 'rubygems')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: rubygems
+    permissions:
+      contents: read
+      id-token: write # RubyGems trusted publishing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: The libraries carry this release's version
+        run: node scripts/library-version.mjs --check "$TAG"
+      - name: Test and build
+        working-directory: sdk/ruby
+        run: |
+          ruby -Ilib -Itest test/tracker_test.rb
+          gem build outflare.gemspec
+      - name: Is this version on RubyGems already?
+        id: there
+        run: |
+          version="${TAG#v}"
+          if curl -fsS "https://rubygems.org/api/v2/rubygems/outflare/versions/$version.json" >/dev/null 2>&1; then
+            echo "::notice::outflare $version is already on RubyGems."
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+        if: steps.there.outputs.already != 'true'
+      - name: Publish
+        if: steps.there.outputs.already != 'true'
+        working-directory: sdk/ruby
+        run: gem push "outflare-${TAG#v}.gem"
+
+  maven:
+    if: github.repository == 'outflareai/outflare' && !contains(github.ref_name, '-') && contains(vars.LIBRARY_REGISTRIES, 'maven')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: The libraries carry this release's version
+        run: node scripts/library-version.mjs --check "$TAG"
+      - name: Test
+        working-directory: sdk/android
+        run: gradle --no-daemon -q test
+      - name: Is this version on Maven Central already?
+        id: there
+        run: |
+          version="${TAG#v}"
+          if curl -fsS -o /dev/null "https://repo1.maven.org/maven2/ai/outflare/outflare-android/$version/outflare-android-$version.pom" 2>/dev/null; then
+            echo "::notice::outflare-android $version is already on Maven Central."
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and sign the bundle
+        if: steps.there.outputs.already != 'true'
+        working-directory: sdk/android
+        env:
+          MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
+          MAVEN_SIGNING_PASSWORD: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+        run: |
+          version="${TAG#v}"
+          if [ -z "$MAVEN_SIGNING_KEY" ]; then echo "::error::The MAVEN_SIGNING_KEY secret is not set."; exit 1; fi
+          gradle --no-daemon -q publish
+          dir="build/central/ai/outflare/outflare-android/$version"
+          for f in "outflare-android-$version.jar" "outflare-android-$version-sources.jar" "outflare-android-$version-javadoc.jar" "outflare-android-$version.pom"; do
+            [ -s "$dir/$f" ] && [ -s "$dir/$f.asc" ] || { echo "::error::$f or its signature is missing from the bundle."; exit 1; }
+          done
+          # Central takes the version's folder only, not the folder's index.
+          (cd build/central && zip -q -r "$RUNNER_TEMP/bundle.zip" "ai/outflare/outflare-android/$version")
+      - name: Upload to the Central Portal
+        if: steps.there.outputs.already != 'true'
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          PUBLISHING_TYPE: ${{ vars.MAVEN_PUBLISHING_TYPE }}
+        run: |
+          version="${TAG#v}"
+          if [ -z "$MAVEN_CENTRAL_USERNAME" ] || [ -z "$MAVEN_CENTRAL_PASSWORD" ]; then echo "::error::The MAVEN_CENTRAL_USERNAME and MAVEN_CENTRAL_PASSWORD secrets are not set."; exit 1; fi
+          type="USER_MANAGED"; [ "$PUBLISHING_TYPE" = "AUTOMATIC" ] && type="AUTOMATIC"
+          bearer=$(printf '%s:%s' "$MAVEN_CENTRAL_USERNAME" "$MAVEN_CENTRAL_PASSWORD" | base64 -w0)
+          echo "::add-mask::$bearer"
+          id=$(curl -fsS -X POST "https://central.sonatype.com/api/v1/publisher/upload?name=outflare-android-$version&publishingType=$type" \
+            -H "Authorization: Bearer $bearer" -F "bundle=@$RUNNER_TEMP/bundle.zip")
+          echo "Uploaded as deployment $id."
+          if [ "$type" = "USER_MANAGED" ]; then
+            echo "::notice::outflare-android $version is waiting at https://central.sonatype.com/publishing/deployments for someone to press Publish."
+          fi
+
+  pub:
+    if: github.repository == 'outflareai/outflare' && !contains(github.ref_name, '-') && contains(vars.LIBRARY_REGISTRIES, 'pub')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # pub.dev automated publishing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: The libraries carry this release's version
+        run: node scripts/library-version.mjs --check "$TAG"
+      - uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1.8.2
+        with:
+          sdk: 3.14.0
+      - name: Test
+        working-directory: sdk/flutter
+        run: dart pub get && dart analyze --fatal-infos && dart test
+      - name: Is this version on pub.dev already?
+        id: there
+        run: |
+          version="${TAG#v}"
+          if curl -fsS "https://pub.dev/api/packages/outflare/versions/$version" >/dev/null 2>&1; then
+            echo "::notice::outflare $version is already on pub.dev."
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish
+        if: steps.there.outputs.already != 'true'
+        working-directory: sdk/flutter
+        run: dart pub publish --force

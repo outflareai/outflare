@@ -370,7 +370,8 @@ export function BiddingStrategyReport({ brand, from, to, account }: { brand: str
     };
   }, [brand, from, to, account]);
   if (!rows || (rows.length === 0 && errors.length === 0)) return null;
-  const cur = (r: AdBiddingStrategyRow) => r.currency || "USD";
+  // Cost, average CPC and cost per conversion come in the brand's currency.
+  const cur = (r: AdBiddingStrategyRow) => r.report_currency || r.currency || "USD";
   const mono = (s: string) => <span className="font-mono tabular-nums">{s}</span>;
   return (
     <Card title="Bidding strategies" description={`Each portfolio bidding strategy from ${from} to ${to}, read from Google Ads now: what its campaigns spent and got together. Average CPC and cost per conversion are Google's own.`}>
@@ -393,13 +394,13 @@ export function BiddingStrategyReport({ brand, from, to, account }: { brand: str
           { id: "account", header: "Account", accessorFn: (r) => r.account_name },
           { id: "type", header: "Type", accessorFn: (r) => strategyWord[r.type] ?? word(r.type) },
           { id: "status", header: "Status", accessorFn: (r) => word(r.status) },
-          { id: "clicks", header: "Clicks", accessorFn: (r) => r.clicks, cell: ({ row: { original: r } }) => mono(n(r.clicks)) },
-          { id: "impressions", header: "Impressions", accessorFn: (r) => r.impressions, cell: ({ row: { original: r } }) => mono(n(r.impressions)) },
-          { id: "spend", header: "Cost", accessorFn: (r) => r.spend_micros, cell: ({ row: { original: r } }) => mono(money(r.spend_micros, cur(r))), meta: { csv: (r: AdBiddingStrategyRow) => csvMoney(r.spend_micros, cur(r)) } },
-          { id: "cpc", header: "Avg. CPC", accessorFn: (r) => r.cpc_micros ?? -1, cell: ({ row: { original: r } }) => mono(money(r.cpc_micros, cur(r))), meta: { csv: (r: AdBiddingStrategyRow) => csvMoney(r.cpc_micros, cur(r)) } },
-          { id: "conversions", header: "Conv.", accessorFn: (r) => r.conversions, cell: ({ row: { original: r } }) => mono(n(r.conversions)), meta: { csv: (r: AdBiddingStrategyRow) => r.conversions } },
-          { id: "all_conversions", header: "All conv.", accessorFn: (r) => r.all_conversions, cell: ({ row: { original: r } }) => mono(n(r.all_conversions)) },
-          { id: "cpa", header: "Cost / conv.", accessorFn: (r) => r.cost_per_conversion_micros ?? -1, cell: ({ row: { original: r } }) => mono(money(r.cost_per_conversion_micros, cur(r))), meta: { csv: (r: AdBiddingStrategyRow) => csvMoney(r.cost_per_conversion_micros, cur(r)) } },
+          { id: "clicks", header: "Clicks", accessorFn: (r) => r.clicks, cell: ({ row: { original: r } }) => mono(n(r.clicks)), meta: { align: "right" } },
+          { id: "impressions", header: "Impressions", accessorFn: (r) => r.impressions, cell: ({ row: { original: r } }) => mono(n(r.impressions)), meta: { align: "right" } },
+          { id: "spend", header: "Cost", accessorFn: (r) => r.spend_micros, cell: ({ row: { original: r } }) => mono(money(r.spend_micros, cur(r))), meta: { align: "right", csv: (r: AdBiddingStrategyRow) => csvMoney(r.spend_micros, cur(r)) } },
+          { id: "cpc", header: "Avg. CPC", accessorFn: (r) => r.cpc_micros ?? -1, cell: ({ row: { original: r } }) => mono(money(r.cpc_micros, cur(r))), meta: { align: "right", csv: (r: AdBiddingStrategyRow) => csvMoney(r.cpc_micros, cur(r)) } },
+          { id: "conversions", header: "Conv.", accessorFn: (r) => r.conversions, cell: ({ row: { original: r } }) => mono(n(r.conversions)), meta: { align: "right", csv: (r: AdBiddingStrategyRow) => r.conversions } },
+          { id: "all_conversions", header: "All conv.", accessorFn: (r) => r.all_conversions, cell: ({ row: { original: r } }) => mono(n(r.all_conversions)), meta: { align: "right" } },
+          { id: "cpa", header: "Cost / conv.", accessorFn: (r) => r.cost_per_conversion_micros ?? -1, cell: ({ row: { original: r } }) => mono(money(r.cost_per_conversion_micros, cur(r))), meta: { align: "right", csv: (r: AdBiddingStrategyRow) => csvMoney(r.cost_per_conversion_micros, cur(r)) } },
         ]}
       />
     </Card>

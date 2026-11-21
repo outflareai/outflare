@@ -332,3 +332,44 @@ tbody tr {
   color: var(--foreground);
   border: 0;
 }
+
+/* Session recordings: a ring where the visitor clicked, and the player's
+   progress bar (the slider itself is see-through: the marks are the bar). */
+.of-click-ring {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 9999px;
+  border: 3px solid rgb(244 63 94);
+  background: rgb(244 63 94 / 0.25);
+  animation: of-click-ring 0.9s ease-out forwards;
+}
+@keyframes of-click-ring {
+  from { transform: scale(0.6); opacity: 1; }
+  to { transform: scale(4.5); opacity: 0; }
+}
+input.of-timeline {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  margin: 0;
+}
+input.of-timeline::-webkit-slider-runnable-track { background: transparent; height: 100%; }
+input.of-timeline::-moz-range-track { background: transparent; height: 100%; }
+input.of-timeline::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 4px;
+  height: 22px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: var(--color-brand-strong, #16a34a);
+  box-shadow: 0 0 0 2px var(--color-background, #fff);
+}
+input.of-timeline::-moz-range-thumb {
+  width: 4px;
+  height: 22px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--color-brand-strong, #16a34a);
+}

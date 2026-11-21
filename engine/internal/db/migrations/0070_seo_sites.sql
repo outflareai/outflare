@@ -10,9 +10,9 @@ CREATE TABLE seo_sites (
     -- The brand the site belongs to; null is shared by every brand.
     brand_id          uuid REFERENCES brands (id) ON DELETE SET NULL,
     -- Lowercase host, with a port only on installs that crawl private
-    -- addresses: www.geonode.com.
+    -- addresses: www.northpeak.example.
     host              text NOT NULL,
-    -- Where crawls start: https://www.geonode.com/.
+    -- Where crawls start: https://www.northpeak.example/.
     start_url         text NOT NULL,
     -- Put in the DNS record, meta tag or file that proves ownership.
     verify_token      text NOT NULL,

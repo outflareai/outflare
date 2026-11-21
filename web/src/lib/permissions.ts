@@ -23,7 +23,7 @@ export const areas: Area[] = [
   { id: "social", label: "Social", help: "Watch Reddit for posts the brand can help with and draft replies. Only a person approves a reply, in Outflare.", read: ["social.read"], write: ["social.manage"] },
   { id: "partners", label: "Partners", help: "Referral, affiliate and influencer programs, partners, rewards and payouts. Reporting conversions from your backend is its own power below.", read: ["partners.read"], write: ["partners.manage"] },
   { id: "agents", label: "Agent runs", help: "Run playbooks with Outflare's agent on the action layer, follow its runs and write to them.", read: ["agents.read"], write: ["agents.run"] },
-  { id: "missions", label: "Missions", help: "Work toward a goal on its own, within limits. Being replaced by agent runs.", read: ["missions.read"], write: ["missions.run"] },
+  { id: "missions", label: "Missions", help: "Retired: only missions made before agent runs.", read: ["missions.read"], write: ["missions.run"] },
   { id: "actions", label: "Agent changes", help: "See every change agents made, what waits for a person, and what each agent may do.", read: ["actions.read"], write: [] },
   { id: "analytics", label: "Analytics", help: "Reports from connected analytics tools, and the campaign links that tag your traffic.", read: ["analytics.read"], write: ["analytics.manage"] },
   { id: "ads", label: "Paid ads", help: "Pause or resume campaigns and set their daily budgets on your own ad accounts. Reading them is Analytics; this spends money.", read: ["analytics.read"], write: ["ads.manage"] },
@@ -39,11 +39,12 @@ export const areas: Area[] = [
 // Powers that need a deliberate yes, never part of "can make changes".
 export const extras: { scope: Scope; label: string; help: string }[] = [
   { scope: "infrastructure.approve", label: "Spend money", help: "Buy domains and mailboxes without asking. Off means a person approves each purchase." },
-  { scope: "missions.approve", label: "Approve missions", help: "Approve missions and their held changes." },
+  { scope: "missions.approve", label: "Approve missions", help: "Retired: approve what old missions still hold." },
   { scope: "actions.approve", label: "Approve agents' changes", help: "Approve or reject changes agents hold for a person. Never their own." },
   { scope: "coverage.approve", label: "Approve coverage agreements", help: "Record approval of commercial terms with publishers." },
   { scope: "query.endpoints", label: "Call published query endpoints", help: "Read the rows of the brand's published query endpoints, and nothing else. All another system's token needs to pull a report." },
   { scope: "partners.conversions", label: "Report partner conversions", help: "Send sign-ups, sales and refunds from your backend, and mark action rewards done. All a server token for partners needs." },
+  { scope: "ads.remove", label: "Remove ad campaigns, ads and keywords", help: "Removals can't be undone on the ad platform. An agent also needs a grant naming the removal, set on its page." },
   { scope: "suppressions.manage", label: "Remove from the suppression list", help: "Let mail reach people who were suppressed." },
   { scope: "members.manage", label: "Invite people and change roles", help: "Never past what the person who connected it can do. Removing people is only for a signed-in person." },
   { scope: "ai_spend.read", label: "See AI spend", help: "Prices, spend and receipts on everyone's AI accounts." },

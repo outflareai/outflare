@@ -424,3 +424,114 @@ func TestSiteKeyBareDomainCoversSubdomains(t *testing.T) {
 		}
 	}
 }
+
+// An app sends with a site key that names no websites: screens and track
+// events, with what the library says about the app and the phone.
+func TestSiteKeyTakesAppEvents(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	web := owner.must(201, "POST", base+"/site-keys", map[string]any{"name": "Website", "origins": []string{"northpeak.example"}})
+	app := owner.must(201, "POST", base+"/site-keys", map[string]any{"name": "iOS app"})
+	appUA := "outflare-swift/0.1.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X)"
+	appCtx := map[string]any{
+		"app":     map[string]any{"name": "Northpeak", "version": "2.4.0", "build": "311", "secret": "dropped"},
+		"device":  map[string]any{"manufacturer": "Apple", "model": "iPhone16,2", "type": "ios", "name": "Ana's iPhone"},
+		"os":      map[string]any{"name": "iOS", "version": "18.1"},
+		"library": map[string]any{"name": "outflare-swift", "version": "0.1.0"},
+		"locale":  "en-AU", "timezone": "Australia/Sydney",
+	}
+	screen := map[string]any{"type": "screen", "name": "Checkout", "anonymousId": "app-anon-0001", "context": appCtx}
+
+	// A website's key refuses a request with no Origin, and says what to do.
+	rec := sendSiteAs(t, e.h, "", web["key"].(string), appUA, false, screen)
+	if rec.Code != 403 || !strings.Contains(rec.Body.String(), "no origins") {
+		t.Fatalf("website key from an app: %d %s", rec.Code, rec.Body)
+	}
+
+	rec = sendSiteAs(t, e.h, "", app["key"].(string), appUA, false, screen,
+		map[string]any{"type": "track", "event": "Order Started", "anonymousId": "app-anon-0001", "properties": map[string]any{"items": 2}, "context": appCtx},
+		map[string]any{"type": "screen", "anonymousId": "app-anon-0001"},
+		map[string]any{"type": "identify", "anonymousId": "app-anon-0001", "userId": "u1"})
+	var out map[string]int
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if rec.Code != 200 || out["accepted"] != 2 || out["rejected"] != 2 {
+		t.Fatalf("app batch: %d %s", rec.Code, rec.Body)
+	}
+
+	var name, source string
+	var props, evCtx map[string]any
+	if err := e.pool.QueryRow(ctx, `SELECT name, source, properties, context FROM customer_events WHERE workspace_id = $1 AND name = 'screen.viewed'`, ws).
+		Scan(&name, &source, &props, &evCtx); err != nil {
+		t.Fatal(err)
+	}
+	if props["name"] != "Checkout" || source != "browser" {
+		t.Fatalf("screen stored as %v from %s", props, source)
+	}
+	appOut, _ := evCtx["app"].(map[string]any)
+	dev, _ := evCtx["device"].(map[string]any)
+	if appOut["version"] != "2.4.0" || appOut["secret"] != nil || dev["model"] != "iPhone16,2" || dev["name"] != nil {
+		t.Fatalf("app context: %v", evCtx)
+	}
+	if lib, _ := evCtx["library"].(map[string]any); lib["name"] != "outflare-swift" {
+		t.Fatalf("library: %v", evCtx)
+	}
+
+	// The two events are one visit from an iPhone, in the app.
+	var events, views int
+	var device, browser, os, osVersion string
+	if err := e.pool.QueryRow(ctx, `SELECT events, pageviews, device, browser, os, os_version FROM site_sessions WHERE workspace_id = $1`, ws).
+		Scan(&events, &views, &device, &browser, &os, &osVersion); err != nil {
+		t.Fatal(err)
+	}
+	if events != 2 || views != 1 || device != "mobile" || browser != "app" || os != "ios" || osVersion != "18.1" {
+		t.Fatalf("visit: %d events, %d views, %s %s %s %s", events, views, device, browser, os, osVersion)
+	}
+}
+
+// Autocapture is a switch per site key, off by default: the answer to the
+// script's events says what to capture only once it is on.
+func TestSiteKeyAutocapture(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	k := owner.must(201, "POST", base+"/site-keys", map[string]any{"name": "acme.example", "origins": []string{"https://acme.example"}})
+	key, id := k["key"].(string), k["id"].(string)
+	if k["capture_clicks"] != false || k["capture_forms"] != false {
+		t.Fatalf("autocapture on by default: %v", k)
+	}
+	view := map[string]any{"type": "page", "anonymousId": "a-1", "messageId": "m-1", "context": map[string]any{"page": map[string]any{"url": "https://acme.example/", "path": "/"}}}
+	answer := func(msg string) map[string]any {
+		view["messageId"] = msg
+		rec := sendSiteAs(t, e.h, "https://acme.example", key, desktopUA, false, view)
+		var out map[string]any
+		if json.Unmarshal(rec.Body.Bytes(), &out); rec.Code != 200 {
+			t.Fatalf("%d %s", rec.Code, rec.Body)
+		}
+		return out
+	}
+	if out := answer("m-1"); out["capture"] != nil {
+		t.Fatalf("told to capture while off: %v", out)
+	}
+
+	events := track.Capture(t)
+	on := owner.must(200, "PATCH", base+"/site-keys/"+id, map[string]any{"capture_clicks": true})
+	if on["capture_clicks"] != true || on["capture_forms"] != false || on["tests"] != true {
+		t.Fatalf("after turning clicks on: %v", on)
+	}
+	if up := named(events(), "site_key.updated"); len(up) != 1 || up[0].Props["target_type"] != "site_key" {
+		t.Fatalf("site_key.updated: %+v", up)
+	}
+	if c, _ := answer("m-2")["capture"].(map[string]any); c["clicks"] != true || c["forms"] != false {
+		t.Fatalf("capture: %v", c)
+	}
+	// Another change leaves the switches as they are.
+	if k := owner.must(200, "PATCH", base+"/site-keys/"+id, map[string]any{"name": "Acme", "capture_forms": true}); k["capture_clicks"] != true || k["capture_forms"] != true {
+		t.Fatalf("after a rename: %v", k)
+	}
+	owner.must(200, "PATCH", base+"/site-keys/"+id, map[string]any{"capture_clicks": false, "capture_forms": false})
+	if out := answer("m-3"); out["capture"] != nil {
+		t.Fatalf("told to capture after turning it off: %v", out)
+	}
+}

@@ -33,6 +33,7 @@ func (s *Server) routesAdConversions(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ads/conversion-rules/{id}", s.inWorkspace(manage, s.updateAdConversionRule))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/ads/conversion-rules/{id}", s.inWorkspace(manage, s.deleteAdConversionRule))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/conversion-sends", s.inWorkspace(read, s.listAdConversionSends))
+	mux.HandleFunc("GET /v1/brands/{brand}/ads/signup-quality", s.onBrand(read, s.getBrandSignupQuality))
 	for _, t := range s.twins("ads/settings") {
 		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.getAdSettings))
 		mux.HandleFunc("PUT "+t.path, t.on(s.inWorkspace)(manage, s.setAdSettings))
@@ -208,12 +209,17 @@ type adConversionRule struct {
 	// person ('' for nothing, new, returning or auto).
 	FeedRole     string `json:"feed_role"`
 	CustomerType string `json:"customer_type"`
+	// PredictedValue sends each event with what people like the person
+	// went on to pay; QualifiedOnly holds the ones less likely to pay
+	// than the brand's average (adconv/predict.go).
+	PredictedValue bool `json:"predicted_value"`
+	QualifiedOnly  bool `json:"qualified_only"`
 }
 
 const adRuleSelect = `SELECT r.id, r.ad_account_id, a.connector, COALESCE(d.event_name, r.event_name), d.key, d.name, r.target_id, r.target_name, r.event_type,
 		r.value_property, r.value_unit, r.fixed_value_micros, r.currency, r.enabled,
 		COALESCE(st.sent, 0), COALESCE(st.skipped, 0), COALESCE(st.failed, 0), COALESCE(st.queued, 0), st.last_sent_at,
-		r.created_at, r.updated_at, r.feed_role, r.customer_type
+		r.created_at, r.updated_at, r.feed_role, r.customer_type, r.predicted_value, r.qualified_only
 	FROM ad_conversion_rules r JOIN ad_accounts a ON a.id = r.ad_account_id
 	LEFT JOIN conversion_definitions d ON d.id = r.conversion_id
 	LEFT JOIN LATERAL (
@@ -229,7 +235,7 @@ func scanAdRule(row pgx.Row) (adConversionRule, error) {
 	var x adConversionRule
 	err := row.Scan(&x.ID, &x.AdAccountID, &x.Connector, &x.EventName, &x.Conversion, &x.ConversionName, &x.TargetID, &x.TargetName, &x.EventType,
 		&x.ValueProperty, &x.ValueUnit, &x.FixedValueMicros, &x.Currency, &x.Enabled,
-		&x.Sent30d, &x.Skipped30d, &x.Failed30d, &x.Queued, &x.LastSentAt, &x.CreatedAt, &x.UpdatedAt, &x.FeedRole, &x.CustomerType)
+		&x.Sent30d, &x.Skipped30d, &x.Failed30d, &x.Queued, &x.LastSentAt, &x.CreatedAt, &x.UpdatedAt, &x.FeedRole, &x.CustomerType, &x.PredictedValue, &x.QualifiedOnly)
 	return x, err
 }
 
@@ -286,7 +292,21 @@ type adRuleInput struct {
 	FixedValueMicros *int64  `json:"fixed_value_micros"`
 	Currency         *string `json:"currency"`
 	Enabled          *bool   `json:"enabled"`
+	// FeedRole narrows a payment.succeeded rule to a person's first
+	// payment in the brand (first_payment), or to every later one
+	// (repeat_payment); custom sends every payment.
+	FeedRole       *string `json:"feed_role"`
+	PredictedValue *bool   `json:"predicted_value"`
+	QualifiedOnly  *bool   `json:"qualified_only"`
 }
+
+// handRoles are the feed roles a rule made by hand may take, and the
+// customer type each tells the platform. signup stays the conversion
+// feed's own.
+var handRoles = map[string]string{adconv.RoleCustom: "", adconv.RoleFirstPayment: connectors.CustomerNew, adconv.RoleRepeatPayment: connectors.CustomerReturning}
+
+// paymentEvent is the event first and repeat payments are told apart on.
+const paymentEvent = "payment.succeeded"
 
 // check validates the plain fields, answering the error itself.
 func (in *adRuleInput) check(w http.ResponseWriter, r *http.Request) bool {
@@ -320,6 +340,11 @@ func (in *adRuleInput) check(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if in.FixedValueMicros != nil && *in.FixedValueMicros < 0 {
 		return bad("fixed_value_micros is 0 or more")
+	}
+	if in.FeedRole != nil {
+		if _, ok := handRoles[*in.FeedRole]; !ok {
+			return bad("feed_role is custom (every event), first_payment (a person's first payment only) or repeat_payment (every later payment)")
+		}
 	}
 	if in.Currency != nil {
 		v := strings.ToUpper(strings.TrimSpace(*in.Currency))
@@ -431,6 +456,14 @@ func (s *Server) createAdConversionRule(w http.ResponseWriter, r *http.Request) 
 		}
 		def, networkEvents, eventName = &d, d.NetworkEvents, d.Event
 	}
+	role := adconv.RoleCustom
+	if in.FeedRole != nil {
+		role = *in.FeedRole
+	}
+	if role != adconv.RoleCustom && eventName != paymentEvent {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "feed_role "+role+" needs the payment.succeeded event: only payments can be first or repeat")
+		return
+	}
 	eventType := ""
 	if in.EventType != nil {
 		eventType = strings.TrimSpace(*in.EventType)
@@ -458,10 +491,13 @@ func (s *Server) createAdConversionRule(w http.ResponseWriter, r *http.Request) 
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		var id string
 		err := tx.QueryRow(r.Context(), `INSERT INTO ad_conversion_rules (workspace_id, ad_account_id, event_name, target_id, target_name, event_type,
-				value_property, value_unit, fixed_value_micros, currency, enabled, created_by, conversion_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+				value_property, value_unit, fixed_value_micros, currency, enabled, created_by, conversion_id, feed_role, customer_type,
+				predicted_value, qualified_only)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
 			a.WorkspaceID, *in.AccountID, eventName, t.ID, trimTo(t.Name, 300), eventType,
-			str(in.ValueProperty, ""), str(in.ValueUnit, "major"), in.FixedValueMicros, str(in.Currency, ""), enabled, createdBy, conversionID).Scan(&id)
+			str(in.ValueProperty, ""), str(in.ValueUnit, "major"), in.FixedValueMicros, str(in.Currency, ""), enabled, createdBy, conversionID,
+			role, handRoles[role],
+			in.PredictedValue != nil && *in.PredictedValue, in.QualifiedOnly != nil && *in.QualifiedOnly).Scan(&id)
 		if err != nil {
 			return err
 		}
@@ -470,7 +506,7 @@ func (s *Server) createAdConversionRule(w http.ResponseWriter, r *http.Request) 
 		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "ad_conversion_rule.created", "ad_conversion_rule", id,
 			map[string]any{"connector": out.Connector, "ad_account_id": out.AdAccountID, "event_type": eventType, "has_value": out.ValueProperty != "" || out.FixedValueMicros != nil,
-				"from_definition": def != nil})
+				"from_definition": def != nil, "feed_role": role, "predicted_value": out.PredictedValue, "qualified_only": out.QualifiedOnly})
 	})
 	if isUnique(err) {
 		writeError(w, r, http.StatusConflict, "conflict", "this ad account already sends that event to that conversion")
@@ -513,16 +549,48 @@ func (s *Server) updateAdConversionRule(w http.ResponseWriter, r *http.Request) 
 			conversionID, in.EventName = &d.ID, &d.Event
 		}
 	}
+	var customerType *string
+	if in.FeedRole != nil {
+		ct := handRoles[*in.FeedRole]
+		customerType = &ct
+	}
 	var out adConversionRule
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		// A rule made by the conversion feed keeps its role; a first or
+		// repeat payment rule sends only payment.succeeded.
+		var curRole, curEvent string
+		if err := tx.QueryRow(r.Context(), `SELECT r.feed_role, COALESCE(d.event_name, r.event_name) FROM ad_conversion_rules r
+			LEFT JOIN conversion_definitions d ON d.id = r.conversion_id WHERE r.workspace_id = $1 AND r.id = $2 FOR UPDATE OF r`, a.WorkspaceID, id).Scan(&curRole, &curEvent); err != nil {
+			return err
+		}
+		if in.FeedRole != nil && *in.FeedRole != curRole && curRole == adconv.RoleSignup {
+			return errRuleRole("this rule is the conversion feed's sign-up rule: its feed_role is fixed")
+		}
+		role, event := curRole, curEvent
+		if in.FeedRole != nil {
+			role = *in.FeedRole
+		}
+		if in.EventName != nil {
+			event = *in.EventName
+		}
+		if clear {
+			if err := tx.QueryRow(r.Context(), `SELECT event_name FROM ad_conversion_rules WHERE id = $1`, id).Scan(&event); err != nil {
+				return err
+			}
+		}
+		if (role == adconv.RoleFirstPayment || role == adconv.RoleRepeatPayment) && event != paymentEvent {
+			return errRuleRole("feed_role " + role + " needs the payment.succeeded event: only payments can be first or repeat")
+		}
 		tag, err := tx.Exec(r.Context(), `UPDATE ad_conversion_rules SET event_name = COALESCE($3, event_name),
 				conversion_id = CASE WHEN $10 THEN NULL ELSE COALESCE($9::uuid, conversion_id) END,
 				matched_until = CASE WHEN $9::uuid IS NOT NULL OR $10 THEN now() ELSE matched_until END,
 				value_property = COALESCE($4, value_property), value_unit = COALESCE($5, value_unit),
 				fixed_value_micros = COALESCE($6, fixed_value_micros), currency = COALESCE($7, currency),
-				enabled = COALESCE($8, enabled), updated_at = now()
+				enabled = COALESCE($8, enabled), feed_role = COALESCE($11, feed_role), customer_type = COALESCE($12, customer_type),
+				predicted_value = COALESCE($13, predicted_value), qualified_only = COALESCE($14, qualified_only), updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
-			a.WorkspaceID, id, in.EventName, in.ValueProperty, in.ValueUnit, in.FixedValueMicros, in.Currency, in.Enabled, conversionID, clear)
+			a.WorkspaceID, id, in.EventName, in.ValueProperty, in.ValueUnit, in.FixedValueMicros, in.Currency, in.Enabled, conversionID, clear, in.FeedRole, customerType,
+			in.PredictedValue, in.QualifiedOnly)
 		if err != nil {
 			return err
 		}
@@ -543,9 +611,21 @@ func (s *Server) updateAdConversionRule(w http.ResponseWriter, r *http.Request) 
 		if in.Enabled != nil {
 			meta["enabled"] = *in.Enabled
 		}
+		if in.FeedRole != nil {
+			meta["feed_role"] = *in.FeedRole
+		}
+		if in.PredictedValue != nil {
+			meta["predicted_value"] = *in.PredictedValue
+		}
+		if in.QualifiedOnly != nil {
+			meta["qualified_only"] = *in.QualifiedOnly
+		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "ad_conversion_rule.updated", "ad_conversion_rule", id, meta)
 	})
+	var roleErr errRuleRole
 	switch {
+	case errors.As(err, &roleErr):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", string(roleErr))
 	case errors.Is(err, pgx.ErrNoRows):
 		writeError(w, r, http.StatusNotFound, "not_found", "conversion rule not found")
 	case isUnique(err):
@@ -556,6 +636,11 @@ func (s *Server) updateAdConversionRule(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, out)
 	}
 }
+
+// errRuleRole is a feed_role a rule can't take, said to the person.
+type errRuleRole string
+
+func (e errRuleRole) Error() string { return string(e) }
 
 func (s *Server) deleteAdConversionRule(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -604,6 +689,17 @@ type adConversionSend struct {
 	// RequestID the Data Manager request it went in, when it did.
 	Transport string `json:"transport"`
 	RequestID string `json:"request_id"`
+	// Country is the country the consent decision was made on and
+	// CountrySource where it came from (adconv.PersonCountry); both ""
+	// when nothing said, or for a send from before they were kept.
+	Country       string `json:"country"`
+	CountrySource string `json:"country_source"`
+	// Where it was going: the rule's conversion on its ad account.
+	TargetName  string `json:"target_name"`
+	AdAccountID string `json:"ad_account_id"`
+	// RecordName is the person's name on their customer record, "" when
+	// the event belongs to nobody known.
+	RecordName string `json:"record_name"`
 }
 
 var adSendStatuses = []string{"queued", "sent", "skipped", "failed"}
@@ -639,8 +735,10 @@ func (s *Server) listAdConversionSends(w http.ResponseWriter, r *http.Request) {
 	where := brand.sql(`a.brand_id`, &args)
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT q.id, q.rule_id, a.connector, x.event_name, q.record_id, q.event_id, q.occurred_at, q.status, q.reason, q.match_keys,
-			q.value_micros, q.currency, q.attempts, q.sent_at, q.created_at, q.transport, q.request_id
+			q.value_micros, q.currency, q.attempts, q.sent_at, q.created_at, q.transport, q.request_id,
+			q.country, q.country_source, x.target_name, x.ad_account_id, COALESCE(p.name, '')
 		FROM ad_conversion_sends q JOIN ad_conversion_rules x ON x.id = q.rule_id JOIN ad_accounts a ON a.id = x.ad_account_id
+		LEFT JOIN records p ON p.workspace_id = q.workspace_id AND p.id = q.record_id
 		WHERE q.workspace_id = $1 AND ($2 = '' OR q.rule_id::text = $2) AND ($3 = '' OR q.status = $3)
 		  AND ($4 = '' OR q.record_id::text = $4) AND ($5::timestamptz IS NULL OR q.created_at < $5)`+where+`
 		ORDER BY q.created_at DESC, q.id DESC LIMIT $6`, args...)
@@ -653,7 +751,8 @@ func (s *Server) listAdConversionSends(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var x adConversionSend
 		if err := rows.Scan(&x.ID, &x.RuleID, &x.Connector, &x.EventName, &x.RecordID, &x.EventID, &x.OccurredAt, &x.Status, &x.Reason, &x.MatchKeys,
-			&x.ValueMicros, &x.Currency, &x.Attempts, &x.SentAt, &x.CreatedAt, &x.Transport, &x.RequestID); err != nil {
+			&x.ValueMicros, &x.Currency, &x.Attempts, &x.SentAt, &x.CreatedAt, &x.Transport, &x.RequestID,
+			&x.Country, &x.CountrySource, &x.TargetName, &x.AdAccountID, &x.RecordName); err != nil {
 			s.internal(w, r, err)
 			return
 		}
@@ -706,8 +805,14 @@ func (s *Server) setAdSettings(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.ConsentMode == nil || (*in.ConsentMode != adconv.OptOut && *in.ConsentMode != adconv.OptIn) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", fmt.Sprintf("consent_mode is %s or %s", adconv.OptOut, adconv.OptIn))
+	if in.ConsentMode == nil || (*in.ConsentMode != adconv.OptOut && *in.ConsentMode != adconv.OptIn && *in.ConsentMode != adconv.Collected) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", fmt.Sprintf("consent_mode is %s, %s or %s", adconv.OptOut, adconv.OptIn, adconv.Collected))
+		return
+	}
+	// Saying everyone has consented is a statement the brand makes about
+	// its own site: a person makes it, never an agent or a token.
+	if *in.ConsentMode == adconv.Collected && a.ActorType != "human" {
+		writeError(w, r, http.StatusForbidden, "forbidden", "only a signed-in person can say the brand collects consent from everyone")
 		return
 	}
 	var out adSettings
@@ -733,4 +838,33 @@ func (s *Server) setAdSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// getBrandSignupQuality is the brand's history of who pays after an
+// event such as signed_up, by country and kind of email: what a rule with
+// predicted_value or qualified_only decides from.
+func (s *Server) getBrandSignupQuality(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	event := strings.TrimSpace(r.URL.Query().Get("event"))
+	if event == "" {
+		event = "signed_up"
+	}
+	if len(event) > 200 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "event is a customer event's name")
+		return
+	}
+	cur, _, err := s.adReportCurrency(r)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if cur == "" {
+		cur = "USD"
+	}
+	q, err := adconv.LoadQuality(r.Context(), s.pool, a.WorkspaceID, a.Brand, event, cur, time.Now())
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
 }

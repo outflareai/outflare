@@ -396,14 +396,61 @@ func QueueReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
 }
 
 // queueChatReply stores a reply to a chat as sent: the widget shows it the
-// next time it asks.
+// next time it asks. When the visitor has left the chat (no sign of their
+// page for AwayAfter), left an email address, and the brand has a support
+// mailbox, the reply also goes to them by email from that mailbox, and
+// their answer by email joins the same conversation.
 func queueChatReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
-	var id string
+	var contact, subject string
+	var mbID, mbEmail, mbName *string
 	err := tx.QueryRow(ctx, `
-		INSERT INTO support_messages (workspace_id, conversation_id, kind, record_id, author_id, from_name, body, status, sent_at)
-		SELECT $1, $2, 'out', c.record_id, $3, COALESCE((SELECT NULLIF(u.name, '') FROM users u WHERE u.id = $3), ''), $4, 'sent', now()
-		FROM support_conversations c WHERE c.id = $2 RETURNING id::text`,
-		r.WorkspaceID, r.ConversationID, nilIfEmpty(r.AuthorID), r.Body).Scan(&id)
+		SELECT c.contact_email, c.subject, mb.id::text, mb.email, mb.display_name
+		FROM support_conversations c LEFT JOIN mailboxes mb ON mb.id = (`+supportMailboxSQL+`)
+			AND c.contact_email <> '' AND (c.visitor_seen_at IS NULL OR c.visitor_seen_at < now() - `+awaySQL+`)
+		WHERE c.id = $1 AND c.workspace_id = $2`, r.ConversationID, r.WorkspaceID).Scan(&contact, &subject, &mbID, &mbEmail, &mbName)
+	if err != nil {
+		return "", err
+	}
+	byEmail := mbID != nil
+	if byEmail {
+		// A bounced or blocked address just stays in the chat.
+		d, err := policy.CheckPurpose(ctx, tx, r.WorkspaceID, policy.PurposeTransactional, []string{contact})
+		if err != nil {
+			return "", err
+		}
+		byEmail = d[0].Allowed
+	}
+	var id string
+	if byEmail {
+		var inReplyTo, refs string
+		if err := tx.QueryRow(ctx, `
+			SELECT message_id, references_ids FROM support_messages
+			WHERE conversation_id = $1 AND kind IN ('in', 'out') AND message_id <> '' ORDER BY created_at DESC LIMIT 1`,
+			r.ConversationID).Scan(&inReplyTo, &refs); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", err
+		}
+		if inReplyTo != "" {
+			refs = strings.TrimSpace(refs + " " + inReplyTo)
+		}
+		subj := "Re: " + subject
+		if subject == "" {
+			subj = "Re: your message"
+		}
+		from := *mbEmail
+		msgID := newID() + "@" + from[strings.LastIndexByte(from, '@')+1:]
+		err = tx.QueryRow(ctx, `
+			INSERT INTO support_messages (workspace_id, conversation_id, kind, record_id, author_id, from_email, from_name, to_email,
+				subject, body, message_id, in_reply_to, references_ids, status, mailbox_id)
+			SELECT $1, $2, 'out', c.record_id, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'sending', $12
+			FROM support_conversations c WHERE c.id = $2 RETURNING id::text`,
+			r.WorkspaceID, r.ConversationID, nilIfEmpty(r.AuthorID), from, *mbName, contact, subj, r.Body, msgID, inReplyTo, refs, *mbID).Scan(&id)
+	} else {
+		err = tx.QueryRow(ctx, `
+			INSERT INTO support_messages (workspace_id, conversation_id, kind, record_id, author_id, from_name, body, status, sent_at)
+			SELECT $1, $2, 'out', c.record_id, $3, COALESCE((SELECT NULLIF(u.name, '') FROM users u WHERE u.id = $3), ''), $4, 'sent', now()
+			FROM support_conversations c WHERE c.id = $2 RETURNING id::text`,
+			r.WorkspaceID, r.ConversationID, nilIfEmpty(r.AuthorID), r.Body).Scan(&id)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -418,7 +465,16 @@ func queueChatReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
 		WHERE id = $1`, r.ConversationID, next); err != nil {
 		return "", err
 	}
-	return id, Clock(ctx, tx, r.ConversationID)
+	if err := Clock(ctx, tx, r.ConversationID); err != nil {
+		return "", err
+	}
+	if !byEmail {
+		return id, nil
+	}
+	metrics.SupportChatRouted("email")
+	_, err = jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: JobSend, WorkspaceID: &r.WorkspaceID,
+		Payload: map[string]string{"message_id": id}, IdempotencyKey: "support-send:" + id, MaxAttempts: 5})
+	return id, err
 }
 
 // mailAddress is "Name <address>", quoting the name when it needs it.

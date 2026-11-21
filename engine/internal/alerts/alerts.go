@@ -1,10 +1,11 @@
 // Package alerts tells people when something needs them now: a hot reply,
 // a hot website visitor, a negative review. Any module raises one with
 // Raise, in the transaction that found it. Each alert is kept for the app
-// (GET .../alerts), recorded as alert.raised (a webhook, so Slack, a CRM or
-// Zapier can take it), counted in the digest, and emailed to the person it
-// is for, or to the owners and admins, as the workspace chooses per kind
-// and per brand. People can mute a kind for themselves.
+// (GET .../alerts), recorded as alert.raised (a webhook, so a CRM or Zapier
+// can take it), counted in the digest, emailed to the person it is for,
+// or to the owners and admins, and posted to a Slack channel or a
+// Telegram chat through the workspace's own connection, as the workspace
+// chooses per kind and per brand. People can mute a kind for themselves.
 //
 // Alert emails are Outflare's own account email (sysmail), like sign-in
 // links and AI budget warnings: they name what happened and link to it,
@@ -40,6 +41,11 @@ const (
 // rest wait in the app and the digest.
 const DailyCap = 50
 
+// EmailWait is how long an alert email waits before it goes, so a burst
+// of the same kind for the same person (twenty landers found broken by
+// one check) goes as one email listing them. Tests set it to zero.
+var EmailWait = 2 * time.Minute
+
 // A Kind is a sort of alert a module raises. Describe turns an alert into
 // what people see, read fresh from its target, so an alert never keeps a
 // copy of a name or a message.
@@ -48,8 +54,12 @@ type Kind struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	// Scope is what a caller needs to see these alerts in the app.
-	Scope    string                                                         `json:"-"`
-	Describe func(ctx context.Context, q jobs.Querier, a Row) (View, error) `json:"-"`
+	Scope string `json:"-"`
+	// DefaultEmail is who gets the kind by email until a brand chooses:
+	// ToOwner when empty. ToOff for kinds that can come in bursts, which a
+	// brand switches on for itself.
+	DefaultEmail string                                                         `json:"default_email"`
+	Describe     func(ctx context.Context, q jobs.Querier, a Row) (View, error) `json:"-"`
 }
 
 // A View is an alert as people see it: a title, a line of detail and the
@@ -82,7 +92,15 @@ func URL(publicURL, slug, path string) string {
 }
 
 // Kinds lists every registered kind, in the order registered.
-func Kinds() []Kind { return slices.Clone(kinds) }
+func Kinds() []Kind {
+	out := slices.Clone(kinds)
+	for k := range out {
+		if out[k].DefaultEmail == "" {
+			out[k].DefaultEmail = ToOwner
+		}
+	}
+	return out
+}
 
 // Find returns a registered kind.
 func Find(id string) (Kind, bool) {
@@ -184,8 +202,12 @@ func Raise(ctx context.Context, q jobs.Querier, a Alert) (string, error) {
 			VALUES ($1, $2, $3, $4, $5, $6, 'queued') RETURNING id::text`, a.WorkspaceID, id, channel, user, integration, target).Scan(&delivery); err != nil {
 			return err
 		}
+		var runAt time.Time
+		if channel == "email" && EmailWait > 0 {
+			runAt = time.Now().Add(EmailWait)
+		}
 		_, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobDeliver, WorkspaceID: &a.WorkspaceID, IdempotencyKey: "alert:" + delivery,
-			MaxAttempts: 5, Payload: map[string]any{"delivery_id": delivery}})
+			MaxAttempts: 5, RunAt: runAt, Payload: map[string]any{"delivery_id": delivery}})
 		return err
 	}
 	for _, u := range users {
@@ -202,16 +224,29 @@ func Raise(ctx context.Context, q jobs.Querier, a Alert) (string, error) {
 			return "", err
 		}
 	}
+	bot, chat, err := TelegramSetting(ctx, q, a.WorkspaceID, a.BrandID, a.Kind)
+	if err != nil {
+		return "", err
+	}
+	if bot != "" {
+		if err := deliver("telegram", nil, &bot, &chat); err != nil {
+			return "", err
+		}
+	}
 	return id, nil
 }
 
 // EmailSetting is who gets a kind by email: the brand's choice, else the
-// person it is for. Brands share no settings.
+// kind's default (the person it is for, unless the kind says otherwise).
+// Brands share no settings.
 func EmailSetting(ctx context.Context, q jobs.Querier, ws string, brand *string, kind string) (string, error) {
 	var to string
 	err := q.QueryRow(ctx, `SELECT email FROM alert_settings WHERE workspace_id = $1 AND kind = $3 AND email IS NOT NULL
 		AND brand_id IS NOT DISTINCT FROM $2::uuid LIMIT 1`, ws, brand, kind).Scan(&to)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if k, ok := Find(kind); ok && k.DefaultEmail != "" {
+			return k.DefaultEmail, nil
+		}
 		return ToOwner, nil
 	}
 	return to, err
@@ -223,6 +258,18 @@ func SlackSetting(ctx context.Context, q jobs.Querier, ws string, brand *string,
 	err = q.QueryRow(ctx, `SELECT slack_integration_id::text, slack_channel FROM alert_settings
 		WHERE workspace_id = $1 AND kind = $3 AND slack_integration_id IS NOT NULL AND slack_channel IS NOT NULL
 		AND brand_id IS NOT DISTINCT FROM $2::uuid LIMIT 1`, ws, brand, kind).Scan(&integration, &channel)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", nil
+	}
+	return
+}
+
+// TelegramSetting is the Telegram chat a kind posts to, through the
+// workspace's own bot: the brand's, or "" for none.
+func TelegramSetting(ctx context.Context, q jobs.Querier, ws string, brand *string, kind string) (integration, chat string, err error) {
+	err = q.QueryRow(ctx, `SELECT telegram_integration_id::text, telegram_chat FROM alert_settings
+		WHERE workspace_id = $1 AND kind = $3 AND telegram_integration_id IS NOT NULL AND telegram_chat IS NOT NULL
+		AND brand_id IS NOT DISTINCT FROM $2::uuid LIMIT 1`, ws, brand, kind).Scan(&integration, &chat)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", nil
 	}

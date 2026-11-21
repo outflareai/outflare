@@ -43,7 +43,7 @@ func (XAds) Definition() c.Definition {
 		"Spend, impressions, clicks and conversions per campaign from your X ad accounts.",
 		"Uses your own X developer app, once X has approved it for the Ads API (apply in the developer portal; approval can take a few weeks). Paste the app's API key and secret and the access token and secret of the account that runs your ads. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget, which needs the access token made with Read and write permission. Add your pixel ID and conversion event IDs to send conversions back.")
 	d.Auth = c.AuthAPIKey
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsManage)
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage)
 	d.Fields = []c.Field{
 		{Name: "consumer_key", Label: "API key", Secret: false, Help: "Your developer app's API key (consumer key)."},
 		{Name: "consumer_secret", Label: "API key secret", Secret: true},
@@ -326,28 +326,38 @@ func (x XAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.Ad
 	if err != nil {
 		return nil, err
 	}
+	ids, names := make([]string, len(camps)), map[string]string{}
+	for i, cp := range camps {
+		ids[i], names[cp.ID] = cp.ID, cp.Name
+	}
+	out, err := x.stats(ctx, cl, creds, acct, "CAMPAIGN", ids, from, to)
+	for i := range out {
+		out[i].CampaignName = names[out[i].CampaignID]
+	}
+	return out, err
+}
+
+// stats reads the numbers per day of campaigns (entity CAMPAIGN) or line
+// items (LINE_ITEM) by their ids. Each day's CampaignID is the id of the
+// campaign or line item it is for.
+func (x XAds) stats(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, entity string, all []string, from, to string) ([]c.AdDay, error) {
 	loc, err := time.LoadLocation(acct.TimeZone)
 	if err != nil || acct.TimeZone == "" {
 		loc = time.UTC
 	}
-	all := days(from, to)
+	span := days(from, to)
 	// X's own conversions come with the WEB_CONVERSION group; an account
 	// that can't have it (no pixel) gets spend without them.
 	conversions := true
 	var out []c.AdDay
-	for start := 0; start < len(all); start += xStatsDays {
-		window := all[start:min(start+xStatsDays, len(all))]
+	for start := 0; start < len(span); start += xStatsDays {
+		window := span[start:min(start+xStatsDays, len(span))]
 		t0 := mustDate(window[0])
 		t1 := mustDate(window[len(window)-1]).AddDate(0, 0, 1)
 		begin := time.Date(t0.Year(), t0.Month(), t0.Day(), 0, 0, 0, 0, loc)
 		end := time.Date(t1.Year(), t1.Month(), t1.Day(), 0, 0, 0, 0, loc)
-		for i := 0; i < len(camps); i += xStatsIDs {
-			batch := camps[i:min(i+xStatsIDs, len(camps))]
-			ids := make([]string, len(batch))
-			names := map[string]string{}
-			for j, cp := range batch {
-				ids[j], names[cp.ID] = cp.ID, cp.Name
-			}
+		for i := 0; i < len(all); i += xStatsIDs {
+			ids := all[i:min(i+xStatsIDs, len(all))]
 			var resp struct {
 				Data []struct {
 					ID     string `json:"id"`
@@ -368,7 +378,7 @@ func (x XAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.Ad
 					groups += ",WEB_CONVERSION"
 				}
 				q := url.Values{
-					"entity": {"CAMPAIGN"}, "entity_ids": {strings.Join(ids, ",")}, "granularity": {"DAY"},
+					"entity": {entity}, "entity_ids": {strings.Join(ids, ",")}, "granularity": {"DAY"},
 					"metric_groups": {groups}, "placement": {"ALL_ON_TWITTER"},
 					"start_time": {begin.Format(time.RFC3339)}, "end_time": {end.Format(time.RFC3339)},
 				}
@@ -397,7 +407,7 @@ func (x XAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.Ad
 						if spend == 0 && imp == 0 && clk == 0 && su == 0 && pu == 0 {
 							continue
 						}
-						ad := c.AdDay{CampaignID: d.ID, CampaignName: names[d.ID], Date: day, SpendMicros: spend, Impressions: imp, Clicks: clk}
+						ad := c.AdDay{CampaignID: d.ID, Date: day, SpendMicros: spend, Impressions: imp, Clicks: clk}
 						if m.SignUps != nil || m.Purchases != nil {
 							total := su + pu
 							ad.Conversions = &total
@@ -519,6 +529,11 @@ func (x XAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Creds, 
 		if len(ids) == 0 {
 			results[i].Skipped, results[i].Reason = true, "no X click id, email or phone to match on"
 			continue
+		}
+		// Where the person was, as one identifier beside the ones above:
+		// X takes the two only together with another identifier.
+		if cv.IPAddress != "" && cv.UserAgent != "" {
+			ids, keys = append(ids, map[string]string{"ip_address": cv.IPAddress, "user_agent": cv.UserAgent}), append(keys, "ip_address", "user_agent")
 		}
 		ev := map[string]any{
 			"conversion_time": cv.Time.UTC().Format("2006-01-02T15:04:05.000Z"),

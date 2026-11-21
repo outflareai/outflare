@@ -60,3 +60,15 @@ def verify_webhook(
         if hmac.compare_digest(given, expected):
             return json.loads(raw)
     raise WebhookVerificationError("no signature matches the secret")
+
+
+def identify_signature(secret: str, user_id: str) -> str:
+    """The signature that lets a page say who its visitor is.
+
+    Run it on your server when someone signs in, with the site's identify
+    secret (ofid_..., from Website tracking, never in a page), and give the
+    page the user id and the result: outflare.identify(user.id, signature)
+    then joins the browser's visits to that person. It is
+    hex(HMAC-SHA256(secret, user_id)).
+    """
+    return hmac.new(secret.encode(), user_id.encode(), hashlib.sha256).hexdigest()

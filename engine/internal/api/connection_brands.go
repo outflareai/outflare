@@ -45,12 +45,14 @@ type connectionAccount struct {
 	Host    string  `json:"host"`
 	BrandID *string `json:"brand_id"`
 	// Source says where the brand comes from: assigned (someone picked
-	// it), connection (the connection's own brand), only_brand (the
-	// workspace's one brand), first_brand (a site nobody placed counts for
-	// the workspace's first brand) or none (an ad account nobody assigned).
+	// it), domain (the brand whose website the site is), connection (the
+	// connection's own brand), only_brand (the workspace's one brand),
+	// first_brand (a site on no brand's domain that nobody placed counts
+	// for the workspace's first brand) or none (an ad account nobody
+	// assigned).
 	Source string `json:"source"`
-	// SuggestedBrandID is a brand whose domains include the site's, for an
-	// unassigned site. It is only a suggestion.
+	// SuggestedBrandID is always null now: a site on a brand's domain
+	// belongs to that brand without anyone picking. Kept for clients.
 	SuggestedBrandID *string `json:"suggested_brand_id"`
 }
 
@@ -68,13 +70,12 @@ const connectionAccountsSQL = `
 	), sole AS (
 		SELECT min(id::text)::uuid AS id FROM brands WHERE workspace_id = $1 AND status = 'active' HAVING count(*) = 1
 	)
-	SELECT k.integration_id::text, 'site', k.site, k.name, k.host, outflare_site_brand_or_first(k.integration_id, k.site)::text,
-		CASE WHEN o.brand_id IS NOT NULL THEN 'assigned' WHEN i.brand_id IS NOT NULL THEN 'connection'
+	SELECT k.integration_id::text, 'site', k.site, k.name, k.host, outflare_site_brand_now(k.integration_id, k.site)::text,
+		CASE WHEN o.brand_id IS NOT NULL THEN 'assigned'
+			WHEN outflare_domain_brand($1, COALESCE(NULLIF(k.host, ''), outflare_site_domain(k.integration_id, k.site))) IS NOT NULL THEN 'domain'
+			WHEN i.brand_id IS NOT NULL THEN 'connection'
 			WHEN (SELECT id FROM sole) IS NOT NULL THEN 'only_brand' ELSE 'first_brand' END,
-		CASE WHEN o.brand_id IS NULL AND i.brand_id IS NULL THEN (
-			SELECT b.id::text FROM brands b, unnest(b.domains) d
-			WHERE b.workspace_id = $1 AND b.status = 'active' AND k.host <> '' AND (k.host = d OR k.host LIKE '%.' || d)
-			ORDER BY length(d) DESC, b.created_at LIMIT 1) END
+		NULL::text
 	FROM known k
 	JOIN integrations i ON i.id = k.integration_id AND i.workspace_id = $1
 	LEFT JOIN analytics_site_brands o ON o.integration_id = k.integration_id AND o.site = k.site
@@ -483,7 +484,7 @@ func (s *Server) assignConnectionAccount(w http.ResponseWriter, r *http.Request)
 }
 
 // siteBrandTables hold a site's synced data, each with brand_id: the
-// brand outflare_site_brand_or_first gives the site when the row is written.
+// brand outflare_site_brand_now gives the site when the row is written.
 // Assigning the site moves its rows with it.
 var siteBrandTables = []string{"search_segments", "search_ga4_outcomes", "search_completeness",
 	"analytics_daily", "analytics_syncs", "search_daily", "search_syncs", "search_sitemaps", "url_inspections", "page_conversions", "page_conversion_syncs", "organic_conversions", "organic_conversion_syncs"}
@@ -492,8 +493,8 @@ var siteBrandTables = []string{"search_segments", "search_ga4_outcomes", "search
 // brand it belongs to now (none when it is unassigned).
 func rebrandSite(ctx context.Context, tx pgx.Tx, ws, integration, site string) error {
 	for _, table := range siteBrandTables {
-		if _, err := tx.Exec(ctx, `UPDATE `+table+` SET brand_id = outflare_site_brand_or_first($2, $3)
-			WHERE workspace_id = $1 AND integration_id = $2 AND site = $3 AND brand_id IS DISTINCT FROM outflare_site_brand_or_first($2, $3)`,
+		if _, err := tx.Exec(ctx, `UPDATE `+table+` SET brand_id = outflare_site_brand_now($2, $3)
+			WHERE workspace_id = $1 AND integration_id = $2 AND site = $3 AND brand_id IS DISTINCT FROM outflare_site_brand_now($2, $3)`,
 			ws, integration, site); err != nil {
 			return err
 		}
@@ -505,8 +506,8 @@ func rebrandSite(ctx context.Context, tx pgx.Tx, ws, integration, site string) e
 // its own brand changed.
 func rebrandConnection(ctx context.Context, tx pgx.Tx, ws, integration string) error {
 	for _, table := range siteBrandTables {
-		if _, err := tx.Exec(ctx, `UPDATE `+table+` SET brand_id = outflare_site_brand_or_first(integration_id, site)
-			WHERE workspace_id = $1 AND integration_id = $2 AND brand_id IS DISTINCT FROM outflare_site_brand_or_first(integration_id, site)`,
+		if _, err := tx.Exec(ctx, `UPDATE `+table+` SET brand_id = outflare_site_brand_now(integration_id, site)
+			WHERE workspace_id = $1 AND integration_id = $2 AND brand_id IS DISTINCT FROM outflare_site_brand_now(integration_id, site)`,
 			ws, integration); err != nil {
 			return err
 		}

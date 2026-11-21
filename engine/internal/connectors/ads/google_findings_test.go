@@ -37,6 +37,15 @@ func TestGoogleFindingsLevers(t *testing.T) {
 					}
 				}
 				return map[string]any{"results": rows}
+			case strings.Contains(q, "ad_group.cpc_bid_micros FROM ad_group WHERE ad_group.id = 71"):
+				return map[string]any{"results": []any{map[string]any{"adGroup": map[string]any{"id": "71", "cpcBidMicros": "1500000"}}}}
+			case strings.Contains(q, "ad_group_criterion.cpc_bid_micros") && strings.Contains(q, "criterion_id = 91"):
+				// No bid of its own: it takes its ad group's.
+				return map[string]any{"results": []any{map[string]any{"adGroupCriterion": map[string]any{"criterionId": "91", "effectiveCpcBidMicros": "1500000"}}}}
+			case strings.Contains(q, "ad_group_criterion.cpc_bid_micros") && strings.Contains(q, "criterion_id = 92"):
+				return map[string]any{"results": []any{map[string]any{"adGroupCriterion": map[string]any{"criterionId": "92", "cpcBidMicros": "2000000", "effectiveCpcBidMicros": "2000000"}}}}
+			case strings.Contains(q, "ad_group_criterion.cpc_bid_micros"), strings.Contains(q, "ad_group.cpc_bid_micros"):
+				return map[string]any{"results": []any{}}
 			case strings.Contains(q, "FROM ad_group_criterion"):
 				return map[string]any{"results": []any{map[string]any{"adGroupCriterion": map[string]any{"resourceName": "customers/123/adGroupCriteria/71~555", "negative": true,
 					"keyword": map[string]any{"text": "free crm", "matchType": "PHRASE"}}}}}
@@ -71,6 +80,7 @@ func TestGoogleFindingsLevers(t *testing.T) {
 		},
 		"POST /v23/customers/123/adGroupCriteria:mutate":  map[string]any{"results": []any{map[string]any{"resourceName": "customers/123/adGroupCriteria/71~91"}}},
 		"POST /v23/customers/123/adGroupAds:mutate":       map[string]any{"results": []any{}},
+		"POST /v23/customers/123/adGroups:mutate":         map[string]any{"results": []any{}},
 		"POST /v23/customers/123/campaigns:mutate":        map[string]any{"results": []any{}},
 		"POST /v23/customers/123/campaignCriteria:mutate": map[string]any{"results": []any{map[string]any{"resourceName": "customers/123/campaignCriteria/7~1"}}},
 	})
@@ -99,6 +109,55 @@ func TestGoogleFindingsLevers(t *testing.T) {
 	}
 	if err := g.SetKeywordStatus(ctx, cl, creds, acct, "x", "91", false); c.KindOf(err) != c.ErrInvalid {
 		t.Fatalf("bad id: %v", err)
+	}
+	// An ad group paused: its status alone.
+	if err := g.SetAdGroupStatus(ctx, cl, creds, acct, "71", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls("adGroups:mutate"); len(got) != 1 || !strings.Contains(got[0], `"resourceName":"customers/123/adGroups/71","status":"PAUSED"`) || !strings.Contains(got[0], `"updateMask":"status"`) {
+		t.Fatalf("ad group status: %v", got)
+	}
+	if err := g.SetAdGroupStatus(ctx, cl, creds, acct, "71~1", false); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("bad ad group id: %v", err)
+	}
+	// Bids by hand: an ad group's default, a keyword's own or, without
+	// one, its ad group's; set on cpc_bid_micros alone, rounded to a cent.
+	if b, err := g.UnitBid(ctx, cl, creds, acct, "71", ""); err != nil || b.Micros != 1_500_000 || b.Auto {
+		t.Fatalf("ad group bid: %+v %v", b, err)
+	}
+	if b, err := g.UnitBid(ctx, cl, creds, acct, "71", "91"); err != nil || b.Micros != 1_500_000 {
+		t.Fatalf("a keyword taking its ad group's bid: %+v %v", b, err)
+	}
+	if b, err := g.UnitBid(ctx, cl, creds, acct, "71", "92"); err != nil || b.Micros != 2_000_000 {
+		t.Fatalf("a keyword's own bid: %+v %v", b, err)
+	}
+	if _, err := g.UnitBid(ctx, cl, creds, acct, "72", ""); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("an ad group Google doesn't have: %v", err)
+	}
+	before := len(calls("adGroups:mutate"))
+	if err := g.SetUnitBid(ctx, cl, creds, acct, "71", "", 1_234_567); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls("adGroups:mutate"); len(got) != before+1 || !strings.Contains(got[before], `"cpcBidMicros":"1230000"`) || !strings.Contains(got[before], `"updateMask":"cpc_bid_micros"`) ||
+		!strings.Contains(got[before], `"resourceName":"customers/123/adGroups/71"`) {
+		t.Fatalf("ad group bid set: %v", got)
+	}
+	before = len(calls("adGroupCriteria:mutate"))
+	if err := g.SetUnitBid(ctx, cl, creds, acct, "71", "91", 900_000); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls("adGroupCriteria:mutate"); len(got) != before+1 || !strings.Contains(got[before], `"resourceName":"customers/123/adGroupCriteria/71~91"`) || !strings.Contains(got[before], `"cpcBidMicros":"900000"`) {
+		t.Fatalf("keyword bid set: %v", got)
+	}
+	for _, err := range []error{
+		g.SetUnitBid(ctx, cl, creds, acct, "71", "", 4_000),
+		g.SetUnitBid(ctx, cl, creds, acct, "71", "", 2_000_000_000),
+		g.SetUnitBid(ctx, cl, creds, acct, "x", "", 1_000_000),
+		g.SetUnitBid(ctx, cl, creds, acct, "71", "9~1", 1_000_000),
+	} {
+		if c.KindOf(err) != c.ErrInvalid {
+			t.Fatalf("a bad bid or id: %v", err)
+		}
 	}
 
 	// A target on a Maximise conversions campaign goes on the strategy's
@@ -164,6 +223,16 @@ func TestGoogleFindingsLevers(t *testing.T) {
 	got = calls("campaignCriteria:mutate")
 	if !strings.Contains(got[len(got)-1], `"mobileApplication":{"appId":"2-com.example.game"},"negative":true`) {
 		t.Fatalf("placement: %v", got)
+	}
+	if err := g.AddExclusion(ctx, cl, creds, acct, "7", c.AdExclusion{Kind: c.ExcludeAudience, Value: "801"}); err != nil {
+		t.Fatal(err)
+	}
+	got = calls("campaignCriteria:mutate")
+	if !strings.Contains(got[len(got)-1], `"negative":true,"userList":{"userList":"customers/123/userLists/801"}`) {
+		t.Fatalf("audience: %v", got)
+	}
+	if err := g.AddExclusion(ctx, cl, creds, acct, "7", c.AdExclusion{Kind: c.ExcludeAudience, Value: "a list"}); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("an audience id that is no number: %v", err)
 	}
 	if err := g.AddExclusion(ctx, cl, creds, acct, "7", c.AdExclusion{Kind: c.ExcludeNetwork, Value: "search_partners"}); err != nil {
 		t.Fatal(err)

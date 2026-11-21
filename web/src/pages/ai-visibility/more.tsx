@@ -411,23 +411,28 @@ function TrafficBody({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
       ) : (
         <p className="text-[13px] text-muted-foreground">Traffic shows once website tracking is on for {d.brand.name}. <button className="underline" onClick={() => go("tracking")}>Set up tracking</button></p>
       )}
-      <Section title="AI crawlers" note="Whether AI crawlers can read your sites, from each site audit, and how often they visit, from your Cloudflare logs.">
+      <Section title="AI crawlers" note="Whether AI crawlers can read your sites, from each site audit, and how often they visit, from your Cloudflare logs or your own server.">
         <p className="mb-3 text-muted-foreground">
           Site audits check what robots.txt lets each AI crawler read and whether you have an llms.txt. Problems go on the <button className="underline" onClick={() => go("fixes")}>fixes list</button>.
         </p>
-        {!hits ? null : hits.connections.length === 0 ? (
-          <p className="text-muted-foreground">To see visits, connect Cloudflare with an API token that can read your zones and their analytics. <button className="underline" onClick={() => go("connectors")}>Connect Cloudflare</button></p>
-        ) : (
+        {!hits ? null : (
           <>
             {hits.connections.filter((c) => c.status === "error").map((c) => <ErrorText key={c.integration_id}>{c.message ?? "Reading Cloudflare's logs failed."}</ErrorText>)}
-            {hits.data.length === 0 ? <p className="text-muted-foreground">No AI crawler visits in this period.</p> : (
+            {hits.data.length === 0 ? (
+              hits.connections.length === 0 ? (
+                <p className="text-muted-foreground">
+                  To see visits, <button className="underline" onClick={() => go("connectors")}>connect Cloudflare</button> with an API token that can read your zones and their analytics. Not behind Cloudflare? Your server can report crawler visits with the Outflare library: <a className="underline" href="https://outflare.ai/docs/guides/ai-visibility/" target="_blank" rel="noreferrer">how to set it up</a>.
+                </p>
+              ) : <p className="text-muted-foreground">No AI crawler visits in this period.</p>
+            ) : (
               <table className="w-full">
-                <thead><tr><th className={th}>Site</th><th className={th}>AI search</th><th className={th}>For a person</th><th className={th}>Training</th><th className={th}>Top crawlers</th></tr></thead>
+                <thead><tr><th className={th}>Site</th><th className={th}>AI search</th><th className={th}>For a person</th><th className={th}>Training</th><th className={th}>Top crawlers</th><th className={th}>Source</th></tr></thead>
                 <tbody className="divide-y">
                   {hits.data.map((h) => (
                     <tr key={h.host}>
                       <td className="py-1.5 pr-3 font-mono">{h.host}</td><td className="pr-3">{h.search.toLocaleString()}</td><td className="pr-3">{h.user.toLocaleString()}</td><td className="pr-3">{h.training.toLocaleString()}</td>
-                      <td className="text-muted-foreground">{h.bots.slice(0, 3).map((b) => `${b.token} ${b.requests.toLocaleString()}`).join(" · ")}</td>
+                      <td className="pr-3 text-muted-foreground">{h.bots.slice(0, 3).map((b) => `${b.token} ${b.requests.toLocaleString()}`).join(" · ")}</td>
+                      <td className="text-muted-foreground">{h.source === "server" ? "Your server" : h.source === "both" ? "Cloudflare logs and your server" : "Cloudflare logs"}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -4,9 +4,9 @@ Website tracking records visits to your own sites as product events, so sign-ups
 
 ## Set it up
 
-The quickest way is **Analytics → Website tracking** (the same step as **Company → Brand setup**, or `GET .../brands/{brand}/setup`): three steps, get the script, add it to the site, then see the first visit. It makes the key and offers one click through your own Google Tag Manager, a message to send a developer, a prompt for an AI coding tool, or the snippet to paste. The step ticks off when the first visit arrives. By hand:
+The quickest way is **Settings → Website tracking** (the same step as **Company → Brand setup**, or `GET .../brands/{brand}/setup`): three steps, get the script, add it to the site, then see the first visit. It makes the key and offers one click through your own Google Tag Manager, a message to send a developer, a prompt for an AI coding tool, or the snippet to paste. The step ticks off when the first visit arrives. By hand:
 
-1. Add a site key: **Analytics → Website tracking** (also under **Settings → General**), `POST /v1/brands/{brand}/site-keys` (scope `customers.manage`) or MCP `create_site_key`. Give it the site's name. You can also set `origins`, the sites it takes events from. A plain domain, `example.com`, covers the site and every subdomain (www, docs, app) over https, so one key serves them all; it is stored as `https://*.example.com`. List any other origin exactly, port included (`https://shop.example.com:8443`, or `http://localhost:3000` while you try it locally; http is taken only from localhost), and a `brand_id` if the site belongs to one brand.
+1. Add a site key: **Settings → Website tracking** `POST /v1/brands/{brand}/site-keys` (scope `customers.manage`) or MCP `create_site_key`. Give it the site's name. You can also set `origins`, the sites it takes events from. A plain domain, `example.com`, covers the site and every subdomain (www, docs, app) over https, so one key serves them all; it is stored as `https://*.example.com`. List any other origin exactly, port included (`https://shop.example.com:8443`, or `http://localhost:3000` while you try it locally; http is taken only from localhost), and a `brand_id` if the site belongs to one brand.
 2. Paste the key's `snippet` into each page's `<head>`:
 
    ```html
@@ -179,7 +179,7 @@ The key's snippet already lists them when its origins are on more than one domai
 
 A site key sits in your page's HTML, so anyone can copy it. It can only add browser events:
 
-- It sends `page` and `track` only. A `userId`, traits, and identify, group or alias calls are refused or dropped, so a browser can never name, create or merge a person. The time is the server's, not the browser's.
+- It sends `page` and `track` only, and `screen` from an app (a key with no origins takes an app's events: see [the libraries for apps](sdks.md#apps)). A `userId`, traits, and identify, group or alias calls are refused or dropped, so a browser can never name, create or merge a person on its own word. The one way in is `outflare.identify(userId, signature)` with a signature your server made (see "Identify from the browser, signed by your server"). The time is the server's, not the browser's.
 - It reads nothing. The answer only counts what was taken, and the key works on no other endpoint.
 - Browser events never start a journey or send email, never meet a journey's event condition, and never count as revenue. Their `source` is `browser`, and the server API refuses that source for anything else.
 - `origins` filters out stray traffic, such as a copy of your page on another site. It is not a lock, since anyone can send any `Origin`.
@@ -202,3 +202,135 @@ Without consent, the campaign tags a visitor landed with are on that first page'
 To have Outflare show the banner itself, with region rules, Google Consent Mode and the ad platforms' consent signals, turn on the [consent banner](consent-banner.md) for the site key. `outflare.consent()` then also takes categories (`{analytics: true, marketing: false}`), and every choice is kept as the visitor's consent.
 
 `outflare.reset()` gives the visitor a new id, for example on sign-out on a shared computer. Nothing is sent to Outflare's own analytics. The events stay in your workspace with the rest of your customer data.
+
+## Identify from the browser, signed by your server
+
+A browser can never say who its visitor is on its own word: anyone can open the console and type an id. The usual way stays the safest: your server sends `identify` when someone signs up or signs in (step 3 at the top). When that is awkward, your server can vouch for the id instead, and the page does the rest.
+
+1. In **Website tracking**, open the script's menu and choose **Turn on browser identify**. You get an identify secret (`ofid_...`), shown once. Keep it on your server, in the same place as your other secrets. Never put it in a page.
+2. When someone signs in, your server signs their user id with the secret and gives the page the id and the signature:
+
+   ```js
+   // Node, Deno, Bun or a Worker
+   import { identifySignature } from "@outflare/sdk";
+   const signature = await identifySignature(process.env.OUTFLARE_IDENTIFY_SECRET, user.id);
+   ```
+
+   ```python
+   from outflare import identify_signature
+   signature = identify_signature(os.environ["OUTFLARE_IDENTIFY_SECRET"], user.id)
+   ```
+
+   In any other language it is the HMAC-SHA256 of the user id with the secret as the key, written as hex.
+3. In the page:
+
+   ```js
+   outflare.identify(user.id, signature);
+   ```
+
+The browser's earlier visits then join that person, exactly as an `identify` from your server would. A signature only works for the id it was made for, so a visitor can't use theirs to become someone else. The page sends no traits: a person's name, plan and other fields still come only from your server. Without a secret for the site, or with a wrong signature, the call is refused and nothing changes.
+
+Making a new secret stops the old one at once. **Turn off browser identify** in the same menu removes it. On sign-out, call `outflare.reset()` so the next person on that computer starts fresh.
+
+## Signed-in visitors
+
+Your marketing site often needs to know one thing about a visitor: do they already have an account? Tell the script from your app, and every page on your domain can ask.
+
+```js
+// In your app, after sign-in
+outflare.signedIn(true);
+// On sign-out
+outflare.signedIn(false);
+
+// On any page of your site, such as the marketing site
+if (outflare.isSignedIn()) { /* show "Go to dashboard" instead of "Sign up" */ }
+```
+
+`signedIn(true)` keeps a cookie named `of_signed_in` on your widest domain, so `www.` and `app.` share it. It only ever holds `1`: it says nothing about who the visitor is, so it needs no consent, and it is removed by `signedIn(false)` and by `outflare.reset()`. With it set:
+
+- `outflare.isSignedIn()` is true on every page of the site.
+- An element with `data-outflare-signed-in="show"` is shown only to signed-in visitors, and one with `data-outflare-signed-in="hide"` only to everyone else, with no code.
+- Flags and A/B tests can have a **Signed in** condition, so a test can run only for new visitors.
+- Page views and events carry `signed_in: true` in their context.
+
+It is a hint for what to show, never proof. Anyone can set a cookie in their own browser, so your server must still check who is signed in before it shows or does anything private.
+
+## Clicks and form submits without code (autocapture)
+
+A site can send clicks and form submits on its own, with no `outflare.track` calls. Each is a switch on the site's script under Website tracking, in "What the script does on its own": **Capture clicks on buttons and links** and **Capture form submits**. A switch saves at once. Both are off until you turn them on, and nothing changes in the script on your site: it learns what to capture from Outflare on the visitor's first page. In the API they are `capture_clicks` and `capture_forms` on the site key.
+
+- **Element Clicked**: a click on a link, a button, a `summary`, anything with `role="button"`, or a submit or plain button input. Its properties are `tag`, `text` (the label, at most 80 characters), `id`, `classes` (the first five), `href` for a link (without its query string or fragment) and `path` (the page).
+- **Form Submitted**: a form the visitor sent. Its properties are the form's `id`, `name`, `action` (without its query string), `method`, `fields` (how many it has) and `path`.
+
+What a visitor typed is never read: no field values, and no field is looked at when a form is sent. A label that holds an email address, a long number or something shaped like a key is left out, and so is the label of anything inside an element with `data-of-mask` or `data-of-block` (the same attributes that hide things from [recordings](session-recordings.md)).
+
+To name a click yourself, give the element `data-outflare-event`:
+
+```html
+<button data-outflare-event="Plan Chosen">Choose Pro</button>
+```
+
+That click is sent as `Plan Chosen` instead of Element Clicked, and it works whether or not the switch is on, so it is the quickest way to move a handful of named events over from another tool. `data-outflare-ignore` on an element leaves it and everything inside it out. `data-autocapture="off"` on the snippet stops all of it for a site, named clicks and [errors](error-tracking.md) included. A page sends at most 100 captured events, so a script that clicks in a loop can't fill your events.
+
+### Name a click without touching the site
+
+When you can't or don't want to change the page, name the click in Outflare instead: open **Analytics**, then **Named clicks**. The page lists every button and link your site captured in the last 7 days, most clicked first. Press **Name this click** next to one, give it an event name such as `Signup Clicked`, and save. From then on a matching click is stored a second time under that name, so funnels, trends and A/B test goals can use it like an event your site sent itself. The Element Clicked event is still stored too.
+
+A named click says which click it is with any of these, and every part you fill in must match:
+
+| Part | Matches |
+| --- | --- |
+| Label | What the button or link says, exactly or as a part of it. Case is ignored. |
+| Goes to an address containing | A part of where a link goes, such as `/signup`. |
+| Element id | The element's `id` attribute. |
+| Class | One class name the element has. |
+| Only on this page | A path such as `/pricing`, or `/blog/*` for every page under it. Empty means every page. |
+
+Naming works from the moment you save: earlier clicks keep only their Element Clicked event. Each named click has an On/Off switch, and the table shows how many of the last 7 days' captured clicks it matches, so you can see a rule is right before you rely on it. A brand can have 200 named clicks. Named clicks need "Capture clicks" on for the site. In the API they are `/v1/brands/{brand}/click-actions`, and agents use `list_seen_clicks` and `create_click_action`.
+
+Captured events are ordinary track events: they show on the Product events page, and work in trends, funnels, paths and A/B test goals like any event you send yourself. They count toward the site key's daily event limits.
+
+## Errors
+
+The same snippet can send your site's errors: turn on **Capture errors** on the site's script, or the **Error capture** switch at the top of the Errors page (both are `capture_errors` on the site key), or call `outflare.captureException(err)` from your own code. They show on the Errors page, grouped into issues: see [Error tracking](error-tracking.md).
+
+## Ad pixels without code on your site
+
+The script can load an ad platform's pixel for you, so your site carries no pixel snippet and your developers pass no user data to it. Today that is the ChatGPT Ads pixel (OpenAI's Measurement Pixel), described first, and Meta's and TikTok's pixels, below.
+
+1. Connect ChatGPT Ads for the brand, with your own Advertiser API key, and fill in the **Pixel ID** on the connection (Paid ads → Accounts → Connections; see [Paid media](paid-media.md)). The pixel is always the one on the brand's own connection.
+2. On Website tracking, turn on **Load the ChatGPT Ads pixel** on the site's script (`chatgpt_pixel` on the site key). Until the connection has a Pixel ID the switch stays off and says where to add it.
+
+From the next page a visitor opens, the script:
+
+- loads OpenAI's pixel with your Pixel ID once the page has loaded, and counts each page view with it (`page_viewed`), also when a single-page app changes pages;
+- gives the pixel the signed-in visitor's hashed email address, phone number and id as its user data. The hashes are made on Outflare's server, the same ones their conversions carry, and come back with the answer to the page's events; the script never sees an email address. A browser gets them only when your product identified the person on it: `outflare.identify` with your server's signature, or an `identify` from your server that names the visitor's `anonymousId`. A browser that only clicked a link in an email gets none;
+- loads nothing without the visitor's consent to marketing, and tells the pixel when they withdraw it. A person who may not have ad data sent (they withdrew it, or they are in the EEA, the UK or Switzerland and never granted it) has no user data passed, as with conversions.
+
+If the page still carries OpenAI's own snippet, the script leaves it in charge: it loads no second copy and counts no second page view, and only adds the user data. Once the switch is on, take that snippet off the site so page views are counted once however the page loads. Sign-ups and purchases are not sent from the page: they go from Outflare's server through the Conversions API (conversion rules, in [Paid media](paid-media.md)), with the same hashes, so the two match.
+
+A site with a Content Security Policy allows `https://bzrcdn.openai.com` in `script-src` and `connect-src`, and `https://bzr.openai.com` in `connect-src` and `img-src`. `data-pixels="off"` on the tag stops the script loading any pixel on that page.
+
+### Meta and TikTok pixels
+
+The same script can load your Meta pixel and your TikTok pixel. The reason to do it is matching: a conversion sent only from Outflare's server is matched on what the server knows, while the pixel in the browser also sees the platform's own cookies. With both, and the same event id on each, the platform counts the conversion once and matches more of them to an ad.
+
+1. Send the brand's conversions to the platform first: Paid ads → Settings → Send conversions, add a conversion for Meta Ads or TikTok Ads and pick its pixel ([Paid media](paid-media.md)). The pixel the script loads is always that one.
+2. On Website tracking, turn on **Load the Meta pixel** or **Load the TikTok pixel** on the site's script (`meta_pixel` and `tiktok_pixel` on the site key). Until the brand sends that platform a conversion the switch stays off and says where to add one.
+
+From the next page a visitor opens, the script:
+
+- loads the platform's pixel once the page has loaded, and counts each page view with it, also when a single-page app changes pages;
+- gives it the signed-in visitor's hashed email address, phone number and id when the pixel starts, under the same rules as the ChatGPT Ads pixel above. Someone who signs in during a visit is known to the pixel from the next page they open;
+- sends a conversion to the pixel when your page calls `outflare.track` with an event that one of those conversions is made from, with the platform's event name (such as `Purchase`), the value the conversion takes from the event or its fixed value, and the track call's `messageId` as the event id (Meta's `eventID`, TikTok's `event_id`). Outflare's server sends the same conversion with the same id, so the platform keeps one;
+- loads nothing without the visitor's consent to marketing, and tells the pixel when they withdraw it.
+
+Only conversions the page can send exactly as the server does go from the page: one event, no conditions, and a value the event carries or a fixed one. A conversion with conditions, a predicted value, or a place in the feed of sign-ups and payments goes from the server alone, as do events your server sends that no page tracked. Nothing is lost either way: the server sends every conversion whether or not the page did.
+
+If the page still carries the platform's own snippet, the script does nothing for that platform: it loads no second copy and sends no events, because the page's own code may send them already. Take the snippet off the site to let the script do it.
+
+A site with a Content Security Policy allows `https://connect.facebook.net` in `script-src` and `https://www.facebook.com` in `connect-src` and `img-src` for Meta, and `https://analytics.tiktok.com` in `script-src` and `connect-src` for TikTok.
+
+## Recordings and heatmaps
+
+The same snippet records visits and counts clicks and scrolling once a brand turns them on: see [Session recordings and heatmaps](session-recordings.md). `data-replay="off"` on the snippet keeps both off for a site.

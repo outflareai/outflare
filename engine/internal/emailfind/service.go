@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,6 +28,12 @@ type Service struct {
 	Log      *slog.Logger
 	// Network is the data network, or nil (internal/datanetwork).
 	Network NetworkLookup
+	// Store opens the workspace's own connected email finders for Resolve
+	// (finder.go). Nil turns that tier off.
+	Store *connectors.Store
+
+	finderMu   sync.Mutex
+	finderTurn map[string]int // by workspace: whose turn among its finder connections
 }
 
 type rebuildPayload struct {
@@ -155,7 +162,7 @@ func (s *Service) VerifyEmails(ctx context.Context, ws string, req VerifyRequest
 			Cost: Cost{Provider: res.Provider}}
 		if paid[res.Email] {
 			// One credit an address, as the spend ledger books it.
-			it.Cost.Connection, it.Cost.Units = *res.IntegrationID, 1
+			it.Cost.Connection, it.Cost.Units, it.Cost.Micros = *res.IntegrationID, 1, micros(res.CostMicros)
 		}
 		if res.Score != nil {
 			it.Confidence = *res.Score

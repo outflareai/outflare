@@ -4,7 +4,7 @@ export const stages = [
   {
     id: "discovered",
     label: "Discovered",
-    description: "Accepted from the leads API",
+    description: "Accepted from the discovery API",
     color: "var(--series-6)",
     queue: "248 awaiting research",
   },
@@ -32,7 +32,7 @@ export const stages = [
   {
     id: "replied",
     label: "Replied",
-    description: "Leads with a first reply",
+    description: "Companies with a first reply",
     color: "var(--series-2)",
     queue: "8 interested, awaiting SDR",
   },

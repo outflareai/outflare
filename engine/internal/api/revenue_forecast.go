@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -150,6 +151,9 @@ type revenueForecast struct {
 		Renewals int `json:"renewals"`
 	} `json:"skipped"`
 	Weights forecastWeights `json:"weights"`
+	// History is what the quarter's forecast said in each week so far,
+	// the oldest first (revenue_forecast_history.go).
+	History []forecastWeek `json:"history"`
 }
 
 var quarterRe = regexp.MustCompile(`^(\d{4})-Q([1-4])$`)
@@ -191,10 +195,10 @@ type forecastSettings struct {
 	Stages  map[string]int
 }
 
-func loadForecastSettings(r *http.Request, tx pgx.Tx, a *access) (forecastSettings, error) {
+func loadForecastSettings(ctx context.Context, tx pgx.Tx, a *access) (forecastSettings, error) {
 	out := forecastSettings{Targets: map[string]int64{}, Renewal: map[string]int{}, Stages: map[string]int{}}
 	var targets, renewal, stages []byte
-	err := tx.QueryRow(r.Context(), `SELECT targets, renewal_weights, stage_weights FROM revenue_forecast_settings WHERE brand_id = $1 AND workspace_id = $2`,
+	err := tx.QueryRow(ctx, `SELECT targets, renewal_weights, stage_weights FROM revenue_forecast_settings WHERE brand_id = $1 AND workspace_id = $2`,
 		a.Brand, a.WorkspaceID).Scan(&targets, &renewal, &stages)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
@@ -256,7 +260,7 @@ func (s *Server) getRevenueForecast(w http.ResponseWriter, r *http.Request) {
 	var out revenueForecast
 	err := s.readTx(r.Context(), func(tx pgx.Tx) error {
 		var err error
-		out, err = buildForecast(r, tx, a, r.URL.Query().Get("quarter"))
+		out, err = buildForecast(r.Context(), tx, a, r.URL.Query().Get("quarter"))
 		return err
 	})
 	if s.allocError(w, r, err) {
@@ -280,8 +284,7 @@ func splitOwners(owner *string, co string, percent *float64, v int64) (mine, the
 	return mine, theirs, &co
 }
 
-func buildForecast(r *http.Request, tx pgx.Tx, a *access, quarter string) (revenueForecast, error) {
-	ctx := r.Context()
+func buildForecast(ctx context.Context, tx pgx.Tx, a *access, quarter string) (revenueForecast, error) {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	out := revenueForecast{RenewalLines: []forecastRenewal{}, DealLines: []forecastDeal{}, Owners: []forecastOwner{}}
 	owners := map[string]*forecastOwner{}
@@ -327,7 +330,7 @@ func buildForecast(r *http.Request, tx pgx.Tx, a *access, quarter string) (reven
 	if err := tx.QueryRow(ctx, `SELECT currency FROM brands WHERE id = $1 AND workspace_id = $2`, a.Brand, a.WorkspaceID).Scan(&out.Currency); err != nil {
 		return out, err
 	}
-	set, err := loadForecastSettings(r, tx, a)
+	set, err := loadForecastSettings(ctx, tx, a)
 	if err != nil {
 		return out, err
 	}
@@ -629,6 +632,9 @@ func buildForecast(r *http.Request, tx pgx.Tx, a *access, quarter string) (reven
 			out.Attainment = &share
 		}
 	}
+	if out.History, err = forecastHistory(ctx, tx, a, out.Quarter); err != nil {
+		return out, err
+	}
 	return out, nil
 }
 
@@ -661,7 +667,7 @@ func (s *Server) setRevenueForecast(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM revenue_forecast_settings WHERE brand_id = $1 AND workspace_id = $2 FOR UPDATE`, a.Brand, a.WorkspaceID); err != nil {
 			return err
 		}
-		set, err := loadForecastSettings(r, tx, a)
+		set, err := loadForecastSettings(ctx, tx, a)
 		if err != nil {
 			return err
 		}
@@ -726,7 +732,7 @@ func (s *Server) setRevenueForecast(w http.ResponseWriter, r *http.Request) {
 			WHERE brand_id = $1 AND workspace_id = $2`, a.Brand, a.WorkspaceID, targets, renewal, stages); err != nil {
 			return err
 		}
-		if out, err = buildForecast(r, tx, a, q); err != nil {
+		if out, err = buildForecast(ctx, tx, a, q); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "revenue_forecast.updated", "brand", a.Brand,

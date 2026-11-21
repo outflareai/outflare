@@ -12,8 +12,8 @@ func TestSearch(t *testing.T) {
 	h := freshServer(t)
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
 	ada := owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Ada Lovelace", "brand_id": rp,
 		"identities": []map[string]any{{"namespace": "email", "value": "ada@northpeak.example"}}})["id"].(string)
 	owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Northpeak Analytics"})
@@ -72,12 +72,12 @@ func TestSearch(t *testing.T) {
 		t.Fatalf("messages only, without their scopes: %d", code)
 	}
 	// Brands: a token kept to another brand doesn't find Ada.
-	tok = owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Geonode agent", "scopes": []string{"customers.read"}, "brand": "geonode"})
+	tok = owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Northpeak agent", "scopes": []string{"customers.read"}, "brand": "northpeak"})
 	gn := &client{t: t, h: h, bearer: tok["token"].(string)}
 	if hits := gn.must(200, "GET", base+"/search?q=ada", nil)["data"].([]any); len(hits) != 0 {
 		t.Fatalf("another brand's person: %v", hits)
 	}
-	// A company made without a brand belongs to the first brand, not Geonode.
+	// A company made without a brand belongs to the first brand, not Northpeak.
 	if hits := gn.must(200, "GET", base+"/search?q=northpeak", nil)["data"].([]any); len(hits) != 0 {
 		t.Fatalf("the first brand's company: %v", hits)
 	}

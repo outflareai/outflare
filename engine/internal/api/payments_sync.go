@@ -53,6 +53,8 @@ var (
 const (
 	evPaymentSucceeded      = "payment.succeeded"
 	evPaymentRefunded       = "payment.refunded"
+	evPaymentFailed         = "payment.failed"
+	evPaymentDisputed       = "payment.disputed"
 	evSubscriptionStarted   = "subscription.started"
 	evSubscriptionChanged   = "subscription.changed"
 	evSubscriptionCanceled  = "subscription.canceled"

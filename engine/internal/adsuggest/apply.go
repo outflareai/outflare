@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 
@@ -49,10 +50,18 @@ const (
 	ChangeTarget          = "target"
 	ChangeExclusionAdd    = "exclusion_add"
 	ChangeExclusionRemove = "exclusion_remove"
+	// ChangeBid sets a campaign's bid, or one placement's.
+	ChangeBid = "bid"
+	// An ad group (Meta's ad set) paused or resumed, and its own daily
+	// budget set.
+	ChangeAdGroupPause  = "ad_group_pause"
+	ChangeAdGroupResume = "ad_group_resume"
+	ChangeAdGroupBudget = "ad_group_budget"
 )
 
 // OwnChangeKinds are the change kinds JobApply carries out.
-var OwnChangeKinds = []string{ChangeNegativeRemove, ChangeKeywordPause, ChangeKeywordResume, ChangeAdPause, ChangeAdResume, ChangeTarget, ChangeExclusionAdd, ChangeExclusionRemove}
+var OwnChangeKinds = []string{ChangeNegativeRemove, ChangeKeywordPause, ChangeKeywordResume, ChangeAdPause, ChangeAdResume, ChangeTarget, ChangeExclusionAdd, ChangeExclusionRemove, ChangeBid,
+	ChangeAdGroupPause, ChangeAdGroupResume, ChangeAdGroupBudget}
 
 // OwnChange says whether JobApply carries out a change kind.
 func OwnChange(kind string) bool {
@@ -78,11 +87,28 @@ type Change struct {
 	KeywordID string `json:"keyword_id,omitempty"`
 	// An ad: the network's id.
 	AdID string `json:"ad_id,omitempty"`
+	// The name of the ad group or ad a change is for, so the list of
+	// changes can say which.
+	Name string `json:"name,omitempty"`
 	// Bidding, as the ad sync's bidding change takes it.
 	Bidding *connectors.AdBidding `json:"bidding,omitempty"`
 	// A target move, and an exclusion.
 	Target    *connectors.AdTarget    `json:"target,omitempty"`
 	Exclusion *connectors.AdExclusion `json:"exclusion,omitempty"`
+	// A bid: before, what the network showed; after, what was asked.
+	Bid *BidChange `json:"bid,omitempty"`
+}
+
+// BidChange is a campaign's bid, or one placement's (Placement set), in
+// micros of the account's currency. With the change's AdGroupID set it is
+// that ad group's bid instead, or one keyword's in it (KeywordID). OnlyLower makes the job refuse the
+// change unless it lowers the bid the network shows, so an agent's can
+// run without a person.
+type BidChange struct {
+	Micros    int64  `json:"micros"`
+	Auto      bool   `json:"auto,omitempty"`
+	Placement string `json:"placement,omitempty"`
+	OnlyLower bool   `json:"only_lower,omitempty"`
 }
 
 type changePayload struct {
@@ -269,7 +295,8 @@ func ActionFor(kind string) string {
 		ChangeKeywordAdd: "ad_campaign.keyword_added", ChangeNegativeAdd: "ad_campaign.negative_added", ChangeBidding: "ad_campaign.bidding_changed",
 		ChangeNegativeRemove: "ad_campaign.negative_removed", ChangeKeywordPause: "ad_campaign.keyword_paused", ChangeKeywordResume: "ad_campaign.keyword_resumed",
 		ChangeAdPause: "ad_campaign.ad_paused", ChangeAdResume: "ad_campaign.ad_resumed", ChangeTarget: "ad_campaign.target_changed",
-		ChangeExclusionAdd: "ad_campaign.exclusion_added", ChangeExclusionRemove: "ad_campaign.exclusion_removed"}[kind]
+		ChangeExclusionAdd: "ad_campaign.exclusion_added", ChangeExclusionRemove: "ad_campaign.exclusion_removed", ChangeBid: "ad_campaign.bid_changed",
+		ChangeAdGroupPause: "ad_campaign.ad_group_paused", ChangeAdGroupResume: "ad_campaign.ad_group_resumed", ChangeAdGroupBudget: "ad_campaign.ad_group_budget_changed"}[kind]
 }
 
 // QueueChange records one change for a campaign in q (a transaction, with
@@ -427,6 +454,31 @@ func (r *Runner) ApplyFindingChange(ctx context.Context, ws, changeID string, la
 			_, err := tx.Exec(ctx, `UPDATE ad_entities SET status = $3, updated_at = now() WHERE ad_account_id = $1 AND level = 'ad' AND external_id = $2`, acctID, want.AdID, statusWord(active))
 			return err
 		}
+	case ChangeAdGroupPause, ChangeAdGroupResume:
+		m, ok := o.Connector.(connectors.AdGroupManager)
+		if !ok {
+			return invalid("pause or resume ad groups")
+		}
+		active := kind == ChangeAdGroupResume
+		err = m.SetAdGroupStatus(ctx, o.Client, o.Creds, acct, want.AdGroupID, active)
+		mirror = func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE ad_entities SET status = $3, updated_at = now() WHERE ad_account_id = $1 AND level = 'ad_group' AND external_id = $2`, acctID, want.AdGroupID, statusWord(active))
+			return err
+		}
+	case ChangeAdGroupBudget:
+		m, ok := o.Connector.(connectors.AdGroupBudgetManager)
+		if !ok {
+			return invalid("set an ad group's budget")
+		}
+		if want.DailyBudgetMicros == nil || *want.DailyBudgetMicros <= 0 {
+			err = connectors.Errf(connectors.ErrInvalid, "the change names no budget")
+			break
+		}
+		err = m.SetAdGroupDailyBudget(ctx, o.Client, o.Creds, acct, want.AdGroupID, *want.DailyBudgetMicros)
+		mirror = func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE ad_entities SET daily_budget_micros = $3, updated_at = now() WHERE ad_account_id = $1 AND level = 'ad_group' AND external_id = $2`, acctID, want.AdGroupID, *want.DailyBudgetMicros)
+			return err
+		}
 	case ChangeTarget:
 		m, ok := o.Connector.(connectors.AdTargetManager)
 		if !ok {
@@ -442,6 +494,59 @@ func (r *Runner) ApplyFindingChange(ctx context.Context, ws, changeID string, la
 				return err
 			}
 		}
+	case ChangeBid:
+		if want.Bid == nil || want.Bid.Micros <= 0 {
+			err = connectors.Errf(connectors.ErrInvalid, "the change names no bid")
+			break
+		}
+		// A bid below the campaign (an ad group's, or one keyword's in it)
+		// or the campaign's own, or one placement's.
+		unit := want.AdGroupID != ""
+		var read func() (connectors.AdBid, error)
+		var set func() error
+		if unit {
+			m, ok := o.Connector.(connectors.AdUnitBidManager)
+			if !ok {
+				return invalid("set ad group or keyword bids")
+			}
+			read = func() (connectors.AdBid, error) {
+				return m.UnitBid(ctx, o.Client, o.Creds, acct, want.AdGroupID, want.KeywordID)
+			}
+			set = func() error {
+				return m.SetUnitBid(ctx, o.Client, o.Creds, acct, want.AdGroupID, want.KeywordID, want.Bid.Micros)
+			}
+		} else {
+			m, ok := o.Connector.(connectors.AdBidManager)
+			if !ok {
+				return invalid("set bids")
+			}
+			read = func() (connectors.AdBid, error) {
+				return m.Bid(ctx, o.Client, o.Creds, acct, campaignExternal, want.Bid.Placement)
+			}
+			set = func() error {
+				return m.SetBid(ctx, o.Client, o.Creds, acct, campaignExternal, want.Bid.Placement, want.Bid.Micros)
+			}
+		}
+		// What the network shows now is the change's before, and what an
+		// only-lower change is held to.
+		cur, rerr := read()
+		if rerr != nil {
+			err = rerr
+			break
+		}
+		was := Change{Bid: &BidChange{Micros: cur.Micros, Auto: cur.Auto, Placement: want.Bid.Placement}}
+		if unit {
+			was.AdGroupID, was.KeywordID, was.Keyword, was.MatchType, was.Name = want.AdGroupID, want.KeywordID, want.Keyword, want.MatchType, want.Name
+		}
+		before, _ := json.Marshal(was)
+		if _, dbErr := r.Pool.Exec(ctx, `UPDATE ad_changes SET before = $3 WHERE workspace_id = $1 AND id = $2 AND status = 'queued'`, ws, changeID, before); dbErr != nil {
+			return fail("error", "internal", dbErr)
+		}
+		if want.Bid.OnlyLower && (cur.Auto || want.Bid.Micros >= cur.Micros) {
+			err = connectors.Errf(connectors.ErrInvalid, "the bid would not go down (it is %s now), and this change may only lower it", bidText(cur))
+			break
+		}
+		err = set()
 	case ChangeExclusionAdd, ChangeExclusionRemove:
 		m, ok := o.Connector.(connectors.AdExclusionManager)
 		if !ok {
@@ -484,4 +589,12 @@ func statusWord(active bool) string {
 		return connectors.AdActive
 	}
 	return connectors.AdPaused
+}
+
+// bidText is a bid as a person reads it.
+func bidText(b connectors.AdBid) string {
+	if b.Auto {
+		return "set by the network"
+	}
+	return strconv.FormatFloat(float64(b.Micros)/1e6, 'f', -1, 64)
 }

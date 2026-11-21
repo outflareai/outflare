@@ -9,6 +9,7 @@ import type { AdSuggestion, Schemas } from "@outflare/sdk";
 // The paid ads types the SDK does not yet export by name.
 export type AdEconomics = Schemas["AdEconomics"];
 export type AdPerformanceRow = Schemas["AdPerformanceRow"];
+export type AdPerformanceDay = Schemas["AdPerformanceDay"];
 export type AdAcquisition = Schemas["AdAcquisition"];
 export type AdSetup = Schemas["AdSetup"];
 export type BrandKnowledgeSheet = Schemas["BrandKnowledgeSheet"];
@@ -42,6 +43,12 @@ export function rangeOf(days: number, endingAt = new Date()) {
 export const minorToMicros = (m: MinorMoney) => m.amount_minor * 10_000;
 export const minorList = (list: MinorMoney[] | undefined, money: (micros: number | null | undefined, currency: string) => string) =>
   list && list.length > 0 ? list.map((m) => money(minorToMicros(m), m.currency)).join(" · ") : "—";
+
+// Return on ad spend: revenue over spend in the same currency, as 3.2×.
+// Under 1× it shows two decimals, so 0.04× doesn't read as nothing.
+export const roasText = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v >= 1 || v === 0 ? v.toFixed(1) : v.toFixed(2)}×`);
+export const roasHelp =
+  "Return on ad spend: revenue in the range from first and later payments, divided by spend, in the account's currency, on Outflare's own attribution.";
 
 // A finding is one row in the decision queue: a proposed change, an alert,
 // or an automatic change that was made. The queue gains these fields from

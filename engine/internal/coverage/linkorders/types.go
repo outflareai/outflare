@@ -71,6 +71,7 @@ type Donor struct {
 	PublisherID   uuid.UUID  `json:"publisher_id"`
 	Domain        string     `json:"domain"`
 	PBN           bool       `json:"pbn"`
+	BestLink      bool       `json:"best_link"`
 	Country       string     `json:"country"`
 	Languages     []string   `json:"languages"`
 	Niches        []string   `json:"niches"`
@@ -101,10 +102,38 @@ type Donor struct {
 	// DirectContact is whether the site is worth writing to directly,
 	// computed on read (see DirectContact).
 	DirectContact DirectContact `json:"direct_contact"`
-	ArchivedAt    *time.Time    `json:"archived_at"`
-	Prices        []Price       `json:"prices"`
-	CreatedAt     time.Time     `json:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at"`
+	// EmailSearch is OutflareBot's last search of the site for who to
+	// write to; nil before the first.
+	EmailSearch *EmailSearch `json:"email_search"`
+	// AhrefsCheck is the last Ahrefs check of the site; nil before the
+	// first.
+	AhrefsCheck *AhrefsCheck `json:"ahrefs_check"`
+	// Quality is the verdict from where its traffic sits and how it links
+	// out (Assess).
+	Quality Quality `json:"quality"`
+	// Outreach is the latest Outreach enrollment of someone at the site in
+	// one of the brand's sequences, computed on read; nil when nobody at
+	// the site was ever enrolled (see DonorOutreach).
+	Outreach   *DonorOutreach `json:"outreach"`
+	ArchivedAt *time.Time     `json:"archived_at"`
+	Prices     []Price        `json:"prices"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+}
+
+// EmailSearch is the outcome of the last search of a donor's site for
+// addresses, and what it found, best first.
+type EmailSearch struct {
+	At     time.Time `json:"at"`
+	Status string    `json:"status"`
+	Emails []string  `json:"emails"`
+}
+
+// AhrefsCheck is when the site was last checked in Ahrefs and how it
+// ended: checked, no_connection, budget or failed.
+type AhrefsCheck struct {
+	At     time.Time `json:"at"`
+	Status string    `json:"status"`
 }
 
 // Order is one link order, including its current status and frozen donor
@@ -151,6 +180,7 @@ type Order struct {
 	LastCheckTargetMatch *bool      `json:"last_check_target_match"`
 	LastCheckRel         string     `json:"last_check_rel"`
 	LastCheckAnchor      string     `json:"last_check_anchor"`
+	LastCheckAnchorMatch string     `json:"last_check_anchor_match"`
 	ApprovedBy           *uuid.UUID `json:"approved_by"`
 	ApprovedAt           *time.Time `json:"approved_at"`
 	PaidBy               *uuid.UUID `json:"paid_by"`

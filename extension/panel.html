@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Outflare</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/48.png" alt="" width="20" height="20" />
+      <strong>Outflare</strong>
+      <select id="brand" aria-label="Brand" hidden></select>
+    </header>
+    <main id="app" aria-live="polite"></main>
+    <footer id="foot" hidden>
+      <span id="where"></span>
+      <button id="disconnect" class="link">Disconnect</button>
+    </footer>
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>

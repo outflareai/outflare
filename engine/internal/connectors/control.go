@@ -1,6 +1,9 @@
 package connectors
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Capabilities for mailbox allocation on outside sequencers.
 const (
@@ -61,6 +64,27 @@ type Snapshot struct {
 type Observer interface {
 	Connector
 	Observe(ctx context.Context, c *Client, creds Creds) (Snapshot, error)
+}
+
+// MailboxDay is what one mailbox did on one day, as its platform counts
+// it: campaign emails only, never warm-up.
+type MailboxDay struct {
+	Email string
+	// Day is the date, YYYY-MM-DD, in UTC.
+	Day     string
+	Sent    int
+	Replies int
+	Bounced int
+}
+
+// MailboxStatReader is a platform that can say how much each of its
+// mailboxes sent, and how many replies and bounces came back, day by day.
+// MailboxDays covers from through to (dates in UTC, both included) and
+// must not change anything on the platform. A mailbox with nothing on a
+// day may be left out.
+type MailboxStatReader interface {
+	Connector
+	MailboxDays(ctx context.Context, c *Client, creds Creds, emails []string, from, to time.Time) ([]MailboxDay, error)
 }
 
 // Controller changes which mailboxes a platform campaign sends from. Each

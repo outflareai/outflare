@@ -94,4 +94,24 @@ func TestTrackerHoneypot(t *testing.T) {
 	if err := e.pool.QueryRow(ctx, `SELECT fraud_reasons FROM tracking_link_clicks WHERE click_key = $1`, key2).Scan(&other); err != nil || len(other) != 0 {
 		t.Fatalf("a hit on another domain flagged the click: %v %v", other, err)
 	}
+
+	// A click that never went to a lander has no page with the hidden
+	// link. Its key travels on to the offer, so whoever holds it must not
+	// be able to mark the click as a bot's.
+	owner.must(200, "PUT", cpath+"/links/"+link["id"].(string)+"/destinations", map[string]any{"destinations": []any{map[string]any{"name": "Offer page", "url": "https://offers.northpeak.example/o1"}}})
+	loc3, _ := url.Parse(get(host, "/l/"+code).Header().Get("Location"))
+	key3 := loc3.Query().Get("ofclk")
+	if loc3.Host != "offers.northpeak.example" || key3 == "" {
+		t.Fatalf("the direct click went to %v", loc3)
+	}
+	if err := e.srv.FlushClicks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rec := get(host, "/hp?ofclk="+key3); rec.Code != 204 {
+		t.Fatalf("honeypot on a direct click: %d", rec.Code)
+	}
+	var direct []string
+	if err := e.pool.QueryRow(ctx, `SELECT fraud_reasons FROM tracking_link_clicks WHERE click_key = $1`, key3).Scan(&direct); err != nil || len(direct) != 0 {
+		t.Fatalf("a click with no lander was flagged: %v %v", direct, err)
+	}
 }

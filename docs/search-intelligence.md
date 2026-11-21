@@ -57,7 +57,42 @@ their brands' sites. The Search Console sign-in is read-only
 (`webmasters.readonly`), which covers URL Inspection and sitemaps.
 
 The MCP tools are `get_site_search`, `get_site_search_history`,
-`get_site_indexing` and `get_site_sitemaps`.
+`get_site_search_performance`, `get_site_indexing` and `get_site_sitemaps`.
+
+### The Performance report, live
+
+SEO overview opens on Search Console's Performance report.
+`GET /v1/brands/{brand}/seo-sites/{site}/search/performance` asks Search
+Console itself, with the workspace's own sign-in, so it shows exactly what
+Search Console shows for the same choices; the stored data above can't answer
+every mix of query, country and device. Pick:
+
+- the search type (`web`, `image`, `video`, `news`, `discover`, `googleNews`);
+- the dates, and `compare_from` and `compare_to` for a period to compare with
+  (every row then has `previous`, and rows only the earlier period had are
+  listed as lost);
+- the rows (`dimension`: `query`, `page`, `country`, `device`,
+  `searchAppearance` or `date`);
+- any number of filters, `filter=dimension:operator:expression`, with
+  Search Console's operators (`equals`, `notEquals`, `contains`,
+  `notContains`, `includingRegex`, `excludingRegex`).
+
+```sh
+# Non-branded searches in Germany, against the 28 days before
+curl -G -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/search/performance" \
+  --data-urlencode "from=2026-10-01" --data-urlencode "to=2026-10-28" \
+  --data-urlencode "compare_from=2026-09-03" --data-urlencode "compare_to=2026-09-30" \
+  --data-urlencode "filter=query:excludingRegex:northpeak|north peak" --data-urlencode "filter=country:equals:deu"
+```
+
+The page adds filters Search Console lacks: branded or non-branded searches
+(a pattern guessed from the brand's name, which you can edit), questions,
+query length, position bands, a minimum number of impressions, rows won or
+lost against the earlier period, days grouped by week or month, and the table
+as a CSV file. `hours=24` (the "24 hours" button) answers the last 24
+hours Search Console has, hour by hour; `compare_previous=true` sets them
+against the 24 hours before. Answers are kept for 15 minutes; Refresh asks again. It costs
+nothing: Search Console's API is free and has its own quota.
 
 ## A keyword target for each page
 
@@ -205,6 +240,12 @@ The history has no top 10 for these days.
 - Reading projects takes no Data API credits. `imports` in the list names the
   connections that import, and the Rankings tab shows "from SE Ranking" on
   their keywords.
+- `last_import` on each of a site's `imports` says what the last import
+  did, and the Rankings tab shows it: the project that matched and how many
+  keywords came in (`imported`), that none of the account's projects is for
+  this site, with the sites its projects are for (`no_project`, usually an
+  API key from another account or a project under a different domain), or
+  that the read failed and how (`failed` with `error_code`, such as `auth`, and `error`: SE Ranking's own explanation with the step that failed, such as reading the projects or the positions).
 - Each import is the product event `rank.imported`, with `site_id`,
   `integration_id`, `connector`, `project_found`, `keywords`, `added`,
   `days` and `skipped` (counts, never keywords or URLs).

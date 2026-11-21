@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -93,6 +94,15 @@ func TestFunnels(t *testing.T) {
 	if s2["dropped"] != 1.0 || s2["label"] != "signed_up" || s2["median_seconds"] == nil {
 		t.Fatalf("step 2: %v", s2)
 	}
+	// How long step 2 took, in ten spans of time that add up to its count.
+	ttc, _ := s2["time_to_convert"].([]any)
+	var took float64
+	for _, b := range ttc {
+		took += b.(map[string]any)["count"].(float64)
+	}
+	if len(ttc) != 10 || took != 2 || ttc[9].(map[string]any)["to_seconds"] != nil || steps[0].(map[string]any)["time_to_convert"] != nil {
+		t.Fatalf("time to convert: %v", ttc)
+	}
 	if steps[2].(map[string]any)["label"] != "First payment" {
 		t.Fatalf("label: %v", steps[2])
 	}
@@ -167,6 +177,49 @@ func TestFunnels(t *testing.T) {
 	saved := owner.must(201, "POST", base+"/insights", map[string]any{"name": "Google ads to first purchase", "spec": map[string]any{
 		"date_range": map[string]any{"preset": "last_30_days"}, "steps": funnel["steps"]}})
 	id := saved["id"].(string)
+
+	// The event dictionary: a label shows in the catalog, and an event's
+	// usage counts its last 30 days, reads its properties and says where
+	// the name is used. Values that look like a person are left out.
+	owner.must(201, "POST", base+"/catalog/events", map[string]any{"name": "plan_changed", "label": "Changed plan", "description": "Someone moved to another plan."})
+	for i := range 4 {
+		exec(`INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, occurred_at, properties)
+			VALUES ($1, $2, $3, 'track', 'plan_changed', $4, $5::jsonb)`, ws, brand, ana, t0.Add(time.Duration(i)*time.Hour),
+			fmt.Sprintf(`{"plan": "pro", "seats": %d, "by": "ana@acme.example"}`, 3+i/3))
+	}
+	exec(`INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, occurred_at) VALUES ($1, $2, $3, 'track', 'plan_changed', $4)`, ws, brand, bo, t0)
+	var labelled bool
+	for _, ev := range owner.must(200, "GET", base+"/insights/catalog", nil)["events"].([]any) {
+		m := ev.(map[string]any)
+		labelled = labelled || (m["name"] == "plan_changed" && m["label"] == "Changed plan" && m["description"] != "")
+	}
+	if !labelled {
+		t.Fatal("the catalog doesn't carry the dictionary's label")
+	}
+	usage := owner.must(200, "GET", base+"/catalog/events/plan_changed/usage", nil)
+	if usage["count"] != float64(5) || usage["people"] != float64(2) || len(usage["days"].([]any)) != 30 || usage["sampled"] != float64(5) {
+		t.Fatalf("usage: %v", usage)
+	}
+	props := map[string]map[string]any{}
+	for _, p := range usage["properties"].([]any) {
+		props[p.(map[string]any)["key"].(string)] = p.(map[string]any)
+	}
+	if len(props) != 3 || props["plan"]["share"] != 0.8 || props["seats"]["types"].([]any)[0] != "number" {
+		t.Fatalf("usage properties: %v", props)
+	}
+	if v := props["plan"]["values"].([]any); len(v) != 1 || v[0].(map[string]any)["value"] != "pro" || v[0].(map[string]any)["count"] != float64(4) {
+		t.Fatalf("plan values: %v", v)
+	}
+	if v := props["by"]["values"].([]any); len(v) != 0 {
+		t.Fatalf("an address was shown as a common value: %v", v)
+	}
+	if used := owner.must(200, "GET", base+"/catalog/events/signed_up/usage", nil)["used_in"].([]any); len(used) != 1 || used[0].(map[string]any)["kind"] != "insight" || used[0].(map[string]any)["id"] != id {
+		t.Fatalf("used in: %v", used)
+	}
+	if never := owner.must(200, "GET", base+"/catalog/events/never_sent/usage", nil); never["count"] != float64(0) || len(never["properties"].([]any)) != 0 {
+		t.Fatalf("a name never received: %v", never)
+	}
+	owner.must(400, "GET", base+"/catalog/events/Not%20A%20Name/usage", nil)
 	owner.must(400, "POST", base+"/insights", map[string]any{"name": "Bad", "spec": map[string]any{"steps": []any{}}})
 	owner.must(400, "POST", base+"/insights", map[string]any{"name": "", "spec": saved["spec"]})
 	if l := owner.must(200, "GET", base+"/insights", nil)["data"].([]any); len(l) != 1 {

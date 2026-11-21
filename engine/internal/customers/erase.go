@@ -14,7 +14,7 @@ var Erased = []Ref{
 	{"partner_proposals", "record_id"},
 	{"crm_activities", "record_id"},
 	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_calendar_events", "record_id"}, {"crm_mail_sharing", "record_id"}, {"crm_mail_sends", "record_id"},
-	{"sales_leads", "record_id"}, {"sales_drafts", "record_id"}, {"sales_messages", "record_id"}, {"sales_events", "record_id"},
+	{"sales_leads", "record_id"}, {"sales_drafts", "record_id"}, {"sales_draft_assists", "record_id"}, {"sales_feed_items", "record_id"}, {"sales_messages", "record_id"}, {"sales_events", "record_id"},
 	{"telegram_chats", "record_id"},
 	{"review_requests", "record_id"},
 	// Signals about them, with what someone wrote on them.
@@ -132,6 +132,32 @@ func Erase(ctx context.Context, tx pgx.Tx, workspaceID string, ids, emails []str
 		if _, err := tx.Exec(ctx, `UPDATE deletions SET record_id = NULL
 			WHERE workspace_id = $1 AND kind = 'transaction' AND record_id = ANY($2)`, workspaceID, ids); err != nil {
 			return nil, err
+		}
+	}
+	// A signal a person's Slack post raised quotes the post, and it sits on
+	// their company, which stays: it goes with them, found by the post.
+	if ok, err := tableExists(ctx, tx, "sales_feed_items"); err != nil {
+		return nil, err
+	} else if ok {
+		tag, err := tx.Exec(ctx, `DELETE FROM signals WHERE workspace_id = $1 AND source = 'feed'
+			AND data->>'item_id' IN (SELECT id::text FROM sales_feed_items WHERE workspace_id = $1 AND record_id = ANY($2))`, workspaceID, ids)
+		if err != nil {
+			return nil, err
+		}
+		gone["signals"] += int(tag.RowsAffected())
+		// Their posts go below, but Slack still has them: a marker of where
+		// each was (nothing about them) keeps reading the channel from
+		// storing it, and so making them, again.
+		if ok, err := tableExists(ctx, tx, "sales_feed_erased"); err != nil {
+			return nil, err
+		} else if ok {
+			if _, err := tx.Exec(ctx, `INSERT INTO sales_feed_erased(workspace_id,brand_id,feed_channel_id,slack_ts)
+				SELECT i.workspace_id,c.brand_id,i.feed_channel_id,i.slack_ts FROM sales_feed_items i
+				JOIN sales_feed_channels c ON c.workspace_id = i.workspace_id AND c.id = i.feed_channel_id
+				WHERE i.workspace_id = $1 AND i.record_id = ANY($2)
+				ON CONFLICT DO NOTHING`, workspaceID, ids); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for _, r := range Erased {

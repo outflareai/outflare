@@ -47,20 +47,27 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_jobs_processed_total` | `kind`, `outcome` (`succeeded`, `retried`, `dead`, `interrupted`, `released`) | Jobs this server ran. `interrupted` stopped for a shutdown and went back in the queue at once; `released` was still running when the shutdown grace ended and was handed back (its handler ignores cancellation). |
 | `outflare_jobs_duration_seconds`, `outflare_jobs_wait_seconds` | `kind` | How long a job ran, and how long it waited after it was due before a worker took it. |
 | `outflare_jobs_reaped_total` | `kind` | Running jobs put back in the queue because their worker stopped holding them (a crash, or a job longer than the lease). Such a job may run twice. |
-| `outflare_jobs_active`, `outflare_jobs_workers` | | Jobs running in this process, and how many workers it has (`WORKERS` plus the send queue's). |
+| `outflare_jobs_active`, `outflare_jobs_workers` | | Jobs running in this process, and how many workers it has (`WORKERS` plus the send queue's and the email verification queue's). |
 | `outflare_jobs_queued`, `outflare_jobs_scheduled`, `outflare_jobs_running` | `kind` | Whole-queue depth from the database: due now, waiting for a later time (retries, schedules), and claimed. |
 | `outflare_jobs_oldest_due_seconds` | `kind` | How long the longest-waiting due job has waited. The best single sign that workers can't keep up. |
 | `outflare_ingest_events_total` | `outcome` (`accepted`, `rejected`, `capped`) | Website events the collector received: queued, refused for their shape, or turned away by a daily limit. |
 | `outflare_ad_tracking_arrivals_total` | `network` (an ad network, or `other`), `outcome` (`click_id`, `ad_ids`, `none`) | Landing pages from paid ads (a paid `utm_medium`) and how they were tracked: the network's click id, only the tracking template's ad ids, or neither. |
 | `outflare_ad_tracking_unfilled_macros_total` | `network` | Tracking template values that arrived as the macro itself, because the network didn't fill them in. |
 | `outflare_redirect_clicks_total` | `outcome` (`counted`, `bot`, `unknown`, `error`, `dropped`) | Clicks on campaign redirect links (`/l/{code}`): a person, a link scanner or preview, a code that isn't a link, a link that couldn't be looked up, or a click dropped because too many waited to be written. Clicks are written in batches a moment later. |
-| `outflare_redirect_click_writes_total` | `outcome` (`written`, `refused_quota`, `link_gone`, `failed`, `dropped_full`) | What happened to redirect clicks when their batch was written: written, over the workspace's click quota, their link gone, the batch failed and waits for the next flush, or dropped with too many waiting. |
+| `outflare_redirect_click_writes_total` | `outcome` (`written`, `refused_quota`, `link_gone`, `failed`, `dropped_full`, `dropped_invalid`) | What happened to redirect clicks when their batch was written: written, over the workspace's click quota, their link gone, the batch failed and waits for the next flush, dropped with too many waiting, or dropped alone because the database refused its values (the rest of its batch was written). |
 | `outflare_redirect_click_buffer` | | Redirect clicks waiting in a process to be written. |
 | `outflare_tracker_postbacks_total` | `outcome` (`accepted`, `duplicate`, `updated`, `unknown_source`, `wrong_domain`, `ip_refused`, `invalid`, `unknown_click`, `expired_click`, `rate_limited`, `error`) | Tracker conversion postbacks from brands' networks, by what happened. |
 | `outflare_tracker_source_postbacks_total` | `outcome` (`queued`, `filtered`, `suspect`, `awaiting_lookup`, `sent`, `retried`, `rejected`, `unreachable`, `invalid`) | Tracker conversions sent back to traffic sources' postback URLs, by what happened. |
+| `outflare_tracker_cost_updates_total` | `outcome` (`queued`, `applied`, `no_clicks`, `replaced`, `retried`, `error`) | Tracker campaign costs entered by hand, by what happened. |
 | `outflare_tracker_fraud_flags_total` | `subject` (`click`, `conversion`), `reason` (`datacenter_network`, `repeat_click`, `fast_conversion`, `filter_list`, `honeypot`, `ip_reputation`) | Tracker clicks and conversions a fraud signal flagged. |
-| `outflare_tracker_network_cost_syncs_total` | `network` (`zeropark`), `outcome` (`synced`, `not_connected`, `no_campaign_token`, `failed_auth`, `failed_quota`, `failed_unavailable`, `failed_invalid`) | Network cost reconciliations: a campaign day's spend shared out over the tracker's clicks. |
+| `outflare_tracker_network_cost_syncs_total` | `network` (`zeropark`), `outcome` (`synced`, `targets_read`, `not_connected`, `no_campaign_token`, `failed_auth`, `failed_quota`, `failed_unavailable`, `failed_invalid`) | Network cost reconciliations: a campaign day's spend shared out over the tracker's clicks (`synced`), and a campaign's targets read with their state and bid (`targets_read`). |
 | `outflare_tracker_network_cost_micros_total` | `network`, `kind` (`matched`, `spread`, `unattributed`) | Network spend shared out, in millionths of the network's currency; each pass re-reads recent days, so compare kinds, not totals. |
+| `outflare_tracker_page_checks_total` | `kind` (`lander`, `offer`), `outcome` (`ok`, `failed`, `refused`, `discarded`) | Requests for a lander's or an offer's page to see that it still answers: a lander a link sends to about hourly, an offer every six hours, either again ten minutes after a failed check. |
+| `outflare_tracker_pages_broken` | `kind` | Landers and offers in use that failed their last two or more checks, as last counted. |
+| `outflare_tracker_page_checks_overdue` | `kind` | Landers in use not checked for 6 hours and offers for 24, as last counted. |
+| `outflare_tracking_domain_expiry_checks_total` | `outcome` (`checked`, `no_date`, `failed`) | Reads of a verified tracking domain's registration record (public RDAP) for when it runs out: once a week each, daily within 45 days of expiry. |
+| `outflare_tracking_domain_expiring` | `window` (`expired`, `7d`, `30d`) | Verified tracking domains whose registration has run out or runs out soon, as last counted. |
+| `outflare_tracking_domain_expiry_overdue` | | Verified tracking domains whose registration hasn't been read for 14 days, as last counted. |
 | `outflare_tracker_ip_lookups_total` | `outcome` (`scored`, `flagged`, `capped`, `off`, `retried`, `failed_auth`, `failed_quota`, `failed_unavailable`, `failed_invalid`) | Tracker click addresses looked up on brands' own IP reputation connections, by what happened. |
 | `outflare_tracker_ip_lookup_seconds` | | Time one IP lookup took at the brand's provider. |
 | `outflare_tracker_ip_lookups_due`, `outflare_tracker_ip_lookup_oldest_seconds` | | Click addresses waiting for an IP lookup, and how long the oldest has waited. |
@@ -103,7 +110,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_smart_lists_lists`, `outflare_smart_lists_oldest_refresh_seconds`, `outflare_smart_lists_failing` | | [Smart lists](lists.md#smart-lists): how many there are, how long since the least recently refreshed one was brought up to date (normal is under 20 minutes), and how many failed their last refresh. |
 | `outflare_rules_evaluations_total` | `trigger`, `outcome` | [Rules](rules.md) evaluated for a record: `fired`, or why not (`no_match`, `duplicate`, `cooldown`, `late`, `before_live`, `too_deep`, `manual`), and absence clocks `started` and `stopped`. |
 | `outflare_lifecycle_evaluations_total` | `level`, `outcome` | [Lifecycle stages](product-lifecycle.md) checked for a record at a level (`company`, `person`, `any`): `moved`, or why not (`no_move`, `duplicate`, `late`, `stale`, `before_live`, `not_approved`, `off`). |
-| `outflare_record_metrics_updates_total` | `outcome` | Events added to a live [metric](metrics.md): `updated`, or why not (`backfilled`, `too_old`, `no_value`). |
+| `outflare_record_metrics_updates_total` | `outcome` | Events added to a live [metric](metrics.md): `updated`, or why not (`backfilled`, `too_old`, `no_value`, `other_category`). |
 | `outflare_record_metrics_backfill_seconds`, `outflare_record_metrics_sweep_seconds` | `outcome` (backfill) | How long a metric's fill from stored events, and one window sweep, took. |
 | `outflare_lifecycle_sweep_seconds` | | How long one lifecycle inactivity sweep took. |
 | `outflare_emails_guarded_total` | `trigger`, `outcome` | Marketing emails from journeys and broadcasts that a workspace's guardrails stopped (`frequency_cap`) or held until morning (`quiet_hours`). |
@@ -124,7 +131,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_ad_conversions_oldest_queued_seconds` | | How long the oldest conversion waiting to be sent has waited. |
 | `outflare_ad_conversion_adjustments_total` | `connector`, `outcome` (`sent`, `skipped`, `failed`) | Refunds sent to ad platforms as changes to conversions already sent ([paid-media.md](paid-media.md#refunds)). |
 | `outflare_ads_feed_sends_total` | `transport` (`data_manager`, `ads_api`), `outcome` (`sent`, `failed`) | Conversions sent to Google through the conversion feed, by the path they took ([paid-media.md](paid-media.md#sending-conversions-back)). |
-| `outflare_ads_feed_batches_total` | `transport` (`data_manager`, `ads_api`, `payers_list`), `outcome` (`sent`, `failed`, `refused`) | Requests the feed made; `refused` means the Data Manager API will not take the destination and the account fell back to `ads_api`. |
+| `outflare_ads_feed_batches_total` | `transport` (`data_manager`, `ads_api`, `payers_list`, `audience`, `match_quality`), `outcome` (`sent`, `failed`, `refused`) | Requests the feed made; `refused` means the Data Manager API will not take the destination and the account fell back to `ads_api`. |
 | `outflare_ads_payers_list_members` | | People on every account's Outflare paying customers list, added together, as of the last refresh. |
 | `outflare_meeting_events_total` | `status` (`booked`, `held`, `no_show`, `canceled`) | Meeting events recorded on people's timelines ([customers.md](customers.md#meetings-as-events)). |
 | `outflare_meeting_events_pending` | | Meetings tied to a person whose latest status isn't recorded as an event yet. |
@@ -133,6 +140,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_signals_raised_total` | `source` (`event`, `journey`, `manual`, `agent`, `api`), `outcome` (`raised`, `duplicate`, `capped`, `no_record`, `skipped`) | Signals raised, or not, for the Needs attention queue ([signals.md](signals.md)). |
 | `outflare_signals_escalated_total` | | Open signals handed to owners and admins because nobody accepted them two days past their due date. |
 | `outflare_signals_open` | `state` (`on_time`, `late`) | Signals waiting for their owner. |
+| `outflare_forecast_history_kept_total` | `outcome` (`kept`, `error`) | Readings of a brand's revenue forecast kept for its week-by-week history ([revenue.md](revenue.md)). |
 | `outflare_scores_computed_total` | `trigger` (`change`, `pass`, `daily`), `outcome` (`changed`, `unchanged`, `no_record`) | Records scored ([scores.md](scores.md)). |
 | `outflare_scores_scoring` | | Scores waiting for, or in, a pass over every record. |
 | `outflare_scores_scoring_oldest_seconds` | | How long the score that has waited longest for its pass has waited. |
@@ -163,7 +171,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_partners_rewards_overdue_seconds` | | How long past its hold the oldest reward due to approve on its own has waited. |
 | `outflare_partners_imports_total` | `connector` (`tolt`), `outcome` (`done`, `failed`) | Partner program imports from another platform that finished ([moving from Tolt](partners-tolt-migration.md)). |
 | `outflare_partners_import_objects_total` | `kind` (`groups`, `links`, `partners`, `flows`, `promo_codes`, `customers`, `transactions`, `commissions`, `clicks`), `result` (`created`, `updated`, `unchanged`, `skipped`, `unreadable`: a whole kind left out, counted once) | Objects partner imports read, and what each became. |
-| `outflare_flags_requests_total` | `surface` (`site`, `api`), `outcome` (`ok`, `refused`, `error`) | Requests to decide a visitor's [feature flags](feature-flags.md): from the website script or a server. |
+| `outflare_flags_requests_total` | `surface` (`site`, `api`, `definitions`), `outcome` (`ok`, `refused`, `error`, `unchanged`) | Requests to decide a visitor's [feature flags](feature-flags.md): from the website script or a server, and a server library reading the definitions to decide by itself (`unchanged` when it already has them). |
 | `outflare_flags_request_seconds` | `surface` | Time to decide them. |
 | `outflare_flags_cache_total` | `result` (`hit`, `miss`) | Lookups of a workspace's flags answered from memory or read from Postgres (at most every 10 seconds per process). |
 | `outflare_site_consent_requests_total` | `endpoint` (`config`, `choice`), `outcome` (`ok`, `refused`, `error`) | Requests from websites' [consent banners](consent-banner.md): the banner's settings, and visitors' choices kept as consents. |
@@ -179,12 +187,14 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_reviews_page_reads_total` | `platform`, `outcome` (`success`, `pending` (still being read; the next round picks it up), `blocked`, `slow_page`, `page_failed`, `page_not_found`, `not_a_review_page`, `save_failed`, `connector_error`) | Reads of brands' [review pages](reviews.md). |
 | `outflare_reviews_new_total` | `platform` | Reviews kept for the first time. |
 | `outflare_reviews_pages` | `platform`, `state` (`ok`, `failing`, `no_reader`) | Active review pages, how many failed their last read, and how many are in a workspace with no page reader connected. |
-| `outflare_sync_runs_total` | `module` (`analytics`, `search_console`, `page_conversions`, `organic_conversions`, `ads`, `seo`), `outcome` (`success`, `internal`, `budget_reached`, `connector_*`) | Scheduled sync runs of connections. |
+| `outflare_sync_runs_total` | `module` (`analytics`, `search_console`, `search_sitemaps`, `page_conversions`, `organic_conversions`, `ads`, `seo`), `outcome` (`success`, `internal`, `budget_reached`, `connector_*`) | Scheduled sync runs of connections. |
 | `outflare_ads_item_days_synced_total` | `level` (`ad_group`, `ad`, `keyword`, `search_term`) | Days of numbers stored for ad sets, ad groups and ads (Meta and Google), and Google keywords and search terms. |
 | `outflare_ads_sync_runs_total` | `window` (`first`, `hourly`, `daily`, `weekly`, `monthly`), `outcome` | Runs of the hourly ad sync per connection, by the window each read (an account's first 90 days; 2 days every hour; 7 once a day; 35 once a week; 95 once a month) and outcome (`success` or an error code) ([paid-media.md](paid-media.md#what-is-stored)). |
+| `outflare_ads_sync_overdue` | `connector` | Connected ad platform connections whose last successful sync is older than twice their sync interval and a quarter of an hour. The interval is the workspace's (an extension's, else `OUTFLARE_ADS_SYNC_INTERVAL`, else an hour), never under the platform's floor. Paused connections don't count. Normal: 0 |
+| `outflare_ads_sync_oldest_seconds` | `connector` | Age of the oldest last successful sync among a platform's connected connections (since it was connected, for one that has never synced) |
 | `outflare_ads_clicks_harvested_total` | `connector`, `outcome` (`stored`, or an error code) | Paid clicks read from Google's `click_view` into `ad_clicks`, one per click stored, or one per refused day ([paid-media.md](paid-media.md#what-is-stored)). |
 | `outflare_ads_change_events_total`, `outflare_ads_change_event_reads_total` | `connector`; `connector`, `outcome` | Changes made on ad platforms (Google `change_event`) stored in `ad_change_events`, and the reads of each connection's history every 15 minutes with their outcome ([paid-media.md](paid-media.md#googles-own-changes)). |
-| `outflare_ads_alerts_total` | `kind` | Paid ads alerts raised as new findings, by kind (`alert.spend_anomaly`, `alert.pacing`, `alert.flatline`, `alert.zero_conversions`, `alert.disapproved`, `alert.auto_apply_on`, `alert.sends_failing`, `alert.tracking_broken`, `overspend_pause`) ([paid-media.md](paid-media.md#alerts)). |
+| `outflare_ads_alerts_total` | `kind` | Paid ads alerts raised as new findings, by kind (`alert.spend_anomaly`, `alert.pacing`, `alert.flatline`, `alert.zero_conversions`, `alert.disapproved`, `alert.auto_apply_on`, `alert.sends_failing`, `alert.sends_not_counted`, `alert.tracking_broken`, `overspend_pause`) ([paid-media.md](paid-media.md#alerts)). |
 | `outflare_ads_alert_runs_total` | `outcome` (`success`, `error`) | Runs of the paid ads alert job, once per workspace after each hourly sync. |
 | `outflare_ads_findings_total` | `kind`, `autonomy` (`auto`, `approve`, `alert`, `shadow`), `outcome` (`created`, `applied`, `recorded`) | Findings the paid ads rules wrote: new rows for a person, savings applied on their own, and what a rule would have done in shadow mode ([paid-media.md](paid-media.md#findings-and-decisions)). |
 | `outflare_ads_verdicts_total` | `kind`, `verdict` (`worked`, `did_not_work`, `not_sure`) | Verdicts on findings whose change was made, in cost per new paying customer. |
@@ -198,12 +208,25 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_pricing_oldest_read_seconds` | | Time since a read of the least recently tried pricing page ended, read or failed. Pages without a connected page reader are left out. |
 | `outflare_news_search_runs_total` | `purpose` (`topic`, `coverage`), `outcome` (`success`, `connector_needed`, `usage_limit_reached`, `connector_error`, `internal`) | Runs of saved [news searches](news-watch.md). |
 | `outflare_news_found_total` | `kind` (`article`, `coverage`) | Articles and coverage items news searches kept for the first time. |
+| `outflare_mentions_scans_total` | `outcome` (`success`, `internal`) | [Mention](mentions.md) scans of brands that have mentions on. |
+| `outflare_mentions_scan_duration_seconds` | | How long one mention scan of a brand took. |
+| `outflare_mentions_found_total` | `source`, `about` (`brand`, `competitor`) | Mentions kept for the first time. |
+| `outflare_mentions_video_searches_total` | `outcome` | Web searches for YouTube videos naming a brand or a competitor. |
+| `outflare_mentions_video_reads_total` | `outcome` (`read`, `none`, `own_channel`, `connector_needed`, `usage_limit_reached`, `connector_error`, `internal`) | Reads of a found video's watch page and captions; `own_channel` is a video the brand or a competitor posted itself, which is not kept as a mention. |
+| `outflare_mentions_podcast_searches_total` | `outcome` (`success`, `connector_error`) | Podcast directory searches for episodes naming a brand or a competitor. |
+| `outflare_mentions_episode_reads_total` | `outcome` (`read`, `transcript_unavailable`, `transcript_unreadable`) | Reads of the transcripts shows publish for found episodes. |
 | `outflare_inbound_email_received_total` | `purpose` (`support`, `ai_receipts`, `none`), `outcome` (`accepted`, `duplicate`, `unknown_address`, `bad_signature`, `too_large`, `error`) | Messages the operator's mail receiver delivered to [inbound email](inbound-email.md). |
 | `outflare_inbound_email_processed_total` | `purpose`, `status` (`processed`, `ignored`, `rejected`, `failed`) | What became of delivered messages. |
 | `outflare_inbound_email_received_bytes_total` | | Size of the inbound messages accepted. |
 | `outflare_inbound_email_raw_purged_total` | | Raw inbound messages deleted after 30 days. |
 | `outflare_exchange_rates_fetched_total` | `outcome` (`success`, `error`) | Fetches of the European Central Bank's daily exchange rates, every 6 hours on servers with inbound email. |
 | `outflare_exchange_rates_newest_age_seconds` | | Age of the newest exchange rate stored, set after each fetch. |
+| `outflare_link_orders_catalog_tables_read_total` | `source` (`google_sheet`, `xlsx`), `outcome` (`success`, `refused`, `error`) | Google Sheet links and Excel workbooks read into CSV for the Link orders catalog import ([link orders](link-orders.md)). `refused` is a private sheet, a bad link or a broken file; `error` is Google not reachable. |
+| `outflare_link_orders_email_searches_total` | `status` (`found`, `none`, `blocked`, `unreachable`, `opted_out`, `failed`) | OutflareBot's searches of donor sites for who to write to ([link orders](link-orders.md)). |
+| `outflare_link_orders_email_search_duration_seconds` | | How long one donor email search takes (histogram). |
+| `outflare_link_orders_ahrefs_checks_total` | `status` (`checked`, `no_connection`, `budget`, `failed`) | Ahrefs checks of catalog sites ([link orders](link-orders.md)). |
+| `outflare_link_orders_ahrefs_check_duration_seconds` | | How long one Ahrefs check of a catalog site takes (histogram). |
+| `outflare_link_orders_catalog_table_read_duration_seconds` | `source` | Time to read one sheet or workbook. |
 | `outflare_geoip_downloads_total` | `file` (`City`, `ASN`), `outcome` (`success`, `not_published`, `error`) | Downloads of DB-IP's monthly City Lite and ASN Lite files, checked every 6 hours by each server that answers visitors ([website tracking](website-tracking.md#where-visitors-are)). |
 | `outflare_geoip_file_age_seconds` | `file` | Age of the DB-IP file a server uses, from the day it was built; absent while the server has none. |
 | `outflare_exchange_rates_receipts_converted_total` | | AI receipts in other currencies given their US dollar amount once a rate arrived. |
@@ -273,9 +296,11 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareScriptPolicyReports` (info): browsers reported over 20 scripts in an hour that the web app didn't ship (not counting browser extensions).
 - `OutflareTxRetriesGaveUp` (warning): a request's write (a transaction or a customer events batch) lost a deadlock three times in a row and answered 500.
 - `OutflareRedirectClicksNotWritten` (warning): redirect link clicks have failed to be written for 10 minutes; people are still sent on.
+- `OutflareRedirectClicksDropped` (info): redirect link clicks were left out because the database refused their values; the rest were written.
 - `OutflareRedirectClickBacklog` (warning): over 20,000 redirect clicks have waited in one process for 5 minutes.
 - `OutflareTrackerPostbacksFailing` (warning): tracker conversion postbacks have failed to be recorded for 10 minutes.
 - `OutflareTrackerSourcePostbacksFailing` (warning): conversions sent back to traffic sources have been given up on (unreachable or an invalid URL) for 30 minutes.
+- `OutflareTrackerCostUpdatesFailing` (warning): a campaign cost entered by hand couldn't be shared out over its clicks in five tries.
 - `OutflareTrackerSuspectClicksHigh` (info): over half of the tracker clicks in 30 minutes were flagged suspect (a hosting network or repeat clicks).
 - `OutflareTrackerWeightSuggestionsSlow` (warning): suggested weights take over 5 seconds for the slowest 5% of links and flows.
 - `OutflareTrackerWeightSuggestionsFailing` (warning): suggested weights failed for 15 minutes.
@@ -285,9 +310,17 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareTrackerIPLookupsUnreachable` (info): every IP lookup for 30 minutes was given up because the provider couldn't be reached.
 - `OutflareTrackerNetworkCostsFailing` (warning): network cost reconciliation (Zeropark) has failed for 2 hours with nothing synced.
 - `OutflareTrackerNetworkCostUnattributed` (info): over a fifth of the network spend reconciled in 6 hours had no tracker click to go on.
+- `OutflareTrackerPageChecksDiscarded` (warning): every lander and offer check for 30 minutes was thrown away because no page could be reached at all.
+- `OutflareTrackerPageChecksBehind` (warning): some landers in use haven't been checked for over 6 hours, or offers for over 24.
+- `OutflareTrackingDomainExpiryReadsFailing` (warning): every read of a tracking domain's registration record has failed for 6 hours.
+- `OutflareTrackingDomainExpiryReadsBehind` (warning): some verified tracking domains haven't had their registration read for over two weeks.
+- `OutflareMailboxStatsReadsFailing` (warning): every read of mailboxes' sent, reply and bounce counts from one sequencer has failed for 6 hours.
 - `OutflareTrackerHoneypotFailing` (info): hits on the landers' hidden link (`/hp`) have failed to flag their clicks for 15 minutes, so bots crawling landers aren't being flagged.
 - `OutflareTrackerLanderClicksFailing` (warning): lander clicks (`/click`) have failed for 10 minutes, so visitors on landers reach the fallback page instead of an offer.
 - `OutflareGeoFilesStale` (warning): a server's DB-IP city or network file is over 40 days old, so new visits and clicks get older city and network data.
+- `OutflareLinkOrderSheetsUnreachable` (info): Google Sheet links for the Link orders catalog import could not reach Google three or more times in an hour; file uploads still work.
+- `OutflareDonorAhrefsChecksFailing` (warning): over half of the Ahrefs checks of catalog sites in six hours failed at Ahrefs.
+- `OutflareDonorEmailSearchesFailing` (warning): over half of the donor email searches in six hours failed in Outflare itself (not a site refusing).
 - `OutflareGeoDownloadsFailing` (info): DB-IP file downloads failed at every check for a day; the files in use stay until they're stale.
 - `OutflareJobKindTakesWorkers`: one job kind has held over half the job workers for 10 minutes, so other jobs and, through the shared database connections, page loads wait.
 - `OutflareJobsReaped`: jobs ran past their lease (their worker died mid-job) and were put back in the queue, so they may run twice.
@@ -307,9 +340,24 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareActionsStuckRunning`: an agent change started running and never recorded how it ended.
 - `OutflareActionsFailing`: over 50 agent changes an hour ran and got an error answer.
 - `OutflareAdChangesFailing`: more than three changes to ad campaigns (pausing, resuming, budgets) failed in an hour.
+- `OutflareDestinationsBehind`: a customer event has waited over 30 minutes to go to a destination.
+- `OutflareDestinationSendsFailing`: over half the customer events sent to one kind of destination (webhook, Slack, GA4, HubSpot, BigQuery, Snowflake) failed in an hour.
+- `OutflareBrandFilesNotStored`: files uploaded to brands could not be written to file storage.
+- `OutflareBrandFilesGrowingFast`: over 20 GB of brand files were uploaded in a day.
+- `OutflareGenerationsFailing`: pictures, videos or voice recordings brands asked their AI accounts for are failing for a reason that is not theirs to fix.
+- `OutflareGenerationsTimingOut`: requests for pictures, video or voice are not finishing within 45 minutes.
+- `OutflareTalkingVideosFailing`: talking videos, or edits of them, are ending without a video.
+- `OutflareVideoFinishSlow`: finishing or stitching talking videos with ffmpeg takes over 5 minutes.
+- `OutflareCreativeRendersFailing`: ads are failing to draw from their creatives' pictures.
+- `OutflareCreativeRendersSlow`: drawing an ad from a creative takes over 4 seconds at p95.
+- `OutflareRecordingsNotStored`: parts of session recordings could not be written to file storage.
+- `OutflareRecordingDeletesBehind`: over a thousand deleted or expired recordings have waited two hours for their files to be removed.
+- `OutflareRecordingsGrowingFast`: over 50 GB of session recordings were stored in a day.
 - `OutflareAdsFeedSendsFailing`: over a quarter of the conversions sent through the conversion feed (Data Manager, or the Ads API fallback) failed in an hour.
 - `OutflareAdsFeedFallingBack`: the Data Manager API refused an account's destination, so its sends fell back to the Ads API.
 - `OutflarePayersListRefreshFailing`: the daily refresh of the paying customers lists failed more than twice in a day.
+- `OutflareAdAudienceSyncFailing`: syncing audiences to ad networks failed more than twice in a day.
+- `OutflareAdMatchQualityReadFailing`: reading match quality from ad networks failed more than twice in a day.
 - `OutflareContentPublishesFailing` (warning): over three publications to brands' CMSs failed in an hour; each publication's error on its item says why.
 - `OutflareAccountIncidentsCritical` (warning): a critical incident on a brand's external account has been open for a day; automated use of it is stopped until a person resolves it.
 - `OutflareAccountTakeoverWaiting` (warning): a takeover of a brand's external account (MFA, a CAPTCHA, a passkey or a consent screen) has waited more than four hours for a person to start it.
@@ -325,6 +373,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareAdTestsFailing`: more than three steps of tests inside ad networks (starting, reading or ending a Google Ads experiment or Meta split test) failed in six hours.
 - `OutflareAdDraftsFailing`: more than three steps of approved new ads (making them paused on Google Ads or Meta, or turning them on) failed in six hours.
 - `OutflareAdSyncLagging` (warning): no ad sync has succeeded for over three hours though they run hourly; today's spend, the alerts and the suggestions are stale.
+- `OutflareAdSyncOverdue` (warning): connections to one ad platform have had no successful sync for over twice their sync interval, for an hour; that platform's syncs are failing or the workers can't keep up with the interval.
 - `OutflareAdSyncsFailing` (warning): hourly ad syncs fail more often than they work over three hours.
 - `OutflareAdClickHarvestFailing` (warning): Google refused the click harvest (`click_view`) more than three times in six hours; the harvest stops at its last day and Google keeps only 90.
 - `OutflareAdChangeEventsFailing` (warning): reads of ad platforms' change histories (Google `change_event`, every 15 minutes) fail more often than they work.
@@ -391,6 +440,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - over 500 meetings waiting 30 minutes for their meeting event on people's timelines
 - over 1,000 deals, support conversations or tasks waiting 30 minutes for their timeline event
 - more than 50 open signals past their due date for six hours, outnumbering the ones on time (`OutflareSignalsLate`, info)
+- more than five failed readings of brands' revenue forecasts in six hours (`OutflareForecastHistoryFailing`, warning)
 - a score waiting over an hour for its pass over every record (`OutflareScoresPassStuck`, warning)
 - most reads of conversations for signals failing (`OutflareConversationReadsFailing`, warning)
 - routing records to their owners failing (`OutflareRoutingFailing`, warning)
@@ -421,6 +471,9 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - over half of pricing page reads failing (bot checks aside)
 - a news search over an hour past its time
 - over half of news search runs failing with a provider or internal error
+- over a fifth of mention scans failing
+- over 30% of video caption reads failing inside Outflare
+- over half of podcast searches failing
 - over half of news article reads failing to reach the page
 - over half of story ideas and release drafts failing at the AI call
 - over half of the AI's story work (ideas, release drafts, pitch openers, reading replies) failing at the AI call
@@ -450,6 +503,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - over a quarter of support replies failing to send, a support reply waiting over 5 minutes for a worker, or replies taking over 20 seconds to send at the 95th percentile (info)
 - the support SLA check failing or not running for 15 minutes, or taking over 5 seconds at the 95th percentile (info)
 - over 5% of website chat requests failing, or many chat requests rate limited (info)
+- a support import (conversations copied from Intercom) failing for 30 minutes (`OutflareSupportImportFailing`, warning), not caught up in over 6 hours (`OutflareSupportImportBehind`, warning), or its steps taking over 2 minutes at the 95th percentile (`OutflareSupportImportSlow`, info)
 - over 20% of support assistant runs failing (`OutflareSupportAssistantFailing`), or the assistant taking over 45 seconds to decide at the 95th percentile (`OutflareSupportAssistantSlow`, info)
 - searches of the website and Slack for missing answers failing most of the time (`OutflareKnowledgeAnswerSearchFailing`)
 - most website imports into knowledge failing (`OutflareKnowledgeWebsiteImportsFailing`, info)
@@ -507,9 +561,11 @@ The email privacy check (`crm_mail.privacy_check`) counts each email it reads in
 ## Sales email
 
 The Sales email row uses the shared per-kind throughput, duration, queue depth
-and oldest-due metrics for `sales.send` and `sales.sync`. Additional bounded
-metrics count committed send results (`outflare_sales_send_results_total{status}`)
-and newly retained sync messages (`outflare_sales_stored_messages_total{direction}`).
+and oldest-due metrics for `sales.send`, `sales.sync` and `sales.reply_import`
+(the conversations Outflare opens from replies it reads from a sequencer).
+Additional bounded metrics count committed send results
+(`outflare_sales_send_results_total{status}`) and newly retained sync and
+reply-import messages (`outflare_sales_stored_messages_total{direction}`).
 Duplicate provider copies do not increase the stored-message count.
 
 `outflare_sales_messages{status}` and `outflare_sales_oldest_message_seconds{status}`
@@ -517,7 +573,7 @@ report outstanding queued, sending, failed and uncertain sends from the database
 They expose no ids or message content. Uncertain means the provider may already
 have accepted the message; it must be reconciled before any retry.
 
-- `OutflareSalesJobsFailing`: Sales send or sync jobs repeatedly retry or die.
+- `OutflareSalesJobsFailing`: Sales send, sync or reply import jobs repeatedly retry or die.
 - `OutflareSalesSyncDelayed`: a mailbox poll is over fifteen minutes overdue.
 - `OutflareSalesSendsStuck`: a queued or sending message is over ten minutes old.
 - `OutflareSalesSendUncertain`: a provider outcome remains uncertain for ten minutes.
@@ -528,3 +584,12 @@ Sales reporting source reads export `outflare_sales_reporting_read_seconds` by r
 
 - `OutflareSalesReportingFailing` (warning): more than half of at least five source reads fail over fifteen minutes.
 - `OutflareSalesReportingSlow` (info): source reads repeatedly take over five seconds at the 95th percentile.
+
+Discovery lane and execution-history reads use the Sales reporting source panels and alerts, grouped by the bounded `lanes` and `trace` read kinds. Errors include invalid source receipts; latency includes source query time and response validation. No queries, URLs, company identities or run IDs enter metric labels.
+
+The **Sales AI drafts** dashboard row shows personal preview results, job outcomes,
+p95 latency and oldest pending preview age. `outflare_sales_draft_results_total`
+uses only `ready`/`failed`; `outflare_sales_oldest_draft_seconds` uses only
+`queued`/`running`. `OutflareSalesDraftsStuck` warns about abandoned work and
+`OutflareSalesDraftsFailing` about repeated failures. Check the `sales.draft_assist`
+job and workspace AI connection/budget; a failed preview does not send an email.

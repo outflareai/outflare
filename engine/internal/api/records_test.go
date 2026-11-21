@@ -15,12 +15,14 @@ func TestCatalog(t *testing.T) {
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws + "/catalog"
 
-	// Every workspace starts with people and companies, the Deal type, and
+	// Every workspace starts with people, companies, customer accounts, the
+	// Deal type, and
 	// the shared option lists.
 	c := owner.must(200, "GET", base, nil)
 	types := c["types"].([]any)
-	if len(types) != 3 || types[0].(map[string]any)["key"] != "person" || types[1].(map[string]any)["plural"] != "Companies" ||
-		types[2].(map[string]any)["key"] != "deal" || len(types[2].(map[string]any)["fields"].([]any)) != 12 {
+	if len(types) != 4 || types[0].(map[string]any)["key"] != "person" || types[1].(map[string]any)["plural"] != "Companies" ||
+		types[2].(map[string]any)["key"] != "customer_account" ||
+		types[3].(map[string]any)["key"] != "deal" || len(types[3].(map[string]any)["fields"].([]any)) != 12 {
 		t.Fatalf("built-in types: %v", types)
 	}
 	sets := map[string]bool{}
@@ -86,10 +88,10 @@ func TestCatalog(t *testing.T) {
 
 	// Archiving a type hides it unless asked for.
 	owner.must(200, "PATCH", base+"/types/contract", map[string]any{"archived": true})
-	if n := len(owner.must(200, "GET", base+"/types", nil)["data"].([]any)); n != 3 {
+	if n := len(owner.must(200, "GET", base+"/types", nil)["data"].([]any)); n != 4 {
 		t.Fatalf("types without archived: %d", n)
 	}
-	if n := len(owner.must(200, "GET", base+"/types?archived=true", nil)["data"].([]any)); n != 4 {
+	if n := len(owner.must(200, "GET", base+"/types?archived=true", nil)["data"].([]any)); n != 5 {
 		t.Fatalf("types with archived: %d", n)
 	}
 

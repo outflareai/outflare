@@ -63,23 +63,35 @@ Making the same link twice returns the one you already have. Pages must be
 ## Redirect links
 
 In the app, campaigns with a traffic source or redirect links are also on
-**Tracker → Campaigns** (`G` then `J`), with their visits, conversions,
-revenue, profit and ROI for the last 7 days. Opening one shows its editor:
-**General** (traffic source, name, redirect mode), **Destination** (the
+**Tracker → Campaigns** (`G` then `J`), with their tracker clicks,
+conversions, revenue, cost, profit and ROI for the dates you pick (the last 7
+days to start with). Sort by any column, press **Report** on a row to open
+the tracker report on that campaign, and tick **Show archived** to find a
+campaign you archived and restore it. A new campaign needs a **fallback
+page**: where a click goes when no path or offer takes it. Opening a campaign
+shows its editor in the page, with a **Back to campaigns** button, **View
+report** and **Archive** at the top. The **campaign URL** to paste into the
+ad network sits right under the campaign's name, with a **Copy URL** button,
+whichever tab is open. The tabs are **Settings** (traffic source, name,
+fallback page, cost model, redirect mode), **Landers and offers** (the
 campaign's own rule-based paths, each with its landers and offers, their
 weights and share of the clicks, and the suggested weights to apply; or a
-shared flow instead) and **Tracking** (the traffic source's parameters and
-postback), with the campaign URL to paste into the ad network beside them.
+shared flow instead) and **Tracking parameters** (the traffic source's
+parameters and postback).
 The editor works on the campaign's first redirect link, and makes one when
 it has none. **Tracker → Offers**, **Landers** and **Flows** list the
 brand's [offers](#offers), [landers](#landers) and [flows](#flows) with
-today's clicks and what uses each. An offer opens in a sheet with a token
+today's clicks, how many places use each and whether its page is online.
+Search the list, tick rows to delete several at once, and use **Edit**,
+**Duplicate** and **Delete** on a row. Clicking a row opens its details in
+the page, with a **Back** button and an address of its own. An offer has a token
 picker under its URL, a warning while it can't carry the click id, and
 **Preview** with test values; a lander shows each call to action's click URL
 and the script for its page; a flow opens with the campaign editor's paths,
 and asks before a save that changes more than one link.
 **Tracker → Traffic sources** and **Affiliate networks** start each new one
-from a gallery of the templates below, with Custom first. A traffic source's
+from a gallery of the templates below, with Custom first, and open each one
+in the page with a **Back** button, like an offer. A traffic source's
 form previews the campaign URL as you edit its parameters and won't save
 while a value still reads `REPLACE`; an affiliate network's form shows its
 postback URL once, after it is made or when you make a new one.
@@ -115,6 +127,9 @@ https://links.northpeak.example/l/k7m2pq9x
   left before the page loaded, or went to a page without the snippet.
 - Clicks from link scanners and previews (Slack, mail security filters)
   are kept but not counted. Each link and campaign shows its `clicks`.
+  The fetchers that build a shared link's preview (Meta's
+  `facebookexternalhit`, WhatsApp) and uptime or speed checkers count as
+  previews too, though their user agent doesn't say "bot".
 - No address or user agent is stored with a click: only when it happened,
   whether it looked automated, and what they say about it: the country,
   region, city and network, the device with its maker and model, the
@@ -162,6 +177,18 @@ A campaign's `redirect_mode` says how its redirect links send people on:
 A redirect code that doesn't exist on a tracking domain (mistyped, or from a
 deleted link) shows a not found page, or goes to the domain's fallback page:
 `PUT /v1/brands/{brand}/tracking-domains/{id}/fallback`.
+
+**When the domain's registration runs out.** Every link on a tracking domain
+stops working when the domain itself expires, and someone else can then
+register it. Outflare reads each verified tracking domain's public
+registration record (RDAP, which registries publish with no account or key)
+once a week, and daily within 45 days of the date. The domain shows it
+(`registration_expires_at`; the Domains page says "Registered until", then
+counts the days down in amber and red), and the brand gets the
+`tracking_domain.expiring` [alert](alerts.md) 30 days before, 7 days before
+and when it has run out, by email, Slack or Telegram as it chose. Renewing
+is yours to do, at your registrar. Some country registries publish no date;
+those domains show none and raise no alert.
 
 ### Direct mode
 
@@ -212,7 +239,20 @@ the click's visit knew the person, it also goes on their timeline as
 `tracker.converted`. It takes `cid` (or `clickid`, `click_id`, `subid`),
 `payout` (or `sum`, `revenue`, `amount`), `currency`, `txid` (or
 `transaction_id`, `orderid`), `type` (such as `lead` or `sale`), `status`
-(`approved`, `pending` or `declined`) and `p1` to `p20`.
+(`approved`, `pending` or `declined`) and `p1` to `p20`. With `converted_at`
+(or `date`) it carries its own time: not in the future, and not before its
+click (a day-only date on the click's day is read as the click's time).
+
+A postback that names the click twice is read by its `ofclk`: when `ofclk`
+holds a click key (16 letters and digits) it wins over `cid` and the other
+names, so a backend that also passes the ad network's own click id as `cid`
+still credits the click.
+
+A network that has no value for a parameter leaves its placeholder as it is
+(`status={status}`, `#TYPE#`). Outflare reads such a parameter as left out,
+so the conversion still counts; only an unfilled click id is refused, with
+a message that says so. **Setup → Postback URL** starts from the
+placeholders the network's template has and leaves the rest off.
 
 A source has:
 
@@ -221,8 +261,10 @@ A source has:
   (30 days unless set);
 - a **duplicate policy** for a transaction id seen before: ignore it, record
   a new conversion, update the one recorded (a status change), or add its
-  payout (an upsell). Without a transaction id, the click and type stand in
-  for it.
+  payout (an upsell). An update changes only what the postback names: an
+  approval with no payout keeps the payout first reported, and one with no
+  status keeps the status. Without a transaction id, the click and type
+  stand in for it.
 
 Postbacks answer only on the brand's own verified tracking domain, at up to
 6,000 a minute per source. Rotating a source's secret retires its old URL at
@@ -246,7 +288,9 @@ bots out unless `bots=true`. Use them to find a click id for a test
 conversion, or to see what a campaign's clicks did. In the app, **Tracker →
 Logs** shows them beside the conversions, postbacks in and out, and the
 postbacks that weren't recorded, grouped by why with the fix; **Live**
-refreshes it every few seconds until paused.
+refreshes it every few seconds until paused. A row opens with every field
+recorded for it and its click id to copy, in the page, and **Back** returns
+to the same log with its filters.
 
 The **conversion log** (`GET /v1/brands/{brand}/tracker-conversion-log`) keeps
 every postback and pixel call of the last 30 days: what it sent, what Outflare
@@ -270,8 +314,18 @@ An **offer** is a page the brand sends clicks to, usually on an affiliate
 network (`POST /v1/brands/{brand}/offers`). It has:
 
 - a **URL**, which can carry tokens. Its network (a postback source) adds its
-  click id parameter unless the URL carries `{click_id}`; `missing_click_id`
-  says when neither does, so postbacks couldn't name the click;
+  click id parameter unless the URL carries `{click_id}`;
+- a **click id delivery** (`click_id_delivery`), which says how the click id
+  reaches whoever reports the offer's conversions: `first_party` (a page of
+  the brand's own, which reads the `ofclk` every redirect adds, so its URL
+  needs no `{click_id}`), `affiliate` (someone else's page, whose URL must
+  pass `{click_id}` on in the network's parameter), `unattributed` (no
+  conversion is expected to name the click) or `auto`, the default, which
+  works it out: a `{click_id}` in the URL or the network's parameter, else
+  `ofclk` for a page on one of the brand's domains or tracking domains.
+  `click_id_via` is the answer (`template`, `network`, `ofclk` or `none`),
+  and `missing_click_id` is true only when a conversion is expected to name
+  the click and nothing carries its id;
 - a **payout** and currency, with **payouts by country** before it. With
   `payout_mode` `postback`, a conversion takes the payout its postback sends,
   and the offer's when it sends none; with `fixed`, always the offer's;
@@ -284,9 +338,17 @@ network (`POST /v1/brands/{brand}/offers`). It has:
 Give a link's destination an `offer_id` instead of a `url` to send it to an
 offer. The destination keeps the offer's URL, and a new URL on the offer goes
 to every destination at once. An offer that is a destination can't be
-archived. Each conversion says the offer its click went to (`offer_id`, and
+archived, but it can be deleted (`DELETE` on the offer, or **Delete** on
+**Tracker → Offers**): that takes it off every link and flow that sends to
+it, stops it being a fallback and archives it, and the reports keep its
+clicks and conversions. Setting its status back to `active` restores it, but
+not onto the links it was on. Each conversion says the offer its click went to (`offer_id`, and
 `?offer=` on the ledger). A conversion cap counts every server's conversions
 within a minute, so a few clicks past it can still go to the offer.
+
+An offer a link sends to is also checked every six hours to see that its
+page still answers, with an alert when it doesn't; see "Is the page still
+answering?" under Landers. Turn it off per offer with `check_enabled: false`.
 
 ### Landers
 
@@ -312,6 +374,34 @@ click is kept (`GET /v1/brands/{brand}/lander-clicks`), with its call to
 action and where it went, and gives the click the offer it went to, so its
 conversions get that offer's payout. Lander clicks count against the
 destinations' and offers' daily caps.
+
+A lander that is a destination can't be archived, but it can be deleted
+(`DELETE` on the lander, or **Delete** on **Tracker → Landers**): that takes
+it off every link and flow it is on and archives it, and its clicks stay in
+the reports. Setting its status back to `active` restores it, but not onto
+the links it was on.
+
+**Is the page still answering?** Outflare asks each lander that a link sends
+to for its page about once an hour (as OutflareBot, with the lander's tokens
+left empty, so no click is behind the request), and again ten minutes after
+a failed check. The lander shows what it found (`check_status`, `check_code`; the
+Landers tab's Page status column, as Online, Offline or Not checked): `ok`, `failing` after one failed check, and
+`broken` after two in a row: not found, a server error, a domain that can't
+be found, a bad certificate, or no answer within ten seconds. A lander that
+becomes broken raises the `tracker.link_broken` [alert](alerts.md), once
+each time it starts, so you hear by email, Slack or Telegram while clicks
+are being wasted. A page that turns automated requests away (401, 403, 429)
+shows as `refused`: it can't be checked, and isn't counted as broken.
+Changing a lander's URL starts its checks afresh.
+
+**Offers are checked too**, in the same way and with the same alert, but
+every six hours instead of hourly: an offer is usually a network's own
+tracking link, and the network counts each request as a click with no
+visitor behind it (the offer's tokens are left empty). Each offer has a
+switch, `check_enabled` ("Check that this offer still answers" on its
+form), on unless you turn it off; off, the offer is never asked for and
+shows "Not checked". Plain destinations that are neither a lander nor an
+offer are never asked for.
 
 ### Suspect clicks and conversions
 
@@ -432,7 +522,12 @@ Conditions combine with AND, and the values in one condition with OR:
 | `field1` to `field20` | The click's custom fields |
 
 Text matches whole values, without regard to case. A link has up to 10
-paths, each with up to 20 conditions and 20 destinations.
+paths, each with up to 20 conditions. Every list of destinations (a path's,
+and the link's default ones) takes up to 100 landers and up to 100 offers and
+pages. The two are split on their own: a click goes to one lander by the
+landers' weights, and the lander's call to action to one offer or page by
+theirs, so 25 landers and 31 offers at the same weight get 1/25 and 1/31 of
+the clicks each, and every lander can lead to every offer.
 
 ### Flows
 
@@ -449,12 +544,12 @@ of all of them. A flow that links use can't be archived.
 ### Cost models
 
 A tracker campaign's **cost model** (`cost` on the campaign, and Cost model
-on its General tab) says how the tracker report works out what its clicks
+on its Settings tab) says how the tracker report works out what its clicks
 cost:
 
 | Model | Cost |
 | --- | --- |
-| `token` (default) | The click's share of what the network reported spending, once reconciled (Network cost, below); until then, what the traffic source reported on each click with the `{cost}` token. Likely bots count: the network charged for them |
+| `token` (default) | The click's share of what the network reported spending, once reconciled (Network cost, below), or of a cost you entered by hand (Cost by hand, below); until then, what the traffic source reported on each click with the `{cost}` token. Likely bots count: the network charged for them |
 | `cpc` | A fixed `amount` a click (likely bots left out) |
 | `cpa` | A fixed `amount` a conversion (declined ones left out) |
 | `revshare` | A `share` (percent) of each conversion's payout |
@@ -463,6 +558,44 @@ A fixed amount is in the campaign's `currency`, else its traffic source's,
 else the brand's; a revshare is in the payout's currency. The report shows
 it in the brand's currency at the latest rate. CPM waits for impressions,
 which come with ad syncing. Synced ad spend stays in the site report.
+
+### Cost by hand
+
+For a network whose cost Outflare can't read and that sends no `{cost}`
+token, enter what a campaign cost: Tracker → Logs → Cost updates, or
+`POST /v1/brands/{brand}/tracker-cost-updates` (MCP `update_tracker_costs`).
+An update names the campaign, the days (`from` and `to`, both included, in
+the brand's reporting time zone, 31 at most, none in the future) and the
+`amount`, in the campaign's traffic source's currency:
+
+```sh
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"updates":[{"campaign_id":"'$CAMPAIGN'","from":"2026-10-01","to":"2026-10-07","amount":"125.40"}]}' \
+  "$URL/v1/brands/$BRAND/tracker-cost-updates"
+```
+
+A job shares the amount out evenly over every click of the campaign in
+those days, likely bots too, to the millionth, so the tracker report's cost
+for the period is the amount you entered and every breakdown has cost. The
+answer is `202` with the queued updates; `GET .../tracker-cost-updates` (MCP
+`list_tracker_cost_updates`, and the same tab) shows how each went:
+`applied` with the clicks that carry it, or `failed` with why (days with no
+clicks have nothing to carry a cost).
+
+- Entering the same days again replaces what was there: the later update
+  stands whichever job runs first, and an earlier one that would run after
+  it ends `failed`, saying it was replaced. One call names a campaign's day
+  once (two amounts for one day are refused). `"mode": "clear"` (with no
+  amount) puts the clicks back on the cost they carried themselves.
+- A click that arrives after an update has no share of it. For a day that
+  is still running, enter the day's cost again once it is over: the later
+  update covers every click of the day.
+- A call takes up to 500 updates, all queued or none. **Upload CSV** on the
+  tab reads a file with `campaign, from, to, amount` on each line (the
+  campaign by its name, code or id), with or without a header line.
+- Never two costs at once: a campaign whose cost model isn't `token`, or
+  whose network reports its cost for those days (Network cost, below), is
+  refused with `409`.
 
 ### Network cost
 
@@ -489,6 +622,28 @@ log) beside its share (`network_cost`), which the reports use. What each
 network reported per campaign and day, and how it was shared out
 (`matched`, `spread`, `unattributed`), is in `GET /v1/brands/{brand}/network-costs`
 (MCP `list_network_costs`).
+**Targets.** `GET /v1/brands/{brand}/network-targets` (MCP `list_network_targets`,
+and the Targets table in Tracker → Traffic sources) shows what each target
+of each network campaign did over a range of days: the tracker's clicks,
+their cost, the conversions they brought, their payouts as revenue, profit
+and ROI, most costly first. Once the network is connected and its campaigns
+are synced, **Pause** stops the target on the network (the campaign keeps
+running on its others) and **Resume** starts it again: each is a queued
+change on your own account, through `POST .../ads/campaigns/{id}/exclusions`
+([paid media](paid-media.md)).
+
+Each target also shows its **state** and its **bid** as the network holds
+them. Outflare reads them with the cost, about every 15 minutes, for the
+targets that had traffic in the last 30 days (`seen_at` says when), so a
+target paused in the network's own panel shows as paused here, and one the
+network holds back (over budget, blocked, its source paused) shows as
+stopped with the network's word for it. Click a bid to change it: the new
+bid is a queued change through `POST .../ads/campaigns/{id}/bid` with the
+target as `placement`, shown beside the old one until it is applied. A
+change made here shows straight away and stays until the network has been
+read again; after that the network's own figure shows, so a change someone
+makes in the network's panel wins.
+
 In Tracker → Traffic sources, the Cost column says whether a source's cost is
 exact from its network or comes from the cost token, and a network source's
 form shows how its last days' spend was shared out, with a link to connect
@@ -578,6 +733,65 @@ answers 429 or 5xx, never follows a redirect and only reaches public
 addresses. `GET .../traffic-sources/{id}/postbacks` lists the sends with the
 URL called and what the network answered.
 
+Every conversion says what became of it: `network_postback` on
+`GET .../tracker-conversions`, and the **Traffic source told** column of the
+Logs tab's Conversions. It is `sent`, `queued` or `failed` (its latest send),
+or the reason no send was made: `no_traffic_source` (its campaign has no
+active traffic source), `no_postback_url` (the source has none, or its URL
+still holds `REPLACE`), `suspect`, `awaiting_lookup` (its click's address is
+still being looked up), `filtered` (a type or status the rules leave out) or
+`below_minimum`.
+
+A send carries `warning: no_source_click_id` when the postback URL asks for
+`{source_click_id}` and the conversion's click arrived without the network's
+click id: the call went out, but the network can't tell which click to
+credit. Check that the ad's URL passes the network's click id in the
+parameter the traffic source names.
+
+A send can be sent again: **Send again** on a row of the Logs tab's Postbacks
+out, or `POST .../traffic-sources/{id}/postbacks/{send}/resend`. It goes out
+with the status and payout it was queued with, to the source's postback URL
+as it is now, so a send that failed on a wrong URL goes through once the URL
+is fixed. A send that is still queued is refused (`409`), and so is one whose
+conversion has been flagged as suspect since.
+
+### What Outflare adds to a destination
+
+A click's destination, whether a lander, an offer, a page or the link's own
+page when nothing else is open, is built in one place, by the same rules on
+the first redirect and on a lander's `/click`:
+
+| Parameter | Who sets it |
+| --- | --- |
+| `ofclk` | Outflare: the click's id, once, last. A click that couldn't be counted carries none. |
+| `ofc`, `utm_*` | Outflare: the campaign's and the link's, once. |
+| A network's own parameter, such as `subid={click_id}` | You. The token is filled in and the parameter kept. |
+| The ad network's click id (`{source_click_id}`) | The network. It is never used as Outflare's click id, or the other way round. |
+| Everything else, repeated parameters and the fragment included | You. Kept as written. |
+
+A URL that carries `utm_*`, `ofc` or `ofclk={click_id}` is saved without
+them, since the redirect adds each one itself: what the API returns is what
+is saved. Any other `ofclk` (a fixed value, an empty one, another token)
+would name a different click than the redirect's, so saving it is refused
+with `invalid_request` rather than one of the two being picked. A URL saved
+before that still redirects, with the click's own `ofclk` in place of the
+one it had. Building a destination again from its own result, for the same
+click, gives the same URL.
+
+To see it before a click does, preview a URL: `GET
+/v1/brands/{brand}/destination-preview?destination=...&campaign=...` (the MCP tool
+`preview_destination`, and "Show what a click gets" on the offer and lander
+forms). It returns the URL as given, as it would be saved, and the
+`effective_url` a click would go on to, with who set each parameter (the
+click, the campaign, the link, a token or you) and which of yours were
+replaced. The preview is built by the redirect's own code for a made-up
+click, so the two agree, and it counts nothing: no click and no visit. A
+URL that can't be saved is refused by the preview with the same message.
+
+A lander's `/click` takes one click id. The same one repeated counts as
+one; two different ones, an empty one or a malformed one go to the
+domain's fallback page (or `404`), never on to an offer.
+
 ### Tokens in a destination
 
 A link's page can carry tokens each redirect click fills in, such as
@@ -652,7 +866,7 @@ traffic their code didn't bring, or lose imported partner links.
 | `GET`, `PUT /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths` | `analytics.read`, `analytics.manage` |
 | `PUT /v1/brands/{brand}/tracking-domains/{id}/fallback` | `mailboxes.manage` |
 | `GET`, `POST /v1/brands/{brand}/postback-sources`; `GET`, `PATCH .../{id}`; `POST .../{id}/rotate` | `analytics.read`, `analytics.manage` |
-| `GET /v1/brands/{brand}/tracker-conversions` (filter by `source`, `campaign`, `status`, `offer`) | `analytics.read` |
+| `GET /v1/brands/{brand}/tracker-conversions` (filter by `source`, `campaign`, `status`, `offer`; page with `cursor=next_cursor`) | `analytics.read` |
 | `GET /v1/brands/{brand}/affiliate-network-templates` | `analytics.read` |
 | `GET`, `POST /v1/brands/{brand}/offers`; `GET`, `PATCH .../{id}` | `analytics.read`, `analytics.manage` |
 | `GET`, `POST /v1/brands/{brand}/landers`; `GET`, `PATCH .../{id}` | `analytics.read`, `analytics.manage` |
@@ -669,6 +883,8 @@ traffic their code didn't bring, or lose imported partner links.
 | `GET`, `POST /v1/brands/{brand}/traffic-sources` | `analytics.read`, `analytics.manage` |
 | `GET`, `PATCH /v1/brands/{brand}/traffic-sources/{id}` | `analytics.read`, `analytics.manage` |
 | `GET /v1/brands/{brand}/traffic-sources/{id}/postbacks` (filter by `status`) | `analytics.read` |
+| `POST /v1/brands/{brand}/traffic-sources/{id}/postbacks/{send}/resend` | `analytics.manage` |
+| `GET`, `POST /v1/brands/{brand}/tracker-cost-updates` | `analytics.read`, `analytics.manage` |
 | `GET /l/{code}` (a redirect link) | Public |
 
 Owners, admins and operators have `analytics.manage`; viewers can read.
@@ -686,11 +902,12 @@ The MCP tools are `get_tracking_taxonomy`, `list_tracking_campaigns`,
 `list_tracking_link_paths`, `set_tracking_link_paths`, `set_tracking_domain_fallback`,
 `list_postback_sources`, `create_postback_source`, `update_postback_source`,
 `rotate_postback_source`, `list_tracker_conversions`, `upload_tracker_conversions`, `list_tracker_conversion_log`,
-`list_affiliate_network_templates`, `list_offers`, `get_offer`, `create_offer`, `update_offer`,
-`list_landers`, `get_lander`, `create_lander`, `update_lander`, `list_lander_clicks`,
+`list_affiliate_network_templates`, `list_offers`, `get_offer`, `create_offer`, `update_offer`, `delete_offer`,
+`list_landers`, `get_lander`, `create_lander`, `update_lander`, `delete_lander`, `list_lander_clicks`,
 `list_flows`, `get_flow`, `create_flow`, `update_flow`, `set_flow_destinations`, `set_flow_paths`, `set_tracking_link_flow`,
 `get_tracking_link_weight_suggestions`, `set_tracking_link_weights`, `get_flow_weight_suggestions`, `set_flow_weights`,
 `list_traffic_source_templates`, `list_traffic_sources`, `list_traffic_source_postbacks`,
+`resend_traffic_source_postback`, `list_tracker_cost_updates`, `update_tracker_costs`,
 `create_traffic_source` and `update_traffic_source`.
 
 Each change is an audit action (and a product event): `tracking_campaign.created`,
@@ -699,8 +916,8 @@ Each change is an audit action (and a product event): `tracking_campaign.created
 `tracking_link.destinations_updated`, `tracking_link.paths_updated`, `tracking_domain.fallback_set`,
 `postback_source.created`, `postback_source.updated`, `postback_source.archived`, `postback_source.restored`,
 `postback_source.rotated`, `tracker_conversion.created`, `tracker_conversion.updated`, `tracker_conversion.uploaded`,
-`tracker_offer.created`, `tracker_offer.updated`, `tracker_offer.archived`, `tracker_offer.restored`,
-`tracker_lander.created`, `tracker_lander.updated`, `tracker_lander.archived`, `tracker_lander.restored`,
+`tracker_offer.created`, `tracker_offer.updated`, `tracker_offer.archived`, `tracker_offer.restored`, `tracker_offer.deleted`,
+`tracker_lander.created`, `tracker_lander.updated`, `tracker_lander.archived`, `tracker_lander.restored`, `tracker_lander.deleted`,
 `tracker_flow.created`, `tracker_flow.updated`, `tracker_flow.archived`, `tracker_flow.restored`, `tracker_flow.paths_updated`,
 `tracker_flow.destinations_updated`, `tracking_link.flow_set`, `tracking_link.weights_updated`, `tracker_flow.weights_updated`,
 `traffic_source.created`, `traffic_source.updated`, `traffic_source.archived`

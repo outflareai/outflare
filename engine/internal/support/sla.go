@@ -134,10 +134,16 @@ func Clock(ctx context.Context, tx pgx.Tx, conv string) error {
 	var brand *string
 	var firstMessage time.Time
 	var opened *time.Time
-	err := tx.QueryRow(ctx, `SELECT workspace_id::text, brand_id::text, status, first_message_at, opened_at
-		FROM support_conversations WHERE id = $1`, conv).Scan(&ws, &brand, &status, &firstMessage, &opened)
+	var imported bool
+	err := tx.QueryRow(ctx, `SELECT workspace_id::text, brand_id::text, status, first_message_at, opened_at, source <> 'outflare'
+		FROM support_conversations WHERE id = $1`, conv).Scan(&ws, &brand, &status, &firstMessage, &opened, &imported)
 	if err != nil {
 		return err
+	}
+	// A conversation copied from another tool is answered there, under its
+	// own targets: nothing is due here.
+	if imported {
+		return nil
 	}
 	// Waiting since: the customer's first message the team hasn't answered.
 	var waiting *time.Time
@@ -187,7 +193,7 @@ func Clock(ctx context.Context, tx pgx.Tx, conv string) error {
 // ClockAll recomputes every conversation not closed in a workspace, after
 // its SLAs change: at most limit of them, newest first.
 func ClockAll(ctx context.Context, tx pgx.Tx, ws string, limit int) (int, error) {
-	rows, err := tx.Query(ctx, `SELECT id::text FROM support_conversations WHERE workspace_id = $1 AND status <> 'closed'
+	rows, err := tx.Query(ctx, `SELECT id::text FROM support_conversations WHERE workspace_id = $1 AND status <> 'closed' AND source = 'outflare'
 		ORDER BY last_message_at DESC LIMIT $2`, ws, limit)
 	if err != nil {
 		return 0, err

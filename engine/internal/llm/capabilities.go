@@ -24,6 +24,9 @@ func CapabilitiesOf(provider, model string) Capabilities {
 	case Claude.ID:
 		// The adapter marks the stable prefix for caching.
 		c.Cache = true
+	case OpenRouter.ID:
+		// Marked for caching on Anthropic's models (cachesOnRequest).
+		c.Cache = cachesOnRequest(OpenRouter, model)
 	case OpenAI.ID, DeepSeek.ID:
 		// The provider caches a repeated prefix by itself. A router's
 		// caching depends on the model behind it, so it isn't claimed.

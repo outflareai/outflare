@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -291,14 +292,39 @@ func cleanLanding(p *string) (*string, error) {
 }
 
 // checkDestinationTokens checks the tokens in a destination, which a
-// redirect click fills in ({click_id}, {field1}). A destination without
-// braces has none to check.
+// redirect click fills in ({click_id}, {field1}), and that it doesn't set
+// the click's own parameter. A destination without braces has no tokens
+// to check.
 func checkDestinationTokens(field, raw string) error {
+	if err := checkClickKeyParam(field, raw); err != nil {
+		return err
+	}
 	if !strings.ContainsAny(raw, "{}") {
 		return nil
 	}
 	if err := tokens.Check(raw, trafficsources.DestinationTokens); err != nil {
 		return errInvalid(field + ": " + err.Error())
+	}
+	return nil
+}
+
+// checkClickKeyParam refuses a destination that sets ofclk itself. The
+// redirect adds the click's key as ofclk, once, so ofclk={click_id} says
+// the same thing and is accepted (and dropped when the URL is saved, like
+// utm_* and ofc). Anything else, a fixed value, an empty one or another
+// token, would name a different click than the redirect's, so it is
+// refused rather than one of the two being picked.
+func checkClickKeyParam(field, raw string) error {
+	_, query, _ := strings.Cut(raw, "?")
+	query, _, _ = strings.Cut(query, "#")
+	for _, part := range strings.Split(query, "&") {
+		k, v, _ := strings.Cut(part, "=")
+		if k, err := url.QueryUnescape(k); err != nil || k != clickKeyParam {
+			continue
+		}
+		if v, err := url.QueryUnescape(v); err != nil || v != "{click_id}" {
+			return errInvalid(field + ": ofclk is the click id Outflare adds to every destination itself, once; take it out of the URL. To pass the click id to a network, put {click_id} in the network's own parameter, such as subid={click_id}")
+		}
 	}
 	return nil
 }

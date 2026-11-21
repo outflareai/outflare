@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,11 +38,14 @@ import (
 
 const (
 	JobSync = "ads.sync"
-	// interval is how often each connection syncs: every hour, reading the
-	// last recentDays (today and yesterday, the days the platforms are
-	// still filling in).
-	interval   = time.Hour
-	recentDays = 2
+	// DefaultInterval is how often each connection syncs unless the server
+	// (Syncer.Default) or an extension (Syncer.Interval) says otherwise:
+	// every hour, reading the last recentDays (today and yesterday, the
+	// days the platforms are still filling in).
+	DefaultInterval = time.Hour
+	// MaxInterval is the longest interval taken: a day.
+	MaxInterval = 24 * time.Hour
+	recentDays  = 2
 	// Once a day (dailyInterval, watermark ad_syncs.last_full_at) a run
 	// re-reads the last dailyDays; once a week (last_week_at) weekDays;
 	// once a month (last_month_at) monthDays, which covers the 90 days a
@@ -103,6 +107,46 @@ type Syncer struct {
 	Log   *slog.Logger
 	// Now is the clock; tests set it.
 	Now func() time.Time
+	// Default is the server's sync interval (OUTFLARE_ADS_SYNC_INTERVAL);
+	// zero is DefaultInterval.
+	Default time.Duration
+	// Interval says how often one workspace's connections sync, for an
+	// extension that sets it per plan; nil, or an answer of zero or less,
+	// is the server's. Either way a platform's floor holds (IntervalFor).
+	Interval func(ctx context.Context, workspaceID string) time.Duration
+}
+
+// floors are the shortest sync interval per platform. Each sync reads two
+// days of every account's campaigns, ad groups and ads, and the platforms
+// count those reads against daily or hourly quotas, so none goes under
+// half an hour. Zeropark's stats are one cheap read per account.
+var floors = map[string]time.Duration{"zeropark_ads": 15 * time.Minute}
+
+// defaultFloor is the floor of a platform that has none of its own.
+const defaultFloor = 30 * time.Minute
+
+// Floor is the shortest interval a platform's connections sync at.
+func Floor(connector string) time.Duration {
+	if f, ok := floors[connector]; ok {
+		return f
+	}
+	return defaultFloor
+}
+
+// IntervalFor is how often a workspace's connection to a platform syncs:
+// the extension's answer for the workspace, else the server's, else an
+// hour, never under the platform's floor or over a day.
+func (s *Syncer) IntervalFor(ctx context.Context, ws, connector string) time.Duration {
+	d := s.Default
+	if s.Interval != nil {
+		if v := s.Interval(ctx, ws); v > 0 {
+			d = v
+		}
+	}
+	if d <= 0 {
+		d = DefaultInterval
+	}
+	return min(max(d, Floor(connector)), MaxInterval)
 }
 
 type payload struct {
@@ -159,51 +203,81 @@ func (s *Syncer) Run(ctx context.Context) {
 	}
 }
 
+// overdueAfter is how long past its interval a connection's last
+// successful sync may be before it counts as overdue: twice the interval
+// and a quarter of an hour for the run itself.
+func overdueAfter(interval time.Duration) time.Duration { return 2*interval + 15*time.Minute }
+
 // QueueDue queues a sync of each connection that is due, or whose last
-// run failed and is due a retry (retry.After).
+// run failed and is due a retry (retry.After), and reports per platform
+// how many connections are behind and how old the oldest sync is.
 func (s *Syncer) QueueDue(ctx context.Context) error {
-	// A connection is due after the interval, or sooner while its last
-	// runs failed (retry.After), so a failed sync is tried again soon.
+	ids := Connectors(s.Store.Registry)
 	rows, err := s.Pool.Query(ctx, `
-		SELECT i.id, i.workspace_id, COALESCE(a.failures, 0), COALESCE(extract(epoch FROM a.last_run_at)::bigint, 0) FROM integrations i
+		SELECT i.id, i.workspace_id, i.connector, i.created_at, COALESCE(a.failures, 0), a.last_run_at, a.last_ok_at FROM integrations i
 		LEFT JOIN ad_syncs a ON a.integration_id = i.id
 		WHERE i.connector = ANY($1) AND i.status = 'connected'
-		  AND NOT COALESCE((i.config->>'sync_paused')::boolean, false)
-		  AND (COALESCE(a.last_run_at, '-infinity') < now() - $2::interval
-		   OR (a.failures > 0 AND a.last_run_at < now() - `+retry.SQL("a.failures")+`))`,
-		Connectors(s.Store.Registry), fmt.Sprintf("%d seconds", int(interval.Seconds())))
+		  AND NOT COALESCE((i.config->>'sync_paused')::boolean, false)`, ids)
 	if err != nil {
 		return err
 	}
-	type due struct {
-		id, ws   string
-		failures int
-		lastRun  int64
+	type conn struct {
+		id, ws, connector string
+		created           time.Time
+		failures          int
+		lastRun, lastOK   *time.Time
 	}
-	var list []due
+	var list []conn
 	for rows.Next() {
-		var d due
-		if err := rows.Scan(&d.id, &d.ws, &d.failures, &d.lastRun); err != nil {
+		var c conn
+		if err := rows.Scan(&c.id, &c.ws, &c.connector, &c.created, &c.failures, &c.lastRun, &c.lastOK); err != nil {
 			rows.Close()
 			return err
 		}
-		list = append(list, d)
+		list = append(list, c)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	slot := s.now().Truncate(interval).Unix()
-	for _, d := range list {
-		key := fmt.Sprintf("%s:%d", d.id, slot)
-		if d.failures > 0 {
-			// Each retry after a failed run is a job of its own.
-			key = fmt.Sprintf("%s:retry:%d", d.id, d.lastRun)
+	now := s.now()
+	overdue, oldest := map[string]int{}, map[string]float64{}
+	// One answer per workspace a pass: the extension's may read a plan.
+	every := map[string]time.Duration{}
+	for _, c := range list {
+		interval, ok := every[c.ws+"|"+c.connector]
+		if !ok {
+			interval = s.IntervalFor(ctx, c.ws, c.connector)
+			every[c.ws+"|"+c.connector] = interval
 		}
-		if _, err := Enqueue(ctx, s.Pool, d.ws, d.id, key); err != nil {
+		// How far behind: since the last success, or since it was
+		// connected when it has never synced.
+		since := c.created
+		if c.lastOK != nil {
+			since = *c.lastOK
+		}
+		age := now.Sub(since)
+		if age > overdueAfter(interval) {
+			overdue[c.connector]++
+		}
+		oldest[c.connector] = max(oldest[c.connector], age.Seconds())
+
+		// Due after the interval, or sooner while its last runs failed
+		// (retry.After), so a failed sync is tried again soon.
+		retryDue := c.failures > 0 && c.lastRun != nil && now.Sub(*c.lastRun) >= retry.After(c.failures)
+		if c.lastRun != nil && now.Sub(*c.lastRun) < interval && !retryDue {
+			continue
+		}
+		key := fmt.Sprintf("%s:%d", c.id, now.Truncate(interval).Unix())
+		if c.failures > 0 && c.lastRun != nil {
+			// Each retry after a failed run is a job of its own.
+			key = fmt.Sprintf("%s:retry:%d", c.id, c.lastRun.Unix())
+		}
+		if _, err := Enqueue(ctx, s.Pool, c.ws, c.id, key); err != nil {
 			return err
 		}
 	}
+	metrics.AdSyncLag(ids, overdue, oldest)
 	return nil
 }
 
@@ -409,7 +483,10 @@ func (s *Syncer) finish(ctx context.Context, ws, integrationID, window string, m
 			monthly = &now
 		}
 	}
-	_, err := s.Pool.Exec(ctx, `
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		var failures int
+		var lastOK *time.Time
+		if err := tx.QueryRow(ctx, `
 		INSERT INTO ad_syncs (integration_id, workspace_id, last_run_at, last_ok_at, last_full_at, last_week_at, last_month_at, last_clicks_day, last_error, last_rows, failures, last_error_code)
 		VALUES ($1, $2, $3::timestamptz, CASE WHEN $4::text IS NULL THEN $3::timestamptz END, $5::timestamptz, $6::timestamptz, $7::timestamptz, $8::date, $4::text, $9::integer,
 			CASE WHEN $4::text IS NULL THEN 0 ELSE 1 END, $10::text)
@@ -420,8 +497,17 @@ func (s *Syncer) finish(ctx context.Context, ws, integrationID, window string, m
 			last_month_at = COALESCE(EXCLUDED.last_month_at, ad_syncs.last_month_at),
 			last_clicks_day = COALESCE(EXCLUDED.last_clicks_day, ad_syncs.last_clicks_day),
 			last_error = EXCLUDED.last_error, last_rows = EXCLUDED.last_rows, last_error_code = EXCLUDED.last_error_code,
-			failures = CASE WHEN EXCLUDED.last_error IS NULL THEN 0 ELSE ad_syncs.failures + 1 END`,
-		integrationID, ws, now, msg, daily, weekly, monthly, marks.clicksDay, res.Rows, code)
+			failures = CASE WHEN EXCLUDED.last_error IS NULL THEN 0 ELSE ad_syncs.failures + 1 END
+		RETURNING failures, last_ok_at`,
+			integrationID, ws, now, msg, daily, weekly, monthly, marks.clicksDay, res.Rows, code).Scan(&failures, &lastOK); err != nil {
+			return err
+		}
+		// A sync that keeps failing is something people hear about.
+		if code == nil || !syncFailedDue(*code, failures) {
+			return nil
+		}
+		return raiseSyncFailed(ctx, tx, ws, integrationID, *code, failures, lastOK)
+	})
 	if err != nil && s.Log != nil {
 		s.Log.Error("ads: record sync", "integration", integrationID, "err", err)
 	}
@@ -551,8 +637,8 @@ func (s *Syncer) syncAccount(ctx context.Context, o *connectors.Opened, r connec
 			var b *string
 			err := tx.QueryRow(ctx, `
 				INSERT INTO ad_entities (workspace_id, ad_account_id, level, external_id, name, status, provider_status, objective, daily_budget_micros,
-					bidding_strategy, platform_target_cpa_micros, platform_target_roas)
-				VALUES ($1, $2, 'campaign', $3, $4, $5, $6, $7, $8, $9, $10, $11)
+					bidding_strategy, platform_target_cpa_micros, platform_target_roas, details)
+				VALUES ($1, $2, 'campaign', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 				ON CONFLICT (ad_account_id, level, external_id) DO UPDATE SET
 					name = COALESCE(NULLIF(EXCLUDED.name, ''), ad_entities.name),
 					-- A platform that says how it bids replaces the targets with
@@ -564,10 +650,13 @@ func (s *Syncer) syncAccount(ctx context.Context, o *connectors.Opened, r connec
 					provider_status = COALESCE(NULLIF(EXCLUDED.provider_status, ''), ad_entities.provider_status),
 					objective = COALESCE(NULLIF(EXCLUDED.objective, ''), ad_entities.objective),
 					daily_budget_micros = COALESCE(EXCLUDED.daily_budget_micros, ad_entities.daily_budget_micros),
+					-- Whether it is really serving and the platform's score, as
+					-- the platform says now; one that says nothing leaves them.
+					details = CASE WHEN EXCLUDED.details = '{}'::jsonb THEN ad_entities.details ELSE EXCLUDED.details END,
 					updated_at = now()
 				RETURNING id, brand_id`,
 				o.WorkspaceID, a.id, c.ID, trim(c.Name, 300), statusOr(c.Status), trim(c.ProviderStatus, 60), trim(c.Objective, 60), c.DailyBudgetMicros,
-				trim(c.BiddingStrategy, 60), c.TargetCPAMicros, c.TargetROAS).Scan(&id, &b)
+				trim(c.BiddingStrategy, 60), c.TargetCPAMicros, c.TargetROAS, campaignDetails(c)).Scan(&id, &b)
 			if err != nil {
 				return err
 			}
@@ -637,6 +726,11 @@ func (s *Syncer) syncAccount(ctx context.Context, o *connectors.Opened, r connec
 			if err := s.syncItems(ctx, o, ir, a, level, from, to, res); err != nil {
 				return err
 			}
+		}
+	}
+	if cr, ok := r.(connectors.AdCampaignAdsReader); ok {
+		if err := s.syncCampaignAds(ctx, o, cr, a, camps, rows, from, to, res); err != nil {
+			return err
 		}
 	}
 	if kr, ok := r.(connectors.AdKeywordsReader); ok {
@@ -821,9 +915,52 @@ func (s *Syncer) syncItems(ctx context.Context, o *connectors.Opened, r connecto
 		s.accountError(ctx, a.id, err)
 		return err
 	}
+	n, err := s.storeItems(ctx, o, a, level, items, days)
+	if err != nil {
+		return err
+	}
+	if level == connectors.AdLevelGroup {
+		res.AdGroups += n
+	} else {
+		res.Ads += n
+	}
+	return nil
+}
+
+// syncCampaignAds stores the ads of a platform that has no ad groups. Each
+// campaign is stored as its own ad group too, with the campaign's id, name,
+// status and days, so an ad hangs under an ad group as on every other
+// platform and nothing that reads ads needs to know the difference. The
+// budget stays on the campaign.
+func (s *Syncer) syncCampaignAds(ctx context.Context, o *connectors.Opened, r connectors.AdCampaignAdsReader, a account, camps []connectors.AdCampaign, rows []connectors.AdDay, from, to string, res *Result) error {
+	ads, adDays, err := r.CampaignAds(ctx, o.Client, o.Creds, a.ad(), from, to)
+	if err != nil {
+		s.accountError(ctx, a.id, err)
+		return err
+	}
+	groups := make([]connectors.AdItem, 0, len(camps))
+	for _, c := range camps {
+		groups = append(groups, connectors.AdItem{ID: c.ID, ParentID: c.ID, Name: c.Name, Status: c.Status, ProviderStatus: c.ProviderStatus})
+	}
+	days := make([]connectors.AdItemDay, 0, len(rows))
+	for _, d := range rows {
+		days = append(days, connectors.AdItemDay{ID: d.CampaignID, ParentID: d.CampaignID, Name: d.CampaignName, Date: d.Date, SpendMicros: d.SpendMicros,
+			Impressions: d.Impressions, Clicks: d.Clicks, Conversions: d.Conversions, ConversionValueMicros: d.ConversionValueMicros, AdExtra: d.AdExtra})
+	}
+	if _, err := s.storeItems(ctx, o, a, connectors.AdLevelGroup, groups, days); err != nil {
+		return err
+	}
+	n, err := s.storeItems(ctx, o, a, connectors.AdLevelAd, ads, adDays)
+	res.Ads += n
+	return err
+}
+
+// storeItems stores ad groups or ads under their parents, with their days,
+// and returns how many it stored.
+func (s *Syncer) storeItems(ctx context.Context, o *connectors.Opened, a account, level string, items []connectors.AdItem, days []connectors.AdItemDay) (int, error) {
 	stored := 0
 	entity := map[string]string{}
-	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		parents := map[string]string{}
 		rows, err := tx.Query(ctx, `SELECT external_id, id FROM ad_entities WHERE ad_account_id = $1 AND level = $2`, a.id, parentLevel[level])
 		if err != nil {
@@ -900,15 +1037,10 @@ func (s *Syncer) syncItems(ctx context.Context, o *connectors.Opened, r connecto
 		return nil
 	})
 	if err != nil {
-		return dbError{err}
+		return 0, dbError{err}
 	}
 	metrics.AdItemRows(level, stored)
-	if level == connectors.AdLevelGroup {
-		res.AdGroups += len(entity)
-	} else {
-		res.Ads += len(entity)
-	}
-	return nil
+	return len(entity), nil
 }
 
 // saveDay stores one campaign's, ad group's or ad's numbers for a day,
@@ -922,15 +1054,19 @@ func saveDay(ctx context.Context, tx pgx.Tx, entityID, ws, currency, day string,
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros, impressions, clicks, conversions, conversion_value_micros,
-			reach, link_clicks, landing_page_views, video_views, all_conversions, all_conversion_value_micros)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			reach, link_clicks, landing_page_views, video_views, all_conversions, all_conversion_value_micros,
+			video_thruplays, video_p25, video_p50, video_p75, video_p100)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (ad_entity_id, day) DO UPDATE SET currency = EXCLUDED.currency, spend_micros = EXCLUDED.spend_micros,
 			impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks, conversions = EXCLUDED.conversions,
 			conversion_value_micros = EXCLUDED.conversion_value_micros, reach = EXCLUDED.reach, link_clicks = EXCLUDED.link_clicks,
 			landing_page_views = EXCLUDED.landing_page_views, video_views = EXCLUDED.video_views,
-			all_conversions = EXCLUDED.all_conversions, all_conversion_value_micros = EXCLUDED.all_conversion_value_micros, updated_at = now()`,
+			all_conversions = EXCLUDED.all_conversions, all_conversion_value_micros = EXCLUDED.all_conversion_value_micros,
+			video_thruplays = EXCLUDED.video_thruplays, video_p25 = EXCLUDED.video_p25, video_p50 = EXCLUDED.video_p50,
+			video_p75 = EXCLUDED.video_p75, video_p100 = EXCLUDED.video_p100, updated_at = now()`,
 		entityID, day, ws, currency, max(spend, 0), max(impressions, 0), max(clicks, 0), conv, value,
-		nonNeg(x.Reach), nonNeg(x.LinkClicks), nonNeg(x.LandingPageViews), nonNeg(x.VideoViews), x.AllConversions, x.AllConversionValueMicros); err != nil {
+		nonNeg(x.Reach), nonNeg(x.LinkClicks), nonNeg(x.LandingPageViews), nonNeg(x.VideoViews), x.AllConversions, x.AllConversionValueMicros,
+		nonNeg(x.VideoThruPlays), nonNeg(x.VideoP25), nonNeg(x.VideoP50), nonNeg(x.VideoP75), nonNeg(x.VideoP100)); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM ad_conversion_actions_daily WHERE ad_entity_id = $1 AND day = $2`, entityID, day); err != nil {
@@ -994,4 +1130,26 @@ func trim(s string, n int) string {
 		return string(r[:n])
 	}
 	return s
+}
+
+// campaignDetails is what a platform says about how a campaign is
+// serving, as the campaign's details: its primary status, the reasons
+// and the platform's own score. Empty when it says none of them.
+func campaignDetails(c connectors.AdCampaign) map[string]string {
+	d := map[string]string{}
+	if c.PrimaryStatus != "" {
+		d[connectors.AdDetailPrimaryStatus] = trim(c.PrimaryStatus, 60)
+		if len(c.PrimaryStatusReasons) > 0 {
+			d[connectors.AdDetailPrimaryReasons] = trim(strings.Join(c.PrimaryStatusReasons, ","), 600)
+		}
+	}
+	if c.OptimizationScore != nil && *c.OptimizationScore >= 0 && *c.OptimizationScore <= 1 {
+		d[connectors.AdDetailOptimizationScore] = strconv.FormatFloat(*c.OptimizationScore, 'f', 4, 64)
+	}
+	for key, v := range map[string]*float64{connectors.AdDetailBudgetLostShare: c.BudgetLostShare, connectors.AdDetailRankLostShare: c.RankLostShare} {
+		if v != nil && *v >= 0 && *v <= 1 {
+			d[key] = strconv.FormatFloat(*v, 'f', 4, 64)
+		}
+	}
+	return d
 }

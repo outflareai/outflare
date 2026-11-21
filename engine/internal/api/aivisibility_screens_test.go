@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/outflareai/outflare/engine/internal/aivis"
+	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 // AI visibility reads ChatGPT's own screen through the workspace's own
@@ -78,13 +79,32 @@ func TestAIVisibilityScreens(t *testing.T) {
 	}
 
 	// With the connection removed, the sample fails and says what to add.
+	// Every prompt fails the same way, and one event says so: a refusal
+	// for the workspace to fix, not an error for each prompt.
 	owner.must(204, "DELETE", base+"/integrations/"+dfs, nil)
+	owner.must(201, "POST", base+"/ai-cohorts/"+cid+"/prompts", map[string]any{"prompts": []map[string]any{
+		{"text": "Which proxy provider is fastest?", "intent": "discovery"}, {"text": "Which proxy provider is cheapest?", "intent": "discovery"}}})
 	rid = owner.must(201, "POST", base+"/ai-cohorts/"+cid+"/runs", nil)["id"].(string)
+	events := track.Capture(t)
 	if err := svc.Step(ctx, ws, rid, 0); err != nil {
 		t.Fatal(err)
 	}
-	s = owner.must(200, "GET", base+"/ai-samples?brand=acme&run_id="+rid, nil)["data"].([]any)[0].(map[string]any)
-	if s["status"] != "failed" || s["error_code"] != "connector_needed" {
-		t.Fatalf("no connection: %v", s)
+	samples := owner.must(200, "GET", base+"/ai-samples?brand=acme&run_id="+rid, nil)["data"].([]any)
+	if len(samples) != 3 {
+		t.Fatalf("no connection: %d samples, want 3", len(samples))
+	}
+	for _, v := range samples {
+		if s := v.(map[string]any); s["status"] != "failed" || s["error_code"] != "connector_needed" {
+			t.Fatalf("no connection: %v", s)
+		}
+	}
+	var told []track.Event
+	for _, ev := range events() {
+		if ev.Name == "ai_sample.failed" {
+			told = append(told, ev)
+		}
+	}
+	if len(told) != 1 || told[0].Outcome != track.Failure || told[0].ErrorCode != "connector_needed" {
+		t.Fatalf("events for a connection that is gone: %+v", told)
 	}
 }

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Badge } from "../../ui";
+import { Badge, Button } from "../../ui";
 import { dash, donorBy, priceOf, shortId, statusLabel, statuses, type PageData } from "./shared";
 import { OrdersTable } from "./OrdersTable";
 import { OrderSheet } from "./OrderSheet";
+import { RecordBought } from "./RecordBought";
 
 export function Orders({ data, openId, onClose }: { data: PageData; openId?: string; onClose: () => void }) {
   const [view, setView] = useState<"kanban" | "table">(() => {
@@ -19,6 +20,7 @@ export function Orders({ data, openId, onClose }: { data: PageData; openId?: str
   };
   const counts = Object.fromEntries(statuses.map((s) => [s, data.orders.filter((o) => o.status === s).length]));
   const open = data.orders.find((o) => o.id === openId);
+  const [recording, setRecording] = useState(false);
 
   return (
     <div className="flex flex-col gap-3">
@@ -26,15 +28,19 @@ export function Orders({ data, openId, onClose }: { data: PageData; openId?: str
         <p className="text-[13px] text-muted-foreground">
           {data.orders.length} order{data.orders.length === 1 ? "" : "s"} · Paid comes after Published, and only the brand's designated approver can Approve or mark Paid
         </p>
-        <div className="flex rounded-md border p-0.5" role="tablist" aria-label="Orders view">
-          <button type="button" role="tab" aria-selected={view === "kanban"} className={`rounded px-2 py-1 text-[12px] ${view === "kanban" ? "bg-accent font-medium" : "text-muted-foreground"}`} onClick={() => set("kanban")}>
-            Kanban
-          </button>
-          <button type="button" role="tab" aria-selected={view === "table"} className={`rounded px-2 py-1 text-[12px] ${view === "table" ? "bg-accent font-medium" : "text-muted-foreground"}`} onClick={() => set("table")}>
-            Table
-          </button>
+        <div className="flex items-center gap-2">
+          {data.canManage ? <Button variant="ghost" onClick={() => setRecording(!recording)}>Record a bought link</Button> : null}
+          <div className="flex rounded-md border p-0.5" role="tablist" aria-label="Orders view">
+            <button type="button" role="tab" aria-selected={view === "kanban"} className={`rounded px-2 py-1 text-[12px] ${view === "kanban" ? "bg-accent font-medium" : "text-muted-foreground"}`} onClick={() => set("kanban")}>
+              Kanban
+            </button>
+            <button type="button" role="tab" aria-selected={view === "table"} className={`rounded px-2 py-1 text-[12px] ${view === "table" ? "bg-accent font-medium" : "text-muted-foreground"}`} onClick={() => set("table")}>
+              Table
+            </button>
+          </div>
         </div>
       </div>
+      {recording ? <RecordBought data={data} onClose={() => setRecording(false)} /> : null}
       {view === "kanban" ? (
         <div className="overflow-x-auto pb-2">
           <div className="flex min-w-max gap-2">

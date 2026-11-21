@@ -430,6 +430,9 @@ func (s *Server) deleteFieldValue(w http.ResponseWriter, r *http.Request) {
 				if f := t.field(key); f != nil && f.WritePolicy == "computed" {
 					return errInvalid(fmt.Sprintf("field %s is computed by Outflare from other data; delete that data instead", key))
 				}
+				if f := t.field(key); f != nil && f.Builtin && key == "source" && rec.Type == "person" {
+					return errInvalid("a person's Source is set once and can be changed but not emptied: pick Other if none fits")
+				}
 			}
 			d, err := startDeletion(ctx, tx, a, deletedFieldValue, &rec.ID, key)
 			if err != nil {

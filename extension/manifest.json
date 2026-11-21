@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Outflare",
+  "description": "See what Outflare knows about the person or company in front of you, in Gmail and on any website.",
+  "version": "0.2.0",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw9woRQXsLmJA2J8g8+j/ep1o/6voQ/aR8AZNylWfzf8cmZbeKcUl5qK8KEYnKS/+TD7RlI40tqflkSEVqJefqwN/m8gB+BVaA2Ews79KcFSvGafoc/UrE6hnywsUCCZOTPSA4fP8ZBFNlejUNe1plvReMCisdbyw3/FnmnbbZ+3ODB+kGDzxY8NnMUj57582QjOFIerFThI6aes8nzNJ+6FMx+axCBEHVnvjkvy9kJisjOruNCneK40mRPzSGiT/hfey76cZFAc8cfvLIsVINGNbUyXunD17M13uHWIHPT3b0t1fm9Fw/PzjRn71zGIb1oNYiaxiXc0lmg0/WxYkVQIDAQAB",
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "action": { "default_title": "Outflare", "default_icon": { "16": "icons/16.png", "32": "icons/32.png" } },
+  "side_panel": { "default_path": "panel.html" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "permissions": ["sidePanel", "storage", "identity", "tabs", "alarms"],
+  "host_permissions": ["https://app.outflare.ai/*"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "content_scripts": [{ "matches": ["https://mail.google.com/*"], "js": ["gmail.js"], "run_at": "document_idle" }]
+}

@@ -31,7 +31,7 @@ POST /v1/brands/{brand}/transactions
 Revenue, [attribution](attribution.md) and the [conversions sent back to ad networks](paid-media.md#sending-conversions-back) count payments as `payment.succeeded` events, and refunds as `payment.refunded`. Every payment becomes exactly one of them, whichever way it arrives:
 
 - **A transaction from the API.** A `succeeded` payment with a person (`record_id` or `user_id`) is a `payment.succeeded` event, and a refund or chargeback is a `payment.refunded` for the payment it names in `refund_of`. One that is `pending` counts when it is sent again as `succeeded`. Credits never count.
-- **An Order Completed event.** A track event named `Order Completed` (stored as `order_completed`), sent from your servers for a known person, with `revenue` (or `total`, or `value`) above zero in major units (`49.00`) and a `currency` (the brand's when left out), is a payment. It is saved as a transaction (`source` `events`, `source_id` its `order_id`) and counted as a `payment.succeeded` event. Events from the website snippet never count as money, since anyone can send them.
+- **An Order Completed event.** A track event named `Order Completed` (stored as `order_completed`), sent from your servers for a known person, with `revenue` (or `total`, or `value`) above zero in major units (`49.00`) and a `currency` (the brand's when left out), is a payment. It is saved as a transaction (`source` `events`, `source_id` its `order_id`) and counted as a `payment.succeeded` event. When the order names one of the brand's [products](product-lifecycle.md) in `product`, the payment is about that product too, so it moves the company's lifecycle stage for it; a payment sent first without a product learns it from its order. Events from the website snippet never count as money, since anyone can send them.
 - **A billing connector**, such as Stripe, as before.
 
 **When the same payment arrives twice**, from two of these, it is kept once and counted once. Outflare takes them as the same payment when:
@@ -80,6 +80,49 @@ The same refund as an event, counted once with the transaction above:
 {"type": "track", "userId": "u_123", "event": "Order Refunded", "messageId": "refund-re_2001",
  "properties": {"order_id": "ch_1042", "refund_id": "re_2001", "amount": 49.00, "currency": "USD"}}
 ```
+
+## Failed payments and disputes
+
+Two more events say when a payment went wrong for a known person. Neither is money: revenue, attribution and ad conversions never count them.
+
+- **`payment.failed`**: a payment transaction sent with `status` `failed` (a declined card, a bounced transfer). Its properties are `payment_id` (your `source_id`), `amount_minor`, `currency` and `transaction_id`. When the retry goes through, send the same `source_id` as `succeeded`: the payment then counts, and the failure stays in the person's history.
+- **`payment.disputed`**: a transaction of `kind` `chargeback`. Its properties are `dispute_id` (your `source_id`), `payment_id` (the payment it disputes), `amount_minor`, `currency` and `transaction_id`. The money still comes off as a `payment.refunded`, as before.
+
+Each is written once per `source_id`. Use them in segments, journeys, lifecycle moves and alerts, for example everyone whose payment failed in the last 7 days. They come from transactions sent to the API; a billing connector doesn't write them yet.
+
+## Subscriptions from your own billing
+
+A billing connector writes each customer's subscriptions as it reads them. When you bill with your own system, send them yourself: `POST /v1/brands/{brand}/billing-subscriptions` (MCP `save_billing_subscription`), once when a subscription starts and again whenever it changes.
+
+```http
+POST /v1/brands/{brand}/billing-subscriptions
+{
+  "source_id": "sub_1042",
+  "user_id": "u_123",
+  "status": "active",
+  "plan": "Pro",
+  "product": "pro",
+  "price_id": "pro_monthly",
+  "interval": "month",
+  "amount_minor": 4900,
+  "currency": "USD",
+  "started_at": "2026-08-01T09:00:00Z"
+}
+```
+
+- `source_id` is your id for the subscription. The same one sent again updates the subscription saved (200 instead of 201) and never adds a second.
+- `record_id` or `user_id` says whose it is. A `user_id` must already be known: send an identify for them first.
+- `status` is `trialing`, `active`, `past_due` or `canceled` (`active` by default). `canceled_at` is when it ended, now by default.
+- `amount_minor` is what one `interval` (`day`, `week`, `month` or `year`) costs, in minor units. Monthly revenue counts a twelfth of a yearly amount.
+- `plan`, `product` (one of the brand's [products](product-lifecycle.md)) and `price_id` are optional.
+
+What changes is written on the person's timeline, the same events a billing connector writes: `subscription.started` once (at `started_at`), `subscription.changed` when the price or amount moves, and `subscription.canceled` once. Their `mrr`, `billing_status` and `billing_plan`, the brand's Revenue page and the [lifecycle stages](product-lifecycle.md) that move on subscription events all follow.
+
+**History.** Send every existing subscription once, each with its real `started_at` (and `canceled_at` for the ones that ended). Sending one again later changes nothing unless it changed.
+
+**Payments are separate.** A subscription says what someone is signed up to pay; each charge is still a payment, sent as a transaction or an Order Completed event as above.
+
+`GET /v1/brands/{brand}/billing-subscriptions` lists them (MCP `list_billing_subscriptions`): `?record=` for one person or company, `?status=` for one status. Subscriptions from billing connectors are in the same list, with their `provider`.
 
 ## Currencies
 

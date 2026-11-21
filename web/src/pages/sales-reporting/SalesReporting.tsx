@@ -197,7 +197,7 @@ export function SalesReportingPreview({
               ))}
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Milestones count events during this period; leads can enter at
+              Milestones count events during this period; companies can enter at
               different times. Queue notes show the current snapshot. Bison sync
               is included under Verified.
             </p>
@@ -224,11 +224,11 @@ export function SalesReportingPreview({
         <>
           <div className="sr-summary-grid">
             <Summary
-              label="Total cost per lead"
+              label="Total cost per company"
               value={money(
                 (costPerLead(spend.dayCents, spend.verifiedLeads) ?? 0) * 100,
               )}
-              note="Tool spend / verified lead · last 24h"
+              note="Tool spend / verified company · last 24h"
             />
             <Summary
               label="Spent in the last hour"
@@ -238,7 +238,7 @@ export function SalesReportingPreview({
             <Summary
               label="Spent in the last 24 hours"
               value={money(spend.dayCents)}
-              note={`${number(spend.verifiedLeads)} verified leads in the same window`}
+              note={`${number(spend.verifiedLeads)} verified companies in the same window`}
             />
           </div>
           <ToolSpend onFund={(wallet) => observe("funding_opened", wallet)} />
@@ -255,7 +255,7 @@ export function SalesReportingPreview({
           />
           <Card
             title="Confirmed customers"
-            description={`Customers confirmed ${periodLabel(report)}. Open a lead for its owner, use case and optional monthly amount.`}
+            description={`Customers confirmed ${periodLabel(report)}. Open a company for its owner, use case and optional monthly amount.`}
           >
             <ClosedDeals
               key={period}
@@ -307,7 +307,7 @@ export function SalesReportingPreview({
                   <div className="sr-detail-note">
                     <strong>Verification and Bison delivery, together</strong>
                     <p>
-                      A lead is counted once when verification passes. Its Bison
+                      A company is counted once when verification passes. Its Bison
                       sync status stays inside this milestone: 32 waiting now,
                       including 6 retrying. A first email is counted only after
                       send confirmation.
@@ -386,8 +386,8 @@ function ToolSpend({
       title="Tools & spend"
       description={
         compact
-          ? `Last 24h · ${unitCost(spend.dayCents)} per verified lead`
-          : "Each tool’s contribution to the cost of one verified lead."
+          ? `Last 24h · ${unitCost(spend.dayCents)} per verified company`
+          : "Each tool’s contribution to the cost of one verified company."
       }
       action={
         onExpand && (
@@ -405,7 +405,7 @@ function ToolSpend({
               <th>Last hour</th>
               <th>Last 24h</th>
               <th>
-                Per lead <span className="sr-table-hint">24h</span>
+                Per company <span className="sr-table-hint">24h</span>
               </th>
               <th>Balance</th>
             </tr>
@@ -447,8 +447,8 @@ function ToolSpend({
         </table>
       </div>
       <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-        Per lead = each tool’s Sales spend in the last 24h ÷{" "}
-        {number(spend.verifiedLeads)} verified leads in that window. Total uses
+        Per company = each tool’s Sales spend in the last 24h ÷{" "}
+        {number(spend.verifiedLeads)} verified companies in that window. Total uses
         unrounded costs. Balances are shared provider wallets, not Sales
         allocations. USD; excludes mailbox subscriptions and rep time.
       </p>
@@ -503,7 +503,7 @@ function MailboxCapacity({ expanded = false }: { expanded?: boolean }) {
       <div className="sr-capacity-bottom">
         <div>
           <span className="text-xs text-muted-foreground">
-            Room for new leads today
+            Room for new companies today
           </span>
           <strong>
             {number(remaining - 320)} <span>emails</span>
@@ -643,7 +643,7 @@ function LeadTable({
       <table className="sr-table">
         <thead>
           <tr>
-            <th>Lead / use case</th>
+            <th>Company / use case</th>
             <th>Owner</th>
             <th>{closed ? "Outcome" : "Status / next action"}</th>
             {closed && (
@@ -689,7 +689,7 @@ function LeadTable({
                 colSpan={closed ? 5 : 3}
                 className="py-8 text-center text-muted-foreground"
               >
-                No leads match this view.
+                No companies match this view.
               </td>
             </tr>
           )}
@@ -744,7 +744,7 @@ function LeadDetails({ lead, stage }: { lead: Lead; stage: Stage }) {
       )}
       {timeline.length > 0 && (
         <section>
-          <h3 className="mb-3 text-sm font-semibold">Lead timeline</h3>
+          <h3 className="mb-3 text-sm font-semibold">Timeline</h3>
           <ol className="sr-timeline">
             {timeline.map((event) => (
               <li key={event.label}>

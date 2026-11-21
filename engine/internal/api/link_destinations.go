@@ -30,7 +30,14 @@ import (
 // gives back the count from every server. So a cap can be passed by what
 // the servers send in the moment before their next batch, not more.
 
-const maxLinkDestinations = 20
+// A list of destinations (a link's own, a path's or a flow's) has two
+// stages, each with its own limit: its landers, and the offers and pages
+// clicks go to straight away or after a lander. A click is given one of
+// each stage by weight, on its own, so the stages' weights don't mix.
+const (
+	maxListLanders = 100
+	maxListOnward  = 100
+)
 
 // linkDestination is one of a link's destinations, as a redirect needs it.
 type linkDestination struct {
@@ -633,8 +640,17 @@ type linkDestinationInput struct {
 // checkDestinations cleans and checks a list of destinations; what names
 // the list in messages. It returns how many have a cap.
 func checkDestinations(what string, list []linkDestinationInput) (capped int, err error) {
-	if len(list) > maxLinkDestinations {
-		return 0, errInvalid(what + " has at most 20 destinations")
+	landers := 0
+	for _, d := range list {
+		if strings.TrimSpace(d.LanderID) != "" {
+			landers++
+		}
+	}
+	switch {
+	case landers > maxListLanders:
+		return 0, errInvalid(what + " has at most " + strconv.Itoa(maxListLanders) + " landers")
+	case len(list)-landers > maxListOnward:
+		return 0, errInvalid(what + " has at most " + strconv.Itoa(maxListOnward) + " offers and pages")
 	}
 	seen := map[string]bool{}
 	for i := range list {

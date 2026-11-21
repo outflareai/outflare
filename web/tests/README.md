@@ -22,6 +22,14 @@ pnpm --filter @outflare/web test:ads
 ```
 
 The Paid ads page (plans/paid-ads/plan.md, "Web experience") for a brand with a Google Ads account, against mocked API answers: the cost per new paying customer against the target and its sentence, the header's customers and attribution window switches changing the performance query, the decision inbox (a saving approved without a question, a raise confirmed first, Undo, Acknowledge and the shadow section), the set-up path with the offer sheet reviewed in place, and the results, customers and verdicts screens at phone width without sideways scrolling. Set `OUTFLARE_TEST_SHOTS` to a folder to save a screenshot of each screen. CI runs it in the web-and-sdk job.
+SEO target report browser regression:
+
+```sh
+pnpm --filter @outflare/web test:seo-targets
+```
+
+The SEO target report (SEO overview, Targets) against a mocked report: page and keyword as columns of their own, sorting by either, the filter row under the headers (page and keyword text, status, intent, page type and band picks), clearing the column filters, and opening a row. Set `OUTFLARE_TEST_SHOTS` to a folder to save a screenshot. CI runs it in the web-and-sdk job.
+
 Tracker report page browser regression:
 
 ```sh
@@ -84,6 +92,21 @@ pnpm --filter @outflare/web test:partner-review
 
 Opens the Partners page's Review tab at `/partners` with every API request mocked: open fraud flags show their signal in words with its counts, the partner and the cash they hold; Clear sends the note and the flag leaves the list; Confirm can suspend the partner; the status filter shows resolved flags with their note; it fits a phone. `OUTFLARE_TEST_SHOTS=<dir>` saves screenshots. CI runs it in the web-and-sdk job.
 
+Tracking domain registration note:
+
+```sh
+pnpm --filter @outflare/web test:registration
+```
+
+Checks the note a tracking domain shows about its registration on the Domains page: none without a date, "Registered until" while it is far off, the days left in amber within 30 days and in red within 7, and "expired" once it has run out. Plain `node --test`, no browser. CI runs it in the web-and-sdk job.
+Alerts page:
+
+```sh
+pnpm --filter @outflare/web test:alerts
+```
+
+Opens the Alerts page's "Where they go" card with every API request mocked: with the workspace's own Telegram bot connected, each kind of alert has a chat picker beside Slack and email, listing the chats the bot heard from; a saved chat that is no longer listed keeps its name; Another chat takes a chat id and shows the server's refusal; Not in Telegram stops it; without a bot the page links to the connector; someone who can't manage sees no pickers; it fits a phone. CI runs it in the web-and-sdk job.
+
 Link orders page:
 
 ```sh
@@ -111,3 +134,19 @@ pnpm --filter @outflare/web test:lead-import
 With every API request mocked: a list's page imports a CSV in a dialog with that list fixed and stays on the list, and the Leads import picks a list from a menu (search lists left out), starts on the filtered list, names a new list before importing, and sends no list for **No list**. `OUTFLARE_TEST_SHOTS=<dir>` saves screenshots. CI runs it in the web-and-sdk job.
 
 `pnpm --filter @outflare/web test:sales-reporting` exercises Sales reporting in the real app with fictional API fixtures. It covers the manager link, missing/error/connected data, the explicit demo, periods, optional revenue, mobile layout, interval drilldowns and conversation navigation. `OUTFLARE_TEST_SHOTS` optionally saves local fixture screenshots.
+
+Website tracking page browser regression:
+
+```sh
+pnpm --filter @outflare/web test:website-tracking
+```
+
+Settings → Website tracking against mocked API answers: a script with a visit in the last day reads Live with its last visit and today's events and no setup steps; one whose visits stopped reads Quiet and points at the script below; one that has sent nothing shows the steps and waits. The script is on the page once in every state. Set `OUTFLARE_TEST_SHOTS` to a folder to save a screenshot of each. CI runs it in the web-and-sdk job.
+
+A list's page browser regression:
+
+```sh
+pnpm --filter @outflare/web test:list-members
+```
+
+A list's own page against mocked API answers: each member's name links to their record, the email, lifetime value and sign-up date columns, the Columns menu, saving the columns picked as the default and going back to the standard ones, and cards at phone width without sideways scrolling. Set `OUTFLARE_TEST_SHOTS` to a folder to save a screenshot of each.

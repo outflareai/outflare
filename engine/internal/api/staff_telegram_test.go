@@ -279,7 +279,7 @@ func TestTelegramSync(t *testing.T) {
 	t.Cleanup(func() { cancel(); <-done })
 
 	brand := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "https://northpeak.example"})["id"].(string)
-	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com/"})["id"].(string)
+	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "https://summitly.example/"})["id"].(string)
 	integ := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "telegram",
 		"credentials": map[string]any{"api_id": "1234567", "api_hash": strings.Repeat("ab", 16)}})["id"].(string)
 	acc := owner.must(201, "POST", base+"/staff-accounts", map[string]any{"kind": "telegram", "address": "@acme_sales_1"})["id"].(string)

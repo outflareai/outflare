@@ -139,6 +139,9 @@ func (s *Service) Step(ctx context.Context, ws, runID string, step int) error {
 		return err
 	}
 	until := s.now().Add(stepFor)
+	// Connections found gone in this step: their other prompts fail
+	// without being asked.
+	var gone sync.Map
 	for len(todo) > 0 && s.now().Before(until) {
 		// Screen answers take about a minute each, so a few are asked at
 		// once; API answers one at a time.
@@ -155,7 +158,7 @@ func (s *Service) Step(ctx context.Context, ws, runID string, step int) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				stops[i], errs[i] = s.sample(ctx, ws, runID, cohort, set, p)
+				stops[i], errs[i] = s.sample(ctx, ws, runID, cohort, set, p, &gone)
 			}()
 		}
 		wg.Wait()
@@ -259,9 +262,9 @@ func (s *Service) todo(ctx context.Context, ws, runID string, r runRow) ([]pendi
 
 // sample asks one model one prompt and stores the answer. It returns the
 // reason to stop the whole run (ai_budget_reached), or "" to go on.
-func (s *Service) sample(ctx context.Context, ws, runID string, c Cohort, set Settings, p pending) (string, error) {
+func (s *Service) sample(ctx context.Context, ws, runID string, c Cohort, set Settings, p pending, gone *sync.Map) (string, error) {
 	if p.target.IsScreen() {
-		return s.sampleScreen(ctx, ws, runID, c, set, p)
+		return s.sampleScreen(ctx, ws, runID, c, set, p, gone)
 	}
 	estimate := int64(estimateCents)
 	if p.target.WebSearch {
@@ -330,7 +333,7 @@ func (s *Service) sample(ctx context.Context, ws, runID string, c Cohort, set Se
 // signed-out person in the cohort's country, and stores what it showed:
 // the answer, the brands it named, the pages it cited and read, and the
 // searches it ran.
-func (s *Service) sampleScreen(ctx context.Context, ws, runID string, c Cohort, set Settings, p pending) (string, error) {
+func (s *Service) sampleScreen(ctx context.Context, ws, runID string, c Cohort, set Settings, p pending, gone *sync.Map) (string, error) {
 	spent, err := MonthSpent(ctx, s.Pool, ws, deref(c.BrandID), s.now())
 	if err != nil {
 		return "", err
@@ -343,6 +346,12 @@ func (s *Service) sampleScreen(ctx context.Context, ws, runID string, c Cohort, 
 		row.errorCode = "connector_needed"
 		return "", s.store(ctx, ws, row)
 	}
+	if code, ok := gone.Load(p.target.IntegrationID); ok {
+		// Its connection is gone: one event said so, and asking again
+		// would only fail the same way.
+		row.errorCode = code.(string)
+		return "", s.store(ctx, ws, row)
+	}
 	lang, country := splitLocale(c.Locale)
 	started := s.now()
 	ref := "ai_sample:" + runID + ":" + fmt.Sprint(p.promptID, ":", p.target.IntegrationID, ":", p.target.Model, ":", p.target.WebSearch, ":", p.attempt)
@@ -352,8 +361,12 @@ func (s *Service) sampleScreen(ctx context.Context, ws, runID string, c Cohort, 
 	var refused Refused
 	switch {
 	case errors.As(err, &refused):
+		// The workspace has to reconnect or choose again: a refusal, said
+		// once for the connection rather than for each of its prompts.
 		row.errorCode = refused.Code
-		s.emitFailed(ctx, ws, runID, row)
+		if _, told := gone.LoadOrStore(p.target.IntegrationID, refused.Code); !told {
+			s.emitRefused(ctx, ws, runID, row)
+		}
 	case err != nil:
 		row.errorCode = screenCode(err)
 		s.emitFailed(ctx, ws, runID, row)
@@ -403,6 +416,9 @@ func splitLocale(locale string) (lang, country string) {
 // screenCode names what went wrong reading a screen, for the sample and
 // its event.
 func screenCode(err error) string {
+	if connectors.IsTimeout(err) {
+		return "timeout"
+	}
 	switch connectors.KindOf(err) {
 	case connectors.ErrAuth:
 		return "connector_auth"
@@ -443,6 +459,14 @@ func codeOf(err error) string {
 func (s *Service) emitFailed(ctx context.Context, ws, runID string, r sampleRow) {
 	track.Emit(ctx, track.Event{Name: "ai_sample.failed", WorkspaceID: ws, ActorType: "system", Surface: "job",
 		Outcome: track.Error, ErrorCode: r.errorCode,
+		Props: map[string]any{"run_id": runID, "cohort_id": r.cohort.ID, "provider": r.provider, "web_search": r.p.target.WebSearch}})
+}
+
+// emitRefused is emitFailed for a sample the workspace's own setup
+// refused, such as a connection that is no longer connected.
+func (s *Service) emitRefused(ctx context.Context, ws, runID string, r sampleRow) {
+	track.Emit(ctx, track.Event{Name: "ai_sample.failed", WorkspaceID: ws, ActorType: "system", Surface: "job",
+		Outcome: track.Failure, ErrorCode: r.errorCode,
 		Props: map[string]any{"run_id": runID, "cohort_id": r.cohort.ID, "provider": r.provider, "web_search": r.p.target.WebSearch}})
 }
 

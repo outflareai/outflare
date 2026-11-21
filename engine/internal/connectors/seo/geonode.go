@@ -35,7 +35,9 @@ func (Geonode) Definition() c.Definition {
 			"Checks where your pages rank on Google for the keywords you track, through Geonode's Google Search Light API (one credit per results page; a check reads 10 pages), within the monthly budget you set on the connection. "+
 			"Reads each brand's homepage to suggest its social profiles and app store listings, and the public X profile in each brand's links once a day for its follower count. "+
 			"For sites you have proved you own, and only for pages robots.txt allows: when a page answers with a firewall block or a challenge, "+
-			"OutflareBot reads it through Geonode's Scraper API instead. Searches and pages cost Geonode tokens on your account.",
+			"OutflareBot reads it through Geonode's Scraper API instead. "+
+			"With YouTube on under Social, Mentions, searches YouTube for videos naming your brand or a tracked competitor, and reads each new video's public page and captions. "+
+			"Searches and pages cost Geonode tokens on your account.",
 		"Tokens per search and per page, and a credit per Google results page, on your Geonode plan", []c.Field{
 			{Name: "api_key", Label: "API key", Secret: true, Help: "Geonode dashboard > Scraper API > API keys."},
 		})
@@ -246,6 +248,9 @@ func geonodePageCode(code string) error {
 	if blocked, ok := geonodePageCodes[code]; ok {
 		return &c.PageError{Blocked: blocked, Code: code}
 	}
+	if geonodeBusy(code) {
+		return c.Throttledf(0, "Geonode had no room to read the page now (%s)", code)
+	}
 	if k := geonodeKind(code); k != c.ErrUnavailable {
 		return c.Errf(k, "Geonode could not read the page (%s)", code)
 	}
@@ -322,7 +327,7 @@ func (g Geonode) WebSearch(ctx context.Context, cl *c.Client, creds c.Creds, q c
 	}
 	if status != http.StatusOK {
 		if out.Error != nil {
-			return c.WebResults{Cost: c.SEOCost{Units: float64(a.Tokens)}}, c.Errf(geonodeKind(out.Error.Code), "Geonode could not run the search (%s)", out.Error.Code)
+			return c.WebResults{Cost: c.SEOCost{Units: float64(a.Tokens)}}, geonodeErrf(out.Error.Code, "Geonode could not run the search (%s)", out.Error.Code)
 		}
 		return c.WebResults{}, c.HTTPError("Geonode", status, string(raw))
 	}
@@ -432,7 +437,7 @@ func (g Geonode) SERP(ctx context.Context, cl *c.Client, creds c.Creds, engine s
 			return out, nil
 		}
 		if resp.Code != "" {
-			return out, c.Errf(geonodeKind(resp.Code), "Geonode could not read Google's results (%s)", resp.Code)
+			return out, geonodeErrf(resp.Code, "Geonode could not read Google's results (%s)", resp.Code)
 		}
 		return out, c.HTTPError("Geonode", status, string(raw))
 	}
@@ -482,10 +487,26 @@ func geonodeKind(code string) string {
 		return c.ErrInvalid
 	case "UNAUTHORIZED", "INVALID_API_KEY":
 		return c.ErrAuth
-	case "PAYMENT_REQUIRED", "RATE_LIMITED", "WORK_CONCURRENCY_LIMITED":
+	case "PAYMENT_REQUIRED":
 		return c.ErrQuota
 	}
 	return c.ErrUnavailable
+}
+
+// geonodeErrf is the error for one of Geonode's codes: busy (Throttledf)
+// for a rate limit, otherwise of the code's kind.
+func geonodeErrf(code, format string, a ...any) *c.Error {
+	if geonodeBusy(code) {
+		return c.Throttledf(0, format, a...)
+	}
+	return c.Errf(geonodeKind(code), format, a...)
+}
+
+// geonodeBusy is Geonode's codes for a call it has no room for right now:
+// a rate limit, or the account's work at its concurrency limit. Neither
+// is the account's quota; the same call goes through a little later.
+func geonodeBusy(code string) bool {
+	return code == "RATE_LIMITED" || code == "WORK_CONCURRENCY_LIMITED"
 }
 
 // post sends a JSON request and returns the status and body, up to 16 MB.

@@ -92,3 +92,45 @@ func (c *Connection) UpdateWorkspaceUser(ctx context.Context, u WorkspaceUserUpd
 	}
 	return v.UpdateWorkspaceUser(ctx, c.o.Client, c.o.Creds, u)
 }
+
+// CapWorkspaceCreateUsers creates users in a tenant the workspace connected
+// and allowed it for.
+const CapWorkspaceCreateUsers = connectors.CapWorkspaceCreateUsers
+
+const (
+	// CodeWorkspaceCreateOff: the connection isn't allowed to create users.
+	CodeWorkspaceCreateOff = connectors.CodeWorkspaceCreateOff
+	// CodeWorkspaceUserElsewhere: the address is a user of another tenant.
+	CodeWorkspaceUserElsewhere = connectors.CodeWorkspaceUserElsewhere
+)
+
+type (
+	WorkspaceUserCreate  = connectors.WorkspaceUserCreate
+	WorkspaceUserCreated = connectors.WorkspaceUserCreated
+)
+
+// CreateWorkspaceUser creates one user with only the selected connection's
+// credentials. A retry for a user already in that tenant changes nothing.
+func (c *Connection) CreateWorkspaceUser(ctx context.Context, u WorkspaceUserCreate) (WorkspaceUserCreated, error) {
+	v, ok := c.o.Connector.(connectors.WorkspaceUserCreator)
+	if !ok {
+		return WorkspaceUserCreated{}, ErrNotConnected
+	}
+	if err := c.withinLimits(ctx); err != nil {
+		return WorkspaceUserCreated{}, err
+	}
+	return v.CreateWorkspaceUser(ctx, c.o.Client, c.o.Creds, u)
+}
+
+// CheckWorkspaceCreate says whether the selected connection could create a
+// user now, without creating or changing anything. Nil means it could.
+func (c *Connection) CheckWorkspaceCreate(ctx context.Context) error {
+	v, ok := c.o.Connector.(connectors.WorkspaceCreateChecker)
+	if !ok {
+		return ErrNotConnected
+	}
+	if err := c.withinLimits(ctx); err != nil {
+		return err
+	}
+	return v.CheckWorkspaceCreate(ctx, c.o.Client, c.o.Creds)
+}

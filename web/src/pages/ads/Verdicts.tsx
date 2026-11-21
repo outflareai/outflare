@@ -1,12 +1,13 @@
-// Verdicts: what each approved or auto-applied change did, judged against
+// Results of past changes: what each approved or auto-applied change did, judged against
 // as many days before it, in plain words ("This cut worked: 14 new
 // customers at $38 each, before 9 at $41").
 
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api";
-import { Badge, ErrorText, Loading } from "../../ui";
+import { DataTable } from "@/components/data-table";
+import { Card, ErrorText, Loading, Status } from "../../ui";
 import { ago } from "../../format";
-import { money, n, platformName, scopeQuery, type AdScope } from "../Ads";
+import { money, n, scopeQuery, type AdScope } from "../Ads";
 import { isJudged, leverWord, unitWord, type Finding } from "./api";
 
 const verdictWord = { worked: "Worked", did_not_work: "Didn't work", not_sure: "Not sure", "": "Not judged" } as const;
@@ -58,33 +59,45 @@ export function Verdicts({ brand, scope }: Props) {
   if (error && !rows) return <ErrorText>{error}</ErrorText>;
   if (!rows) return <Loading />;
   const sorted = [...rows].sort((a, b) => (b.judged_at ?? "").localeCompare(a.judged_at ?? ""));
+  const cost = (v: unknown, f: Finding) => {
+    const x = side(v, f.unit);
+    if (x.count === null) return <span className="text-muted-foreground">—</span>;
+    return (
+      <div className="whitespace-nowrap">
+        <div className="font-mono tabular-nums">{x.count && x.spend !== null ? money(Math.round(x.spend / x.count), f.currency) : "—"}</div>
+        <div className="text-[12px] text-muted-foreground">{n(x.count)} {unitWord(f.unit, x.count)}</div>
+      </div>
+    );
+  };
   return (
-    <section aria-labelledby="ads-verdicts" className="space-y-3">
-      <h2 id="ads-verdicts" className="text-[13px] font-medium text-muted-foreground">Verdicts{rows.length > 0 && <span className="ml-2 font-mono text-[12px]">{rows.length}</span>}</h2>
+    <Card title="Results of past changes" description="Every change you approved, or that applied on its own, judged against as many days before it. Source: ad network spend, Outflare sign-ups and payments.">
       {error && <ErrorText>{error}</ErrorText>}
-      {sorted.length === 0 ? (
-        <p className="rounded-lg border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">
-          No verdicts yet. Each approved or auto-applied change is measured for one to six weeks, then judged here against the days before it.
-        </p>
-      ) : (
-        <ul className="grid gap-3 lg:grid-cols-2">
-          {sorted.map((f) => (
-            <li key={f.id} className="space-y-2 rounded-lg border bg-card p-4 shadow-xs">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <p className="text-[14px] font-medium">{verdictSentence(f)}</p>
-                <Badge tone={verdictTone[f.verdict]}>{verdictWord[f.verdict]}</Badge>
-              </div>
-              <div className="text-[12px] text-muted-foreground">{leverWord(f.kind)} · {f.campaign_name} · {platformName(f.connector)} · {f.account_name}</div>
-              {f.verdict_note && !!f.result.after && <p className="text-[13px] text-muted-foreground">{f.verdict_note}</p>}
-              <div className="text-[12px] text-muted-foreground">
-                {f.measure_from && f.measure_until ? <>Measured {f.measure_from} to {f.measure_until}</> : <span title={f.window_note}>Measured</span>}
-                {f.judged_at && <> · judged {ago(f.judged_at)}</>}
-                {f.applied_auto && <> · applied on its own</>}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+      <DataTable
+        data={sorted}
+        rowId={(f) => f.id}
+        columnsMenu={false}
+        empty="No results yet. Each approved change is measured for one to six weeks, then judged here against the days before it."
+        mobile={(f) => (
+          <div className="space-y-1">
+            <div className="flex items-start justify-between gap-2"><span className="font-medium">{verdictSentence(f)}</span><Status tone={verdictTone[f.verdict]}>{verdictWord[f.verdict]}</Status></div>
+            <div className="text-[12px] text-muted-foreground">{leverWord(f.kind)} · {f.campaign_name}</div>
+          </div>
+        )}
+        columns={[
+          { id: "result", header: "Result", accessorFn: (f) => verdictWord[f.verdict], cell: ({ row: { original: f } }) => <Status tone={verdictTone[f.verdict]}>{verdictWord[f.verdict]}</Status> },
+          { id: "change", header: "Change", enableSorting: false, accessorFn: (f) => verdictSentence(f), cell: ({ row: { original: f } }) => (
+            <div className="max-w-md whitespace-normal">
+              <div className="font-medium">{verdictSentence(f)}</div>
+              <div className="text-[12px] text-muted-foreground">{leverWord(f.kind)} · {f.campaign_name}{f.applied_auto ? " · applied on its own" : ""}</div>
+              {f.verdict_note && !!f.result.after && <div className="text-[12px] text-muted-foreground">{f.verdict_note}</div>}
+            </div>
+          ) },
+          { id: "before", header: `Before, each`, enableSorting: false, meta: { align: "right" }, cell: ({ row: { original: f } }) => cost(f.result.before, f) },
+          { id: "after", header: "After, each", enableSorting: false, meta: { align: "right" }, cell: ({ row: { original: f } }) => cost(f.result.after, f) },
+          { id: "measured", header: "Measured", accessorFn: (f) => f.measure_until ?? "", cell: ({ row: { original: f } }) => f.measure_from && f.measure_until ? <span className="whitespace-nowrap">{f.measure_from} to {f.measure_until}</span> : <span className="text-muted-foreground" title={f.window_note}>—</span> },
+          { id: "judged", header: "Judged", accessorFn: (f) => f.judged_at ?? "", cell: ({ row: { original: f } }) => f.judged_at ? <span className="whitespace-nowrap">{ago(f.judged_at)}</span> : <span className="text-muted-foreground">—</span> },
+        ]}
+      />
+    </Card>
   );
 }

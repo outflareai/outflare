@@ -11,7 +11,7 @@ import (
 // TestConnectionKinds: a connection is one brand's, split by account or a
 // shared tool. A brand connection with no brand is listed as unassigned
 // until someone assigns it. A site nobody assigned counts for the
-// workspace's first brand, with its domain only suggesting another.
+// workspace's first brand unless it is on a brand's domain.
 func TestConnectionKinds(t *testing.T) {
 	got := track.Capture(t)
 	e := freshEnv(t)
@@ -90,20 +90,21 @@ func TestConnectionKinds(t *testing.T) {
 	if w := whole(); w["suggested_brand_id"] != first || w["suggested_because"] != "same_sign_in" || w["connected_with"] != "Plausible" {
 		t.Fatalf("same sign-in: %v", w)
 	}
+	// A site on a brand's domain is that brand's without anyone picking.
 	accts := owner.must(200, "GET", base+"/integrations/"+ga+"/accounts", nil)["data"].([]any)
 	for _, a := range accts {
 		a := a.(map[string]any)
-		if a["source"] != "first_brand" || a["brand_id"] != first {
-			t.Fatalf("a domain only suggests: %v", a)
+		if a["account"] == "s/north" && (a["source"] != "domain" || a["brand_id"] != north) {
+			t.Fatalf("northpeak.example is Northpeak's: %v", a)
 		}
-		if a["account"] == "s/north" && a["suggested_brand_id"] != north {
-			t.Fatalf("suggestion: %v", a)
+		if a["suggested_brand_id"] != nil {
+			t.Fatalf("no suggestions: %v", a)
 		}
 	}
 
 	// Assigning a site moves it and its data.
 	if _, err := e.pool.Exec(ctx, `INSERT INTO search_completeness (workspace_id, brand_id, integration_id, site, day, clicks, impressions, visible_clicks, visible_impressions, rows_read, row_limit, capped)
-		VALUES ($1, outflare_site_brand_or_first($2, 's/north'), $2, 's/north', current_date, 1, 1, 1, 1, 1, 1, false)`, ws, ga); err != nil {
+		VALUES ($1, outflare_site_brand_now($2, 's/north'), $2, 's/north', current_date, 1, 1, 1, 1, 1, 1, false)`, ws, ga); err != nil {
 		t.Fatal(err)
 	}
 	a := owner.must(200, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("s/north"), map[string]any{"brand_id": "northpeak"})
@@ -121,8 +122,8 @@ func TestConnectionKinds(t *testing.T) {
 	if u["connections"] != 0.0 || u["accounts"] != 0.0 {
 		t.Fatalf("after assigning: %v", u)
 	}
-	// Taking the assignment away puts it back in the first brand.
-	if a := owner.must(200, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("s/north"), map[string]any{"brand_id": nil}); a["source"] != "first_brand" || a["brand_id"] != first {
+	// Taking the assignment away puts it back in the brand of its domain.
+	if a := owner.must(200, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("s/north"), map[string]any{"brand_id": nil}); a["source"] != "domain" || a["brand_id"] != north {
 		t.Fatalf("unassigned again: %v", a)
 	}
 	// A new kind clears what doesn't suit it.

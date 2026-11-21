@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,10 +96,33 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		out = map[string]any{"data": []any{map[string]any{"id": "31", "effective_status": "ACTIVE", "targeting": metaState.targeting}}}
 		metaState.Unlock()
+	case "/v24.0/41":
+		// Ad 41 paused or resumed.
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		metaState.Lock()
+		metaState.posts = append(metaState.posts, "POST 41 "+body["status"])
+		metaState.Unlock()
+		out = map[string]any{"success": true}
 	case "/v24.0/31":
 		var body map[string]string
 		json.NewDecoder(r.Body).Decode(&body)
 		metaState.Lock()
+		if body["status"] != "" || body["daily_budget"] != "" {
+			// Ad set 31 paused or resumed, or its own daily budget set.
+			defer metaState.Unlock()
+			if metaState.refuse {
+				w.WriteHeader(400)
+				out = map[string]any{"error": map[string]any{"message": "Invalid parameter", "code": 100}}
+				break
+			}
+			if b := body["daily_budget"]; b != "" {
+				metaState.adsetBudget = b
+			}
+			metaState.posts = append(metaState.posts, "POST 31 "+body["status"]+body["daily_budget"])
+			out = map[string]any{"success": true}
+			break
+		}
 		var t map[string]any
 		json.Unmarshal([]byte(body["targeting"]), &t)
 		metaState.targeting = t
@@ -105,7 +130,13 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		metaState.Unlock()
 		out = map[string]any{"success": true}
 	case "/v24.0/act_55/adsets":
-		out = map[string]any{"data": []any{map[string]any{"id": "31", "name": "Lookalike", "effective_status": "ACTIVE", "campaign_id": "9"}}}
+		set := map[string]any{"id": "31", "name": "Lookalike", "effective_status": "ACTIVE", "campaign_id": "9"}
+		metaState.Lock()
+		if metaState.adsetBudget != "" {
+			set["daily_budget"] = metaState.adsetBudget
+		}
+		metaState.Unlock()
+		out = map[string]any{"data": []any{set}}
 	case "/v24.0/act_55/adcreatives", "/v24.0/42":
 		b, _ := io.ReadAll(r.Body)
 		metaState.Lock()
@@ -136,7 +167,28 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		metaSent.events = append(metaSent.events, body.Data...)
 		metaSent.Unlock()
 		out = map[string]any{"events_received": len(body.Data)}
+	case "/v24.0/dataset_quality":
+		metaQuality.Lock()
+		score := metaQuality.score
+		metaQuality.Unlock()
+		if r.URL.Query().Get("dataset_id") != "777" || !strings.Contains(r.URL.Query().Get("fields"), "composite_score") {
+			http.Error(w, `{"error":{"message":"bad dataset"}}`, 400)
+			return
+		}
+		out = map[string]any{"web": []any{
+			map[string]any{"event_name": "Purchase", "event_match_quality": map[string]any{"composite_score": score,
+				"match_key_feedback": []any{map[string]any{"identifier": "email", "coverage": map[string]any{"percentage": 92.5}},
+					map[string]any{"identifier": "ip_address", "coverage": map[string]any{"percentage": 40}}},
+				"diagnostics": []any{map[string]any{"name": "Server sending mismatched IP addresses", "description": "The addresses differ from the pixel's.",
+					"solution": "Send the customer's address.", "percentage": 61.5}}}},
+			map[string]any{"event_name": "PageView", "event_match_quality": map[string]any{"composite_score": 3.1}},
+			map[string]any{"event_name": "Lead"},
+		}}
 	case "/v24.0/act_55/customaudiences":
+		if r.Method == http.MethodPost {
+			json.NewEncoder(w).Encode(map[string]any{"id": "801"})
+			return
+		}
 		out = map[string]any{"data": []any{map[string]any{"id": "801", "name": "Trial users", "subtype": "CUSTOM"},
 			map[string]any{"id": "803", "name": "Site visitors", "subtype": "WEBSITE"}}}
 	case "/v24.0/801/users":
@@ -169,7 +221,12 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"reach": "800", "actions": []any{map[string]any{"action_type": "lead", "value": "2"}, map[string]any{"action_type": "offsite_conversion.fb_pixel_lead", "value": "2"},
 					map[string]any{"action_type": "offsite_conversion.custom.555", "value": "1"}, map[string]any{"action_type": "link_click", "value": "15"},
 					map[string]any{"action_type": "landing_page_view", "value": "12"}, map[string]any{"action_type": "video_view", "value": "40"}},
-				"action_values": []any{map[string]any{"action_type": "lead", "value": "60"}}}
+				"action_values":                  []any{map[string]any{"action_type": "lead", "value": "60"}},
+				"video_thruplay_watched_actions": []any{map[string]any{"action_type": "video_view", "value": "10"}},
+				"video_p25_watched_actions":      []any{map[string]any{"action_type": "video_view", "value": "30"}},
+				"video_p50_watched_actions":      []any{map[string]any{"action_type": "video_view", "value": "20"}},
+				"video_p75_watched_actions":      []any{map[string]any{"action_type": "video_view", "value": "12"}},
+				"video_p100_watched_actions":     []any{map[string]any{"action_type": "video_view", "value": "8"}}}
 			switch r.URL.Query().Get("level") {
 			case "adset":
 				row["adset_id"], row["adset_name"] = "31", "Lookalike"
@@ -195,6 +252,16 @@ var metaState struct {
 	refuse    bool
 	// targeting is ad set 31's, as changes leave it.
 	targeting map[string]any
+	// adsetBudget is ad set 31's own daily budget in cents; empty when
+	// its campaign holds the budget.
+	adsetBudget string
+}
+
+// metaQuality is the match quality score fakeMetaAds reports for
+// Purchase on pixel 777.
+var metaQuality struct {
+	sync.Mutex
+	score float64
 }
 
 // metaAudience collects what fakeMetaAds took into audience 801:
@@ -224,9 +291,23 @@ var googleSuffix = struct {
 	// refuseFeed makes the Data Manager API refuse every request with
 	// this ErrorInfo reason (NOT_ALLOWLISTED), so sends fall back.
 	refuseFeed string
+	// groupBid and keywordBid are ad group 71's default bid and keyword
+	// 91's own, in micros, once a bid change set them.
+	groupBid, keywordBid string
 	// goal is the new customer acquisition goal the account has, as the
 	// GAQL answer ("" for none), set by goals:mutate.
 	goal string
+	// bidding is campaign 7's bidding once a change set it, as the
+	// campaign fields Google answers with; kept only while keepBidding
+	// is on, so one test's change isn't another's starting point.
+	bidding     map[string]any
+	keepBidding bool
+	// places are campaign 7's places once a test sets them: Google's id
+	// for each, true for an excluded one. While set, criteria mutates
+	// change them and the criteria and place reads answer from them.
+	places map[string]bool
+	// name is campaign 7's name once a rename set it.
+	name string
 }{campaign: "gad_campaignid={campaignid}"}
 
 // fakeGoogleAds refuses a developer token other than "dev-ok". Google
@@ -288,6 +369,35 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		googleSuffix.Lock()
 		googleSuffix.mutates = append(googleSuffix.mutates, r.URL.Path+" "+string(b))
+		if googleSuffix.places != nil && strings.HasSuffix(r.URL.Path, "/campaignCriteria:mutate") {
+			var body struct {
+				Operations []struct {
+					Remove string `json:"remove"`
+					Create *struct {
+						Negative bool `json:"negative"`
+						Location *struct {
+							GeoTargetConstant string `json:"geoTargetConstant"`
+						} `json:"location"`
+					} `json:"create"`
+				} `json:"operations"`
+			}
+			json.Unmarshal(b, &body)
+			for _, op := range body.Operations {
+				if id, ok := strings.CutPrefix(op.Remove, "customers/123/campaignCriteria/7~"); ok {
+					delete(googleSuffix.places, id)
+				}
+				if op.Create != nil && op.Create.Location != nil {
+					googleSuffix.places[strings.TrimPrefix(op.Create.Location.GeoTargetConstant, "geoTargetConstants/")] = op.Create.Negative
+				}
+			}
+		}
+		if m := regexp.MustCompile(`"cpcBidMicros":"(\d+)"`).FindSubmatch(b); m != nil {
+			if strings.HasSuffix(r.URL.Path, "/adGroups:mutate") {
+				googleSuffix.groupBid = string(m[1])
+			} else if strings.HasSuffix(r.URL.Path, "/adGroupCriteria:mutate") {
+				googleSuffix.keywordBid = string(m[1])
+			}
+		}
 		googleSuffix.Unlock()
 		name := "customers/123/x/1"
 		switch {
@@ -345,6 +455,25 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"mutateOperationResponses": res})
+	case "/v23/googleAdsFields:search":
+		b, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(b), "category = 'RESOURCE'") {
+			json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"name": "campaign", "category": "RESOURCE", "selectable": false}}})
+			return
+		}
+		if strings.Contains(string(b), " OR ") {
+			// The field service joins conditions with AND only.
+			w.WriteHeader(400)
+			w.Write([]byte(`{"error":{"message":"Request contains an invalid argument."}}`))
+			return
+		}
+		if strings.Contains(string(b), "name = 'campaign'") {
+			json.NewEncoder(w).Encode(map[string]any{"results": []any{
+				map[string]any{"name": "campaign", "category": "RESOURCE", "selectableWith": []string{"metrics.clicks", "segments.date"}}}})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"results": []any{
+			map[string]any{"name": "campaign.status", "category": "ATTRIBUTE", "dataType": "ENUM", "selectable": true, "filterable": true, "sortable": true, "enumValues": []string{"ENABLED", "PAUSED", "REMOVED"}}}})
 	case "/v23/customers:listAccessibleCustomers":
 		json.NewEncoder(w).Encode(map[string]any{"resourceNames": []string{"customers/123"}})
 	case "/v23/customers/123:mutate", "/v23/customers/123/campaigns:mutate":
@@ -369,8 +498,17 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(400)
 				w.Write([]byte(`{"error":{"message":"FIELD_NOT_MUTABLE"}}`))
 				return
+			case u["resourceName"] == "customers/123/campaigns/7" && op["updateMask"] == "name":
+				googleSuffix.name, _ = u["name"].(string)
 			case u["resourceName"] == "customers/123/campaigns/7" && op["updateMask"] == "final_url_suffix":
 				googleSuffix.campaign = u["finalUrlSuffix"].(string)
+			case u["resourceName"] == "customers/123/campaigns/7":
+				for field, kind := range map[string]string{"maximizeConversions": "MAXIMIZE_CONVERSIONS", "maximizeConversionValue": "MAXIMIZE_CONVERSION_VALUE",
+					"targetImpressionShare": "TARGET_IMPRESSION_SHARE", "targetSpend": "TARGET_SPEND"} {
+					if v, ok := u[field]; ok && googleSuffix.keepBidding {
+						googleSuffix.bidding = map[string]any{"biddingStrategyType": kind, field: v}
+					}
+				}
 			}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
@@ -378,7 +516,14 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		q := string(b)
 		googleSuffix.Lock()
-		accountSuffix, campaignSuffix, goal := googleSuffix.account, googleSuffix.campaign, googleSuffix.goal
+		accountSuffix, campaignSuffix, goal, bidding := googleSuffix.account, googleSuffix.campaign, googleSuffix.goal, googleSuffix.bidding
+		var places map[string]bool
+		if googleSuffix.places != nil {
+			places = map[string]bool{}
+			for id, neg := range googleSuffix.places {
+				places[id] = neg
+			}
+		}
 		googleSuffix.Unlock()
 		if strings.Contains(q, "FROM customer\"") {
 			json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"customer": map[string]any{"id": "123", "descriptiveName": "Acme search", "currencyCode": "EUR", "timeZone": "Pacific/Kiritimati",
@@ -405,8 +550,9 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			r["segments"], r["metrics"] = map[string]any{"date": day}, metrics
 			return r
 		}
-		camp := map[string]any{"id": "7", "name": "Brand search", "status": "ENABLED", "advertisingChannelType": "SEARCH"}
-		group := map[string]any{"id": "71", "name": "Exact brand", "status": "ENABLED"}
+		camp := map[string]any{"id": "7", "name": "Brand search", "status": "ENABLED", "advertisingChannelType": "SEARCH",
+			"primaryStatus": "LIMITED", "primaryStatusReasons": []string{"BUDGET_CONSTRAINED", "UNKNOWN"}, "optimizationScore": 0.8214}
+		group := map[string]any{"id": "71", "name": "Exact brand", "status": "ENABLED", "primaryStatus": "ELIGIBLE"}
 		var out []any
 		switch {
 		case strings.Contains(q, "FROM experiment_arm"):
@@ -433,21 +579,46 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				out = []any{}
 			}
+		case strings.Contains(q, "FROM campaign_criterion") && places != nil:
+			ids := make([]string, 0, len(places))
+			for id := range places {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			out = []any{}
+			for _, id := range ids {
+				out = append(out, map[string]any{"campaignCriterion": map[string]any{"resourceName": "customers/123/campaignCriteria/7~" + id, "type": "LOCATION", "negative": places[id],
+					"criterionId": id, "location": map[string]any{"geoTargetConstant": "geoTargetConstants/" + id}}})
+			}
+		case strings.Contains(q, "FROM geo_target_constant") && places != nil:
+			out = []any{}
+			for _, p := range [][4]string{{"2036", "Australia", "AU", "Country"}, {"2404", "Kenya", "KE", "Country"}, {"2566", "Nigeria", "NG", "Country"},
+				{"2554", "New Zealand", "NZ", "Country"}, {"2356", "India", "IN", "Country"}, {"2586", "Pakistan", "PK", "Country"}, {"1011742", "Lisbon", "PT", "City"}} {
+				if strings.Contains(q, "'geoTargetConstants/"+p[0]+"'") || (p[3] == "Country" && strings.Contains(q, "'"+p[2]+"'")) {
+					out = append(out, map[string]any{"geoTargetConstant": map[string]any{"resourceName": "geoTargetConstants/" + p[0], "name": p[1], "countryCode": p[2], "targetType": p[3]}})
+				}
+			}
 		case strings.Contains(q, "FROM campaign_criterion"):
 			out = []any{map[string]any{"campaignCriterion": map[string]any{"resourceName": "customers/123/campaignCriteria/7~501", "type": "USER_LIST",
 				"userList": map[string]any{"userList": "customers/123/userLists/501"}}},
 				map[string]any{"campaignCriterion": map[string]any{"resourceName": "customers/123/campaignCriteria/7~2036", "type": "LOCATION",
-					"location": map[string]any{"geoTargetConstant": "geoTargetConstants/2036"}}}}
+					"criterionId": "2036", "location": map[string]any{"geoTargetConstant": "geoTargetConstants/2036"}}},
+				map[string]any{"campaignCriterion": map[string]any{"resourceName": "customers/123/campaignCriteria/7~2404", "type": "LOCATION", "negative": true,
+					"criterionId": "2404", "location": map[string]any{"geoTargetConstant": "geoTargetConstants/2404"}}},
+				map[string]any{"campaignCriterion": map[string]any{"resourceName": "customers/123/campaignCriteria/7~1011742", "type": "LOCATION", "negative": true,
+					"criterionId": "1011742", "location": map[string]any{"geoTargetConstant": "geoTargetConstants/1011742"}}}}
 		case strings.Contains(q, "FROM geo_target_constant") && strings.Contains(q, "country_code = 'NZ'"):
 			out = []any{map[string]any{"geoTargetConstant": map[string]any{"resourceName": "geoTargetConstants/2554", "countryCode": "NZ", "targetType": "Country"}}}
 		case strings.Contains(q, "FROM geo_target_constant"):
-			out = []any{map[string]any{"geoTargetConstant": map[string]any{"resourceName": "geoTargetConstants/2036", "countryCode": "AU", "targetType": "Country"}}}
+			out = []any{map[string]any{"geoTargetConstant": map[string]any{"resourceName": "geoTargetConstants/2036", "name": "Australia", "countryCode": "AU", "targetType": "Country"}},
+				map[string]any{"geoTargetConstant": map[string]any{"resourceName": "geoTargetConstants/2404", "name": "Kenya", "countryCode": "KE", "targetType": "Country"}},
+				map[string]any{"geoTargetConstant": map[string]any{"resourceName": "geoTargetConstants/1011742", "name": "Lisbon", "canonicalName": "Lisbon,Lisbon,Portugal", "countryCode": "PT", "targetType": "City"}}}
 		case strings.Contains(q, "FROM user_list"):
 			out = []any{map[string]any{"userList": map[string]any{"id": "501", "name": "Trial users"}}}
 		case strings.Contains(q, "FROM recommendation"):
 			out = []any{map[string]any{"recommendation": map[string]any{"resourceName": "customers/123/recommendations/1", "type": "KEYWORD", "campaign": "customers/123/campaigns/7",
 				"impact": map[string]any{"baseMetrics": map[string]any{"clicks": 10.0}, "potentialMetrics": map[string]any{"clicks": 14.0}}}}}
-		case strings.Contains(q, "responsive_search_ad.path1"):
+		case strings.Contains(q, "responsive_search_ad.path2 FROM ad_group_ad"):
 			hl := []any{map[string]any{"text": "Acme CRM"}, map[string]any{"text": "Simple sales"}, map[string]any{"text": "Try it free"}}
 			ds := []any{map[string]any{"text": "A CRM for small teams."}, map[string]any{"text": "Set up in minutes."}}
 			out = []any{map[string]any{"adGroupAd": map[string]any{"ad": map[string]any{"finalUrls": []string{"https://acme.example/"},
@@ -490,6 +661,21 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(mutated, "biddingStrategies:mutate") && strings.Contains(mutated, `"create"`) && !strings.Contains(q, "bidding_strategy.id = 900") {
 				out = append(out, map[string]any{"biddingStrategy": map[string]any{"id": "902", "name": "Value", "type": "TARGET_ROAS", "status": "ENABLED", "targetRoas": map[string]any{"targetRoas": 4.0}}})
 			}
+		case strings.Contains(q, "ad_group.cpc_bid_micros FROM ad_group WHERE ad_group.id"):
+			// Ad group 71's default bid, as bid changes leave it.
+			googleSuffix.Lock()
+			out = []any{map[string]any{"adGroup": map[string]any{"id": "71", "cpcBidMicros": cmp.Or(googleSuffix.groupBid, "1500000")}}}
+			googleSuffix.Unlock()
+		case strings.Contains(q, "ad_group_criterion.cpc_bid_micros"):
+			// Keyword 91 has no bid of its own until one is set: it takes
+			// its ad group's.
+			googleSuffix.Lock()
+			k := map[string]any{"criterionId": "91", "effectiveCpcBidMicros": cmp.Or(googleSuffix.keywordBid, googleSuffix.groupBid, "1500000")}
+			if googleSuffix.keywordBid != "" {
+				k["cpcBidMicros"] = googleSuffix.keywordBid
+			}
+			googleSuffix.Unlock()
+			out = []any{map[string]any{"adGroupCriterion": k}}
 		case strings.Contains(q, "campaign.status FROM campaign WHERE campaign.id"):
 			out = []any{map[string]any{"campaign": map[string]any{"id": "7", "status": removedOr("campaigns/7")}}}
 		case strings.Contains(q, "ad_group_ad.status FROM ad_group_ad WHERE ad_group.id"):
@@ -516,13 +702,27 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			out = []any{row(map[string]any{"adGroup": group, "campaign": map[string]any{"id": "7"}})}
 		case strings.Contains(q, "FROM ad_group"):
 			out = []any{map[string]any{"adGroup": group, "campaign": map[string]any{"id": "7"}}}
+		case strings.Contains(q, "FROM campaign WHERE segments.date DURING LAST_7_DAYS"):
+			// Room to grow: what the campaign missed to budget and to rank.
+			out = []any{map[string]any{"campaign": map[string]any{"id": "7"}, "metrics": map[string]any{"impressions": "300", "searchBudgetLostImpressionShare": 0.23, "searchRankLostImpressionShare": 0.4}}}
 		case strings.Contains(q, "FROM campaign WHERE segments"):
 			out = []any{row(map[string]any{"campaign": camp})}
 		case strings.Contains(q, "FROM campaign"):
 			c := maps.Clone(camp)
+			googleSuffix.Lock()
+			if googleSuffix.name != "" {
+				c["name"] = googleSuffix.name
+			}
+			googleSuffix.Unlock()
 			if strings.Contains(q, "bidding_strategy_type") {
 				c["biddingStrategyType"] = "MAXIMIZE_CONVERSIONS"
 				c["maximizeConversions"] = map[string]any{"targetCpaMicros": "4000000"}
+				if bidding != nil {
+					delete(c, "maximizeConversions")
+					maps.Copy(c, bidding)
+				}
+				c["resourceName"] = "customers/123/campaigns/7"
+				c["geoTargetTypeSetting"] = map[string]any{"positiveGeoTargetType": "PRESENCE", "negativeGeoTargetType": "PRESENCE"}
 			}
 			if strings.Contains(q, "campaign.final_url_suffix") {
 				c["finalUrlSuffix"] = campaignSuffix
@@ -559,7 +759,8 @@ func TestAdsSyncAndReports(t *testing.T) {
 	i := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "meta_ads", "credentials": map[string]string{"api_key": "mt"}})
 	id := i["id"].(string)
 	conns := owner.must(200, "GET", base+"/ads/connections", nil)["data"].([]any)
-	if len(conns) != 1 || len(conns[0].(map[string]any)["setup_needed"].([]any)) != 0 {
+	if len(conns) != 1 || len(conns[0].(map[string]any)["setup_needed"].([]any)) != 0 || len(conns[0].(map[string]any)["conversion_fields"].([]any)) != 0 ||
+		len(conns[0].(map[string]any)["conversion_fields_set"].([]any)) != 0 {
 		t.Fatalf("meta needs no setup: %v", conns)
 	}
 
@@ -614,6 +815,12 @@ func TestAdsSyncAndReports(t *testing.T) {
 	// pixel's) counts once, and a custom conversion isn't in the total.
 	if tot["link_clicks"] != 150.0 || tot["landing_page_views"] != 120.0 || tot["video_views"] != 400.0 || tot["daily_reach"] != 8000.0 || tot["frequency"] != 1.25 {
 		t.Fatalf("delivery: %v", tot)
+	}
+	// How far the video was watched over the ten days: 400 plays of 10,000
+	// impressions is a hook rate of 0.04, and 100 ThruPlays of those 400
+	// plays a hold rate of 0.25.
+	if tot["video_thruplays"] != 100.0 || tot["video_p25"] != 300.0 || tot["video_p50"] != 200.0 || tot["video_p75"] != 120.0 || tot["video_p100"] != 80.0 || tot["hook_rate"] != 0.04 || tot["hold_rate"] != 0.25 {
+		t.Fatalf("video: %v", tot)
 	}
 	acts := map[string]float64{}
 	for _, x := range owner.must(200, "GET", base+"/ads/conversion-actions?from="+from+"&to="+to, nil)["data"].([]any) {
@@ -683,9 +890,9 @@ func TestAdsSyncAndReports(t *testing.T) {
 	owner.must(400, "GET", base+"/ads/campaigns?status=live", nil)
 
 	// An account belongs to a brand; its spend in the ledger follows.
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
 	acctID := acct["id"].(string)
-	got := owner.must(200, "PATCH", base+"/ads/accounts/"+acctID, map[string]any{"brand": "geonode"})
+	got := owner.must(200, "PATCH", base+"/ads/accounts/"+acctID, map[string]any{"brand": "northpeak"})
 	if got["brand_id"] != geo["id"] {
 		t.Fatalf("brand: %v", got)
 	}
@@ -693,10 +900,10 @@ func TestAdsSyncAndReports(t *testing.T) {
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE workspace_id = $1 AND brand_id = $2`, ws, geo["id"]).Scan(&branded); err != nil || branded != 90 {
 		t.Fatalf("ledger rows with the brand: %d %v", branded, err)
 	}
-	if b := owner.must(200, "GET", base+"/ads/summary?brand=geonode&group=brand&from="+from+"&to="+to, nil)["data"].([]any); b[0].(map[string]any)["key"] != geo["id"] {
+	if b := owner.must(200, "GET", base+"/ads/summary?brand=northpeak&group=brand&from="+from+"&to="+to, nil)["data"].([]any); b[0].(map[string]any)["key"] != geo["id"] {
 		t.Fatalf("by brand: %v", b)
 	}
-	if moved := owner.must(200, "GET", base+"/ads/campaigns?brand=geonode", nil)["data"].([]any); len(moved) == 0 {
+	if moved := owner.must(200, "GET", base+"/ads/campaigns?brand=northpeak", nil)["data"].([]any); len(moved) == 0 {
 		t.Fatalf("the account's campaigns follow it: %v", moved)
 	}
 	owner.must(400, "PATCH", base+"/ads/accounts/"+acctID, map[string]any{"brand": "nope"})
@@ -809,8 +1016,8 @@ func TestAdAccountTakesItsConnectionsBrand(t *testing.T) {
 	ctx := context.Background()
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "https://www.geonode.com/"})["id"].(string)
-	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com/"})["id"].(string)
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "https://www.northpeak.example/"})["id"].(string)
+	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "https://summitly.example/"})["id"].(string)
 	var id string
 	err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
 		i, err := e.integrations.Insert(ctx, tx, ws, "google_ads", connectors.AuthOAuth2, "Google Ads", connectors.Creds{"access_token": "gt"}, connectors.Account{}, "")

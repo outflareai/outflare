@@ -67,6 +67,11 @@ type Props = {
   myId: string;
   can: (scope: string) => boolean;
   go: (tab: Tab, item?: string) => void;
+  // Partnerships shows one section of this page under its own tabs: the
+  // section is fixed, and this page's own title and tabs are left out.
+  section?: "placements" | "commercial" | "reports";
+  // "agreements/<id>" opens that record, as ?record= does.
+  record?: string;
 };
 type Section =
   | "partnerships"
@@ -182,8 +187,12 @@ function CoverageBrand({
   can,
   go,
   myId,
+  section: fixed,
+  record: openRecord,
 }: Props & { brand: string }) {
   const initial = new URLSearchParams(location.search);
+  if (fixed) initial.set("view", fixed);
+  if (openRecord) initial.set("record", openRecord);
   // Found is the first tab. The Overview tab was removed (it repeated
   // Reports), so old ?view=overview links open Found, and the Work queue
   // is Found's Follow-ups view, so ?view=tasks opens that.
@@ -299,6 +308,7 @@ function CoverageBrand({
   };
   return (
     <div className="space-y-6">
+      {fixed ? null : (
       <PageHeader
         title={
           <span className="flex items-center gap-2">
@@ -324,6 +334,8 @@ function CoverageBrand({
           </div>
         }
       />
+      )}
+      {!fixed && (
       <Tabs value={section} onValueChange={(v) => navigate(v as Section)}>
         <TabsList className="flex h-auto max-w-full justify-start overflow-x-auto">
           {sections
@@ -335,6 +347,7 @@ function CoverageBrand({
             ))}
         </TabsList>
       </Tabs>
+      )}
       <ErrorText>{error}</ErrorText>
       {section === "settings" ? (
         <CoverageSettings go={go} can={can} />

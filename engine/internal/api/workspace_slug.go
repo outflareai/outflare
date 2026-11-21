@@ -211,7 +211,7 @@ func (s *Server) appPath(ctx context.Context, workspaceID, page string) string {
 }
 
 // brandAppPath is a page's path in the web app on one brand
-// (/acme/repocket/seo), or on none in particular when brandID is "".
+// (/acme/summitly/seo), or on none in particular when brandID is "".
 func (s *Server) brandAppPath(ctx context.Context, workspaceID, brandID, page string) string {
 	var handle string
 	if brandID != "" {

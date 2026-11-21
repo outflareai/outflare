@@ -23,7 +23,7 @@ Steps, each its own pull request:
 1. **This decision.** The Workspace connection reports its scopes; the send service sends as a member through it, after the policy check, from a job, without sending twice on a retry; the sent email is kept on the record.
 2. **Mailboxes become workspace-level.** `crm_google_connections` (one per brand and person) becomes one mailbox per person with the brand it belongs to, so a person spans brands without connecting twice.
 3. **One personal sign-in with incremental scopes.** The CRM capture consent becomes the shared one (`/v1/google/callback`); a module asks for an extra scope and the person approves only that.
-4. **Modules move onto it.** Sales conversations read captured mail and outreach messages (matched on Message-ID) and send through the send service. Outreach mailboxes that sign in with Google may later use the same mailbox.
+4. **Modules move onto it.** Sales conversations read captured mail and outreach messages (matched on Message-ID) and send through the send service. Outreach mailboxes that sign in with Google may later use the same mailbox. First, Sales reads and sends through the Workspace connection, under the CRM email rollout's eligibility, instead of a sign-in of its own; its own sign-in stays for teams without a Workspace admin until step 3.
 
 Also decided:
 

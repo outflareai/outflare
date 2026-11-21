@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
 
@@ -24,8 +26,8 @@ func (RedditAds) Definition() c.Definition {
 	d := def("reddit_ads", "Reddit Ads", "https://ads.reddit.com",
 		"https://ads-api.reddit.com/docs/v3/", "",
 		"Spend, impressions, clicks and conversions per campaign from your Reddit ad accounts.",
-		"Signs in with Reddit and reads every ad account of every business the account belongs to. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget. Add your pixel ID and a Conversions API token to send conversions back. Separate from organic Reddit, which posts and listens from your brand's own account.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsManage)
+		"Signs in with Reddit and reads every ad account of every business the account belongs to. It changes a campaign only when you, or an agent within the grants you set, pause or resume it, one of its ad groups or one of its ads, or set its daily budget. Add your pixel ID and a Conversions API token to send conversions back. Separate from organic Reddit, which posts and listens from your brand's own account.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage)
 	d.OAuth = &c.OAuth{
 		AuthURL:   "https://www.reddit.com/api/v1/authorize",
 		TokenURL:  "https://www.reddit.com/api/v1/access_token",
@@ -196,6 +198,8 @@ func (r RedditAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds,
 type redditAdGroup struct {
 	ID               string  `json:"id"`
 	CampaignID       string  `json:"campaign_id"`
+	Name             string  `json:"name"`
+	EffectiveStatus  string  `json:"effective_status"`
 	ConfiguredStatus string  `json:"configured_status"`
 	GoalType         string  `json:"goal_type"`
 	GoalValue        flexInt `json:"goal_value"`
@@ -294,6 +298,56 @@ func (r RedditAds) SetCampaignStatus(ctx context.Context, cl *c.Client, creds c.
 	return r.update(ctx, cl, creds, "/campaigns/"+esc(campaignID), map[string]any{"configured_status": st})
 }
 
+var (
+	_ c.AdGroupManager  = RedditAds{}
+	_ c.AdStatusManager = RedditAds{}
+)
+
+// owned checks that an ad group or ad is in the account before it is
+// changed: one of another account is not this account's to change.
+func (r RedditAds) owned(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, path, id, what string) error {
+	if !redditID(id) {
+		return c.Errf(c.ErrInvalid, "a Reddit %s id is required", what)
+	}
+	var resp struct {
+		Data struct {
+			ID          string `json:"id"`
+			AdAccountID string `json:"ad_account_id"`
+		} `json:"data"`
+	}
+	if err := r.call(cl, creds).get(ctx, r.base(cl)+path+esc(id), &resp); err != nil {
+		return err
+	}
+	if resp.Data.ID != id || (resp.Data.AdAccountID != "" && resp.Data.AdAccountID != acct.ID) {
+		return c.Errf(c.ErrInvalid, "Reddit Ads has no %s %s in account %s", what, id, acct.ID)
+	}
+	return nil
+}
+
+func redditConfigured(active bool) map[string]any {
+	if active {
+		return map[string]any{"configured_status": "ACTIVE"}
+	}
+	return map[string]any{"configured_status": "PAUSED"}
+}
+
+// SetAdGroupStatus pauses or resumes one ad group (configured_status),
+// leaving its campaign and the other ad groups as they are.
+func (r RedditAds) SetAdGroupStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID string, active bool) error {
+	if err := r.owned(ctx, cl, creds, acct, "/ad_groups/", adGroupID, "ad group"); err != nil {
+		return err
+	}
+	return r.update(ctx, cl, creds, "/ad_groups/"+esc(adGroupID), redditConfigured(active))
+}
+
+// SetAdStatus pauses or resumes one ad (configured_status).
+func (r RedditAds) SetAdStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID, adID string, active bool) error {
+	if err := r.owned(ctx, cl, creds, acct, "/ads/", adID, "ad"); err != nil {
+		return err
+	}
+	return r.update(ctx, cl, creds, "/ads/"+esc(adID), redditConfigured(active))
+}
+
 // SetCampaignDailyBudget sets a campaign's daily budget, in micros,
 // rounded to the cent. A campaign with campaign budget optimisation holds
 // it itself; otherwise its ad groups' daily budgets are scaled together
@@ -357,56 +411,175 @@ func (r RedditAds) update(ctx context.Context, cl *c.Client, creds c.Creds, path
 }
 
 func (r RedditAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdDay, error) {
-	out, err := r.adDays(ctx, cl, creds, acct, from, to, true)
+	rows, err := r.report(ctx, cl, creds, acct, from, to, "CAMPAIGN_ID")
+	if err != nil {
+		return nil, err
+	}
+	var out []c.AdDay
+	for _, m := range rows {
+		if m.CampaignID == "" {
+			continue
+		}
+		d := c.AdDay{CampaignID: m.CampaignID, Date: m.Date[:10], SpendMicros: int64(m.Spend), Impressions: int64(m.Impressions), Clicks: int64(m.Clicks)}
+		if m.Conversions != nil {
+			d.Conversions = ptrF(float64(*m.Conversions))
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+// redditMetric is one row of a report: a day, and the ids of the
+// breakdowns asked for.
+type redditMetric struct {
+	CampaignID  string   `json:"campaign_id"`
+	AdGroupID   string   `json:"ad_group_id"`
+	AdID        string   `json:"ad_id"`
+	Date        string   `json:"date"`
+	Spend       flexInt  `json:"spend"` // micros
+	Impressions flexInt  `json:"impressions"`
+	Clicks      flexInt  `json:"clicks"`
+	Conversions *flexNum `json:"key_conversion_total_count"`
+}
+
+// report reads the account's numbers by day and the breakdowns given
+// (CAMPAIGN_ID, AD_GROUP_ID, AD_ID; Reddit takes three with the date).
+func (r RedditAds) report(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string, by ...string) ([]redditMetric, error) {
+	out, err := r.metrics(ctx, cl, creds, acct, from, to, true, by)
 	// An account that can't report conversions (no pixel) gets spend
 	// without them.
 	if c.KindOf(err) == c.ErrInvalid {
-		out, err = r.adDays(ctx, cl, creds, acct, from, to, false)
+		out, err = r.metrics(ctx, cl, creds, acct, from, to, false, by)
 	}
 	return out, err
 }
 
-func (r RedditAds) adDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string, conversions bool) ([]c.AdDay, error) {
+func (r RedditAds) metrics(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string, conversions bool, by []string) ([]redditMetric, error) {
 	end := mustDate(to).AddDate(0, 0, 1)
 	fields := []string{"SPEND", "IMPRESSIONS", "CLICKS"}
 	if conversions {
 		fields = append(fields, "KEY_CONVERSION_TOTAL_COUNT")
 	}
 	body := map[string]any{"data": map[string]any{
-		"breakdowns":   []string{"DATE", "CAMPAIGN_ID"},
+		"breakdowns":   append([]string{"DATE"}, by...),
 		"fields":       fields,
 		"starts_at":    from + "T00:00:00Z",
 		"ends_at":      end.Format("2006-01-02") + "T00:00:00Z",
 		"time_zone_id": acct.TimeZone,
 	}}
-	var out []c.AdDay
+	var out []redditMetric
 	err := r.list(ctx, cl, creds, "POST", r.base(cl)+"/ad_accounts/"+esc(acct.ID)+"/reports", body, func(raw json.RawMessage) error {
 		var data struct {
-			Metrics []struct {
-				CampaignID  string   `json:"campaign_id"`
-				Date        string   `json:"date"`
-				Spend       flexInt  `json:"spend"` // micros
-				Impressions flexInt  `json:"impressions"`
-				Clicks      flexInt  `json:"clicks"`
-				Conversions *flexNum `json:"key_conversion_total_count"`
-			} `json:"metrics"`
+			Metrics []redditMetric `json:"metrics"`
 		}
 		_ = json.Unmarshal(raw, &data)
 		for _, m := range data.Metrics {
-			if m.CampaignID == "" || len(m.Date) < 10 {
-				continue
+			if len(m.Date) >= 10 {
+				out = append(out, m)
 			}
-			d := c.AdDay{CampaignID: m.CampaignID, Date: m.Date[:10], SpendMicros: int64(m.Spend),
-				Impressions: int64(m.Impressions), Clicks: int64(m.Clicks)}
-			if m.Conversions != nil {
-				v := float64(*m.Conversions)
-				d.Conversions = &v
-			}
-			out = append(out, d)
 		}
 		return nil
 	})
 	return out, err
+}
+
+// ---- ad groups and ads ----
+
+var _ c.AdItemsReader = RedditAds{}
+
+// redditStatus is what Reddit works out an ad group or ad is doing, or
+// what the account set when it doesn't say.
+func redditStatus(effective, configured string) string {
+	if effective != "" {
+		return effective
+	}
+	return configured
+}
+
+// AdItems lists the account's ad groups or ads. An ad group's budget is
+// its own daily one; a campaign that sets the budget leaves it empty.
+func (r RedditAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level string) ([]c.AdItem, error) {
+	switch level {
+	case c.AdLevelGroup:
+		groups, err := r.adGroups(ctx, cl, creds, acct, "")
+		if err != nil {
+			return nil, err
+		}
+		out := make([]c.AdItem, 0, len(groups))
+		for _, g := range groups {
+			if g.ID == "" {
+				continue
+			}
+			st := redditStatus(g.EffectiveStatus, g.ConfiguredStatus)
+			it := c.AdItem{ID: g.ID, ParentID: g.CampaignID, Name: g.Name, Status: status(st), ProviderStatus: st}
+			if g.GoalType == "DAILY_SPEND" && g.GoalValue > 0 {
+				it.DailyBudgetMicros = ptrI(int64(g.GoalValue))
+			}
+			out = append(out, it)
+		}
+		return out, nil
+	case c.AdLevelAd:
+		var out []c.AdItem
+		err := r.list(ctx, cl, creds, "GET", r.base(cl)+"/ad_accounts/"+esc(acct.ID)+"/ads", nil, func(raw json.RawMessage) error {
+			var list []struct {
+				ID               string `json:"id"`
+				AdGroupID        string `json:"ad_group_id"`
+				Name             string `json:"name"`
+				EffectiveStatus  string `json:"effective_status"`
+				ConfiguredStatus string `json:"configured_status"`
+				ClickURL         string `json:"click_url"`
+			}
+			_ = json.Unmarshal(raw, &list)
+			for _, a := range list {
+				if a.ID == "" {
+					continue
+				}
+				st := redditStatus(a.EffectiveStatus, a.ConfiguredStatus)
+				it := c.AdItem{ID: a.ID, ParentID: a.AdGroupID, Name: a.Name, Status: status(st), ProviderStatus: st,
+					Details: adDetails(map[string]string{c.AdDetailURL: a.ClickURL})}
+				if a.ClickURL != "" {
+					it.Details[c.AdDetailTemplated] = strconv.FormatBool(adtrack.HasTemplate(a.ClickURL))
+				}
+				out = append(out, it)
+			}
+			return nil
+		})
+		return out, err
+	}
+	return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+}
+
+// AdItemDays reads the report by ad group or ad and day. Each row names
+// its parent, so an ad group or ad no longer listed is still placed.
+func (r RedditAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level, from, to string) ([]c.AdItemDay, error) {
+	by := []string{"CAMPAIGN_ID", "AD_GROUP_ID"}
+	switch level {
+	case c.AdLevelGroup:
+	case c.AdLevelAd:
+		by = []string{"AD_GROUP_ID", "AD_ID"}
+	default:
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	rows, err := r.report(ctx, cl, creds, acct, from, to, by...)
+	if err != nil {
+		return nil, err
+	}
+	var out []c.AdItemDay
+	for _, m := range rows {
+		id, parent := m.AdGroupID, m.CampaignID
+		if level == c.AdLevelAd {
+			id, parent = m.AdID, m.AdGroupID
+		}
+		if id == "" {
+			continue
+		}
+		d := c.AdItemDay{ID: id, ParentID: parent, Date: m.Date[:10], SpendMicros: int64(m.Spend), Impressions: int64(m.Impressions), Clicks: int64(m.Clicks)}
+		if m.Conversions != nil {
+			d.Conversions = ptrF(float64(*m.Conversions))
+		}
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 // ---- conversions ----
@@ -479,6 +652,14 @@ func (r RedditAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Cr
 		if len(keys) == 0 {
 			results[i].Skipped, results[i].Reason = true, "no Reddit click id or identifier to match on"
 			continue
+		}
+		// Where the person was, beside the identifiers above and never the
+		// only thing sent: the platform matches on them unhashed.
+		if cv.IPAddress != "" {
+			user["ip_address"], keys = cv.IPAddress, append(keys, "ip_address")
+		}
+		if cv.UserAgent != "" {
+			user["user_agent"], keys = cv.UserAgent, append(keys, "user_agent")
 		}
 		kind := cv.EventType
 		if kind == "" {

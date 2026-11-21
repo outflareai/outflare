@@ -29,6 +29,7 @@ import type { Tab } from "@/lib/paths";
 // The order categories appear in, with what each one is for in plain words.
 const categories: { id: ConnectorCategory; label: string; help: string }[] = [
   { id: "model", label: "AI models for Outflare's own agent", help: "The model Outflare itself uses to plan and run missions, with your own API key. This is not how you connect Claude or ChatGPT to Outflare: for that, use Connect your AI agent at the top of this page." },
+  { id: "media", label: "Pictures, video and voice", help: "Make ad pictures, video and voice-overs on your own fal.ai and ElevenLabs accounts. OpenAI pictures use the OpenAI key under AI models. You pay each provider directly." },
   { id: "email_verification", label: "Email verification", help: "Check addresses before they are emailed, so bounces never hurt your mailboxes." },
   { id: "email_sending", label: "Email sending", help: "Send receipts, password resets and onboarding email from your own provider account. Set up under Lifecycle." },
   { id: "sequencer", label: "Sequencers", help: "Warm up your mailboxes in their own warm-up, or switch over: import campaigns, leads and mailboxes from the tool you use now." },
@@ -52,6 +53,7 @@ const categories: { id: ConnectorCategory; label: string; help: string }[] = [
   { id: "notification", label: "Notifications", help: "Get alerts where your team works." },
   { id: "messaging", label: "Messaging", help: "Read the company's own Telegram accounts' chats into customer records. Connect your Telegram app here, then sign each account in under Settings, Team." },
   { id: "knowledge", label: "Knowledge sources", help: "Let the support assistant find answers your team already wrote down, in the channels you choose. Read only; every answer it finds waits for a person to approve." },
+  { id: "support", label: "Customer support", help: "Copy the conversations you answer in Intercom, with what its AI agent Fin did, into Support, and keep them in step. Read only; you keep answering in Intercom." },
   { id: "custom", label: "Custom", help: "Any HTTP API or MCP server." },
 ];
 const categoryLabel = (c: ConnectorCategory) => categories.find((x) => x.id === c)?.label ?? c;
@@ -78,8 +80,11 @@ function howToConnect(def: Connector) {
 // brand makes it that brand's own connection. pool is where a mailbox
 // sign-in (Gmail, Outlook) puts the mailbox it adds.
 export type ReturnPage = "get-started" | "setup" | "tracking" | "providers" | "audits" | "domains" | "mailboxes";
-export async function startConnectorOAuth(ws: string, def: Connector, back?: ReturnPage, brand?: string, pool?: string) {
-  const { data, error } = await api.GET("/v1/workspaces/{ws}/integrations/oauth/{connector}/authorize", { params: { path: { ws, connector: def.id }, query: { format: "json", ...(back ? { return: back } : {}), ...(brand ? { brand } : {}), ...(pool?.trim() ? { pool: pool.trim() } : {}) } } });
+// integration signs that existing connection in again instead of adding
+// one, so it keeps its accounts and history (a new permission such as
+// Google's Data Manager).
+export async function startConnectorOAuth(ws: string, def: Connector, back?: ReturnPage, brand?: string, pool?: string, integration?: string) {
+  const { data, error } = await api.GET("/v1/workspaces/{ws}/integrations/oauth/{connector}/authorize", { params: { path: { ws, connector: def.id }, query: { format: "json", ...(back ? { return: back } : {}), ...(brand ? { brand } : {}), ...(pool?.trim() ? { pool: pool.trim() } : {}), ...(integration ? { integration } : {}) } } });
   if (error || !data) return toast(errorMessage(error), "error");
   location.assign((data as { url: string }).url);
 }
@@ -227,7 +232,8 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
 
   async function disconnect(i: Integration) {
     const verifies = i.capabilities.includes("verify");
-    if (!(await confirmAction(`Disconnect "${i.name}"?`, <p>Its credentials are deleted. {verifies ? "If it verifies email addresses, the free built-in checks take over." : "Anything using it stops until you connect it again."}</p>, "Disconnect"))) return;
+    const everyBrand = brands.length > 1 && !i.brand_id;
+    if (!(await confirmAction(`Disconnect "${i.name}"${everyBrand ? " for every brand" : ""}?`, <p>{everyBrand ? "This removes it from the whole workspace, not only this brand. " : ""}Its credentials are deleted. {verifies ? "If it verifies email addresses, the free built-in checks take over." : "Anything using it stops until you connect it again."}{i.brand_kind === "split" ? " To keep it but stop a site counting for this brand, use Choose sites instead." : ""}</p>, everyBrand ? "Disconnect everywhere" : "Disconnect"))) return;
     const { error } = await api.DELETE("/v1/workspaces/{ws}/integrations/{id}", { params: { path: { ws, id: i.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`Disconnected "${i.name}".`);
@@ -343,15 +349,18 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
                             {i.account.details.signer === "sign_in_required" ? "Sign in" : "Sign in again"}
                           </Button>
                         )}
+                        {canManage && i.status === "error" && i.auth_method === "oauth2" && !i.account?.details?.signer && !!byId.get(i.connector) && !!authOption(byId.get(i.connector)!, "oauth2")?.available && (
+                          <Button onClick={() => startConnectorOAuth(ws, byId.get(i.connector)!, undefined, undefined, undefined, i.id)}>Sign in again</Button>
+                        )}
                         {canManage && <Button variant="ghost" onClick={() => test(i)}>Test</Button>}
                         {canManage && (
                           <Menu
                             items={[
                               { label: "Rename", onClick: () => rename(i) },
-                              brands.length > 0 && { label: "Choose its brand", onClick: () => setSharing(i) },
-                              i.auth_method === "oauth2" && !!byId.get(i.connector) && !!authOption(byId.get(i.connector)!, "oauth2")?.available && { label: "Sign in again", onClick: () => startOAuth(byId.get(i.connector)!) },
+                              brands.length > 0 && { label: i.brand_kind === "split" ? (brand ? `Choose ${brand.name}'s sites` : "Choose each site's brand") : "Choose its brand", onClick: () => setSharing(i) },
+                              i.auth_method === "oauth2" && !!byId.get(i.connector) && !!authOption(byId.get(i.connector)!, "oauth2")?.available && { label: "Sign in again", onClick: () => startConnectorOAuth(ws, byId.get(i.connector)!, undefined, undefined, undefined, i.id) },
                               !!byId.get(i.connector) && !!authOption(byId.get(i.connector)!, "api_key") && { label: i.auth_method === "oauth2" ? "Use an API key instead" : "Replace API key", onClick: () => setConnecting({ def: byId.get(i.connector)!, replace: i }) },
-                              { label: "Disconnect", onClick: () => disconnect(i), danger: true },
+                              { label: brands.length > 1 && !i.brand_id ? "Disconnect for every brand" : "Disconnect", onClick: () => disconnect(i), danger: true },
                             ]}
                           />
                         )}
@@ -478,7 +487,10 @@ export function ConnectDialog({ ws, def, replace, brand, why, onSignIn, onClose,
   const [useKey, setUseKey] = useState(!canSignIn);
   const [name, setName] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
-  const [useForVerify, setUseForVerify] = useState(def.capabilities.includes("verify"));
+  // On for a verification service; off for a connector that mainly does
+  // something else and can also verify (Treg), so connecting it never
+  // replaces the chosen verifier unasked.
+  const [useForVerify, setUseForVerify] = useState(def.capabilities.includes("verify") && def.category === "email_verification");
   // An AI model runs on the workspace's own provider bill: the person
   // acknowledges that before connecting one.
   const isAI = def.category === "model";
@@ -514,7 +526,7 @@ export function ConnectDialog({ ws, def, replace, brand, why, onSignIn, onClose,
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
-        <form onSubmit={submit} className="space-y-4">
+        <form onSubmit={submit} className="min-w-0 space-y-4">
           <DialogHeader className="text-left">
             <DialogTitle className="flex items-center gap-2.5 text-[15px]"><ConnectorLogo id={def.id} />{replace ? (replace.auth_method === "oauth2" ? `Use an API key for "${replace.name}"` : `Replace the key for "${replace.name}"`) : `Connect ${def.name}`}</DialogTitle>
             <DialogDescription className="text-[13px]">{why ?? (def.description || def.summary)}</DialogDescription>

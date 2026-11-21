@@ -76,6 +76,25 @@ func TestRankImport(t *testing.T) {
 	if im := l["imports"].([]any); len(im) != 1 || im[0].(map[string]any)["integration_id"] != ser {
 		t.Fatalf("imports: %v", l["imports"])
 	}
+	// The list says what the last import did.
+	if li, _ := l["imports"].([]any)[0].(map[string]any)["last_import"].(map[string]any); li == nil || li["outcome"] != "imported" ||
+		li["project"] != "Main" || li["keywords"].(float64) != 1 || li["added"].(float64) != 1 || li["ran_at"] == nil {
+		t.Fatalf("last import: %v", l["imports"])
+	}
+	// A site none of the account's projects is for says so, with the
+	// sites the projects are for, instead of staying silently empty.
+	other := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://shop.example.org/"})["id"].(string)
+	if res, err := svc.Import(ctx, ws, other, ser); err != nil || res.Project != "" {
+		t.Fatalf("import without a project: %+v %v", res, err)
+	}
+	ol := owner.must(200, "GET", base+"/seo-sites/"+other+"/rankings", nil)
+	if li, _ := ol["imports"].([]any)[0].(map[string]any)["last_import"].(map[string]any); li == nil || li["outcome"] != "no_project" ||
+		len(li["projects_seen"].([]any)) != 1 || li["keywords"].(float64) != 0 {
+		t.Fatalf("last import without a project: %v", ol["imports"])
+	}
+	if li := l["imports"].([]any)[0].(map[string]any)["last_import"].(map[string]any); li["error"] != "" || li["error_code"] != "" {
+		t.Fatalf("a good import has no error: %v", li)
+	}
 	byKey := map[string]map[string]any{}
 	for _, r := range l["data"].([]any) {
 		r := r.(map[string]any)

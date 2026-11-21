@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { HoverCard, short, Swatch, useWidth } from "@/components/chart-kit";
 import type { Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, toast } from "../ui";
 import { ago } from "../format";
 import { day, presetLabels, StepEditor, today, whole } from "./Funnels";
+import { embedSpec, type InsightEmbed } from "@/lib/insight-embed";
 import { takeDraft } from "@/components/insight-panels";
 
 // Lifecycle insight (docs/insights.md): in each day, week or month, how
@@ -31,15 +33,15 @@ export function cleanLifecycle(s: LifecycleSpec): LifecycleSpec {
   return { ...s, step: { ...s.step, filters: s.step.filters?.length ? s.step.filters : undefined, within: undefined, label: s.step.label || undefined } };
 }
 
-export function LifecycleFor({ brand, canManage }: { brand: string; canManage: boolean }) {
+export function LifecycleFor({ brand, canManage, embed }: { brand: string; canManage: boolean; embed?: InsightEmbed }) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [saved, setSaved] = useState<Insight[]>([]);
-  const [current, setCurrent] = useState<Insight | null>(null);
-  const [spec, setSpec] = useState<LifecycleSpec>(() => takeDraft<LifecycleSpec>("lifecycle") ?? starter);
+  const [current, setCurrent] = useState<Insight | null>(embed?.insight ?? null);
+  const [spec, setSpec] = useState<LifecycleSpec>(() => (embed ? embedSpec<LifecycleSpec>(embed, starter) : (takeDraft<LifecycleSpec>("lifecycle") ?? starter)));
   const [result, setResult] = useState<LifecycleResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const [name, setName] = useState("");
+  const [name, setName] = useState(embed?.insight?.name ?? "");
   const run = useRef(0);
 
   const loadSaved = useCallback(async () => {
@@ -79,10 +81,12 @@ export function LifecycleFor({ brand, canManage }: { brand: string; canManage: b
       const { data, error } = await api.PATCH("/v1/brands/{brand}/insights/{insight}", { params: { path: { brand, insight: current.id } }, body: { name, spec: body } });
       if (!data) return toast(errorMessage(error), "error");
       setCurrent(data);
+      embed?.onSaved(data);
     } else {
       const { data, error } = await api.POST("/v1/brands/{brand}/insights", { params: { path: { brand } }, body: { kind: "lifecycle", name, spec: body } });
       if (!data || !("id" in data)) return toast(errorMessage(error), "error");
       setCurrent(data);
+      embed?.onSaved(data);
     }
     toast("Saved");
     loadSaved();
@@ -104,22 +108,24 @@ export function LifecycleFor({ brand, canManage }: { brand: string; canManage: b
   return (
     <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
       <div className="min-w-0 space-y-4">
-        <Card title="Saved" action={current ? <Button variant="ghost" onClick={() => { setCurrent(null); setName(""); setSpec(starter); }}>New question</Button> : undefined}>
-          {saved.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">None yet. Build one below and save it to put it on a dashboard.</p>
-          ) : (
-            <ul className="-mx-1 space-y-0.5">
-              {saved.map((i) => (
-                <li key={i.id}>
-                  <button onClick={() => open(i)} className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-accent ${current?.id === i.id ? "bg-accent font-medium" : ""}`}>
-                    <span className="truncate">{i.name}</span>
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{ago(i.updated_at)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        {!embed && (
+          <Card title="Saved" action={current ? <Button variant="ghost" onClick={() => { setCurrent(null); setName(""); setSpec(starter); }}>New question</Button> : undefined}>
+            {saved.length === 0 ? (
+              <p className="text-[13px] text-muted-foreground">None yet. Build one below and save it to put it on a dashboard.</p>
+            ) : (
+              <ul className="-mx-1 space-y-0.5">
+                {saved.map((i) => (
+                  <li key={i.id}>
+                    <button onClick={() => open(i)} className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-accent ${current?.id === i.id ? "bg-accent font-medium" : ""}`}>
+                      <span className="truncate">{i.name}</span>
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{ago(i.updated_at)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        )}
 
         <Card title="What counts as active" description="A visit, a page, an event, a conversion or a payment. Whether someone is new looks at their whole history, not only these dates.">
           <ol>
@@ -161,7 +167,7 @@ export function LifecycleFor({ brand, canManage }: { brand: string; canManage: b
               <input id="lifecycle-name" aria-label="Name" className={`${field} min-w-0 flex-1`} placeholder="Weekly active visitors" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
               <Button disabled={!name.trim() || !lifecycleReady(spec)} onClick={save}>Save</Button>
             </div>
-            {current && <button className="mt-2 text-[12px] text-muted-foreground hover:text-destructive" onClick={remove}>Delete this question</button>}
+            {current && !embed && <button className="mt-2 text-[12px] text-muted-foreground hover:text-destructive" onClick={remove}>Delete this question</button>}
           </Card>
         )}
       </div>
@@ -184,9 +190,9 @@ export function LifecycleFor({ brand, canManage }: { brand: string; canManage: b
 }
 
 const parts = [
-  { key: "new", label: "New", color: "var(--color-primary)", opacity: 1 },
-  { key: "returning", label: "Returning", color: "var(--color-primary)", opacity: 0.55 },
-  { key: "resurrected", label: "Resurrected", color: "var(--color-primary)", opacity: 0.28 },
+  { key: "new", label: "New", color: "var(--series-1)", opacity: 1 },
+  { key: "returning", label: "Returning", color: "var(--series-3)", opacity: 1 },
+  { key: "resurrected", label: "Resurrected", color: "var(--series-6)", opacity: 1 },
 ] as const;
 
 // LifecycleView draws each period as a bar of new, returning and
@@ -194,7 +200,8 @@ const parts = [
 // with the numbers in a table underneath.
 export function LifecycleView({ result, compact }: { result: LifecycleResult; compact?: boolean }) {
   const ps = result.periods;
-  const w = 600;
+  const [box, w] = useWidth();
+  const [hover, setHover] = useState<number | null>(null);
   const h = compact ? 130 : 220;
   const pad = { l: 36, r: 8, t: 10, b: 20 };
   const up = Math.max(1, ...ps.map((p) => p.new + p.returning + p.resurrected));
@@ -204,7 +211,7 @@ export function LifecycleView({ result, compact }: { result: LifecycleResult; co
   const zero = pad.t + up * scale;
   const n = ps.length;
   const slot = (w - pad.l - pad.r) / Math.max(1, n);
-  const bw = Math.max(2, Math.min(28, slot * 0.7));
+  const bw = Math.max(2, Math.min(36, slot * 0.7));
   const x = (i: number) => pad.l + i * slot + (slot - bw) / 2;
   const every = Math.ceil(n / (compact ? 6 : 12));
   const total = ps.reduce((acc, p) => ({ new: acc.new + p.new, returning: acc.returning + p.returning, resurrected: acc.resurrected + p.resurrected, dormant: acc.dormant + p.dormant }), { new: 0, returning: 0, resurrected: 0, dormant: 0 });
@@ -213,30 +220,67 @@ export function LifecycleView({ result, compact }: { result: LifecycleResult; co
   }
   return (
     <div className="space-y-3">
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" role="img" aria-label={`Active people by ${result.interval}: new, returning and resurrected above the line, dormant below`}>
-        <line x1={pad.l} x2={w - pad.r} y1={zero} y2={zero} stroke="currentColor" strokeOpacity={0.35} />
-        <text x={pad.l - 6} y={pad.t + 4} textAnchor="end" fontSize={10} fill="currentColor" fillOpacity={0.6}>{whole(up)}</text>
-        {down > 0 && <text x={pad.l - 6} y={h - pad.b} textAnchor="end" fontSize={10} fill="currentColor" fillOpacity={0.6}>-{whole(down)}</text>}
+      <div ref={box} className="relative select-none">
+      <svg width={w} height={h} className="block" role="img" aria-label={`Active people by ${result.interval}: new, returning and resurrected above the line, dormant below`} onPointerLeave={() => setHover(null)}>
+        {hover !== null && <rect x={pad.l + hover * slot} y={pad.t} width={slot} height={h - pad.t - pad.b} rx={4} fill="var(--foreground)" opacity={0.05} />}
+        <line x1={pad.l} x2={w - pad.r} y1={zero} y2={zero} stroke="var(--muted-foreground)" strokeOpacity={0.5} />
+        <text x={pad.l - 8} y={pad.t + 4} textAnchor="end" className="fill-muted-foreground text-[11px] tabular-nums">{short(up)}</text>
+        {down > 0 && <text x={pad.l - 8} y={h - pad.b} textAnchor="end" className="fill-muted-foreground text-[11px] tabular-nums">−{short(down)}</text>}
         {ps.map((p, i) => {
           let y = zero;
-          const title = `${day(p.start)}: ${whole(p.new)} new, ${whole(p.returning)} returning, ${whole(p.resurrected)} resurrected, ${whole(p.dormant)} dormant`;
+          const segs = parts.map((part) => {
+            const v = p[part.key];
+            const hh = v * scale;
+            y -= hh;
+            return { part, v, y, hh };
+          }).filter((x) => x.v > 0);
+          const topKey = segs[segs.length - 1]?.part.key;
           return (
-            <g key={p.start}>
-              <title>{title}</title>
-              {parts.map((part) => {
-                const v = p[part.key];
-                const hh = v * scale;
-                y -= hh;
-                return v > 0 ? <rect key={part.key} x={x(i)} y={y} width={bw} height={hh} fill={part.color} fillOpacity={part.opacity} /> : null;
-              })}
-              {p.dormant > 0 && <rect x={x(i)} y={zero} width={bw} height={p.dormant * scale} fill="var(--color-destructive)" fillOpacity={0.6} />}
+            <g key={p.start} opacity={hover === null || hover === i ? 1 : 0.6}>
+              {segs.map(({ part, y, hh }) => (
+                <path key={part.key} d={part.key === topKey ? roundTop(x(i), y, bw, hh) : `M${x(i)},${y}h${bw}v${hh}h${-bw}Z`} fill={part.color} fillOpacity={part.opacity} />
+              ))}
+              {p.dormant > 0 && <path d={roundBottom(x(i), zero, bw, p.dormant * scale)} fill="var(--series-2)" fillOpacity={0.75} />}
               {i % every === 0 && (
-                <text x={x(i) + bw / 2} y={h - 5} textAnchor="middle" fontSize={10} fill="currentColor" fillOpacity={0.6}>{day(p.start).replace(/,? \d{4}$/, "")}</text>
+                <text x={x(i) + bw / 2} y={h - 6} textAnchor="middle" className="fill-muted-foreground text-[11px]">{day(p.start).replace(/,? \d{4}$/, "")}</text>
               )}
             </g>
           );
         })}
+        <rect
+          x={pad.l}
+          y={0}
+          width={w - pad.l - pad.r}
+          height={h}
+          fill="transparent"
+          onPointerMove={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            const i = Math.floor(((e.clientX - r.left) / r.width) * n);
+            setHover(i >= 0 && i < n ? i : null);
+          }}
+        />
       </svg>
+      {hover !== null && (
+        <HoverCard x={x(hover) + bw / 2} width={w}>
+          <div className="mb-1.5 font-medium">{day(ps[hover].start)}</div>
+          {parts.map((part) => (
+            <div key={part.key} className="flex items-center gap-2">
+              <Swatch color={part.color} opacity={part.opacity} />
+              <span className="flex-1 text-muted-foreground">{part.label}</span>
+              <span className="font-semibold tabular-nums">{whole(ps[hover][part.key])}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-2">
+            <Swatch color="var(--series-2)" opacity={0.75} />
+            <span className="flex-1 text-muted-foreground">Dormant</span>
+            <span className="font-semibold tabular-nums">{whole(ps[hover].dormant)}</span>
+          </div>
+          <div className="mt-1.5 flex justify-between border-t pt-1.5 text-muted-foreground">
+            Active <span className="font-semibold text-foreground tabular-nums">{whole(ps[hover].new + ps[hover].returning + ps[hover].resurrected)}</span>
+          </div>
+        </HoverCard>
+      )}
+      </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
         {parts.map((part) => (
           <span key={part.key} className="flex items-center gap-1.5">
@@ -245,7 +289,7 @@ export function LifecycleView({ result, compact }: { result: LifecycleResult; co
           </span>
         ))}
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: "var(--color-destructive)", opacity: 0.6 }} />
+          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: "var(--series-2)", opacity: 0.75 }} />
           Dormant <span className="tabular-nums text-foreground">{whole(total.dormant)}</span>
         </span>
       </div>
@@ -279,4 +323,15 @@ export function LifecycleView({ result, compact }: { result: LifecycleResult; co
       )}
     </div>
   );
+}
+
+// roundTop is a bar rounded at the top; roundBottom one rounded at the
+// bottom (the dormant below the line).
+function roundTop(x: number, y: number, w: number, h: number): string {
+  const r = Math.min(4, w / 2, h);
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+}
+function roundBottom(x: number, y: number, w: number, h: number): string {
+  const r = Math.min(4, w / 2, h);
+  return `M${x},${y}V${y + h - r}Q${x},${y + h} ${x + r},${y + h}H${x + w - r}Q${x + w},${y + h} ${x + w},${y + h - r}V${y}Z`;
 }

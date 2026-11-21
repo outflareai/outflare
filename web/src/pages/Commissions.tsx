@@ -3,6 +3,7 @@
 // rule that paid it, and the plans themselves: ordered lists of rules in
 // plain words. Outflare works commission out; it never pays anyone.
 
+import { useUrlParam } from "@/lib/urlParam";
 import { useCallback, useEffect, useState } from "react";
 import type { CommissionPlan, CommissionRule, CommissionStatement, RuleCondition } from "@outflare/sdk";
 import { track } from "@/lib/analytics";
@@ -120,13 +121,34 @@ const starters: { label: string; about: string; rules: CommissionRule[] }[] = [
 export function Commissions({ ws, brandId, go, onBack }: { ws: string; brandId: string; go: (tab: Tab, item?: string) => void; onBack: () => void }) {
   const list = months();
   const [month, setMonth] = useState(list[0]);
-  const [view, setView] = useState<"statements" | "plans">("statements");
+  // The plans page and the plan being edited are in the URL (?view=plans,
+  // ?plan=<id> or new), so each has an address and Back closes it.
+  const [viewParam, setViewParam] = useUrlParam("view");
+  const view = viewParam === "plans" ? "plans" : "statements";
+  const setView = (v: "statements" | "plans") => setViewParam(v === "plans" ? "plans" : "");
+  const [planParam, setPlanParam] = useUrlParam("plan");
   const [s, setS] = useState<Statements | null>(null);
   const [plans, setPlans] = useState<CommissionPlan[] | null>(null);
   const [people, setPeople] = useState<Person[]>([]);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<string | null>(null); // the statement whose lines show
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draft, setDraftState] = useState<Draft | null>(null);
+  const setDraft = (d: Draft | null) => {
+    setDraftState(d);
+    setPlanParam(d ? (d.id ?? "new") : "");
+  };
+  // Back closes the editor; a link or a refresh opens it again.
+  useEffect(() => {
+    if (!planParam) {
+      if (draft) setDraftState(null);
+      return;
+    }
+    if (draft || !plans) return;
+    const p = plans.find((x) => x.id === planParam);
+    if (p) setDraftState({ id: p.id, name: p.name, status: p.status, positions: p.positions, staff_ids: p.staff_ids, lapse_days: p.lapse_days, rules: p.rules });
+    else if (planParam === "new") setDraftState({ name: "", status: "draft", positions: [], staff_ids: [], lapse_days: 90, rules: [] });
+    else setPlanParam("");
+  }, [planParam, plans]); // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {

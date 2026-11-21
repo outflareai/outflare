@@ -194,6 +194,13 @@ func csvRow(idx map[string]int, rec []string, now time.Time) (string, DonorWrite
 		}
 		in.PBN = &b
 	}
+	if v := get("best_link"); !isBlank(v) {
+		b, err := parseCSVBool(v)
+		if err != nil {
+			return bad("best_link", err.Error())
+		}
+		in.BestLink = &b
+	}
 	if present(idx, "country") {
 		in.Country = ptrPtr(clip(get("country"), 100))
 	} else if v := get(MetricGeoTop1); !isBlank(v) {

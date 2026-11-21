@@ -26,6 +26,11 @@ import (
 // JobRun moves one run along until it waits or ends.
 const JobRun = customers.JobJourneyRun
 
+// Lateness is how late an event may arrive and still start, move or end a
+// run, the same as rules and lifecycle stages: history sent later is kept
+// for reports without emailing anyone about the past.
+const Lateness = 24 * time.Hour
+
 // Service moves runs along: it starts them from events and goes through
 // their steps in jobs.
 type Service struct {
@@ -171,13 +176,21 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 		var brand *string
 		var props []byte
 		var account *string
-		err := tx.QueryRow(ctx, `SELECT record_id, name, properties, brand_id::text, account_id::text FROM customer_events WHERE workspace_id = $1 AND id = $2`, ws, in.EventID).
-			Scan(&rec, &name, &props, &brand, &account)
+		var occurred, received time.Time
+		err := tx.QueryRow(ctx, `SELECT record_id, name, properties, brand_id::text, account_id::text, occurred_at, received_at FROM customer_events WHERE workspace_id = $1 AND id = $2`, ws, in.EventID).
+			Scan(&rec, &name, &props, &brand, &account, &occurred, &received)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && rec == nil) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		// An event that arrived more than a day after it happened (history
+		// sent later, a backfill, a sync catching up) is kept for reports
+		// but starts, moves and ends no run, as with rules and lifecycle.
+		if received.Sub(occurred) > Lateness {
+			metrics.JourneyEntryRefused("late")
+			return nil
 		}
 		// Only approved events drive journeys: a name the event's brand never
 		// defined arrives quarantined (the brand's event catalog). Another

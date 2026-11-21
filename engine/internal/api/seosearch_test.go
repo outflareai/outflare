@@ -1,8 +1,10 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,6 +25,15 @@ type fakeSearchConsole struct {
 	inspect     func(page string) (verdict, coverage, googleCanonical string)
 	inspections atomic.Int64
 	pageCalls   atomic.Int64
+	// failRows makes every read by page and query fail; sitemaps, when
+	// set, are the paths of the sitemaps submitted.
+	failRows atomic.Bool
+	sitemaps atomic.Pointer[[]string]
+	// perf answers the Performance report's live queries (those that name
+	// a search type): the dimensions asked, the first day and the whole
+	// request body.
+	perf      func(dims []string, start, body string) []any
+	perfCalls atomic.Int64
 }
 
 func (f *fakeSearchConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +45,15 @@ func (f *fakeSearchConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		enc.Encode(map[string]any{"sub": "1", "email": "jo@example.com"})
 	case r.URL.Path == "/webmasters/v3/sites":
 		enc.Encode(map[string]any{"siteEntry": []any{map[string]any{"siteUrl": "sc-domain:example.com", "permissionLevel": "siteOwner"}}})
+	case strings.HasSuffix(r.URL.Path, "/searchAnalytics/query") && f.perf != nil && perfAsk(r):
+		var q struct {
+			StartDate  string   `json:"startDate"`
+			Dimensions []string `json:"dimensions"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &q)
+		f.perfCalls.Add(1)
+		enc.Encode(map[string]any{"rows": f.perf(q.Dimensions, q.StartDate, string(body))})
 	case strings.HasSuffix(r.URL.Path, "/searchAnalytics/query"):
 		var q struct {
 			StartDate  string   `json:"startDate"`
@@ -43,6 +63,10 @@ func (f *fakeSearchConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&q)
 		rows := []any{}
 		if len(q.Dimensions) == 2 {
+			if f.failRows.Load() {
+				http.Error(w, `{"error":{"message":"backend error"}}`, http.StatusInternalServerError)
+				return
+			}
 			f.pageCalls.Add(1)
 			if q.StartRow == 0 && f.rows != nil {
 				for _, x := range f.rows(q.StartDate) {
@@ -66,12 +90,26 @@ func (f *fakeSearchConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"indexStatusResult": map[string]any{"verdict": verdict, "coverageState": coverage, "googleCanonical": canonical,
 				"userCanonical": q.URL, "lastCrawlTime": "2026-10-20T08:00:00Z", "sitemap": []any{"https://www.example.com/sitemap.xml"}},
 			"mobileUsabilityResult": map[string]any{"verdict": "PASS"}}})
+	case strings.HasSuffix(r.URL.Path, "/sitemaps") && f.sitemaps.Load() != nil:
+		list := []any{}
+		for _, p := range *f.sitemaps.Load() {
+			list = append(list, map[string]any{"path": p, "lastSubmitted": "2026-10-01T00:00:00Z"})
+		}
+		enc.Encode(map[string]any{"sitemap": list})
 	case strings.HasSuffix(r.URL.Path, "/sitemaps"):
 		enc.Encode(map[string]any{"sitemap": []any{map[string]any{"path": "https://www.example.com/sitemap.xml", "lastSubmitted": "2026-10-01T00:00:00Z",
 			"errors": "2", "warnings": "0", "contents": []any{map[string]any{"type": "web", "submitted": "40", "indexed": "31"}}}}})
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// perfAsk reports whether a Search Analytics request names a search type,
+// as only the Performance report's do, and leaves the body readable.
+func perfAsk(r *http.Request) bool {
+	body, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return strings.Contains(string(body), `"type":`)
 }
 
 // connectSearchConsole signs in to the fake Search Console and returns the
@@ -230,5 +268,76 @@ func TestSearchConsolePageByPage(t *testing.T) {
 	}
 	if synced != 3 {
 		t.Fatalf("search_console.synced events: %d", synced)
+	}
+}
+
+// A sitemap submitted in Search Console shows after the next sync someone
+// asks for, also when that sync could not read the search days.
+func TestNewSitemapShowsWhenDaysFail(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	site := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://www.example.com/"})
+	sb := base + "/seo-sites/" + site["id"].(string)
+	f := &fakeSearchConsole{}
+	f.sitemaps.Store(&[]string{"https://www.example.com/sitemap.xml"})
+	sc := connectSearchConsole(t, e, owner, base, f)
+	owner.must(200, "POST", base+"/analytics/"+sc+"/sync", nil)
+	if sm := owner.must(200, "GET", sb+"/sitemaps", nil)["data"].([]any); len(sm) != 1 {
+		t.Fatalf("first run: %v", sm)
+	}
+
+	f.sitemaps.Store(&[]string{"https://www.example.com/sitemap.xml", "https://www.example.com/blog/sitemap.xml"})
+	f.failRows.Store(true)
+	if status, _ := owner.do("POST", base+"/analytics/"+sc+"/sync", nil); status == 200 {
+		t.Fatal("a sync whose days fail says so")
+	}
+	sm := owner.must(200, "GET", sb+"/sitemaps", nil)
+	if l := sm["data"].([]any); len(l) != 2 || l[0].(map[string]any)["path"] != "https://www.example.com/blog/sitemap.xml" {
+		t.Fatalf("the new sitemap: %v", l)
+	}
+	if src := sm["source"].(map[string]any); src["last_error"] == nil {
+		t.Fatalf("the failed days still show: %v", src)
+	}
+}
+
+// A run stores its days, sitemaps and status before it inspects pages, so
+// a run stopped during the inspections does not leave the property looking
+// stale with an old error.
+func TestSearchSyncSavesBeforeInspecting(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://www.example.com/"})
+	f := &fakeSearchConsole{rows: func(string) [][]any {
+		return [][]any{{"https://www.example.com/pricing", "proxy pricing", 10, 100, 3.0}}
+	}}
+	sc := connectSearchConsole(t, e, owner, base, f)
+	owner.must(200, "POST", base+"/analytics/"+sc+"/sync", nil)
+
+	// Days later: the last run recorded a failure and the pages are due.
+	ctx := context.Background()
+	if _, err := e.pool.Exec(ctx, `UPDATE search_syncs SET last_run_at = now() - interval '4 days', last_error = 'refused', failures = 2`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE url_inspections SET inspected_at = now() - interval '8 days'`); err != nil {
+		t.Fatal(err)
+	}
+	var fresh, cleared atomic.Bool
+	f.inspect = func(page string) (string, string, string) {
+		var ok, noError bool
+		if err := e.pool.QueryRow(ctx, `SELECT last_run_at > now() - interval '1 minute', last_error IS NULL FROM search_syncs WHERE integration_id = $1`, sc).Scan(&ok, &noError); err == nil {
+			fresh.Store(ok)
+			cleared.Store(noError)
+		}
+		return "PASS", "Submitted and indexed", page
+	}
+	owner.must(200, "POST", base+"/analytics/"+sc+"/sync", nil)
+	if !fresh.Load() || !cleared.Load() {
+		t.Fatalf("status stored before the inspections: fresh %v, error cleared %v", fresh.Load(), cleared.Load())
+	}
+	var failures int
+	if err := e.pool.QueryRow(ctx, `SELECT failures FROM search_syncs WHERE integration_id = $1`, sc).Scan(&failures); err != nil || failures != 0 {
+		t.Fatalf("failures after a good run: %d %v", failures, err)
 	}
 }

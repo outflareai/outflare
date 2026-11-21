@@ -20,8 +20,11 @@ type Capabilities struct {
 	SupportsConversionValue     bool
 	SupportsNewCustomerGoal     bool
 	SupportsCustomerListExclude bool
-	SupportsExperiments         bool
-	SupportsCampaignCreate      bool
+	// SupportsPlacementExclude: a campaign can stop showing on one
+	// placement (a site, an app, a Zeropark target) and show there again.
+	SupportsPlacementExclude bool
+	SupportsExperiments      bool
+	SupportsCampaignCreate   bool
 	// SupportsTargets: the network takes a target cost per conversion or
 	// return on ad spend on a campaign (tCPA, tROAS).
 	SupportsTargets bool
@@ -41,7 +44,8 @@ type Capabilities struct {
 
 // manageable are the networks Outflare can pause, resume and set budgets
 // on (the same list adsuggest and the campaign calls use).
-var manageable = map[string]bool{"google_ads": true, "meta_ads": true, "microsoft_ads": true, "linkedin_ads": true, "tiktok_ads": true, "reddit_ads": true, "x_ads": true, "chatgpt_ads": true}
+var manageable = map[string]bool{"google_ads": true, "meta_ads": true, "microsoft_ads": true, "linkedin_ads": true, "tiktok_ads": true, "reddit_ads": true, "x_ads": true, "chatgpt_ads": true,
+	"zeropark_ads": true, "taboola_ads": true, "outbrain_ads": true}
 
 // google is what the Google Ads adapter can do and how Google behaves,
 // from the research tables (plans/paid-ads/README.md and research/).
@@ -57,6 +61,7 @@ var google = Capabilities{
 	SupportsConversionValue:     true,
 	SupportsNewCustomerGoal:     true,
 	SupportsCustomerListExclude: true,
+	SupportsPlacementExclude:    true,
 	SupportsExperiments:         true,
 	SupportsCampaignCreate:      true,
 	SupportsTargets:             true,
@@ -113,8 +118,15 @@ func Caps(connector string) Capabilities {
 		c.ClickIDFields = []string{"epik"}
 	case "taboola_ads":
 		c.ClickIDFields = []string{"tblci"}
+		// A publisher site is blocked on a campaign and unblocked.
+		c.SupportsPlacementExclude = true
 	case "outbrain_ads":
 		c.ClickIDFields = []string{"ob_click_id"}
+		// A publisher or a section is blocked on a campaign.
+		c.SupportsPlacementExclude = true
+	case "zeropark_ads":
+		// A target (placement) of a campaign is paused and resumed.
+		c.SupportsPlacementExclude = true
 	case "chatgpt_ads":
 		c.ClickIDFields = []string{"oppref"}
 		c.SupportsOfflineConversions = true // Conversions API, with value
@@ -148,7 +160,7 @@ func (c Capabilities) Allows(kind string) bool {
 	case "SupportsExperiments":
 		return c.SupportsExperiments
 	case "exclusions":
-		return c.Manageable && (c.SupportsScheduleWindows || c.SupportsGeoPresenceSetting || c.HasKeywords || c.SupportsCustomerListExclude)
+		return c.Manageable && (c.SupportsScheduleWindows || c.SupportsGeoPresenceSetting || c.HasKeywords || c.SupportsCustomerListExclude || c.SupportsPlacementExclude)
 	}
 	return false
 }

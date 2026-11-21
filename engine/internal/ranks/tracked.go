@@ -165,6 +165,7 @@ func (s *Service) importLocked(ctx context.Context, ws, siteID, integrationID st
 		}
 		ev.Outcome = outcome
 		track.Fail(ctx, s.Log, ev, code, fmt.Errorf("import tracked keywords of site %s: %w", siteID, err))
+		s.saveImport(ctx, ws, siteID, integrationID, "failed", res, nil, connectors.KindOf(err), explained(err))
 		return res, err
 	}
 	var host string
@@ -209,6 +210,7 @@ func (s *Service) importLocked(ctx context.Context, ws, siteID, integrationID st
 	}
 	ev.Props["project_found"] = got.Project != ""
 	if got.Project == "" {
+		s.saveImport(ctx, ws, siteID, integrationID, "no_project", res, got.Seen, "", "")
 		track.Emit(ctx, ev)
 		return res, nil
 	}
@@ -270,6 +272,50 @@ func (s *Service) importLocked(ctx context.Context, ws, siteID, integrationID st
 		seointel.CheckRegressions(ctx, s.Pool, s.Log, ws, "rank_import", []string{siteID})
 	}
 	ev.Props["keywords"], ev.Props["added"], ev.Props["days"], ev.Props["skipped"] = res.Keywords, res.Added, res.Days, len(res.Skipped)
+	s.saveImport(ctx, ws, siteID, integrationID, "imported", res, nil, "", "")
 	track.Emit(ctx, ev)
 	return res, nil
+}
+
+// saveImport keeps what the last import of a site from a connection did,
+// for the Rankings page. It is a note beside the import, so failing to
+// write it is logged and never fails the import.
+func (s *Service) saveImport(ctx context.Context, ws, siteID, integrationID, outcome string, res Imported, seen []string, code, message string) {
+	skipped, seenList := res.Skipped, seen
+	if len(skipped) > 20 {
+		skipped = skipped[:20]
+	}
+	if skipped == nil {
+		skipped = []string{}
+	}
+	if seenList == nil {
+		seenList = []string{}
+	}
+	sk, _ := json.Marshal(skipped)
+	sn, _ := json.Marshal(seenList)
+	_, err := s.Pool.Exec(ctx, `
+		INSERT INTO rank_imports (workspace_id, brand_id, site_id, integration_id, ran_at, outcome, project, keywords, added, days, skipped, projects_seen, error_code, error)
+		SELECT ss.workspace_id, ss.brand_id, ss.id, $3::uuid, now(), $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12
+		FROM seo_sites ss WHERE ss.id = $2::uuid AND ss.workspace_id = $1::uuid AND ss.brand_id IS NOT NULL
+		ON CONFLICT (site_id, integration_id) DO UPDATE SET ran_at = now(), outcome = EXCLUDED.outcome, project = EXCLUDED.project,
+			keywords = EXCLUDED.keywords, added = EXCLUDED.added, days = EXCLUDED.days, skipped = EXCLUDED.skipped,
+			projects_seen = EXCLUDED.projects_seen, error_code = EXCLUDED.error_code, error = EXCLUDED.error`,
+		ws, siteID, integrationID, outcome, res.Project, res.Keywords, res.Added, res.Days, string(sk), string(sn), code, message)
+	if err != nil && s.Log != nil {
+		s.Log.Warn("rank import status not saved", "site_id", siteID, "error", err)
+	}
+}
+
+// explained is a connector's own explanation of a failure, for the
+// Rankings page; "" for any other error, which is never shown.
+func explained(err error) string {
+	var e *connectors.Error
+	if !errors.As(err, &e) {
+		return ""
+	}
+	m := e.Message
+	if len(m) > 400 {
+		m = m[:400] + "…"
+	}
+	return m
 }

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
 
@@ -213,6 +215,221 @@ func (s SnapchatAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, ac
 	return out, nil
 }
 
+// ---- ad squads and ads ----
+
+var _ c.AdItemsReader = SnapchatAds{}
+
+// snapAd is one ad as the account's list gives it.
+type snapAd struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	AdSquadID  string `json:"ad_squad_id"`
+	CreativeID string `json:"creative_id"`
+	Status     string `json:"status"`
+}
+
+// ads lists every ad of the account.
+func (s SnapchatAds) ads(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]snapAd, error) {
+	var out []snapAd
+	err := s.list(ctx, cl, creds, s.base(cl)+"/adaccounts/"+esc(acct.ID)+"/ads", func(page json.RawMessage) error {
+		var data struct {
+			Ads []struct {
+				Ad snapAd `json:"ad"`
+			} `json:"ads"`
+		}
+		_ = json.Unmarshal(page, &data)
+		for _, w := range data.Ads {
+			if w.Ad.ID != "" {
+				out = append(out, w.Ad)
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
+// AdItems lists the account's ad squads (Snapchat's ad groups, with
+// their own daily budget where they have one) or its ads, each ad with
+// its creative's headline and the page it opens.
+func (s SnapchatAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level string) ([]c.AdItem, error) {
+	switch level {
+	case c.AdLevelGroup:
+		var out []c.AdItem
+		err := s.list(ctx, cl, creds, s.base(cl)+"/adaccounts/"+esc(acct.ID)+"/adsquads", func(page json.RawMessage) error {
+			var data struct {
+				AdSquads []struct {
+					AdSquad struct {
+						ID               string `json:"id"`
+						Name             string `json:"name"`
+						Status           string `json:"status"`
+						CampaignID       string `json:"campaign_id"`
+						DailyBudgetMicro *int64 `json:"daily_budget_micro"`
+					} `json:"adsquad"`
+				} `json:"adsquads"`
+			}
+			_ = json.Unmarshal(page, &data)
+			for _, w := range data.AdSquads {
+				q := w.AdSquad
+				if q.ID == "" {
+					continue
+				}
+				it := c.AdItem{ID: q.ID, ParentID: q.CampaignID, Name: q.Name, Status: status(q.Status), ProviderStatus: q.Status}
+				if q.DailyBudgetMicro != nil && *q.DailyBudgetMicro > 0 {
+					it.DailyBudgetMicros = ptrI(*q.DailyBudgetMicro)
+				}
+				out = append(out, it)
+			}
+			return nil
+		})
+		return out, err
+	case c.AdLevelAd:
+		ads, err := s.ads(ctx, cl, creds, acct)
+		if err != nil {
+			return nil, err
+		}
+		// What each ad shows is on its creative.
+		type creative struct{ headline, url string }
+		creatives := map[string]creative{}
+		err = s.list(ctx, cl, creds, s.base(cl)+"/adaccounts/"+esc(acct.ID)+"/creatives", func(page json.RawMessage) error {
+			var data struct {
+				Creatives []struct {
+					Creative struct {
+						ID                string `json:"id"`
+						Headline          string `json:"headline"`
+						WebViewProperties struct {
+							URL string `json:"url"`
+						} `json:"web_view_properties"`
+					} `json:"creative"`
+				} `json:"creatives"`
+			}
+			_ = json.Unmarshal(page, &data)
+			for _, w := range data.Creatives {
+				creatives[w.Creative.ID] = creative{w.Creative.Headline, w.Creative.WebViewProperties.URL}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]c.AdItem, 0, len(ads))
+		for _, a := range ads {
+			it := c.AdItem{ID: a.ID, ParentID: a.AdSquadID, Name: a.Name, Status: status(a.Status), ProviderStatus: a.Status}
+			if cr, ok := creatives[a.CreativeID]; ok {
+				it.Details = adDetails(map[string]string{c.AdDetailHeadline: cr.headline, c.AdDetailURL: cr.url})
+				if cr.url != "" {
+					it.Details[c.AdDetailTemplated] = strconv.FormatBool(adtrack.HasTemplate(cr.url))
+				}
+			}
+			out = append(out, it)
+		}
+		return out, nil
+	}
+	return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+}
+
+// AdItemDays reads the account's daily stats broken down by ad. Snapchat
+// breaks an account's stats down by campaign or by ad, not by ad squad,
+// so an ad squad's day is the sum of its ads' (each ad is in one squad).
+func (s SnapchatAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level, from, to string) ([]c.AdItemDay, error) {
+	if level != c.AdLevelGroup && level != c.AdLevelAd {
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	ads, err := s.ads(ctx, cl, creds, acct)
+	if err != nil {
+		return nil, err
+	}
+	squad := map[string]string{}
+	name := map[string]string{}
+	for _, a := range ads {
+		squad[a.ID], name[a.ID] = a.AdSquadID, a.Name
+	}
+	loc, err := time.LoadLocation(acct.TimeZone)
+	if err != nil || acct.TimeZone == "" {
+		loc = time.UTC
+	}
+	all := days(from, to)
+	var out []c.AdItemDay
+	// An ad squad's days, summed as its ads' come in.
+	type key struct{ squad, date string }
+	sums := map[key]*c.AdItemDay{}
+	var order []key
+	for start := 0; start < len(all); start += snapStatsDays {
+		window := all[start:min(start+snapStatsDays, len(all))]
+		t0 := mustDate(window[0])
+		t1 := mustDate(window[len(window)-1]).AddDate(0, 0, 1)
+		q := url.Values{
+			"granularity": {"DAY"}, "breakdown": {"ad"}, "fields": {"impressions,swipes,spend,conversion_purchases"},
+			"start_time": {time.Date(t0.Year(), t0.Month(), t0.Day(), 0, 0, 0, 0, loc).Format(time.RFC3339)},
+			"end_time":   {time.Date(t1.Year(), t1.Month(), t1.Day(), 0, 0, 0, 0, loc).Format(time.RFC3339)},
+		}
+		var resp struct {
+			TimeseriesStats []struct {
+				TimeseriesStat struct {
+					BreakdownStats struct {
+						Ad []struct {
+							ID         string `json:"id"`
+							Timeseries []struct {
+								StartTime string `json:"start_time"`
+								Stats     struct {
+									Impressions flexInt  `json:"impressions"`
+									Swipes      flexInt  `json:"swipes"`
+									Spend       flexInt  `json:"spend"` // micros
+									Purchases   *flexNum `json:"conversion_purchases"`
+								} `json:"stats"`
+							} `json:"timeseries"`
+						} `json:"ad"`
+					} `json:"breakdown_stats"`
+				} `json:"timeseries_stat"`
+			} `json:"timeseries_stats"`
+		}
+		if err := s.call(cl, creds).get(ctx, s.base(cl)+"/adaccounts/"+esc(acct.ID)+"/stats?"+q.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		for _, ts := range resp.TimeseriesStats {
+			for _, ad := range ts.TimeseriesStat.BreakdownStats.Ad {
+				for _, p := range ad.Timeseries {
+					st := p.Stats
+					if ad.ID == "" || len(p.StartTime) < 10 || st.Spend == 0 && st.Impressions == 0 && st.Swipes == 0 {
+						continue
+					}
+					day := c.AdItemDay{ID: ad.ID, ParentID: squad[ad.ID], Name: name[ad.ID], Date: p.StartTime[:10],
+						SpendMicros: int64(st.Spend), Impressions: int64(st.Impressions), Clicks: int64(st.Swipes)}
+					if st.Purchases != nil {
+						day.Conversions = ptrF(float64(*st.Purchases))
+					}
+					if level == c.AdLevelAd {
+						out = append(out, day)
+						continue
+					}
+					// An ad that is no longer listed has no squad to add to.
+					k := key{squad[ad.ID], day.Date}
+					if k.squad == "" {
+						continue
+					}
+					sum, ok := sums[k]
+					if !ok {
+						sum = &c.AdItemDay{ID: k.squad, Date: k.date}
+						sums[k], order = sum, append(order, k)
+					}
+					sum.SpendMicros += day.SpendMicros
+					sum.Impressions += day.Impressions
+					sum.Clicks += day.Clicks
+					if day.Conversions != nil {
+						if sum.Conversions == nil {
+							sum.Conversions = ptrF(0)
+						}
+						*sum.Conversions += *day.Conversions
+					}
+				}
+			}
+		}
+	}
+	for _, k := range order {
+		out = append(out, *sums[k])
+	}
+	return out, nil
+}
+
 // ---- conversions ----
 
 // snapEvents are Snapchat's standard events a rule can send as.
@@ -280,6 +497,14 @@ func (s SnapchatAds) SendConversions(ctx context.Context, cl *c.Client, creds c.
 		if len(keys) == 0 {
 			results[i].Skipped, results[i].Reason = true, "no Snapchat click id or identifier to match on"
 			continue
+		}
+		// Where the person was, beside the identifiers above and never the
+		// only thing sent: the platform matches on them unhashed.
+		if cv.IPAddress != "" {
+			user["client_ip_address"], keys = cv.IPAddress, append(keys, "ip_address")
+		}
+		if cv.UserAgent != "" {
+			user["client_user_agent"], keys = cv.UserAgent, append(keys, "user_agent")
 		}
 		kind := cv.EventType
 		if kind == "" {

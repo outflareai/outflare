@@ -85,14 +85,42 @@ LIMIT 50000`, searchReferrer, whenEvents)
 		})
 	}
 
+	// Organic sessions by country with their time on the site. Best
+	// effort: a project whose events can't reach their session (old or
+	// self-hosted PostHog) leaves the country view without sessions.
+	countrySQL := fmt.Sprintf(`SELECT day, host, cc, count(), sum(dur)
+FROM (
+	SELECT $session_id AS sid, min(toDate(timestamp)) AS day,
+		argMin(coalesce(nullIf(toString(properties.$host), ''), ''), timestamp) AS host,
+		argMin(upper(coalesce(nullIf(toString(properties.$geoip_country_code), ''), '')), timestamp) AS cc,
+		any(session.$session_duration) AS dur
+	FROM events
+	WHERE event = '$pageview' AND %s AND session.$channel_type = 'Organic Search' AND $session_id IS NOT NULL
+	GROUP BY sid
+)
+GROUP BY day, host, cc
+ORDER BY day, 4 DESC
+LIMIT 50000`, whenEvents)
+	if res, err := run(countrySQL); err == nil {
+		for _, r := range res {
+			if len(r) < 5 {
+				continue
+			}
+			out.CountrySessions = append(out.CountrySessions, c.OrganicCountrySessionRow{
+				Day: expand(str(r[0])), Host: strings.ToLower(str(r[1])), Country: country(r, 2), Sessions: n(r, 3), Seconds: f64(r, 4),
+			})
+		}
+	}
+
 	signupSQL := fmt.Sprintf(`SELECT toDate(timestamp) AS day,
 	coalesce(nullIf(toString(person.properties.$initial_host), ''), ''),
 	coalesce(nullIf(toString(person.properties.$initial_pathname), ''), nullIf(toString(person.properties.$initial_current_url), ''), '/'),
-	count(), count(DISTINCT person_id)
+	count(), count(DISTINCT person_id),
+	upper(coalesce(nullIf(toString(person.properties.$initial_geoip_country_code), ''), ''))
 FROM events
 WHERE event = 'user_signed_up' AND %s
 	AND person.properties.$virt_initial_channel_type = 'Organic Search'
-GROUP BY day, 2, 3
+GROUP BY day, 2, 3, 6
 ORDER BY day, 4 DESC
 LIMIT 50000`, whenEvents)
 	res, err = run(signupSQL)
@@ -105,7 +133,7 @@ LIMIT 50000`, whenEvents)
 		}
 		out.Signups = append(out.Signups, c.OrganicSignupRow{
 			Day: expand(str(r[0])), Host: strings.ToLower(str(r[1])), Path: str(r[2]),
-			Signups: n(r, 3), SignupPeople: n(r, 4),
+			Signups: n(r, 3), SignupPeople: n(r, 4), Country: country(r, 5),
 		})
 	}
 
@@ -117,7 +145,8 @@ LIMIT 50000`, whenEvents)
 	lower(coalesce(nullIf(toString(properties.currency), ''), 'usd')),
 	coalesce(toBool(properties.is_trial), false),
 	coalesce(toBool(properties.is_wallet_top_up), false),
-	toString(properties.transaction_id)
+	toString(properties.transaction_id),
+	upper(coalesce(nullIf(toString(person.properties.$initial_geoip_country_code), ''), ''))
 FROM events
 WHERE event IN ('payment_succeeded', 'service_purchased') AND %s
 	AND person.properties.$virt_initial_channel_type = 'Organic Search'
@@ -134,7 +163,7 @@ LIMIT %d`, whenEvents, organicPaymentLimit)
 		out.Payments = append(out.Payments, c.OrganicPaymentEvent{
 			Day: expand(str(r[0])), Host: strings.ToLower(str(r[1])), Path: str(r[2]),
 			PersonID: str(r[3]), Event: str(r[4]), Amount: f64(r, 5), Currency: strings.ToLower(str(r[6])),
-			Trial: boolish(r[7]), Wallet: boolish(r[8]), TxID: str(r[9]),
+			Trial: boolish(r[7]), Wallet: boolish(r[8]), TxID: str(r[9]), Country: country(r, 10),
 		})
 	}
 
@@ -163,4 +192,16 @@ func boolish(v any) bool {
 		return *n != 0
 	}
 	return false
+}
+
+// country reads a two-letter country code from a result column.
+func country(r []any, i int) string {
+	if i >= len(r) {
+		return ""
+	}
+	v := strings.ToUpper(strings.TrimSpace(str(r[i])))
+	if len(v) != 2 {
+		return ""
+	}
+	return v
 }

@@ -33,7 +33,34 @@ export type ProposalConfig = {
   commission_terms: string;
   deliverables: Deliverable[];
   milestones: Milestone[];
+  // Set by the server when the offer is sent: the brand's rule for a paid
+  // link removed after payment.
+  removal?: LinkRule;
 };
+export type LinkRule = {
+  removal:
+    | "restore_or_refund"
+    | "restore_or_refund_forever"
+    | "shrinking_refund"
+    | "warn_only";
+  restore_days: number;
+  guarantee_months: number;
+};
+// The rule in one plain sentence, as the site owner reads it.
+export function removalText(r: LinkRule) {
+  const months =
+    r.guarantee_months === 1 ? "month" : `${r.guarantee_months} months`;
+  switch (r.removal) {
+    case "restore_or_refund":
+      return `If the link is removed in the first ${months}, it is restored within ${r.restore_days} days or the payment is refunded.`;
+    case "restore_or_refund_forever":
+      return `If the link is ever removed, it is restored within ${r.restore_days} days or the payment is refunded.`;
+    case "shrinking_refund":
+      return `If the link is removed and not restored within ${r.restore_days} days, part of the payment is refunded: all of it at first, falling evenly to nothing after ${months}.`;
+    default:
+      return "If the link is removed, the brand is told; no refund is asked for.";
+  }
+}
 export type Proposal = {
   id: string;
   membership_id: string;
@@ -59,12 +86,41 @@ export type Proposal = {
     invoice_note: string;
     quoted_cents: number;
     quote_note: string;
+    counters?: Counter[];
   };
   accepted_at: string | null;
   created_at: string;
   updated_at: string;
   invitation_url?: string;
 };
+// What a recipient may change on one deliverable in a counter-offer.
+export type CounterChange = {
+  placement_url?: string;
+  link_text?: string;
+  deadline?: string;
+};
+export type Counter = {
+  round: number;
+  amount_cents: number;
+  changes: Record<string, CounterChange>;
+  note: string;
+  at: string;
+  accepted_at?: string | null;
+};
+// A recipient may send at most this many counter-offers on one proposal.
+export const maxCounterRounds = 3;
+export function offerTotal(c: ProposalConfig) {
+  return c.milestones.reduce((t, m) => t + (m.amount_cents || 0), 0);
+}
+// The counter-offer waiting for the brand, if there is one.
+export function pendingCounter(p: Proposal) {
+  const all = p.progress.counters || [];
+  const last = all[all.length - 1];
+  return p.status === "quote_received" && last && !last.accepted_at
+    ? last
+    : null;
+}
+
 export function blankProposal(): ProposalConfig {
   return {
     title: "",
@@ -87,7 +143,7 @@ export function blankProposal(): ProposalConfig {
         live_days: 0,
         link_url: "",
         link_text: "",
-        link_attribute: "sponsored",
+        link_attribute: "follow",
       },
     ],
     milestones: [

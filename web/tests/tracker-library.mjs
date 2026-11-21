@@ -26,11 +26,12 @@ const lander = '60000000-0000-0000-0000-000000000001';
 const flow = '70000000-0000-0000-0000-000000000001';
 const now = '2026-11-12T00:00:00Z';
 const offer = (id, name, extra = {}) => ({ id, brand_id: brand, name, url: `https://offers.example/${name.slice(-1).toLowerCase()}?sub1={click_id}`, source_id: net, payout_mode: 'postback', payout: '2.50', currency: 'USD',
-  country_payouts: {}, conversion_type: '', daily_cap: null, cap_kind: 'conversions', fallback_offer_id: null, status: 'active', missing_click_id: false, tracking_url: `https://offers.example/${name.slice(-1).toLowerCase()}?sub1=CLICK`,
-  clicks_today: 120, conversions_today: 4, cap_reached: false, destinations: 2, created_at: now, updated_at: now, ...extra });
-const offers = [offer(offerA, 'Offer A'), offer(offerB, 'Offer B', { cap_reached: true, daily_cap: 10, conversions_today: 10 })];
+  country_payouts: {}, conversion_type: '', daily_cap: null, cap_kind: 'conversions', fallback_offer_id: null, status: 'active', click_id_delivery: 'auto', click_id_via: 'template', missing_click_id: false, tracking_url: `https://offers.example/${name.slice(-1).toLowerCase()}?sub1=CLICK`,
+  clicks_today: 120, conversions_today: 4, cap_reached: false, destinations: 2, check_enabled: true, check_status: 'ok', check_code: '', checked_at: now, broken_since: null, created_at: now, updated_at: now, ...extra });
+const offers = [offer(offerA, 'Offer A', { check_status: 'broken', check_code: 'http_410', broken_since: now }),
+  offer(offerB, 'Offer B', { cap_reached: true, daily_cap: 10, conversions_today: 10, check_enabled: false, check_status: '', checked_at: null })];
 const landerRow = (extra = {}) => ({ id: lander, brand_id: brand, name: 'Quiz lander', url: 'https://acme.example/quiz', ctas: 2, status: 'active', click_url: 'https://go.acme.example/click',
-  cta_urls: ['https://go.acme.example/click/1', 'https://go.acme.example/click/2'], script: '<script src="https://go.acme.example/lander.js" async></script>', lander_clicks_today: 30, destinations: 1, needs_domain: false, created_at: now, updated_at: now, ...extra });
+  cta_urls: ['https://go.acme.example/click/1', 'https://go.acme.example/click/2'], script: '<script src="https://go.acme.example/lander.js" async></script>', lander_clicks_today: 30, destinations: 1, needs_domain: false, check_status: 'broken', check_code: 'http_404', checked_at: now, broken_since: now, created_at: now, updated_at: now, ...extra });
 const dest = (id, name, url, extra = {}) => ({ id, name, url, weight: 100, daily_click_cap: null, clicks_today: 0, open: true, offer_id: null, offer_name: null, lander_id: null, lander_name: null, ...extra });
 let flowRow = { id: flow, brand_id: brand, name: 'Sweeps flow', status: 'active', links: 3, needs_domain: false, created_at: now, updated_at: now,
   paths: [{ id: 'p1', name: 'Mobile', active: true, conditions: [{ field: 'device', op: 'is', values: ['mobile'] }], destinations: [dest('pd1', 'Quiz lander', 'https://acme.example/quiz', { lander_id: lander }), dest('pd2', 'Offer A', 'https://offers.example/a', { offer_id: offerA })] }],
@@ -50,6 +51,8 @@ try {
     const B = `/v1/brands/${brand}`;
     let status = 200, body = {};
     if (p === '/v1/workspaces/workspace-a/brands') body = { data: [{ id: brand, name: 'Acme', handle: 'acme', status: 'active', timezone: 'Europe/Berlin' }] };
+    else if (p === `${B}/destination-preview`) { const raw = u.searchParams.get('destination'); body = { configured_url: raw, saved_url: raw, effective_url: raw + 'x&ofclk=previewclickid00', campaign_id: null, sample_click_id: 'previewclickid00',
+      parameters: [{ name: 'sub1', value: 'x', source: 'url' }, { name: 'ofclk', value: 'previewclickid00', source: 'click' }], replaced: [] }; }
     else if (p === `${B}/offers` && method === 'POST') { status = 201; body = offer('50000000-0000-0000-0000-00000000000c', b.name); }
     else if (p === `${B}/offers`) body = { data: offers };
     else if (p.startsWith(`${B}/offers/`)) body = offers[0];
@@ -77,12 +80,33 @@ try {
     const rowB = page.getByRole('row', { name: /Offer B/ });
     assert.match(await rowB.innerText(), /Capped/);
     assert.match(await rowB.innerText(), /MaxBounty/);
-    // New: the token picker inserts at the cursor; without {click_id} and a
-    // network, the warning shows.
+    // Each offer says whether its page answers, or that it isn't checked.
+    assert.match(await rowB.innerText(), /Not checked/);
+    const gone = page.getByRole('row', { name: /Offer A/ }).getByText('Offline');
+    assert.match(await gone.getAttribute('title'), /the page isn't there any more \(410\)/);
+    // New: the token picker inserts at the cursor. Left on Automatic, a
+    // URL without {click_id} isn't warned about before it is saved, since
+    // it may be the brand's own page; set to an affiliate network, without
+    // {click_id} and a network, the warning shows.
     await page.getByRole('button', { name: 'New offer' }).click();
     await page.getByLabel('Name').fill('Offer C');
     await page.getByLabel('Offer URL').fill('https://offers.example/c?sub1=');
     await page.getByLabel('Affiliate network').selectOption('');
+    await page.getByText(/Outflare adds the campaign's UTM tags, ofc and the click id \(ofclk\) itself/).first().waitFor();
+    assert.equal(await page.getByLabel('Click id delivery').inputValue(), 'auto');
+    assert.equal(await page.getByText('Missing click id').count(), 0);
+    // What a click gets, from the server: the final address and who set
+    // each parameter.
+    await page.getByRole('button', { name: 'Show what a click gets' }).click();
+    const effective = page.getByTestId('effective-url');
+    await effective.waitFor();
+    assert.match(await effective.innerText(), /sub1=x&ofclk=previewclickid00/);
+    assert.match(await effective.innerText(), /ofclk: the click's id, added by Outflare/);
+    assert.match(await effective.innerText(), /Nothing is counted/);
+    await page.getByLabel('Click id delivery').selectOption('first_party');
+    await page.getByText(/every redirect puts the click id on the page as ofclk/).waitFor();
+    assert.equal(await page.getByText('Missing click id').count(), 0);
+    await page.getByLabel('Click id delivery').selectOption('affiliate');
     await page.getByText('Missing click id').waitFor();
     await page.getByRole('button', { name: 'Click id', exact: true }).click();
     assert.equal(await page.getByLabel('Offer URL').inputValue(), 'https://offers.example/c?sub1={click_id}');
@@ -98,18 +122,51 @@ try {
     await page.getByLabel('Country payout').fill('4.5');
     await page.getByLabel('Daily cap').fill('50');
     await page.getByLabel('Fallback offer').selectOption(offerA);
+    // The check is on for a new offer, and says what it costs; off here.
+    const checkBox = page.getByLabel(/Check that this offer still answers/);
+    assert.equal(await checkBox.isChecked(), true);
+    await page.getByText('Its network counts each request as a click').waitFor();
+    await checkBox.uncheck();
     await page.getByRole('button', { name: 'Add offer' }).click();
     await page.getByText('Offer added').waitFor();
     const posted = bodies[`POST /v1/brands/${brand}/offers`];
     assert.deepEqual(posted, { name: 'Offer C', url: 'https://offers.example/c?sub1={click_id}{country}', source_id: net, payout_mode: 'fixed', payout: '3', currency: 'USD',
-      country_payouts: { DE: '4.5' }, conversion_type: '', daily_cap: 50, cap_kind: 'conversions', fallback_offer_id: offerA });
-    // A saved offer shows its tracking URL; Archive asks first.
-    await page.getByRole('row', { name: /Offer A/ }).click();
+      country_payouts: { DE: '4.5' }, conversion_type: '', daily_cap: 50, cap_kind: 'conversions', fallback_offer_id: offerA, check_enabled: false, click_id_delivery: 'affiliate' });
+    // A saved offer opens in the page, not over it: a Back button, its
+    // tracking URL, and the list out of the way.
+    await page.getByRole('row', { name: /Offer A/ }).getByText('Offer A', { exact: true }).click();
+    await page.getByTestId('details').waitFor();
     await page.getByText('Tracking URL').waitFor();
-    await page.getByRole('button', { name: 'Archive' }).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: 'Archive' }).click();
-    await page.getByText('Offer archived').waitFor();
-    assert.deepEqual(bodies[`PATCH /v1/brands/${brand}/offers/${offerA}`], { status: 'archived' });
+    assert.equal(await page.getByRole('dialog').count(), 0, 'no sheet');
+    assert.equal(await page.getByRole('row', { name: /Offer B/ }).count(), 0);
+    await page.getByRole('button', { name: 'Back to offers' }).click();
+    await page.getByRole('row', { name: /Offer B/ }).waitFor();
+    // Duplicate starts a new offer from a saved one.
+    await page.getByRole('button', { name: 'Duplicate Offer A' }).click();
+    assert.equal(await page.getByLabel('Name').inputValue(), 'Offer A (copy)');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    // Search narrows the list.
+    await page.getByLabel('Search offers').fill('offer b');
+    assert.equal(await page.getByRole('row', { name: /Offer A/ }).count(), 0);
+    await page.getByLabel('Search offers').fill('');
+    // Delete on a row asks first, says a link uses it, then deletes.
+    await page.getByRole('button', { name: 'Delete Offer A' }).click();
+    const ask = page.getByRole('alertdialog');
+    await ask.getByText('Delete Offer A?').waitFor();
+    await ask.getByText(/A link sends clicks to it now/).waitFor();
+    await ask.getByRole('button', { name: 'Cancel' }).click();
+    assert.equal(calls.filter(c => c.startsWith('DELETE ')).length, 0, 'Cancel deletes nothing');
+    await page.getByRole('button', { name: 'Delete Offer A' }).click();
+    await ask.getByRole('button', { name: 'Delete' }).click();
+    await page.getByText('Offer A deleted').waitFor();
+    assert.ok(calls.includes(`DELETE /v1/brands/${brand}/offers/${offerA}`));
+    // Ticked rows are deleted together.
+    await page.getByLabel('Select all').check();
+    await page.getByTestId('selection-bar').getByRole('button', { name: /^Delete 2/ }).click();
+    await ask.getByText('Delete 2 offers?').waitFor();
+    await ask.getByRole('button', { name: 'Delete' }).click();
+    await page.getByText('2 offers deleted').waitFor();
+    assert.ok(calls.includes(`DELETE /v1/brands/${brand}/offers/${offerB}`));
     assert.deepEqual(errors, []);
     await page.close();
   }
@@ -132,8 +189,29 @@ try {
     assert.match(await urls.innerText(), /Call to action 2/);
     assert.match(await urls.innerText(), /click\/2/);
     await page.getByRole('button', { name: 'Copy script' }).waitFor();
-    assert.equal(calls.filter(c => c === `GET /v1/brands/${brand}/landers`).length, 2, 'the list reloads behind the sheet');
+    assert.equal(calls.filter(c => c === `GET /v1/brands/${brand}/landers`).length, 2, 'the list reloads behind the new lander');
+    // The list says whether each lander's page answers, as last checked.
+    await page.getByRole('button', { name: 'Back to landers' }).click();
+    const badge = page.getByText('Offline');
+    await badge.waitFor();
+    assert.match(await badge.getAttribute('title'), /the page isn't there any more \(404\)/);
     assert.deepEqual(errors, []);
+    await page.close();
+  }
+
+  // In the app each offer has an address of its own: a row asks for it,
+  // and the address opens the offer.
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mock(page);
+    await page.goto(`${origin}/tests/fixtures/tracker-library.html?page=offers&address`);
+    await page.getByRole('row', { name: /Offer A/ }).getByText('Offer A', { exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => window.gone.pop()), ['tracker-offers', offerA]);
+    await page.goto(`${origin}/tests/fixtures/tracker-library.html?page=offers&address&item=${offerA}`);
+    await page.getByTestId('details').waitFor();
+    assert.equal(await page.getByLabel('Name').inputValue(), 'Offer A');
+    await page.getByRole('button', { name: 'Back to offers' }).click();
+    assert.deepEqual(await page.evaluate(() => window.gone.pop()), ['tracker-offers', null]);
     await page.close();
   }
 

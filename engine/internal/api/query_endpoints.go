@@ -59,8 +59,10 @@ func (s *Server) routesQueryEndpoints(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
 	mux.HandleFunc("GET /v1/brands/{brand}/query-endpoints", s.onBrand(read, s.listQueryEndpoints))
 	mux.HandleFunc("POST /v1/brands/{brand}/query-endpoints", s.onBrand(manage, s.createQueryEndpoint))
+	mux.HandleFunc("POST /v1/brands/{brand}/query-endpoints/describe", s.onBrand(read, s.describeQueryEndpoint))
 	mux.HandleFunc("GET /v1/brands/{brand}/query-endpoints/{endpoint}", s.onBrand(read, s.getQueryEndpoint))
 	mux.HandleFunc("PATCH /v1/brands/{brand}/query-endpoints/{endpoint}", s.onBrand(manage, s.updateQueryEndpoint))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/query-endpoints/{endpoint}", s.onBrand(manage, s.deleteQueryEndpoint))
 	mux.HandleFunc("GET /v1/brands/{brand}/query-endpoints/{endpoint}/calls", s.onBrand(read, s.listQueryEndpointCalls))
 	mux.HandleFunc("POST /v1/brands/{brand}/query-endpoints/{endpoint}/run", s.onBrand(auth.ScopeQueryEndpoints, s.runQueryEndpoint))
 }
@@ -331,6 +333,15 @@ func (s *Server) createQueryEndpoint(w http.ResponseWriter, r *http.Request) {
 		if err := checkEndpointParams(v.Params, sql); err != nil {
 			return err
 		}
+		// No description: write one from the query (query_endpoint_describe.go).
+		if in.Description == nil {
+			_, b, err := endpointSource(ctx, tx, a, v.SavedQueryID, &v.Version)
+			var inv errInvalid
+			if err != nil && !errors.As(err, &inv) {
+				return err
+			}
+			v.Description = describeEndpoint(sql, b, v.Params, v.RowCap, s.fieldLabels(ctx, a, b))
+		}
 		scopes := readScopes(a)
 		params, _ := json.Marshal(v.Params)
 		err = tx.QueryRow(ctx, `INSERT INTO query_endpoints (workspace_id, brand_id, saved_query_id, version, slug, name, description, params, scopes,
@@ -476,6 +487,45 @@ func (s *Server) updateQueryEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// deleteQueryEndpoint removes an endpoint for good (owners and admins,
+// signed in): calls to its address answer 404 from then on, its slug is
+// free again, and its call log goes with it. The saved query it ran is
+// kept. The audit log keeps what it was: its slug, saved query, version and
+// the calls it had.
+func (s *Server) deleteQueryEndpoint(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	ctx := r.Context()
+	if !publisher(a) {
+		notPublisher(w, r)
+		return
+	}
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		v, err := findQueryEndpoint(ctx, tx, a, r.PathValue("endpoint"))
+		if err != nil {
+			return err
+		}
+		var calls int
+		if err := tx.QueryRow(ctx, `SELECT count(*)::int FROM query_endpoint_calls WHERE workspace_id = $1 AND brand_id = $2 AND endpoint_id = $3`,
+			a.WorkspaceID, a.Brand, v.ID).Scan(&calls); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM query_endpoints WHERE workspace_id = $1 AND brand_id = $2 AND id = $3`, a.WorkspaceID, a.Brand, v.ID); err != nil {
+			return err
+		}
+		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "query_endpoint.deleted", "query_endpoint", v.ID,
+			map[string]any{"brand_id": a.Brand, "saved_query_id": v.SavedQueryID, "version": v.Version, "slug": v.Slug, "name": v.Name, "status": v.Status, "calls": calls},
+			map[string]any{"saved_query_id": v.SavedQueryID, "version": v.Version, "status": v.Status, "calls": calls})
+	})
+	if errors.Is(err, errNotFound) {
+		writeError(w, r, http.StatusNotFound, "not_found", "query endpoint not found")
+		return
+	}
+	if s.recordError(w, r, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) listQueryEndpoints(w http.ResponseWriter, r *http.Request) {

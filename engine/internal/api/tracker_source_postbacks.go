@@ -157,27 +157,25 @@ func enqueueSourcePostback(ctx context.Context, tx pgx.Tx, ws, conv string) erro
 		JOIN tracker_traffic_sources ts ON ts.id = k.traffic_source_id AND ts.workspace_id = c.workspace_id AND ts.status = 'active'
 		WHERE c.workspace_id = $1 AND c.id = $2`, ws, conv).
 		Scan(&source, &url, &share, &decimals, &minMicros, &types, &statuses, &resend, &status, &typ, &micros, &fraud, &sent, &awaiting)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // no campaign, or its campaign has no active traffic source
-	case err != nil:
+	}
+	if err != nil {
 		return err
-	case url == "" || strings.Contains(url, tokens.Placeholder):
+	}
+	payout := sentPayout(micros, share, decimals)
+	switch why := sourcePostbackSkip(url, fraud, awaiting, statuses, types, status, typ, payout, minMicros); {
+	case why == "no_postback_url":
 		return nil
-	case len(fraud) > 0:
-		metrics.TrackerSourcePostback("suspect")
+	case why == "suspect", why == "awaiting_lookup":
+		metrics.TrackerSourcePostback(why)
 		return nil
-	case awaiting:
-		metrics.TrackerSourcePostback("awaiting_lookup")
-		return nil
-	case !slices.Contains(statuses, status), len(types) > 0 && !slices.Contains(types, typ):
+	case why == "filtered":
 		metrics.TrackerSourcePostback("filtered")
 		return nil
 	case sent && !resend:
 		return nil
-	}
-	payout := sentPayout(micros, share, decimals)
-	if payout < minMicros {
+	case why == "below_minimum":
 		metrics.TrackerSourcePostback("filtered")
 		return nil
 	}
@@ -198,6 +196,29 @@ func enqueueSourcePostback(ctx context.Context, tx pgx.Tx, ws, conv string) erro
 	return err
 }
 
+// sourcePostbackSkip says why a conversion's state isn't sent to its
+// traffic source: no_postback_url (the source takes none, or its URL still
+// holds a placeholder), suspect (a fraud flag on it or its click),
+// awaiting_lookup (its click's address is still being looked up), filtered
+// (a status or type the source's rules leave out) or below_minimum (a
+// payout under the rules' minimum); "" when it is sent. The conversion
+// list reads the same answer, so what it shows is what was decided.
+func sourcePostbackSkip(url string, fraud []string, awaiting bool, statuses, types []string, status, typ string, payout, minMicros int64) string {
+	switch {
+	case url == "" || strings.Contains(url, tokens.Placeholder):
+		return "no_postback_url"
+	case len(fraud) > 0:
+		return "suspect"
+	case awaiting:
+		return "awaiting_lookup"
+	case !slices.Contains(statuses, status), len(types) > 0 && !slices.Contains(types, typ):
+		return "filtered"
+	case payout < minMicros:
+		return "below_minimum"
+	}
+	return ""
+}
+
 // sourcePostbackJob calls a traffic source's postback URL for one queued
 // send.
 func (s *Server) sourcePostbackJob(ctx context.Context, job jobs.Job) error {
@@ -213,21 +234,28 @@ func (s *Server) sourcePostbackJob(ctx context.Context, job jobs.Job) error {
 	var fields []byte
 	var payout int64
 	var decimals int
+	var state string
 	err := s.pool.QueryRow(ctx, `SELECT ts.postback_url, ts.postback_method, ts.id::text, ts.postback_decimals, o.payout_micros,
 			c.click_key, c.transaction_id, c.type, c.status, c.currency, COALESCE(k.slug, ''), COALESCE(k.code, ''),
-			x.source_click_id, x.country, COALESCE(x.fields, '{}')
+			x.source_click_id, x.country, COALESCE(x.fields, '{}'), o.state
 		FROM tracker_source_postbacks o
 		JOIN tracker_traffic_sources ts ON ts.id = o.source_id
 		JOIN tracker_conversions c ON c.id = o.conversion_id
 		LEFT JOIN tracking_campaigns k ON k.id = c.campaign_id
 		LEFT JOIN tracking_link_clicks x ON x.id = c.click_id
 		WHERE o.workspace_id = $1 AND o.id = $2 AND o.status = 'queued'`, ws, p.SendID).
-		Scan(&tmpl, &method, &source, &decimals, &payout, &key, &txid, &typ, &status, &currency, &campaign, &campaignCode, &sourceClickID, &country, &fields)
+		Scan(&tmpl, &method, &source, &decimals, &payout, &key, &txid, &typ, &status, &currency, &campaign, &campaignCode, &sourceClickID, &country, &fields, &state)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // sent, given up on, or gone
 	}
 	if err != nil {
 		return err
+	}
+	// A send is one state of the conversion (status:type:payout): what it
+	// was when queued is what goes out, also when it is sent again after
+	// the conversion has changed.
+	if parts := strings.Split(state, ":"); len(parts) == 3 && parts[0] != "" {
+		status, typ = parts[0], parts[1]
 	}
 	if tmpl == "" {
 		return s.sourcePostbackDone(ctx, ws, p.SendID, source, "failed", 0, "", "the traffic source has no postback URL any more", "postback_invalid", nil)
@@ -310,6 +338,73 @@ func (s *Server) sourcePostbackDone(ctx context.Context, ws, id, source, status 
 
 func (s *Server) routesSourcePostbacks(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/brands/{brand}/traffic-sources/{id}/postbacks", s.onBrand(auth.ScopeAnalyticsRead, s.listSourcePostbacks))
+	mux.HandleFunc("POST /v1/brands/{brand}/traffic-sources/{id}/postbacks/{send}/resend", s.onBrand(auth.ScopeAnalyticsManage, s.resendSourcePostback))
+}
+
+var (
+	errSendQueued  = errors.New("the send is still queued")
+	errSendSuspect = errors.New("the conversion is suspect")
+)
+
+// resendSourcePostback queues one of a traffic source's sends again: the
+// same conversion and payout, to the source's postback URL as it is now
+// (so a send that failed on a wrong URL goes out once the URL is fixed). A
+// send that is still queued isn't queued twice, and one whose conversion
+// has been flagged as suspect since stays held back, like every suspect
+// conversion.
+func (s *Server) resendSourcePostback(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	ctx := r.Context()
+	source, id := r.PathValue("id"), r.PathValue("send")
+	err := errNotFound
+	if validUUID(source) && validUUID(id) {
+		err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+			var status string
+			var attempts int
+			var suspect bool
+			err := tx.QueryRow(ctx, `SELECT o.status, o.attempts,
+					cardinality(c.fraud_reasons || COALESCE((SELECT x.fraud_reasons FROM tracking_link_clicks x WHERE x.id = c.click_id), '{}')) > 0
+				FROM tracker_source_postbacks o JOIN tracker_conversions c ON c.id = o.conversion_id
+				WHERE o.workspace_id = $1 AND o.brand_id = $2 AND o.source_id = $3 AND o.id = $4 FOR UPDATE OF o`,
+				a.WorkspaceID, a.Brand, source, id).Scan(&status, &attempts, &suspect)
+			switch {
+			case errors.Is(err, pgx.ErrNoRows):
+				return errNotFound
+			case err != nil:
+				return err
+			case status == "queued":
+				return errSendQueued
+			case suspect:
+				return errSendSuspect
+			}
+			if _, err := tx.Exec(ctx, `UPDATE tracker_source_postbacks SET status = 'queued', error = '', http_status = NULL WHERE id = $1`, id); err != nil {
+				return err
+			}
+			// attempts only grows, so each re-send is a job of its own.
+			if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobSourcePostback, WorkspaceID: &a.WorkspaceID, Payload: map[string]string{"send_id": id},
+				MaxAttempts: 5, IdempotencyKey: "source-postback:" + id + ":resend:" + strconv.Itoa(attempts)}); err != nil {
+				return err
+			}
+			return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "traffic_source.postback_resent", "traffic_source", source,
+				map[string]any{"brand_id": a.Brand, "send_id": id}, map[string]any{"was": status})
+		})
+	}
+	switch {
+	case errors.Is(err, errNotFound):
+		writeError(w, r, http.StatusNotFound, "not_found", "send not found")
+		return
+	case errors.Is(err, errSendQueued):
+		writeError(w, r, http.StatusConflict, "conflict", "this send is already queued")
+		return
+	case errors.Is(err, errSendSuspect):
+		writeError(w, r, http.StatusConflict, "conflict", "the conversion is flagged as suspect, and suspect conversions aren't sent to traffic sources")
+		return
+	}
+	if s.allocError(w, r, err) {
+		return
+	}
+	metrics.TrackerSourcePostback("queued")
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
 }
 
 type sourcePostbackView struct {
@@ -323,6 +418,10 @@ type sourcePostbackView struct {
 	Attempts     int        `json:"attempts"`
 	SentAt       *time.Time `json:"sent_at"`
 	CreatedAt    time.Time  `json:"created_at"`
+	// Warning is no_source_click_id when the source's postback URL asks
+	// for the network's click id and the conversion's click has none, so
+	// the network can't tell which click to credit; "" otherwise.
+	Warning string `json:"warning"`
 }
 
 // listSourcePostbacks lists a traffic source's sends, newest first.
@@ -349,10 +448,13 @@ func (s *Server) listSourcePostbacks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id::text, conversion_id::text, status, payout_micros, url, http_status, error, attempts, sent_at, created_at
-		FROM tracker_source_postbacks WHERE workspace_id = $1 AND brand_id = $2 AND source_id = $3 AND ($4 = '' OR status = $4)
-		  AND ($5::timestamptz IS NULL OR created_at < $5)
-		ORDER BY created_at DESC LIMIT $6`, a.WorkspaceID, a.Brand, r.PathValue("id"), status, before, limit+1)
+	rows, err := s.pool.Query(ctx, `SELECT o.id::text, o.conversion_id::text, o.status, o.payout_micros, o.url, o.http_status, o.error, o.attempts, o.sent_at, o.created_at,
+			CASE WHEN ts.postback_url LIKE '%{source\_click\_id%' AND NOT EXISTS (SELECT 1 FROM tracker_conversions c JOIN tracking_link_clicks x ON x.id = c.click_id
+				WHERE c.id = o.conversion_id AND COALESCE(x.source_click_id, '') <> '') THEN 'no_source_click_id' ELSE '' END
+		FROM tracker_source_postbacks o JOIN tracker_traffic_sources ts ON ts.id = o.source_id
+		WHERE o.workspace_id = $1 AND o.brand_id = $2 AND o.source_id = $3 AND ($4 = '' OR o.status = $4)
+		  AND ($5::timestamptz IS NULL OR o.created_at < $5)
+		ORDER BY o.created_at DESC LIMIT $6`, a.WorkspaceID, a.Brand, r.PathValue("id"), status, before, limit+1)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -360,7 +462,7 @@ func (s *Server) listSourcePostbacks(w http.ResponseWriter, r *http.Request) {
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (sourcePostbackView, error) {
 		var v sourcePostbackView
 		var micros int64
-		err := row.Scan(&v.ID, &v.ConversionID, &v.Status, &micros, &v.URL, &v.HTTPStatus, &v.Error, &v.Attempts, &v.SentAt, &v.CreatedAt)
+		err := row.Scan(&v.ID, &v.ConversionID, &v.Status, &micros, &v.URL, &v.HTTPStatus, &v.Error, &v.Attempts, &v.SentAt, &v.CreatedAt, &v.Warning)
 		v.Payout = formatMicros(micros)
 		return v, err
 	})

@@ -34,6 +34,12 @@ func (s *Server) routesSEOTargets(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/seo-sites/{site}/targets/{target}", s.inBrand(manage, s.updatePageTarget))
 	mux.HandleFunc("DELETE /v1/brands/{brand}/seo-sites/{site}/targets/{target}", s.onBrand(manage, s.deletePageTarget))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/seo-sites/{site}/targets/{target}", s.inBrand(manage, s.deletePageTarget))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo/country-pages", s.onBrand(read, s.seoCountryPages))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo/cannibalisation", s.onBrand(read, s.seoCannibalisation))
+	mux.HandleFunc("PUT /v1/brands/{brand}/seo-sites/{site}/cannibalisation/primary", s.onBrand(manage, s.setCannibalPrimary))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo/targets", s.onBrand(read, s.seoTargetReport))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/targets/{target}", s.onBrand(read, s.getPageTarget))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-sites/{site}/targets/import", s.onBrand(manage, s.importPageTargets))
 	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/cannibalisation", s.onBrand(read, s.siteCannibalisation))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/cannibalisation", s.inBrand(read, s.siteCannibalisation))
 	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/internal-links", s.onBrand(read, s.siteInternalLinks))
@@ -94,13 +100,18 @@ type targetSearch struct {
 }
 
 type pageTargetView struct {
-	ID        *string         `json:"id"`
-	URL       string          `json:"url"`
-	Keyword   string          `json:"keyword"`
-	Secondary []string        `json:"secondary"`
-	Status    string          `json:"status"`
-	Origin    string          `json:"origin"`
-	Checks    seointel.Checks `json:"checks"`
+	ID        *string  `json:"id"`
+	URL       string   `json:"url"`
+	Keyword   string   `json:"keyword"`
+	Secondary []string `json:"secondary"`
+	Status    string   `json:"status"`
+	Origin    string   `json:"origin"`
+	Intent    string   `json:"intent"`
+	PageType  string   `json:"page_type"`
+	// The summary's length; the summary itself comes with one target.
+	SummaryLength int             `json:"summary_length"`
+	Summary       *string         `json:"summary,omitempty"`
+	Checks        seointel.Checks `json:"checks"`
 	// The keyword on this page in Search Console, over the 28 days to the
 	// newest day it sent. nil when no property covers the site.
 	Search    *targetSearch `json:"search"`
@@ -110,8 +121,19 @@ type pageTargetView struct {
 
 var targetStatuses = []string{"set", "suggested", "dismissed"}
 
-// maxTargets is how many targets a site lists at once.
-const maxTargets = 1000
+// maxTargets is how many targets a site lists at once, and
+// maxTargetBatch how many pages one accept or import takes.
+const (
+	maxTargets     = 10000
+	maxTargetBatch = 1000
+	maxSummary     = 20000
+)
+
+// The intents and page types a target can name; empty is not set.
+var (
+	targetIntents   = []string{"informational", "commercial", "transactional", "navigational"}
+	targetPageTypes = []string{"homepage", "product", "pricing", "use-case", "comparison", "blog", "location", "tool", "docs", "other"}
+)
 
 // loadPageTargets reads a site's targets (one when id is set), checked
 // against its latest crawl, with their Search Console numbers.
@@ -126,7 +148,8 @@ func (s *Server) loadPageTargets(r *http.Request, site *seoSite, src *seointel.S
 	var urls []string
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id::text, t.url, t.keyword, t.secondary, t.status, t.origin, t.created_at, t.updated_at,
-			sd.clicks, sd.impressions, sd.position
+			sd.clicks, sd.impressions, sd.position, t.intent, t.page_type, length(t.summary),
+			CASE WHEN $7 <> '' THEN t.summary END
 		FROM page_targets t
 		LEFT JOIN LATERAL (
 			SELECT COALESCE(sum(d.clicks), 0)::int AS clicks, COALESCE(sum(d.impressions), 0)::int AS impressions,
@@ -146,7 +169,8 @@ func (s *Server) loadPageTargets(r *http.Request, site *seoSite, src *seointel.S
 		var created, updated time.Time
 		var clicks, impressions *int
 		var position *float64
-		if err := rows.Scan(&tid, &v.URL, &v.Keyword, &v.Secondary, &v.Status, &v.Origin, &created, &updated, &clicks, &impressions, &position); err != nil {
+		if err := rows.Scan(&tid, &v.URL, &v.Keyword, &v.Secondary, &v.Status, &v.Origin, &created, &updated, &clicks, &impressions, &position,
+			&v.Intent, &v.PageType, &v.SummaryLength, &v.Summary); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -205,7 +229,7 @@ func (s *Server) listPageTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	suggested := 0
 	if status == "" || status == "suggested" {
-		sug, err := seointel.Suggestions(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, site.ID, site.Host, src, nil, maxTargets)
+		sug, err := seointel.Suggestions(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, site.ID, site.Host, src, nil, maxTargetBatch)
 		if err != nil {
 			s.internal(w, r, err)
 			return
@@ -237,10 +261,40 @@ type targetInput struct {
 	Keyword   *string   `json:"keyword"`
 	Secondary *[]string `json:"secondary"`
 	Status    *string   `json:"status"`
+	Intent    *string   `json:"intent"`
+	PageType  *string   `json:"page_type"`
+	Summary   *string   `json:"summary"`
+}
+
+// passport checks a target's intent, page type and summary; "" clears
+// one. It returns a message for the first that is wrong.
+func (in *targetInput) passport() string {
+	if in.Intent != nil {
+		v := strings.ToLower(strings.TrimSpace(*in.Intent))
+		if v != "" && !slices.Contains(targetIntents, v) {
+			return "intent is one of " + strings.Join(targetIntents, ", ")
+		}
+		in.Intent = &v
+	}
+	if in.PageType != nil {
+		v := strings.ToLower(strings.TrimSpace(*in.PageType))
+		if v != "" && !slices.Contains(targetPageTypes, v) {
+			return "page_type is one of " + strings.Join(targetPageTypes, ", ")
+		}
+		in.PageType = &v
+	}
+	if in.Summary != nil {
+		v := strings.TrimSpace(*in.Summary)
+		if len(v) > maxSummary {
+			return "summary is at most 20000 characters"
+		}
+		in.Summary = &v
+	}
+	return ""
 }
 
 // keywords checks a target's keyword and secondary keywords.
-func (in targetInput) keywords(w http.ResponseWriter, r *http.Request) (kw *string, sec *[]string, ok bool) {
+func (in *targetInput) keywords(w http.ResponseWriter, r *http.Request) (kw *string, sec *[]string, ok bool) {
 	if in.Keyword != nil {
 		k := seointel.Keyword(*in.Keyword)
 		if len(k) > seointel.MaxKeyword {
@@ -269,6 +323,10 @@ func (in targetInput) keywords(w http.ResponseWriter, r *http.Request) (kw *stri
 	}
 	if in.Status != nil && *in.Status != "set" && *in.Status != "dismissed" {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is set or dismissed")
+		return nil, nil, false
+	}
+	if msg := in.passport(); msg != "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
 		return nil, nil, false
 	}
 	return kw, sec, true
@@ -353,11 +411,12 @@ func (s *Server) putPageTarget(w http.ResponseWriter, r *http.Request) {
 			createdBy = &a.ActorID
 		}
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO page_targets (workspace_id, site_id, url, keyword, secondary, status, origin, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, 'manual', $7)
+			INSERT INTO page_targets (workspace_id, site_id, url, keyword, secondary, status, origin, created_by, intent, page_type, summary)
+			VALUES ($1, $2, $3, $4, $5, $6, 'manual', $7, COALESCE($8, ''), COALESCE($9, ''), COALESCE($10, ''))
 			ON CONFLICT (site_id, url) DO UPDATE SET keyword = EXCLUDED.keyword, secondary = EXCLUDED.secondary,
-				status = EXCLUDED.status, origin = 'manual', updated_at = now()
-			RETURNING id::text`, a.WorkspaceID, site.ID, page, keyword, secondary, status, createdBy).Scan(&id); err != nil {
+				status = EXCLUDED.status, origin = 'manual', updated_at = now(),
+				intent = COALESCE($8, page_targets.intent), page_type = COALESCE($9, page_targets.page_type), summary = COALESCE($10, page_targets.summary)
+			RETURNING id::text`, a.WorkspaceID, site.ID, page, keyword, secondary, status, createdBy, in.Intent, in.PageType, in.Summary).Scan(&id); err != nil {
 			return err
 		}
 		action := "page_target.set"
@@ -404,9 +463,10 @@ func (s *Server) updatePageTarget(w http.ResponseWriter, r *http.Request) {
 		var keyword, status string
 		err := tx.QueryRow(ctx, `
 			UPDATE page_targets SET keyword = COALESCE($4, keyword), secondary = COALESCE($5, secondary), status = COALESCE($6, status),
-				origin = CASE WHEN $4::text IS NULL THEN origin ELSE 'manual' END, updated_at = now()
+				origin = CASE WHEN $4::text IS NULL THEN origin ELSE 'manual' END, updated_at = now(),
+				intent = COALESCE($7, intent), page_type = COALESCE($8, page_type), summary = COALESCE($9, summary)
 			WHERE id = $1 AND workspace_id = $2 AND site_id = $3
-			RETURNING keyword, status`, id, a.WorkspaceID, site.ID, kw, sec, in.Status).Scan(&keyword, &status)
+			RETURNING keyword, status`, id, a.WorkspaceID, site.ID, kw, sec, in.Status, in.Intent, in.PageType, in.Summary).Scan(&keyword, &status)
 		if err != nil {
 			return err
 		}
@@ -414,7 +474,8 @@ func (s *Server) updatePageTarget(w http.ResponseWriter, r *http.Request) {
 			return errTargetNoKeyword
 		}
 		var fields []string
-		for name, set := range map[string]bool{"keyword": kw != nil, "secondary": sec != nil, "status": in.Status != nil} {
+		for name, set := range map[string]bool{"keyword": kw != nil, "secondary": sec != nil, "status": in.Status != nil,
+			"intent": in.Intent != nil, "page_type": in.PageType != nil, "summary": in.Summary != nil} {
 			if set {
 				fields = append(fields, name)
 			}
@@ -493,7 +554,7 @@ func (s *Server) acceptPageTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	var urls []string
 	if in.URLs != nil {
-		if len(*in.URLs) == 0 || len(*in.URLs) > maxTargets {
+		if len(*in.URLs) == 0 || len(*in.URLs) > maxTargetBatch {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "urls has 1 to 1000 pages; leave it out to accept every suggestion")
 			return
 		}
@@ -514,7 +575,7 @@ func (s *Server) acceptPageTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	var ids []string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		sug, err := seointel.Suggestions(ctx, tx, a.WorkspaceID, site.ID, site.Host, src, urls, maxTargets)
+		sug, err := seointel.Suggestions(ctx, tx, a.WorkspaceID, site.ID, site.Host, src, urls, maxTargetBatch)
 		if err != nil || len(sug) == 0 {
 			return err
 		}

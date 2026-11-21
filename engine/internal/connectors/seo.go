@@ -85,6 +85,11 @@ const (
 	SEOAudit       = "audit"       // issues a site audit found
 	SEOLinks       = "links"       // single links to it, live and recently lost
 	SEOPages       = "pages"       // its pages that get the most search traffic
+	// SEODonor is what judges a site to buy a link on, and only that:
+	// rating, worldwide search traffic, live referring and linked domains,
+	// and its three pages with the most search traffic (Rows). Kept small
+	// on purpose, so checking many sites costs little.
+	SEODonor = "donor"
 )
 
 // AllSEOReports lists every SEO report, in display order.
@@ -100,6 +105,9 @@ type SEOMetrics struct {
 	// come from.
 	Backlinks        *float64 `json:"backlinks,omitempty"`
 	ReferringDomains *float64 `json:"referring_domains,omitempty"`
+	// LinkedDomains is how many domains the site links out to (the donor
+	// report).
+	LinkedDomains *float64 `json:"linked_domains,omitempty"`
 	// OrganicKeywords is how many keywords rank in the top 100, Top3 how
 	// many in the top 3.
 	OrganicKeywords *float64 `json:"organic_keywords,omitempty"`

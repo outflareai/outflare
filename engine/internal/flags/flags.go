@@ -42,7 +42,7 @@ var (
 	keyRe     = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 	paramRe   = regexp.MustCompile(`^[A-Za-z0-9_.\-\[\]]{1,64}$`)
 	Ops       = []string{"is", "is_not", "contains", "not_contains", "starts_with", "ends_with", "exists", "not_exists"}
-	Attrs     = []string{"host", "path", "url", "referrer", "device", "language", "signed_in"}
+	Attrs     = []string{"host", "path", "url", "referrer", "device", "language", "signed_in", "user_id", "list"}
 	Devices   = []string{"desktop", "mobile", "tablet"}
 	valueless = []string{"exists", "not_exists"}
 )
@@ -59,8 +59,10 @@ type Variant struct {
 // Rule is one condition on the visitor or the page.
 type Rule struct {
 	// host, path, url, referrer, device, language, signed_in,
-	// query.<name> (a parameter of the page's address) or
-	// property.<name> (a property the caller sends).
+	// query.<name> (a parameter of the page's address),
+	// property.<name> (a property the caller sends), or who the visitor
+	// is: user_id (your id for them), list (a People list they are in, by
+	// its id) or person.<field> (a field of their record).
 	Attribute string   `json:"attribute"`
 	Op        string   `json:"op"`
 	Values    []string `json:"values"`
@@ -92,6 +94,13 @@ type Visitor struct {
 	Language string
 	// Properties the caller sends, for property.<name> rules.
 	Properties map[string]string
+	// Who the visitor is, when known: your id for them, the People lists
+	// they are in (ids) and their record's fields as text, for user_id,
+	// list and person.<field> rules. An unknown visitor has none, so they
+	// fail "is" rules on these and pass "is_not" ones.
+	UserID string
+	Lists  []string
+	Person map[string]string
 }
 
 // Result is the variant a visitor got; Variant is "" when the flag is off
@@ -188,14 +197,19 @@ func bucket(s string) int {
 }
 
 type attrs struct {
-	plain map[string]string
-	query url.Values
-	props map[string]string
-	has   map[string]bool
+	plain  map[string]string
+	query  url.Values
+	props  map[string]string
+	has    map[string]bool
+	lists  []string
+	person map[string]string
 }
 
 func attributes(v Visitor) attrs {
-	a := attrs{plain: map[string]string{}, query: url.Values{}, props: v.Properties, has: map[string]bool{}}
+	a := attrs{plain: map[string]string{}, query: url.Values{}, props: v.Properties, has: map[string]bool{}, person: v.Person}
+	for _, l := range v.Lists {
+		a.lists = append(a.lists, strings.ToLower(l))
+	}
 	set := func(k, val string) {
 		a.plain[k] = val
 		a.has[k] = val != ""
@@ -211,12 +225,19 @@ func attributes(v Visitor) attrs {
 	set("language", strings.ToLower(v.Language))
 	set("signed_in", fmt.Sprint(v.SignedIn))
 	a.has["signed_in"] = true
+	set("user_id", v.UserID)
 	return a
 }
 
 func (r Rule) holds(a attrs) bool {
+	if r.Attribute == "list" {
+		in := slices.ContainsFunc(r.Values, func(x string) bool { return slices.Contains(a.lists, strings.ToLower(x)) })
+		return in == (r.Op == "is")
+	}
 	val, present := "", false
 	switch {
+	case strings.HasPrefix(r.Attribute, "person."):
+		val, present = a.person[strings.TrimPrefix(r.Attribute, "person.")]
 	case strings.HasPrefix(r.Attribute, "query."):
 		name := strings.TrimPrefix(r.Attribute, "query.")
 		val, present = a.query.Get(name), a.query.Has(name)
@@ -536,16 +557,16 @@ func CheckRules(rs []Rule) string {
 	}
 	for _, r := range rs {
 		name, scoped := "", false
-		for _, p := range []string{"query.", "property."} {
+		for _, p := range []string{"query.", "property.", "person."} {
 			if n, ok := strings.CutPrefix(r.Attribute, p); ok {
 				name, scoped = n, true
 			}
 		}
 		if scoped && !paramRe.MatchString(name) {
-			return "query.<name> and property.<name> need a name of letters, digits, _ . - [ ], such as query.utm_source"
+			return "query.<name>, property.<name> and person.<field> need a name of letters, digits, _ . - [ ], such as query.utm_source"
 		}
 		if !scoped && !slices.Contains(Attrs, r.Attribute) {
-			return "a rule's attribute is one of " + strings.Join(Attrs, ", ") + ", query.<name> or property.<name>"
+			return "a rule's attribute is one of " + strings.Join(Attrs, ", ") + ", query.<name>, property.<name> or person.<field>"
 		}
 		if !slices.Contains(Ops, r.Op) {
 			return "a rule's op is one of " + strings.Join(Ops, ", ")
@@ -564,6 +585,9 @@ func CheckRules(rs []Rule) string {
 				return "a rule's value is at most 500 characters"
 			}
 		}
+		if r.Attribute == "list" && r.Op != "is" && r.Op != "is_not" {
+			return "a list rule's op is is or is_not, with the lists' ids as values"
+		}
 		if r.Attribute == "device" {
 			for _, v := range r.Values {
 				if !slices.Contains(Devices, strings.ToLower(v)) {
@@ -573,4 +597,25 @@ func CheckRules(rs []Rule) string {
 		}
 	}
 	return ""
+}
+
+// Person says what rs need to know about who the visitor is: whether any
+// rule is about them (user_id, list or person.<field>), the People lists
+// named and the record fields read.
+func Person(rs []Rule) (needed bool, lists, fields []string) {
+	for _, r := range rs {
+		switch {
+		case r.Attribute == "user_id":
+			needed = true
+		case r.Attribute == "list":
+			needed = true
+			for _, v := range r.Values {
+				lists = append(lists, strings.ToLower(v))
+			}
+		case strings.HasPrefix(r.Attribute, "person."):
+			needed = true
+			fields = append(fields, strings.TrimPrefix(r.Attribute, "person."))
+		}
+	}
+	return needed, lists, fields
 }

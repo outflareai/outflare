@@ -138,6 +138,20 @@ func TestTrackerSourcePostbacks(t *testing.T) {
 	if first["status"] != "sent" || first["http_status"] != 200.0 || first["payout"] != "5" || !strings.Contains(first["url"].(string), "cid=net-1") {
 		t.Fatalf("send: %v", first)
 	}
+	// Each conversion says what became of telling the network: the sale
+	// was sent, and the others say why they weren't.
+	if first["warning"] != "" {
+		t.Errorf("a send whose click has the network's id: warning %v", first["warning"])
+	}
+	told := map[string]any{}
+	for _, c := range owner.must(200, "GET", base+"/tracker-conversions", nil)["data"].([]any) {
+		told[c.(map[string]any)["transaction_id"].(string)] = c.(map[string]any)["network_postback"]
+	}
+	for tx, want := range map[string]string{"S-1": "sent", "L-1": "filtered", "S-2": "below_minimum", "S-3": "suspect"} {
+		if told[tx] != want {
+			t.Errorf("network_postback of %s: %v, want %s", tx, told[tx], want)
+		}
+	}
 	mu.Lock()
 	q := got[0]
 	mu.Unlock()
@@ -164,14 +178,88 @@ func TestTrackerSourcePostbacks(t *testing.T) {
 	}
 	owner.must(400, "GET", sendsPath+"?status=sometimes", nil)
 	owner.must(404, "GET", base+"/traffic-sources/00000000-0000-0000-0000-000000000000/postbacks", nil)
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	owner.must(404, "GET", "/v1/brands/"+other["id"].(string)+"/traffic-sources/"+ts["id"].(string)+"/postbacks", nil)
 
-	failed := false
+	// Sending one again: the approval goes out as it was sent, though the
+	// conversion has been declined since, and counts a second attempt; the
+	// decline is refused by the network again.
+	approved, declined := list[1].(map[string]any)["id"].(string), last["id"].(string)
+	mu.Lock()
+	calls := len(got)
+	mu.Unlock()
+	if body := owner.must(202, "POST", sendsPath+"/"+approved+"/resend", nil); body["queued"] != true {
+		t.Fatalf("resend: %v", body)
+	}
+	again := sends(2)[1].(map[string]any)
+	if again["id"] != approved || again["status"] != "sent" || again["attempts"] != 2.0 || again["http_status"] != 200.0 {
+		t.Fatalf("after a re-send: %v", again)
+	}
+	mu.Lock()
+	if len(got) != calls+1 || got[calls].Get("st") != "approved" || got[calls].Get("payout") != "5.00" || got[calls].Get("cid") != "net-1" {
+		t.Fatalf("re-sent call: %v", got[calls:])
+	}
+	mu.Unlock()
+	owner.must(202, "POST", sendsPath+"/"+declined+"/resend", nil)
+	if d := sends(2)[0].(map[string]any); d["status"] != "failed" || d["attempts"] != 2.0 {
+		t.Fatalf("a refused send, sent again: %v", d)
+	}
+	// One that is still queued isn't queued twice; a suspect conversion's
+	// stays held back; another brand's, and one that isn't there, are 404.
+	if _, err := e.pool.Exec(ctx, `UPDATE tracker_source_postbacks SET status = 'queued' WHERE id = $1`, declined); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(409, "POST", sendsPath+"/"+declined+"/resend", nil)
+	if _, err := e.pool.Exec(ctx, `UPDATE tracker_source_postbacks SET status = 'failed' WHERE id = $1`, declined); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE tracker_conversions SET fraud_reasons = '{fast_conversion}' WHERE id = (SELECT conversion_id FROM tracker_source_postbacks WHERE id = $1)`, declined); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(409, "POST", sendsPath+"/"+declined+"/resend", nil)
+	owner.must(404, "POST", sendsPath+"/00000000-0000-0000-0000-000000000000/resend", nil)
+	owner.must(404, "POST", sendsPath+"/not-an-id/resend", nil)
+	owner.must(404, "POST", "/v1/brands/"+other["id"].(string)+"/traffic-sources/"+ts["id"].(string)+"/postbacks/"+approved+"/resend", nil)
+
+	// A click that arrived without the network's click id: its sale is
+	// sent, and the send says the network can't tell which click it was.
+	loc, _ := url.Parse(get("/l/" + code).Header().Get("Location"))
+	bare := loc.Query().Get("ofclk")
+	if err := e.srv.FlushClicks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE tracking_link_clicks SET clicked_at = clicked_at - interval '1 minute' WHERE click_key = $1`, bare); err != nil {
+		t.Fatal(err)
+	}
+	convert("cid=" + bare + "&payout=10&type=sale&txid=S-9")
+	e.runCRMImports(t)
+	warned := ""
+	for range 250 {
+		for _, s := range owner.must(200, "GET", sendsPath, nil)["data"].([]any) {
+			if s := s.(map[string]any); strings.Contains(s["url"].(string), "tx=S-9") && s["status"] != "queued" {
+				warned = s["warning"].(string)
+			}
+		}
+		if warned != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if warned != "no_source_click_id" {
+		t.Errorf("a send without the network's click id: warning %q", warned)
+	}
+
+	failed, resent := false, 0
 	for _, ev := range events() {
 		failed = failed || ev.Name == "traffic_source.postback_failed"
+		if ev.Name == "traffic_source.postback_resent" {
+			resent++
+		}
 	}
 	if !failed {
 		t.Error("no traffic_source.postback_failed event")
+	}
+	if resent != 2 {
+		t.Errorf("%d traffic_source.postback_resent events, want 2", resent)
 	}
 }

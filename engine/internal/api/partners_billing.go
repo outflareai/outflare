@@ -181,7 +181,7 @@ func (s *Server) partnerBillingConversionJob(ctx context.Context, job jobs.Job) 
 			return errors.New("partners: the refunded payment isn't credited yet")
 		}
 	}
-	at := c.At.UTC().Format(time.RFC3339)
+	at := c.At.UTC().Format(time.RFC3339Nano)
 	for _, p := range programs {
 		amount := c.AmountMinor
 		in := conversionInput{Type: c.Type, Program: p, RecordID: c.RecordID, ExternalID: c.ExternalID, RefundOf: c.RefundOf,

@@ -2,6 +2,9 @@ package seo
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/url"
 	"sort"
 	"strconv"
@@ -67,20 +70,23 @@ func seRankingHost(raw string) string {
 func (s SERanking) TrackedRanks(ctx context.Context, cl *c.Client, creds c.Creds, q c.TrackedRankQuery) (c.TrackedRanks, error) {
 	out := c.TrackedRanks{}
 	var sites []struct {
-		ID     int    `json:"id"`
-		Title  string `json:"title"`
-		Name   string `json:"name"`
-		Active int    `json:"is_active"`
+		ID     flexInt `json:"id"`
+		Title  string  `json:"title"`
+		Name   string  `json:"name"`
+		Active flexInt `json:"is_active"`
 	}
-	if err := s.get(ctx, cl, creds, "/project-management/sites", url.Values{}, &sites); err != nil {
+	if err := s.project(ctx, cl, creds, "/project-management/sites", url.Values{}, &sites, "reading the projects"); err != nil {
 		return out, err
 	}
 	site := -1
 	for _, x := range sites {
 		h := seRankingHost(x.Name)
+		if h != "" && len(out.Seen) < 50 {
+			out.Seen = append(out.Seen, h)
+		}
 		for _, want := range q.Hosts {
 			if h != "" && h == strings.ToLower(want) {
-				site, out.Project = x.ID, x.Title
+				site, out.Project = int(x.ID), x.Title
 				break
 			}
 		}
@@ -97,7 +103,7 @@ func (s SERanking) TrackedRanks(ctx context.Context, cl *c.Client, creds c.Creds
 		ID   any    `json:"id"`
 		Name string `json:"name"`
 	}
-	if err := s.get(ctx, cl, creds, "/project-management/system/search-engines", url.Values{}, &all); err != nil {
+	if err := s.project(ctx, cl, creds, "/project-management/system/search-engines", url.Values{}, &all, "reading the search engines"); err != nil {
 		return out, err
 	}
 	names := map[string]string{}
@@ -105,10 +111,10 @@ func (s SERanking) TrackedRanks(ctx context.Context, cl *c.Client, creds c.Creds
 		names[idOf(e.ID)] = e.Name
 	}
 	var engines []struct {
-		SiteEngine   int `json:"site_engine_id"`
-		SearchEngine any `json:"search_engine_id"`
+		SiteEngine   flexInt `json:"site_engine_id"`
+		SearchEngine any     `json:"search_engine_id"`
 	}
-	if err := s.get(ctx, cl, creds, "/project-management/sites/search-engines", id, &engines); err != nil {
+	if err := s.project(ctx, cl, creds, "/project-management/sites/search-engines", id, &engines, "reading the project's search engines"); err != nil {
 		return out, err
 	}
 	type where struct{ engine, device, country string }
@@ -126,7 +132,7 @@ func (s SERanking) TrackedRanks(ctx context.Context, cl *c.Client, creds c.Creds
 			// cities, say) would write the same keyword's day twice.
 			out.Skipped = append(out.Skipped, "search engine "+strconv.Quote(name)+": another of the project's engines already covers "+country+" "+dev)
 		default:
-			at[e.SiteEngine], taken[w] = w, true
+			at[int(e.SiteEngine)], taken[w] = w, true
 		}
 	}
 
@@ -134,7 +140,7 @@ func (s SERanking) TrackedRanks(ctx context.Context, cl *c.Client, creds c.Creds
 		ID   any    `json:"id"`
 		Name string `json:"name"`
 	}
-	if err := s.get(ctx, cl, creds, "/project-management/keywords", id, &kws); err != nil {
+	if err := s.project(ctx, cl, creds, "/project-management/keywords", id, &kws, "reading the project's keywords"); err != nil {
 		return out, err
 	}
 	words := map[string]string{}
@@ -144,13 +150,13 @@ func (s SERanking) TrackedRanks(ctx context.Context, cl *c.Client, creds c.Creds
 
 	v := url.Values{"site_id": id["site_id"], "date_from": {q.From}, "date_to": {q.To}, "with_landing_pages": {"1"}}
 	var stats []struct {
-		SiteEngine int `json:"site_engine_id"`
+		SiteEngine flexInt `json:"site_engine_id"`
 		Keywords   []struct {
 			ID        any `json:"id"`
 			Positions []struct {
-				Date string `json:"date"`
-				Pos  *int   `json:"pos"`
-				Map  int    `json:"is_map"`
+				Date string   `json:"date"`
+				Pos  *flexInt `json:"pos"`
+				Map  flexInt  `json:"is_map"`
 			} `json:"positions"`
 			Landing []struct {
 				URL  string `json:"url"`
@@ -158,11 +164,11 @@ func (s SERanking) TrackedRanks(ctx context.Context, cl *c.Client, creds c.Creds
 			} `json:"landing_pages"`
 		} `json:"keywords"`
 	}
-	if err := s.get(ctx, cl, creds, "/project-management/sites/positions", v, &stats); err != nil {
+	if err := s.project(ctx, cl, creds, "/project-management/sites/positions", v, &stats, "reading the positions"); err != nil {
 		return out, err
 	}
 	for _, st := range stats {
-		w, ok := at[st.SiteEngine]
+		w, ok := at[int(st.SiteEngine)]
 		if !ok {
 			continue
 		}
@@ -193,7 +199,7 @@ func (s SERanking) TrackedRanks(ctx context.Context, cl *c.Client, creds c.Creds
 				// 0 is "not found", and a maps-block place is not an
 				// organic position.
 				if p.Pos != nil && *p.Pos > 0 && p.Map == 0 {
-					pos := *p.Pos
+					pos := int(*p.Pos)
 					d.Position, d.URL = &pos, page(p.Date)
 				}
 				r.Days = append(r.Days, d)
@@ -222,4 +228,53 @@ func idOf(v any) string {
 		return strconv.FormatFloat(x, 'f', -1, 64)
 	}
 	return ""
+}
+
+// project reads one Project API answer into out. A failure says which
+// step it was, and an answer of an unexpected shape says what did not
+// fit and how it began, so a failed import can be told apart on the
+// Rankings page instead of only reading "unavailable".
+func (s SERanking) project(ctx context.Context, cl *c.Client, creds c.Creds, path string, q url.Values, out any, step string) error {
+	var raw json.RawMessage
+	if err := s.get(ctx, cl, creds, path, q, &raw); err != nil {
+		var e *c.Error
+		if errors.As(err, &e) {
+			return c.Errf(e.Kind, "SE Ranking projects, %s: %s", step, e.Message)
+		}
+		return err
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		start := strings.Join(strings.Fields(string(raw)), " ")
+		if len(start) > 120 {
+			start = start[:120] + "…"
+		}
+		return c.Errf(c.ErrUnavailable, "SE Ranking projects, %s: the answer is not in the shape Outflare reads (%v); it begins %s", step, err, start)
+	}
+	return nil
+}
+
+// flexInt reads a whole number SE Ranking may send as a number, a numeric
+// string ("86012"), a boolean or null, so a change of type in its answers
+// does not fail the whole import.
+type flexInt int
+
+func (f *flexInt) UnmarshalJSON(b []byte) error {
+	t := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	switch t {
+	case "", "null":
+		*f = 0
+		return nil
+	case "true":
+		*f = 1
+		return nil
+	case "false":
+		*f = 0
+		return nil
+	}
+	v, err := strconv.ParseFloat(t, 64)
+	if err != nil {
+		return fmt.Errorf("%q is not a number", t)
+	}
+	*f = flexInt(v)
+	return nil
 }

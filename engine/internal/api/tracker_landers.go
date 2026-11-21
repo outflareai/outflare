@@ -18,10 +18,8 @@ import (
 	"github.com/outflareai/outflare/engine/internal/fraud"
 	"github.com/outflareai/outflare/engine/internal/geoip"
 	"github.com/outflareai/outflare/engine/internal/metrics"
-	"github.com/outflareai/outflare/engine/internal/tokens"
 	"github.com/outflareai/outflare/engine/internal/track"
 	"github.com/outflareai/outflare/engine/internal/tracking"
-	"github.com/outflareai/outflare/engine/internal/trafficsources"
 	"github.com/outflareai/outflare/engine/internal/utm"
 )
 
@@ -55,6 +53,7 @@ func (s *Server) routesTrackerLanders(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/landers", s.onBrand(manage, s.createLander))
 	mux.HandleFunc("GET /v1/brands/{brand}/landers/{id}", s.onBrand(read, s.getLander))
 	mux.HandleFunc("PATCH /v1/brands/{brand}/landers/{id}", s.onBrand(manage, s.updateLander))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/landers/{id}", s.onBrand(manage, s.deleteLander))
 	mux.HandleFunc("GET /v1/brands/{brand}/lander-clicks", s.onBrand(read, s.listLanderClicks))
 }
 
@@ -122,7 +121,18 @@ func (s *Server) landerClick(w http.ResponseWriter, r *http.Request) {
 		}
 		n = x
 	}
-	key := strings.ToLower(strings.TrimSpace(r.URL.Query().Get(clickKeyParam)))
+	// One click id, or the same one repeated. Two different ones name two
+	// clicks, and picking either could credit the wrong one, so neither
+	// goes on.
+	key := ""
+	for i, v := range r.URL.Query()[clickKeyParam] {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if i > 0 && v != key {
+			key = ""
+			break
+		}
+		key = v
+	}
 	if !clickKeyRe.MatchString(key) {
 		metrics.TrackerLanderClick("unknown_click")
 		s.unknownCode(w, r)
@@ -187,10 +197,7 @@ func (s *Server) landerClick(w http.ResponseWriter, r *http.Request) {
 	if d != nil {
 		link.URL, outcome = d.url, "routed"
 	}
-	if strings.ContainsAny(link.URL, "{%") {
-		link.URL = tokens.ExpandKnown(link.URL, destinationValues(t, c.buffered(), formatMicros(c.cost)), trafficsources.DestinationTokens)
-	}
-	target := withParam(tagLink(t.campaign, link), clickKeyParam, c.key)
+	target := clickDestination(t, link, c.buffered(), formatMicros(c.cost), c.key)
 	if err := s.saveLanderClick(ctx, c, n, d, bot, uncounted, now, day); err != nil {
 		// The person still goes on; the lander click is lost.
 		track.Fail(ctx, s.log, track.Event{Name: "tracker_lander.click_failed", Surface: "system"}, "internal", err)
@@ -317,7 +324,10 @@ func (s *Server) honeypot(w http.ResponseWriter, r *http.Request) {
 		metrics.TrackerHoneypot("error")
 		track.Fail(ctx, s.log, track.Event{Name: "tracker.honeypot_failed", Surface: "system"}, "internal", err)
 		return
-	case time.Since(c.at) > landerClickMaxAge:
+	case c.lander == "" || time.Since(c.at) > landerClickMaxAge:
+		// Only a click that went to a lander, lately, has a page with the
+		// hidden link: any other click's key (it travels on to the offer)
+		// flags nothing.
 		metrics.TrackerHoneypot("unknown_click")
 		return
 	case slices.Contains(c.fraud, fraud.Honeypot):
@@ -363,20 +373,33 @@ type trackerLanderView struct {
 	Destinations int `json:"destinations"`
 	// NeedsDomain says the brand has no verified tracking domain, where
 	// /click answers.
-	NeedsDomain bool      `json:"needs_domain"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	NeedsDomain bool `json:"needs_domain"`
+	// CheckStatus is whether the lander's page answers, asked about once
+	// an hour while a link sends to it: "" (not asked yet), ok, failing
+	// (one failed check), broken (two or more in a row) or refused (the
+	// page turns automated requests away, so it can't be checked).
+	// CheckCode says why it failed or was refused (http_404, dns, tls,
+	// timeout, unreachable); CheckedAt when it was last asked; BrokenSince
+	// when the failed checks began.
+	CheckStatus string     `json:"check_status"`
+	CheckCode   string     `json:"check_code"`
+	CheckedAt   *time.Time `json:"checked_at"`
+	BrokenSince *time.Time `json:"broken_since"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 const landerSelect = `
 	SELECT x.id::text, x.brand_id::text, x.name, x.url, x.ctas, x.status,
 	       (SELECT count(*) FROM tracker_lander_clicks c WHERE c.lander_id = x.id AND c.clicked_at >= $3::timestamptz AND NOT c.likely_bot),
-	       (SELECT count(*) FROM tracking_link_destinations d WHERE d.lander_id = x.id AND d.removed_at IS NULL)::int, x.created_at, x.updated_at
+	       (SELECT count(*) FROM tracking_link_destinations d WHERE d.lander_id = x.id AND d.removed_at IS NULL)::int,
+	       x.check_status, x.check_code, x.checked_at, x.broken_since, x.created_at, x.updated_at
 	FROM tracker_landers x WHERE x.workspace_id = $1 AND x.brand_id = $2`
 
 func scanLander(row pgx.Row) (trackerLanderView, error) {
 	var v trackerLanderView
-	err := row.Scan(&v.ID, &v.BrandID, &v.Name, &v.URL, &v.CTAs, &v.Status, &v.LanderClicksToday, &v.Destinations, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &v.BrandID, &v.Name, &v.URL, &v.CTAs, &v.Status, &v.LanderClicksToday, &v.Destinations,
+		&v.CheckStatus, &v.CheckCode, &v.CheckedAt, &v.BrokenSince, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
 }
 
@@ -572,10 +595,10 @@ func (s *Server) updateLander(w http.ResponseWriter, r *http.Request) {
 	err := errNotFound
 	if validUUID(id) {
 		err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-			var was string
+			var was, urlBefore string
 			var used int
-			err := tx.QueryRow(ctx, `SELECT status, (SELECT count(*) FROM tracking_link_destinations d WHERE d.lander_id = x.id AND d.removed_at IS NULL)
-				FROM tracker_landers x WHERE workspace_id = $1 AND brand_id = $2 AND id = $3 FOR UPDATE`, a.WorkspaceID, a.Brand, id).Scan(&was, &used)
+			err := tx.QueryRow(ctx, `SELECT status, url, (SELECT count(*) FROM tracking_link_destinations d WHERE d.lander_id = x.id AND d.removed_at IS NULL)
+				FROM tracker_landers x WHERE workspace_id = $1 AND brand_id = $2 AND id = $3 FOR UPDATE`, a.WorkspaceID, a.Brand, id).Scan(&was, &urlBefore, &used)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errNotFound
 			}
@@ -589,6 +612,14 @@ func (s *Server) updateLander(w http.ResponseWriter, r *http.Request) {
 					status = COALESCE($6, status), updated_at = now()
 				WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, id, in.Name, in.URL, in.CTAs, in.Status); err != nil {
 				return err
+			}
+			// A new URL is a page not asked yet: what the check found for
+			// the old one goes, and the next pass asks the new one.
+			if in.URL != nil && *in.URL != urlBefore {
+				if _, err := tx.Exec(ctx, `UPDATE tracker_landers SET check_status = '', check_code = '', check_failures = 0, checked_at = NULL, broken_since = NULL
+					WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, id); err != nil {
+					return err
+				}
 			}
 			// Destinations keep the lander's URL, so the version before
 			// still sends their clicks there.
@@ -609,6 +640,46 @@ func (s *Server) updateLander(w http.ResponseWriter, r *http.Request) {
 	if s.landerSaveError(w, r, err) {
 		return
 	}
+	s.redirects.clear()
+	s.writeLander(w, r, http.StatusOK, id)
+}
+
+// deleteLander takes a lander off every link and flow it is on and
+// archives it. Its clicks stay in the reports under its name, and PATCH
+// status=active brings it back (not onto the links it was on).
+func (s *Server) deleteLander(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	id := r.PathValue("id")
+	ctx := r.Context()
+	err := errNotFound
+	if validUUID(id) {
+		err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+			var was string
+			err := tx.QueryRow(ctx, `SELECT status FROM tracker_landers WHERE workspace_id = $1 AND brand_id = $2 AND id = $3 FOR UPDATE`,
+				a.WorkspaceID, a.Brand, id).Scan(&was)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errNotFound
+			}
+			if err != nil {
+				return err
+			}
+			gone, err := tx.Exec(ctx, `UPDATE tracking_link_destinations SET removed_at = now(), updated_at = now()
+				WHERE workspace_id = $1 AND lander_id = $2 AND removed_at IS NULL`, a.WorkspaceID, id)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE tracker_landers SET status = 'archived', updated_at = now() WHERE workspace_id = $1 AND id = $2`,
+				a.WorkspaceID, id); err != nil {
+				return err
+			}
+			return record(ctx, tx, &a.principal, a.WorkspaceID, "tracker_lander.deleted", "tracker_lander", id,
+				map[string]any{"brand_id": a.Brand, "destinations": gone.RowsAffected(), "was_archived": was == "archived"})
+		})
+	}
+	if s.landerSaveError(w, r, err) {
+		return
+	}
+	// Links that sent to it route without it now.
 	s.redirects.clear()
 	s.writeLander(w, r, http.StatusOK, id)
 }

@@ -128,7 +128,7 @@ func (s *Server) listScores(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		set, err := loadForecastSettings(r, tx, a)
+		set, err := loadForecastSettings(r.Context(), tx, a)
 		stages = forecastStages(c, set.Stages)
 		return err
 	})

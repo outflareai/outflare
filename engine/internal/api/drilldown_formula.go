@@ -3,6 +3,7 @@ package api
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"unicode"
 )
 
@@ -134,7 +135,7 @@ func (p *colParser) atom() (colFormula, error) {
 		}
 		name := string(p.s[start:p.pos])
 		if !slices.Contains(drilldownMetrics, name) {
-			return nil, errInvalid("formula: " + name + " isn't a metric (visits, visitors, conversions, revenue, cost, profit, roi, roas, cr, epv, cpa)")
+			return nil, errInvalid("formula: " + name + " isn't a metric (" + strings.Join(drilldownMetrics, ", ") + ")")
 		}
 		return colMetric(name), nil
 	case unicode.IsDigit(r) || r == '.':

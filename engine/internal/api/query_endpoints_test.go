@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,20 @@ func TestQueryEndpoints(t *testing.T) {
 	if ep["version"] != 1.0 || ep["status"] != "active" || len(ep["scopes"].([]any)) == 0 {
 		t.Fatalf("published: %v", ep)
 	}
+	// Published without a description, it gets one written from the query.
+	if d, _ := ep["description"].(string); !strings.HasPrefix(d, "People where name is the name you send") || !strings.Contains(d, "Callers send name (text, optional).") {
+		t.Fatalf("written description: %q", ep["description"])
+	}
+	// Anyone who can see the saved query describes one without publishing;
+	// nothing is saved. Another person's private query isn't theirs to see.
+	op.must(400, "POST", base+"/query-endpoints/describe", map[string]any{"saved_query_id": sq})
+	desc := owner.must(200, "POST", base+"/query-endpoints/describe", map[string]any{"saved_query_id": sq,
+		"params": []map[string]any{{"name": "who", "type": "text", "required": true}}, "row_cap": 10})
+	if d := desc["description"].(string); !strings.Contains(d, "the who you send") || !strings.Contains(d, "up to 10 rows a call") {
+		t.Fatalf("describe: %q", d)
+	}
+	owner.must(400, "POST", base+"/query-endpoints/describe", map[string]any{"saved_query_id": "00000000-0000-0000-0000-000000000000"})
+	owner.must(400, "POST", base+"/query-endpoints/describe", map[string]any{})
 	owner.must(409, "POST", base+"/query-endpoints", publish)
 	admin, _ := joinAs(t, owner, ws, "admin@acme.example", map[string]any{"role": "admin"})
 	admin.must(200, "PATCH", base+"/query-endpoints/people", map[string]any{"description": "For the board report"})
@@ -121,4 +136,31 @@ func TestQueryEndpoints(t *testing.T) {
 	if l := owner.must(200, "GET", base+"/query-endpoints", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["status"] != "disabled" {
 		t.Fatalf("list: %v", l)
 	}
+
+	// Deleting: owners and admins, signed in, only. It answers 404 after,
+	// its slug is free again, the saved query stays, and the audit log
+	// keeps what it was.
+	if code, out := op.do("DELETE", base+"/query-endpoints/people", nil); code != 403 || out["error"].(map[string]any)["code"] != "admin_only" {
+		t.Fatalf("operator deleted: %d %v", code, out)
+	}
+	if code, _ := script.do("DELETE", base+"/query-endpoints/people", nil); code != 403 {
+		t.Fatalf("token deleted: %d", code)
+	}
+	admin.must(204, "DELETE", base+"/query-endpoints/people", nil)
+	owner.must(404, "DELETE", base+"/query-endpoints/people", nil)
+	owner.must(404, "GET", base+"/query-endpoints/people", nil)
+	tok2.must(404, "POST", run, nil)
+	if l := owner.must(200, "GET", base+"/query-endpoints", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("list after delete: %v", l)
+	}
+	var kept, audited int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM query_endpoint_calls WHERE endpoint_id = $1`, ep["id"]).Scan(&kept); err != nil || kept != 0 {
+		t.Fatalf("calls kept: %d %v", kept, err)
+	}
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = 'query_endpoint.deleted' AND target_id = $1
+		AND data->>'slug' = 'people' AND (data->>'calls')::int >= 5`, ep["id"]).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("audit: %d %v", audited, err)
+	}
+	owner.must(200, "GET", base+"/queries/"+sq, nil)
+	owner.must(201, "POST", base+"/query-endpoints", map[string]any{"saved_query_id": sq, "slug": "people", "name": "People again"})
 }

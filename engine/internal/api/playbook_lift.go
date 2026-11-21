@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -51,39 +52,50 @@ func (s *Server) getPlaybookLift(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ctx := r.Context()
+	list := []playbookLiftJourney{}
+	measured := false
+	if p.Kit != "" {
+		var err error
+		if list, measured, err = s.journeysLift(r.Context(), a, `kit_id = $3`, p.Kit, days, event); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"playbook_id": p.ID, "days": days, "event": event, "measured": measured,
+		"min_people": liftMinPeople, "journeys": list})
+}
+
+// journeysLift measures each of the brand's journeys that where picks
+// (SQL on journeys, with $3 = arg): the ones that went through against
+// the ones held back. measured says at least one holds some back.
+func (s *Server) journeysLift(ctx context.Context, a *access, where string, arg any, days int, event string) ([]playbookLiftJourney, bool, error) {
 	list := []playbookLiftJourney{}
 	type found struct {
 		playbookLiftJourney
 		path string
 	}
-	var all []found
-	if p.Kit != "" {
-		rows, err := s.pool.Query(ctx, `SELECT id::text, name, status, steps FROM journeys
-			WHERE workspace_id = $1 AND brand_id = $2 AND kit_id = $3 AND status <> 'archived' ORDER BY name, id`, a.WorkspaceID, a.Brand, p.Kit)
-		if err != nil {
-			s.internal(w, r, err)
-			return
+	rows, err := s.pool.Query(ctx, `SELECT id::text, name, status, steps FROM journeys
+		WHERE workspace_id = $1 AND brand_id = $2 AND `+where+` AND status <> 'archived' ORDER BY name, id`, a.WorkspaceID, a.Brand, arg)
+	if err != nil {
+		return nil, false, err
+	}
+	all, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (found, error) {
+		var f found
+		var raw []byte
+		if err := row.Scan(&f.JourneyID, &f.Name, &f.Status, &raw); err != nil {
+			return f, err
 		}
-		all, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (found, error) {
-			var f found
-			var raw []byte
-			if err := row.Scan(&f.JourneyID, &f.Name, &f.Status, &raw); err != nil {
-				return f, err
-			}
-			var steps []journeys.Step
-			if err := json.Unmarshal(raw, &steps); err != nil {
-				return f, err
-			}
-			if step, path, percent, ok := journeys.Holdout(steps); ok {
-				f.Measured, f.Step, f.HoldoutPercent, f.path = true, &step, &percent, path
-			}
-			return f, nil
-		})
-		if err != nil {
-			s.internal(w, r, err)
-			return
+		var steps []journeys.Step
+		if err := json.Unmarshal(raw, &steps); err != nil {
+			return f, err
 		}
+		if step, path, percent, ok := journeys.Holdout(steps); ok {
+			f.Measured, f.Step, f.HoldoutPercent, f.path = true, &step, &percent, path
+		}
+		return f, nil
+	})
+	if err != nil {
+		return nil, false, err
 	}
 	measured := false
 	for _, f := range all {
@@ -97,8 +109,7 @@ func (s *Server) getPlaybookLift(w http.ResponseWriter, r *http.Request) {
 				ORDER BY rs.run_id, rs.at, rs.id`
 			paths, err := s.liftPaths(ctx, taken, []any{a.WorkspaceID, f.JourneyID, *f.Step, f.path}, days, event, playbookGroups, "held_back")
 			if err != nil {
-				s.internal(w, r, err)
-				return
+				return nil, false, err
 			}
 			for _, x := range paths {
 				switch x.ID {
@@ -111,6 +122,5 @@ func (s *Server) getPlaybookLift(w http.ResponseWriter, r *http.Request) {
 		}
 		list = append(list, f.playbookLiftJourney)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"playbook_id": p.ID, "days": days, "event": event, "measured": measured,
-		"min_people": liftMinPeople, "journeys": list})
+	return list, measured, nil
 }

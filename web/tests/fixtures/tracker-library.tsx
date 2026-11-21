@@ -12,10 +12,12 @@ function Harness() {
   const params = new URLSearchParams(location.search);
   const canManage = !params.has('readonly');
   const page = params.get('page');
+  // ?address: the page is given an item and go, as the app gives them.
+  const address = params.has('address') ? { item: params.get('item') ?? undefined, go: (tab: string, it?: string) => (window as any).gone.push([tab, it ?? null]) } : {};
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8">
-      {page === 'offers' && <TrackerOffers ws="workspace-a" canManage={canManage} />}
-      {page === 'landers' && <TrackerLanders ws="workspace-a" canManage={canManage} />}
+      {page === 'offers' && <TrackerOffers ws="workspace-a" canManage={canManage} {...address} />}
+      {page === 'landers' && <TrackerLanders ws="workspace-a" canManage={canManage} {...address} />}
       {page === 'flows' && <TrackerFlows ws="workspace-a" canManage={canManage} item={params.get('item') ?? undefined} go={(tab, it) => (window as any).gone.push([tab, it ?? null])} />}
       <DialogHost />
       <ToastHost />

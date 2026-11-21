@@ -37,6 +37,7 @@ func TestRequestsAndJobsAreCounted(t *testing.T) {
 	metrics.JobStarted("test.kind", 2*time.Second)(metrics.JobRetried)
 	metrics.AICall("claude", "reply_labelling", 1200, 40, 0, 0, 1)
 	metrics.AIBudgetAlert(80, true)
+	metrics.SalesDraftResult("ready")
 	metrics.SalesSendResult("uncertain")
 	metrics.SalesMessageStored("incoming")
 
@@ -56,6 +57,7 @@ func TestRequestsAndJobsAreCounted(t *testing.T) {
 		`outflare_ai_tokens_total{kind="input",provider="claude",task="reply_labelling"} 1200`,
 		`outflare_ai_cost_cents_total{provider="claude",task="reply_labelling"} 1`,
 		`outflare_ai_budget_alerts_total{level="80",scope="tool"} 1`,
+		`outflare_sales_draft_results_total{status="ready"} 1`,
 		`outflare_sales_send_results_total{status="uncertain"} 1`,
 		`outflare_sales_stored_messages_total{direction="incoming"} 1`,
 		`go_goroutines`,

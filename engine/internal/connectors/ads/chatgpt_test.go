@@ -159,6 +159,7 @@ func TestChatGPTAdsSendConversions(t *testing.T) {
 	now := time.Now().Add(-time.Hour)
 	buy := conv(0, map[string]string{"oppref": "oppref_abc", "obref": "ob-1"})
 	buy.Time, buy.EventType = now, "order_created"
+	buy.IPAddress, buy.UserAgent, buy.Country = "203.0.113.7", "Mozilla/5.0 (test)", "PT"
 	old := conv(1, map[string]string{"oppref": "oppref_old"})
 	none := conv(2, nil)
 	none.Time, none.Emails, none.PhoneDigits, none.ExternalID = now, nil, nil, ""
@@ -193,6 +194,9 @@ func TestChatGPTAdsSendConversions(t *testing.T) {
 	if ems, _ := user["emails_sha256"].([]any); len(ems) != 1 || ems[0] != c.HashID("ana@acme.example") {
 		t.Fatalf("emails %v", user)
 	}
+	if cs, _ := user["countries"].([]any); user["ip_address"] != "203.0.113.7" || user["user_agent"] != "Mozilla/5.0 (test)" || len(cs) != 1 || cs[0] != "PT" {
+		t.Fatalf("where the person was: %v", user)
+	}
 	// Without a website the events are sent as "other".
 	delete(creds, "website")
 	if _, err := g.SendConversions(ctx, cl, creds, acct, targets[0], []c.AdConversion{buy}); err != nil {
@@ -201,5 +205,75 @@ func TestChatGPTAdsSendConversions(t *testing.T) {
 	b, _ := io.ReadAll(strings.NewReader((*reqs)[len(*reqs)-1].body))
 	if !strings.Contains(string(b), `"action_source":"other"`) || strings.Contains(string(b), "source_url") {
 		t.Fatalf("no website: %s", b)
+	}
+}
+
+// Custom audiences: the list is found by its name or made, and people go
+// in and come out as hashed emails and phones, each request with an
+// Idempotency-Key that is the same for the same people.
+func TestChatGPTAdsAudiences(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /ad_account":       map[string]any{"id": "adacct_1", "name": "Northpeak", "status": "active", "timezone": "UTC", "currency_code": "usd"},
+		"GET /custom_audiences": map[string]any{"object": "list", "data": []any{map[string]any{"id": "caud_1", "name": "Refunded (Outflare)"}}, "has_more": false},
+		"POST /custom_audiences": func(r *http.Request) any {
+			return map[string]any{"id": "caud_2", "status": "active", "membership_revision": 0}
+		},
+		"POST /custom_audiences/caud_1/add":    map[string]any{"operation_id": "op_1", "status": "processing"},
+		"POST /custom_audiences/caud_1/remove": map[string]any{"operation_id": "op_2", "status": "processing"},
+	})
+	g, creds, acct := ChatGPTAds{}, c.Creds{"api_key": "oai_ads_test_not_a_real_key"}, c.AdAccount{ID: "adacct_1"}
+	if !g.Definition().Has(c.CapAdsAudiences) {
+		t.Fatal("no audiences capability")
+	}
+	id, err := g.CreateAudience(ctx, cl, creds, acct, "Refunded (Outflare)", "Kept in step with a list in Outflare.")
+	if err != nil || id != "caud_1" {
+		t.Fatalf("found: %q %v", id, err)
+	}
+	id, err = g.CreateAudience(ctx, cl, creds, acct, "Payers (Outflare)", "Kept in step with a list in Outflare.")
+	if err != nil || id != "caud_2" {
+		t.Fatalf("made: %q %v", id, err)
+	}
+	if last := (*reqs)[len(*reqs)-1]; last.method != "POST" || !strings.Contains(last.body, `"name":"Payers (Outflare)"`) {
+		t.Fatalf("create: %+v", last)
+	}
+	people := []c.AudienceMember{{Emails: []string{c.HashID("ana@acme.example")}, Phones: []string{c.HashID("+15550100")}}, {Emails: []string{c.HashID("ben@northpeak.example")}}}
+	keys := func(path string) (out []string, body string) {
+		for _, r := range *reqs {
+			if r.method == "POST" && r.path == path {
+				out, body = append(out, r.header.Get("Idempotency-Key")), r.body
+			}
+		}
+		return out, body
+	}
+	op, err := g.IngestAudience(ctx, cl, creds, acct, "caud_1", c.AudienceAdd, people)
+	if err != nil || op != "op_1" {
+		t.Fatalf("add: %q %v", op, err)
+	}
+	if _, err := g.IngestAudience(ctx, cl, creds, acct, "caud_1", c.AudienceAdd, people); err != nil {
+		t.Fatal(err)
+	}
+	k, body := keys("/custom_audiences/caud_1/add")
+	if len(k) != 2 || k[0] == "" || k[0] != k[1] {
+		t.Fatalf("idempotency keys: %v", k)
+	}
+	var sent struct {
+		Identifiers []map[string]string `json:"identifiers"`
+	}
+	if err := json.Unmarshal([]byte(body), &sent); err != nil || len(sent.Identifiers) != 3 ||
+		sent.Identifiers[0]["identifier_type"] != "email_sha256" || sent.Identifiers[0]["identifier"] != c.HashID("ana@acme.example") ||
+		sent.Identifiers[1]["identifier_type"] != "phone_number_sha256" || strings.Contains(body, "acme.example") {
+		t.Fatalf("identifiers: %s", body)
+	}
+	if op, err := g.IngestAudience(ctx, cl, creds, acct, "caud_1", c.AudienceRemove, people[:1]); err != nil || op != "op_2" {
+		t.Fatalf("remove: %q %v", op, err)
+	}
+	if rk, _ := keys("/custom_audiences/caud_1/remove"); len(rk) != 1 || rk[0] == k[0] {
+		t.Fatalf("remove key: %v", rk)
+	}
+	if _, err := g.IngestAudience(ctx, cl, creds, acct, "not an id", c.AudienceAdd, people); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("bad id: %v", err)
+	}
+	if _, err := g.IngestAudience(ctx, cl, creds, c.AdAccount{ID: "adacct_9"}, "caud_1", c.AudienceAdd, people); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("another account's key: %v", err)
 	}
 }

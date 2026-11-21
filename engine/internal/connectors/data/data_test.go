@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
@@ -15,6 +16,7 @@ import (
 // fake serves canned responses by path and records request bodies.
 type fake struct {
 	t      *testing.T
+	mu     sync.Mutex
 	routes map[string]func(w http.ResponseWriter, body map[string]any, r *http.Request)
 	bodies map[string]map[string]any
 }
@@ -25,8 +27,12 @@ func newFake(t *testing.T) (*fake, *c.Client) {
 		var body map[string]any
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &body)
+		// One at a time: a request the caller gave up on may still be
+		// here when the next arrives.
+		f.mu.Lock()
 		f.bodies[r.URL.Path] = body
 		h, ok := f.routes[r.URL.Path]
+		f.mu.Unlock()
 		if !ok {
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(500)
@@ -36,7 +42,7 @@ func newFake(t *testing.T) (*fake, *c.Client) {
 	}))
 	t.Cleanup(srv.Close)
 	urls := map[string]string{}
-	for _, id := range []string{"apollo", "peopledatalabs", "prospeo", "leadmagic", "findymail", "moltsets", "snitcher"} {
+	for _, id := range []string{"apollo", "peopledatalabs", "prospeo", "leadmagic", "findymail", "treg", "moltsets", "blitz", "snitcher"} {
 		urls[id] = srv.URL
 	}
 	return f, &c.Client{BaseURLs: urls}
@@ -222,6 +228,40 @@ func TestEveryConnectorIsWellFormed(t *testing.T) {
 		if d.Has(c.CapEnrichPerson) || d.Has(c.CapFindEmail) {
 			if _, ok := conn.(c.PersonEnricher); !ok {
 				t.Errorf("%s claims enrichment but does not implement it", d.ID)
+			}
+		}
+		if d.Has(c.CapCompanyPage) {
+			if _, ok := conn.(c.CompanyLocator); !ok {
+				t.Errorf("%s claims the company page lookup but does not implement it", d.ID)
+			}
+		}
+		if d.Has(c.CapReadProfile) {
+			if _, ok := conn.(c.ProfileReader); !ok {
+				t.Errorf("%s claims reading a profile but does not implement it", d.ID)
+			}
+		}
+		if d.Has(c.CapFindProfile) {
+			if _, ok := conn.(c.ProfileLocator); !ok {
+				t.Errorf("%s claims finding a profile but does not implement it", d.ID)
+			}
+		}
+		if d.Has(c.CapCompanyProfile) {
+			if _, ok := conn.(c.CompanyProfiler); !ok {
+				t.Errorf("%s claims reading a company page but does not implement it", d.ID)
+			}
+		}
+		// A connector asked one step at a time finds emails, and names
+		// each step once.
+		if sf, ok := conn.(c.StepFinder); ok {
+			seen := map[string]bool{}
+			for _, st := range sf.FindSteps() {
+				if st.ID == "" || seen[st.ID] {
+					t.Errorf("%s: bad or repeated finder step %q", d.ID, st.ID)
+				}
+				seen[st.ID] = true
+			}
+			if !d.Has(c.CapFindEmail) || len(seen) == 0 {
+				t.Errorf("%s has finder steps but does not claim finding emails", d.ID)
 			}
 		}
 	}

@@ -78,6 +78,20 @@ export function registerLinkOrderTools(
   );
 
   server.registerTool(
+    "get_link_order_thread",
+    {
+      title: "Read the emails with a link order's donor",
+      description: "The brand's newest 100 emails with the order's donor: Outreach sends to, and Inbox mail from, an address at the site's domain or one of its stored contacts (such as the intermediary's). Received replies list the prices written in them, to help find the agreed price. Reads stored mail only; needs inbox.read and coverage.read.",
+      inputSchema: { brand, id: z.string().uuid().describe("The order id.") },
+      annotations: read,
+    },
+    ({ brand, id }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/link-orders/{id}/thread", { params: { path: { brand, id } } }),
+      ),
+  );
+
+  server.registerTool(
     "get_link_order_summary",
     {
       title: "Summarize link orders",
@@ -253,7 +267,7 @@ export function registerLinkOrderTools(
     "import_link_order_catalog",
     {
       title: "Import the link-order catalog from CSV",
-      description: "Import a CSV string only; a Google Sheet is not imported. The first row is the header and must include a domain column. Headers are matched ignoring case and punctuation (\"Traffic / Organic\" is traffic), and an intermediary's export is read in full: intermediary, theme, site age, and metrics such as referring domains, backlinks, keywords and outgoing links. A repeated domain updates the existing profile. A bad row is listed in errors and does not abort the rest of the file; ignored_columns lists headers that were not read. Up to 32 MB per call; send a larger file as several calls that each repeat the header. price is in dollars or euros, amount_minor in cents; amounts are the donor price only.",
+      description: "Import a CSV string. For a Google Sheet link or an .xlsx workbook, call read_link_order_catalog_table first and import the CSV it returns. The first row is the header and must include a domain column. Headers are matched ignoring case and punctuation (\"Traffic / Organic\" is traffic), and an intermediary's export is read in full: intermediary, theme, site age, and metrics such as referring domains, backlinks, keywords and outgoing links. A repeated domain updates the existing profile. A bad row is listed in errors and does not abort the rest of the file; ignored_columns lists headers that were not read. Up to 32 MB per call; send a larger file as several calls that each repeat the header. price is in dollars or euros, amount_minor in cents; amounts are the donor price only.",
       inputSchema: {
         brand,
         csv: z.string().min(1).describe("The CSV file contents, including the header row."),
@@ -263,6 +277,81 @@ export function registerLinkOrderTools(
     ({ brand, csv }) =>
       call(() =>
         gtm.POST("/v1/brands/{brand}/link-orders/catalog/import", { params: { path: { brand } }, body: { csv } }),
+      ),
+  );
+
+  server.registerTool(
+    "check_link_order_donors_in_ahrefs",
+    {
+      title: "Check catalog sites in Ahrefs",
+      description:
+        "Queue an Ahrefs check of 1 to 50 catalog rows on the brand's own Ahrefs connection: DR, worldwide search traffic, live referring and linked domains, and the three top pages only (about 250 API units a site, within the connection's budget; once a day per row). Then each row's quality says skip (DR under 30, under 5,000 visits, over 45% of traffic on the top page or home page, 80% on the top 3 pages, or over 0.3 linked domains per referring domain), check (top page 35% to 45%) or ok. 409 connector_needed without Ahrefs.",
+      inputSchema: {
+        brand,
+        ids: z.array(z.string().uuid()).min(1).max(50).describe("Catalog row ids."),
+      },
+      annotations: write,
+    },
+    ({ brand, ids }) =>
+      call(() =>
+        gtm.POST("/v1/brands/{brand}/link-orders/catalog/ahrefs-check", { params: { path: { brand } }, body: { ids } }),
+      ),
+  );
+
+  server.registerTool(
+    "search_link_order_donor_emails",
+    {
+      title: "Search donor sites for who to write to",
+      description:
+        "Queue OutflareBot's search of 1 to 50 catalog rows' sites for the addresses they publish (home, contact, advertising, imprint and about pages, in many languages), best first: the advertising desk, then the editors, then a general mailbox. Data-protection, legal, abuse, jobs and no-reply mailboxes are dropped. Free; at most once a day per row. Each row's email_search (list_link_order_catalog) says how it ended; then send the first address with send_link_order_donor_to_sequence.",
+      inputSchema: {
+        brand,
+        ids: z.array(z.string().uuid()).min(1).max(50).describe("Catalog row ids."),
+      },
+      annotations: write,
+    },
+    ({ brand, ids }) =>
+      call(() =>
+        gtm.POST("/v1/brands/{brand}/link-orders/catalog/find-emails", { params: { path: { brand } }, body: { ids } }),
+      ),
+  );
+
+  server.registerTool(
+    "copy_link_order_catalog",
+    {
+      title: "Copy another brand's donor catalog into this brand",
+      description:
+        "Copy one page (up to 500) of from_brand's live donors, with their metrics, prices, flags, niches and intermediary, into this brand. Repeat with the returned next_cursor as cursor until it is null. Donors upsert by domain, so running it again is safe. Import a broker's file once and copy it to the other brands; each brand's copy, publishers and orders stay its own.",
+      inputSchema: {
+        brand,
+        from_brand: z.string().uuid().describe("The brand whose catalog is copied."),
+        cursor: z.string().optional().describe("next_cursor from the previous call."),
+      },
+      annotations: write,
+    },
+    ({ brand, from_brand, cursor }) =>
+      call(() =>
+        gtm.POST("/v1/brands/{brand}/link-orders/catalog/copy", { params: { path: { brand } }, body: { from_brand, cursor } }),
+      ),
+  );
+
+  server.registerTool(
+    "read_link_order_catalog_table",
+    {
+      title: "Read a Google Sheet or Excel workbook as CSV for the catalog",
+      description:
+        "Turn a Google Sheet link (shared as Anyone with the link, or published to the web) or a base64 .xlsx workbook into CSV text. Writes nothing: pass the returned csv to import_link_order_catalog. Send exactly one of sheet_url or xlsx_base64. A private sheet is refused with a message saying how to share it. At most 50,000 rows; blank rows are dropped.",
+      inputSchema: {
+        brand,
+        sheet_url: z.string().url().optional().describe("A https://docs.google.com/spreadsheets/... link; the tab is its gid, else the first tab."),
+        xlsx_base64: z.string().optional().describe("An .xlsx workbook, base64-encoded."),
+        sheet: z.string().optional().describe("The workbook tab to read, by name. Default: the first tab."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    ({ brand, sheet_url, xlsx_base64, sheet }) =>
+      call(() =>
+        gtm.POST("/v1/brands/{brand}/link-orders/catalog/table", { params: { path: { brand } }, body: { sheet_url, xlsx_base64, sheet } }),
       ),
   );
 

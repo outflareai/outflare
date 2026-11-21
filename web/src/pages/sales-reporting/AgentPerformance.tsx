@@ -66,7 +66,7 @@ export function AgentPerformanceTable({
   return (
     <Card
       title="Agent performance"
-      description="Original uploader across the selected period. Current researchers and Sales owners do not replace the lead’s origin."
+      description="Original uploader across the selected period. Current researchers and Sales owners do not replace the company’s origin."
     >
       <div
         className="sr-periods mb-4 w-fit"
@@ -77,7 +77,7 @@ export function AgentPerformanceTable({
           aria-pressed={view === "progress"}
           onClick={() => selectView("progress")}
         >
-          Lead progress
+          Progress
         </button>
         <button
           aria-pressed={view === "quality"}

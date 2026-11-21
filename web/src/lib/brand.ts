@@ -4,7 +4,7 @@
 // first. There is no "all brands": brands share nothing but the team,
 // billing and connections. "" is only a workspace with no brand yet. The
 // choice is kept per person and workspace, and in the URL
-// (/acme/repocket/seo) so a shared link opens on the same brand; an old
+// (/acme/summitly/seo) so a shared link opens on the same brand; an old
 // /acme/all/... link opens the first brand.
 //
 // Every workspace read the app sends carries the brand picked (api.ts), so
@@ -121,7 +121,7 @@ export function useBrand(ws?: string) {
   const current = brands.find((b) => b.handle === s.brand);
   return {
     brand: current,
-    // The query to add to list calls: { brand: "repocket" } or {}.
+    // The query to add to list calls: { brand: "summitly" } or {}.
     query: (current ? { brand: current.handle } : {}) as { brand?: string },
     brands,
     active: brands.filter((b) => b.status === "active"),

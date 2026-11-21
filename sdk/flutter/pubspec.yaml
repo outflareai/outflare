@@ -1,0 +1,12 @@
+name: outflare
+description: Send screens and events from a Flutter app to Outflare.
+version: 0.110.0
+homepage: https://outflare.ai/docs/sdk/mobile/
+repository: https://github.com/outflareai/outflare/tree/main/sdk/flutter
+issue_tracker: https://github.com/outflareai/outflare/issues
+
+environment:
+  sdk: ^3.5.0
+
+dev_dependencies:
+  test: ^1.25.0

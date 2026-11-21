@@ -30,6 +30,9 @@ type Reply struct {
 	ReceivedAt time.Time
 	// Automated is the platform's own word that this is an auto-reply.
 	Automated bool
+	// CampaignExternalID is the platform's id for the campaign the reply
+	// answers, when the platform says.
+	CampaignExternalID string
 }
 
 // ReplyOut answers a reply through the platform, from the sender email it

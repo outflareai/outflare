@@ -110,7 +110,7 @@ export function Throughput({
           <div key={p}>
             <div className="mb-2 mt-3 text-xs text-muted-foreground">
               {panel === topStages
-                ? "Lead processing"
+                ? "Processing"
                 : "Replies & sales outcomes"}{" "}
               / {report.period.hourly ? "hour" : "day"}
               {panels.length > 1 ? " · separate scale" : ""}
@@ -276,7 +276,7 @@ export function Throughput({
         )}
       </div>
       <p className="mt-3 text-xs text-muted-foreground">
-        Counts use each milestone’s own time. Use “Same leads” below to measure
+        Counts use each milestone’s own time. Use “Same companies” below to measure
         progression from discovery.
       </p>
     </section>

@@ -13,7 +13,7 @@ var salesReportingReads = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 
 func SalesReportingRead(read string, success bool, d time.Duration) {
 	switch read {
-	case "summary", "leads", "origins", "check":
+	case "summary", "leads", "origins", "check", "lanes", "trace":
 	default:
 		return
 	}

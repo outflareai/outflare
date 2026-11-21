@@ -32,6 +32,9 @@ export const emptyAnchors: LinkOrderAnchorOptions = { primary: [], secondary: { 
 
 /** One line of evidence, in words. */
 export function reasonText(r: LinkOrderTargetReason): string {
+  if (r.kind === "near_top") {
+    return `SE Ranking: #${Math.round(r.your_position ?? 0)} for “${r.keyword}”, close to the ${r.your_position != null && r.your_position <= 10 ? "top 3" : "first page"}`;
+  }
   if (r.kind === "keyword_gap") {
     const you = r.your_position == null ? "you are not in the top 100" : `you #${Math.round(r.your_position)}`;
     return `${r.competitor} #${Math.round(r.position ?? 0)} for “${r.keyword}” (${you})`;

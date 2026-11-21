@@ -47,25 +47,31 @@ const (
 // known; otherwise set Units and UnitName and reports price them with the
 // workspace's rates. Set Ref to make recording idempotent.
 type Entry struct {
-	ID            string    `json:"id"`
-	WorkspaceID   string    `json:"-"`
-	SequenceID    *string   `json:"sequence_id"`
-	MissionID     *string   `json:"mission_id"`
-	ActionID      *string   `json:"action_id"`
-	MailboxID     *string   `json:"mailbox_id"`
-	Domain        string    `json:"domain"`
-	Category      string    `json:"category"`
-	Provider      string    `json:"provider"`
-	IntegrationID *string   `json:"integration_id"`
-	Units         *float64  `json:"units"`
-	UnitName      string    `json:"unit_name"`
-	AmountCents   *int64    `json:"amount_cents"`
-	Currency      string    `json:"currency"`
-	OccurredAt    time.Time `json:"occurred_at"`
-	Source        string    `json:"source"`
-	Ref           *string   `json:"ref"`
-	Note          string    `json:"note"`
-	ActorID       *string   `json:"actor_id"`
+	ID            string   `json:"id"`
+	WorkspaceID   string   `json:"-"`
+	SequenceID    *string  `json:"sequence_id"`
+	MissionID     *string  `json:"mission_id"`
+	ActionID      *string  `json:"action_id"`
+	MailboxID     *string  `json:"mailbox_id"`
+	Domain        string   `json:"domain"`
+	Category      string   `json:"category"`
+	Provider      string   `json:"provider"`
+	IntegrationID *string  `json:"integration_id"`
+	Units         *float64 `json:"units"`
+	UnitName      string   `json:"unit_name"`
+	AmountCents   *int64   `json:"amount_cents"`
+	// AmountMicros is the exact amount, in millionths of the currency,
+	// when the provider reported a cost finer than a cent (Treg's answers
+	// carry each call's cost in millionths of a dollar). Record fills
+	// AmountCents from it, rounded up, when that is not given. Only Go
+	// callers set it; the API shows the cents.
+	AmountMicros *int64    `json:"-"`
+	Currency     string    `json:"currency"`
+	OccurredAt   time.Time `json:"occurred_at"`
+	Source       string    `json:"source"`
+	Ref          *string   `json:"ref"`
+	Note         string    `json:"note"`
+	ActorID      *string   `json:"actor_id"`
 	// BrandID is the brand the charge belongs to when it has no sequence
 	// (a sequence's charge is its sequence's brand). Record takes it from
 	// the context (WithBrand) when it is not set.
@@ -133,6 +139,15 @@ func (e *Entry) normalize() error {
 	e.Domain = strings.ToLower(strings.TrimSpace(e.Domain))
 	if len(e.Provider) > 200 || len(e.UnitName) > 50 || len(e.Note) > 2000 {
 		return invalid("provider, unit_name or note is too long")
+	}
+	if e.AmountMicros != nil {
+		if *e.AmountMicros < 0 {
+			return invalid("amount_micros cannot be negative")
+		}
+		if e.AmountCents == nil {
+			cents := (*e.AmountMicros + 9999) / 10000
+			e.AmountCents = &cents
+		}
 	}
 	if e.AmountCents == nil && e.Units == nil {
 		return invalid("give amount_cents, or units with a unit_name")
@@ -223,8 +238,8 @@ func Record(ctx context.Context, q jobs.Querier, e Entry) (Entry, bool, error) {
 	created, err := scanEntry(q.QueryRow(ctx, `
 		INSERT INTO spend_entries (workspace_id, sequence_id, mission_id, mailbox_id, domain, category, provider,
 			integration_id, units, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id, action_id,
-			brand_id, channel)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+			brand_id, channel, amount_micros)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
 		WHERE ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM sequences WHERE id = $2 AND workspace_id = $1))
 		  AND ($19::uuid IS NULL OR EXISTS (SELECT 1 FROM brands WHERE id = $19 AND workspace_id = $1))
 		  AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM mailboxes WHERE id = $4 AND workspace_id = $1))
@@ -233,7 +248,7 @@ func Record(ctx context.Context, q jobs.Querier, e Entry) (Entry, bool, error) {
 		RETURNING `+entryCols,
 		e.WorkspaceID, e.SequenceID, e.MissionID, e.MailboxID, e.Domain, e.Category, e.Provider,
 		e.IntegrationID, e.Units, e.UnitName, e.AmountCents, e.Currency, e.OccurredAt, e.Source, e.Ref, e.Note, e.ActorID, e.ActionID,
-		e.BrandID, e.Channel), e.WorkspaceID)
+		e.BrandID, e.Channel, e.AmountMicros), e.WorkspaceID)
 	if err == nil {
 		// A connection's charge counts toward its usage limits, which
 		// warn the workspace at 80% and when one is reached.

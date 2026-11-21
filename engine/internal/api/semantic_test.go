@@ -88,15 +88,15 @@ func TestSemanticSearch(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
-	gn := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
+	gn := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})["id"].(string)
 	ada := owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Ada Lovelace", "brand_id": rp})["id"].(string)
 	grace := owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Grace Hopper", "brand_id": gn})["id"].(string)
 	var mbRP, mbGN string
 	for _, m := range []struct {
 		email, brand string
 		id           *string
-	}{{"sam@repocket.example", rp, &mbRP}, {"sam@geonode.example", gn, &mbGN}} {
+	}{{"sam@summitly.example", rp, &mbRP}, {"sam@northpeak.example", gn, &mbGN}} {
 		if err := e.pool.QueryRow(ctx, `INSERT INTO mailboxes (workspace_id, brand_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials, status)
 			VALUES ($1, $2, $3, 'google', 'smtp.gmail.com', 587, $3, 'imap.gmail.com', 993, $3, '\x00', 'active') RETURNING id::text`, ws, m.brand, m.email).Scan(m.id); err != nil {
 			t.Fatal(err)
@@ -160,7 +160,7 @@ func TestSemanticSearch(t *testing.T) {
 	}
 
 	// Brands and scopes, as for word search.
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket inbox", "scopes": []string{"inbox.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly inbox", "scopes": []string{"inbox.read"}, "brand": "summitly"})
 	rpc := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	hits = rpc.must(200, "GET", base+"/search?q=price&mode=meaning", nil)["data"].([]any)
 	if len(hits) != 2 {

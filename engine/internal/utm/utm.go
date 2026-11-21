@@ -159,9 +159,12 @@ func Destination(raw string) (string, error) {
 	return u.String(), nil
 }
 
-// untagged drops the tags this package adds from a query string and keeps
-// the rest as written. A partner's ref is dropped only when a new one
-// replaces it.
+// untagged drops the tags Outflare adds from a query string and keeps the
+// rest as written: utm_*, ofc and ofclk, the redirect click's key, which a
+// redirect adds after tagging. A destination that carries any of them, as
+// a template (ofclk={click_id}) or a value, would reach the page with the
+// same key twice, so Outflare's own always replace them. A partner's ref is
+// dropped only when a new one replaces it.
 func untagged(raw string, dropRef bool) string {
 	if raw == "" {
 		return ""
@@ -169,7 +172,7 @@ func untagged(raw string, dropRef bool) string {
 	kept := []string{}
 	for _, part := range strings.Split(raw, "&") {
 		k, _, _ := strings.Cut(part, "=")
-		if k, err := url.QueryUnescape(k); err == nil && (strings.HasPrefix(k, "utm_") || k == "ofc" || dropRef && k == "ref") {
+		if k, err := url.QueryUnescape(k); err == nil && (strings.HasPrefix(k, "utm_") || k == "ofc" || k == ClickKeyParam || dropRef && k == "ref") {
 			continue
 		}
 		if part != "" {
@@ -178,6 +181,11 @@ func untagged(raw string, dropRef bool) string {
 	}
 	return strings.Join(kept, "&")
 }
+
+// ClickKeyParam carries a redirect click's key (16 lowercase letters and
+// digits) to the destination. Only a redirect adds it, once, after the
+// campaign's tags.
+const ClickKeyParam = "ofclk"
 
 // Tags are what a link carries.
 type Tags struct {

@@ -336,7 +336,7 @@ func TestSupportAddresses(t *testing.T) {
 	}})
 	var brand string
 	tag := strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")[10:]
-	if err := s.Pool.QueryRow(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Repocket', 'repocket' || $2) RETURNING id::text`, ws, tag).Scan(&brand); err != nil {
+	if err := s.Pool.QueryRow(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Summitly', 'summitly' || $2) RETURNING id::text`, ws, tag).Scan(&brand); err != nil {
 		t.Fatal(err)
 	}
 	ensure := func(w Want) (Address, error) {
@@ -354,7 +354,7 @@ func TestSupportAddresses(t *testing.T) {
 		t.Fatalf("workspace address: %+v %v", shared, err)
 	}
 	branded, err := ensure(Want{BrandID: &brand})
-	if err != nil || branded.Email != "repocket"+tag+"-support@"+domain || branded.BrandID == nil {
+	if err != nil || branded.Email != "summitly"+tag+"-support@"+domain || branded.BrandID == nil {
 		t.Fatalf("brand address: %+v %v", branded, err)
 	}
 	if again, _ := ensure(Want{BrandID: &brand}); again.ID != branded.ID {
@@ -384,7 +384,7 @@ func TestSupportAddresses(t *testing.T) {
 
 	// A customer's email, forwarded by the business's own support mailbox
 	// (nobody in the workspace), reaches the handler with its brand.
-	id, _, err := s.Deliver(ctx, back.Email, message("s1@x", "Li Wei <li@globex.example>", "help@repocket.example", "Export?", "How do I export?"))
+	id, _, err := s.Deliver(ctx, back.Email, message("s1@x", "Li Wei <li@globex.example>", "help@summitly.example", "Export?", "How do I export?"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,15 +392,15 @@ func TestSupportAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	if st, _ := statusOf(t, s, id); st != "processed" || len(got) != 1 || got[0].From != "li@globex.example" || got[0].BrandID == nil || *got[0].BrandID != brand ||
-		got[0].To != back.Email || got[0].ForwardedBy != "help@repocket.example" {
+		got[0].To != back.Email || got[0].ForwardedBy != "help@summitly.example" {
 		t.Fatalf("support mail: %s %+v", st, got)
 	}
 
 	// Gmail's confirmation for forwarding the support mailbox is kept on
 	// the address, for an admin to click.
 	confirm := sign("google.com", message("c9@google", "Gmail Team <forwarding-noreply@google.com>", "",
-		"(#555666777) Gmail Forwarding Confirmation - Receive Mail from help@repocket.example",
-		"help@repocket.example has requested to automatically forward mail to your email address.\r\nConfirmation code: 555666777\r\nhttps://mail-settings.google.com/mail/vf-%5Bexample%5D-x"))
+		"(#555666777) Gmail Forwarding Confirmation - Receive Mail from help@summitly.example",
+		"help@summitly.example has requested to automatically forward mail to your email address.\r\nConfirmation code: 555666777\r\nhttps://mail-settings.google.com/mail/vf-%5Bexample%5D-x"))
 	id, _, _ = s.Deliver(ctx, back.Email, confirm)
 	if err := s.process(ctx, id); err != nil {
 		t.Fatal(err)
@@ -415,7 +415,7 @@ func TestSupportAddresses(t *testing.T) {
 			c = a.Confirmation
 		}
 	}
-	if c == nil || c.From != "help@repocket.example" || c.Code == nil || *c.Code != "555666777" || len(got) != 1 {
+	if c == nil || c.From != "help@summitly.example" || c.Code == nil || *c.Code != "555666777" || len(got) != 1 {
 		t.Fatalf("confirmation: %+v %d", c, len(got))
 	}
 }

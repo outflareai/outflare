@@ -25,6 +25,23 @@ Outflare never holds or sends money. It works out what each partner is owed, and
 - **The referred customer** is a customer record too. Referral, conversion and reward rows point at records, so merging two people moves them. A person's record page (People), and their panel in Visitors and Leads, show the programs they are a partner in and who referred them; through the API, filter `GET .../partners` and `GET .../partner-referrals` by `record_id`.
 - **People and tokens limited to some brands** work in their brands' programs: their partners, rewards and payouts. Another brand's programs answer 404. Each brand's backend reports its conversions to `POST /v1/brands/{brand}/partner-conversions`, which credits only that brand's partners, even when a ref code, click id or promo code belongs to another brand's partner. The deprecated workspace route needs a token for every brand, because it can credit any program's partner.
 
+## When credit starts
+
+Set a program's `credits_from` before importing payment history for a program moved from another platform. Only sales, sign-ups (including leads) and custom conversions whose occurrence time is at or after that time credit partners. Earlier conversions return `credited: false` with reason `before_credits_from`: they create no referral, partner conversion or reward. Their customer events and transactions are still kept.
+
+The same cutoff applies to the conversions API and postbacks, browser sign-ups, identify and track events, promo codes, transactions, order events, synced billing payments and payments retried after a referral arrives. Refunds still reverse credited sales as usual; a sale that earned nothing has nothing to reverse. Changing this setting does not remove existing rewards or replay old conversions.
+
+The program's `credits_from` is an RFC 3339 timestamp or `null`. Set it on `POST /v1/brands/{brand}/partner-programs`, or change it with:
+
+```http
+PATCH /v1/brands/{brand}/partner-programs/{id}
+Content-Type: application/json
+
+{"credits_from": "2026-11-01T00:00:00Z"}
+```
+
+Send `{"credits_from": null}` to clear it. Omitting the field leaves it unchanged on update; new and existing programs have no cutoff unless you set one. The SDK and the MCP `create_partner_program` and `update_partner_program` tools accept the same field.
+
 ## Links
 
 - **The short link** is `/r/<code>` on your [tracking domain](website-tracking.md), or `/r/<workspace-id>/<code>` on the Outflare server until you add one.
@@ -104,6 +121,7 @@ Use a token with only the `partners.conversions` scope. It can report conversion
   - `sale_not_found`
   - `currency`: the sale is in a currency other than the program's
   - `lead_expired`: the customer was referred longer ago than the program's lead expiration and hasn't bought yet
+  - `before_credits_from`: the conversion occurred before the program's credit start time
 
 Report every sale and let Outflare pick out the referred ones.
 

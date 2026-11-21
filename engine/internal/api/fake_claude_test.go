@@ -59,6 +59,22 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		answerABTestAI(w, string(body))
 		return
 	}
+	if strings.Contains(string(body), "into the draft of a reusable recipe for making picture ads") {
+		answerCreativeSkillDraft(w, string(body))
+		return
+	}
+	if strings.Contains(string(body), "into the rules of a smart list in a CRM") {
+		answerSmartListDraft(w, string(body))
+		return
+	}
+	if strings.Contains(string(body), "into one query for a data app") {
+		answerQueryAsk(w, string(body))
+		return
+	}
+	if strings.Contains(string(body), "into one chart for an analytics app") {
+		answerInsightAsk(w, string(body))
+		return
+	}
 	if strings.Contains(string(body), "A customer asked a business a question its knowledge base couldn't answer") {
 		answerFromReply(w, string(body))
 		return

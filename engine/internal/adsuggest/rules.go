@@ -196,11 +196,15 @@ type dayNum struct {
 // campaign is one campaign as the rules read it.
 type campaign struct {
 	id, externalID, name, accountID, acctExternalID, connector, currency, status, objective string
-	workspaceID, integrationID, acctName, acctTZ                                            string
-	acctMeta                                                                                map[string]string
-	brand                                                                                   *string
-	brandName                                                                               string
-	budget                                                                                  *int64
+	// report is the brand's own currency and fx how many of it one unit
+	// of the account's currency is; empty and 0 when nothing converts.
+	report                                       string
+	fx                                           float64
+	workspaceID, integrationID, acctName, acctTZ string
+	acctMeta                                     map[string]string
+	brand                                        *string
+	brandName                                    string
+	budget                                       *int64
 	// busy: a change on the campaign is still being measured or tested,
 	// so no other lever is pulled this cycle.
 	busy bool
@@ -296,6 +300,16 @@ type proposal struct {
 
 // money writes micros as a person reads them: 12.50 USD.
 func money(micros float64, cur string) string { return fmt.Sprintf("%.2f %s", micros/1e6, cur) }
+
+// cash writes micros of the campaign's account currency in the brand's
+// own currency, the one every Paid ads table is in, so a finding's text
+// reads like the numbers beside it. Without a rate it stays as it is.
+func (c campaign) cash(micros float64) string {
+	if c.report == "" || c.report == c.currency || c.fx <= 0 {
+		return money(micros, c.currency)
+	}
+	return money(micros*c.fx, c.report)
+}
 
 // unitWord is how a reason names a conversion in the campaign's unit.
 func unitWord(unit string, n float64) string {
@@ -419,7 +433,7 @@ func budgetRaise(c campaign) *proposal {
 	}
 	return &proposal{kind: BudgetUp, rule: RuleBudgetRaise, evidence: ev, impact: impact, proposed: map[string]any{"daily_budget_micros": nb},
 		reason: fmt.Sprintf("Raise %s's daily budget by a fifth to %s? A %s cost %s over the last %d days, within the target of %s, and %s.%s",
-			c.name, money(float64(nb), c.currency), unitWord(c.unit, 1), money(w.cost(), c.currency), w.Days, money(float64(*c.target), c.currency), how, fallbackNote(c))}
+			c.name, c.cash(float64(nb)), unitWord(c.unit, 1), c.cash(w.cost()), w.Days, c.cash(float64(*c.target)), how, fallbackNote(c))}
 }
 
 // budgetCut: a payer costs more than 1.3 times the target over the window
@@ -437,7 +451,7 @@ func budgetCut(c campaign) *proposal {
 	var impact *int64
 	switch {
 	case w.Conv >= c.floor() && w.cost() > cutOverTarget*t:
-		why = fmt.Sprintf("A %s cost %s over the last %d days against a target of %s (%.0f %s).", unitWord(c.unit, 1), money(w.cost(), c.currency), w.Days, money(t, c.currency), w.Conv, unitWord(c.unit, w.Conv))
+		why = fmt.Sprintf("A %s cost %s over the last %d days against a target of %s (%.0f %s).", unitWord(c.unit, 1), c.cash(w.cost()), w.Days, c.cash(t), w.Conv, unitWord(c.unit, w.Conv))
 		// The last fifth of the budget buys payers at about 1.5 times the
 		// average: without it, the rest costs less per payer.
 		saved := float64(w.Spend) * budgetStep
@@ -448,14 +462,14 @@ func budgetCut(c campaign) *proposal {
 		}
 	case z.Conv == 0 && float64(z.Spend) >= cutZeroTargets*t:
 		ev = c.evidence(z)
-		why = fmt.Sprintf("It spent %s in %d days, more than three targets' worth (%s), with no %s.", money(float64(z.Spend), c.currency), z.Days, money(t, c.currency), unitWord(c.unit, 1))
+		why = fmt.Sprintf("It spent %s in %d days, more than three targets' worth (%s), with no %s.", c.cash(float64(z.Spend)), z.Days, c.cash(t), unitWord(c.unit, 1))
 		impact = c.perPayer(int64(float64(z.Spend) * budgetStep))
 	default:
 		return nil
 	}
 	nb := step(*c.budget, -budgetStep)
 	return &proposal{kind: BudgetDown, rule: RuleBudgetCut, evidence: ev, impact: impact, proposed: map[string]any{"daily_budget_micros": nb},
-		reason: fmt.Sprintf("Cut %s's daily budget by a fifth to %s? %s%s", c.name, money(float64(nb), c.currency), why, fallbackNote(c))}
+		reason: fmt.Sprintf("Cut %s's daily budget by a fifth to %s? %s%s", c.name, c.cash(float64(nb)), why, fallbackNote(c))}
 }
 
 // pause: three targets spent with no payer over max(14 days, 3 cycles),
@@ -471,7 +485,7 @@ func pause(c campaign) *proposal {
 	}
 	return &proposal{kind: Pause, rule: RulePause, evidence: c.evidence(n), impact: c.perPayer(n.Spend), proposed: map[string]any{"status": "paused"},
 		reason: fmt.Sprintf("Pause %s? It spent %s in %d days, more than three times what a %s may cost (%s), and brought none.%s",
-			c.name, money(float64(n.Spend), c.currency), days, unitWord(c.unit, 1), money(float64(*c.target), c.currency), fallbackNote(c))}
+			c.name, c.cash(float64(n.Spend)), days, unitWord(c.unit, 1), c.cash(float64(*c.target)), fallbackNote(c))}
 }
 
 // resume: paused at least a week, and while it ran in the last 90 days a
@@ -493,7 +507,7 @@ func resume(c campaign, now time.Time) *proposal {
 	}
 	return &proposal{kind: Resume, rule: RuleResume, evidence: c.evidence(n), impact: impact, proposed: map[string]any{"status": "active"},
 		reason: fmt.Sprintf("Resume %s? While it ran in the last %d days a %s cost %s, well under the target of %s (%.0f %s).%s",
-			c.name, resumeDays, unitWord(c.unit, 1), money(n.cost(), c.currency), money(float64(*c.target), c.currency), n.Conv, unitWord(c.unit, n.Conv), fallbackNote(c))}
+			c.name, resumeDays, unitWord(c.unit, 1), c.cash(n.cost()), c.cash(float64(*c.target)), n.Conv, unitWord(c.unit, n.Conv), fallbackNote(c))}
 }
 
 // targetStep is how far a target moves toward actual: half the gap,
@@ -536,7 +550,7 @@ func targetTighten(c campaign, now time.Time) *proposal {
 		return &proposal{kind: TargetTighten, rule: RuleTargetTighten, evidence: ev, impact: impactMicros(-n.cost() * shareDown),
 			proposed: map[string]any{"target_cpa_micros": nt},
 			reason: fmt.Sprintf("Lower %s's target cost per conversion from %s to %s? Over the last %d days a conversion cost it %s, %.0f%% under its target, with %.0f %s.%s",
-				c.name, money(t, c.currency), money(float64(nt), c.currency), tightenDays, money(actual, c.currency), gap*100, n.Conv, unitWord(c.unit, n.Conv), fallbackNote(c))}
+				c.name, c.cash(t), c.cash(float64(nt)), tightenDays, c.cash(actual), gap*100, n.Conv, unitWord(c.unit, n.Conv), fallbackNote(c))}
 	case c.platformTROAS != nil && plat.Spend > 0 && n.Revenue > 0:
 		if n.Conv < minPayersROAS {
 			return nil
@@ -584,7 +598,7 @@ func targetLoosen(c campaign, now time.Time) *proposal {
 		if float64(week.Spend) < pmaxUnderspend*float64(*c.budget)*7 {
 			under = true
 			lo, hi = loosenPMaxMin, loosenPMaxMax
-			why = fmt.Sprintf("It spent %s in the last 7 days against a budget of %s a day: the target holds it back.", money(float64(week.Spend), c.currency), money(float64(*c.budget), c.currency))
+			why = fmt.Sprintf("It spent %s in the last 7 days against a budget of %s a day: the target holds it back.", c.cash(float64(week.Spend)), c.cash(float64(*c.budget)))
 		}
 	}
 	if !under {
@@ -622,7 +636,7 @@ func targetLoosen(c campaign, now time.Time) *proposal {
 		return &proposal{kind: TargetLoosen, rule: RuleTargetLoosen, evidence: ev, impact: impactMicros(n.cost() * (float64(nt)/t - 1)),
 			proposed: map[string]any{"target_cpa_micros": nt},
 			reason: fmt.Sprintf("Raise %s's target cost per conversion from %s to %s? %s A conversion cost it %s over the last %d days; %s.%s",
-				c.name, money(t, c.currency), money(float64(nt), c.currency), why, money(actual, c.currency), tightenDays, expect, fallbackNote(c))}
+				c.name, c.cash(t), c.cash(float64(nt)), why, c.cash(actual), tightenDays, expect, fallbackNote(c))}
 	case c.platformTROAS != nil && plat.Spend > 0:
 		t := *c.platformTROAS
 		actual := float64(n.Revenue) * 10_000 / float64(plat.Spend)
@@ -673,7 +687,7 @@ func biddingLadder(c campaign, now time.Time) *proposal {
 	return &proposal{kind: BiddingTarget, rule: RuleBiddingLadder, evidence: ev, impact: ptrInt(0),
 		proposed: map[string]any{"strategy": connectors.BidMaxConversions, "target_cpa_micros": cpa},
 		reason: fmt.Sprintf("Bid %s to a target cost per conversion of %s? It bids for as many conversions as it can with no target, and brought %.0f %s in the last %d days at a conversion cost of %s. A target holds that cost while it learns.%s",
-			c.name, money(float64(cpa), c.currency), n.Conv, unitWord(c.unit, n.Conv), ladderDays, money(float64(cpa), c.currency), fallbackNote(c))}
+			c.name, c.cash(float64(cpa)), n.Conv, unitWord(c.unit, n.Conv), ladderDays, c.cash(float64(cpa)), fallbackNote(c))}
 }
 
 // staleTarget: a target untouched for 90 days that the campaign misses
@@ -701,7 +715,7 @@ func staleTarget(c campaign, now time.Time) *proposal {
 		ev["platform_target_cpa_micros"], ev["platform_cost_per_conversion_micros"] = *c.platformTCPA, int64(actual)
 		return &proposal{kind: AlertTargetStale, rule: RuleStaleTarget, evidence: ev,
 			reason: fmt.Sprintf("%s's target cost per conversion (%s) hasn't changed in %d days, and a conversion actually cost %s over the last %d days: is the target still right?",
-				c.name, money(t, c.currency), staleDays, money(actual, c.currency), tightenDays)}
+				c.name, c.cash(t), staleDays, c.cash(actual), tightenDays)}
 	case plat.Spend > 0:
 		actual, t := float64(n.Revenue)*10_000/float64(plat.Spend), *c.platformTROAS
 		if n.Revenue <= 0 || math.Abs(actual-t)/t <= staleGap {
@@ -815,7 +829,7 @@ func negativeKeyword(c campaign, terms []term) []*proposal {
 		out = append(out, &proposal{kind: NegativeAdd, rule: RuleNegative, evidence: ev, impact: c.perPayer(wasted),
 			proposed: map[string]any{"keyword": worst.text, "match_type": "exact"},
 			reason: fmt.Sprintf("Add %q as an exact negative keyword to %s? People searching it clicked %d times and cost %s in %d days with no %s.%s",
-				worst.text, c.name, worst.clicks, money(float64(worst.spend), c.currency), termDays, unitWord(c.unit, 1), fallbackNote(c))})
+				worst.text, c.name, worst.clicks, c.cash(float64(worst.spend)), termDays, unitWord(c.unit, 1), fallbackNote(c))})
 	}
 	// N-grams: every word and two- or three-word phrase in the searches.
 	type gram struct {
@@ -864,7 +878,7 @@ func negativeKeyword(c campaign, terms []term) []*proposal {
 		out = append(out, &proposal{kind: NegativeAdd, rule: RuleNegativeNgram, evidence: ev, impact: c.perPayer(best.spend),
 			proposed: map[string]any{"keyword": bestGram, "match_type": "phrase"},
 			reason: fmt.Sprintf("Add %q as a phrase negative keyword to %s? %d different searches containing it clicked %d times and cost %s in %d days with no %s.%s",
-				bestGram, c.name, best.terms, best.clicks, money(float64(best.spend), c.currency), termDays, unitWord(c.unit, 1), fallbackNote(c))})
+				bestGram, c.name, best.terms, best.clicks, c.cash(float64(best.spend)), termDays, unitWord(c.unit, 1), fallbackNote(c))})
 	}
 	return out
 }
@@ -931,7 +945,7 @@ func keywordPromote(c campaign, terms []term) *proposal {
 	return &proposal{kind: KeywordAdd, rule: RulePromote, evidence: ev, impact: ptrInt(0),
 		proposed: map[string]any{"keyword": best.text, "match_type": "exact", "ad_group_id": best.groupExternal},
 		reason: fmt.Sprintf("Add %q as an exact keyword in %s? People searching it clicked %d times and brought %.0f %s in %d days at %s each, but it isn't a keyword yet.%s",
-			best.text, best.groupName, best.clicks, conv, unitWord(c.unit, conv), termDays, money(float64(best.spend)/conv, c.currency), fallbackNote(c))}
+			best.text, best.groupName, best.clicks, conv, unitWord(c.unit, conv), termDays, c.cash(float64(best.spend)/conv), fallbackNote(c))}
 }
 
 // keywordPause: a keyword that spent three targets with no payer and
@@ -965,7 +979,7 @@ func keywordPause(c campaign, kws map[int][]keyword) *proposal {
 		return &proposal{kind: KeywordPause, rule: RuleKeywordPause, evidence: ev, impact: c.perPayer(worst.spend),
 			proposed: map[string]any{"keyword": worst.text, "match_type": worst.matchType, "keyword_id": worst.externalID, "ad_group_id": worst.groupExternal},
 			reason: fmt.Sprintf("Pause the %s keyword %q in %s? It spent %s in %d days, over three targets' worth, on %d clicks with no %s.%s",
-				worst.matchType, worst.text, worst.groupName, money(float64(worst.spend), c.currency), days, worst.clicks, unitWord(c.unit, 1), fallbackNote(c))}
+				worst.matchType, worst.text, worst.groupName, c.cash(float64(worst.spend)), days, worst.clicks, unitWord(c.unit, 1), fallbackNote(c))}
 	}
 	return nil
 }
@@ -1159,10 +1173,10 @@ func exclusion(c campaign, segs []segment) *proposal {
 	ev["segment"], ev["segment_clicks"], ev["segment_spend_micros"], ev["segment_conversions"], ev["exclusion"] = worst.Kind+" "+what, worst.Clicks, worst.SpendMicros, c.segConv(*worst), x
 	kindWord := map[string]string{connectors.ExcludeDevice: "on " + what + " devices", connectors.ExcludeLocation: "in " + what, connectors.ExcludePlacement: "on " + what,
 		connectors.ExcludeNetwork: "on " + strings.ReplaceAll(what, "_", " "), connectors.ExcludeSchedule: "from " + what}[x.Kind]
-	why := fmt.Sprintf("it clicked %d times and cost %s there in %d days with no %s", worst.Clicks, money(float64(worst.SpendMicros), c.currency), exclDays, unitWord(c.unit, 1))
+	why := fmt.Sprintf("it clicked %d times and cost %s there in %d days with no %s", worst.Clicks, c.cash(float64(worst.SpendMicros)), exclDays, unitWord(c.unit, 1))
 	if x.Kind == connectors.ExcludeNetwork {
-		why = fmt.Sprintf("a %s cost %s there against %s on the rest of the campaign over %d days", unitWord(c.unit, 1), money(float64(worst.SpendMicros)/math.Max(1, c.segConv(*worst)), c.currency),
-			money(float64(w.Spend-worst.SpendMicros)/math.Max(1, w.Conv-c.segConv(*worst)), c.currency), exclDays)
+		why = fmt.Sprintf("a %s cost %s there against %s on the rest of the campaign over %d days", unitWord(c.unit, 1), c.cash(float64(worst.SpendMicros)/math.Max(1, c.segConv(*worst))),
+			c.cash(float64(w.Spend-worst.SpendMicros)/math.Max(1, w.Conv-c.segConv(*worst))), exclDays)
 	}
 	return &proposal{kind: ExclusionAdd, rule: RuleExclusion, evidence: ev, impact: c.perPayer(worst.SpendMicros),
 		proposed: map[string]any{"exclusion": x},

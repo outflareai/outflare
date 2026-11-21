@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/connectors/workspace"
 	"github.com/outflareai/outflare/engine/internal/oauth"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -33,7 +35,7 @@ func (s *Server) authorizeSalesGoogle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, 503, "unavailable", "configure the Google OAuth app before connecting Sales email")
 		return
 	}
-	id, state, nonce, verifier := newID(), randomMailToken(), randomMailToken(), randomMailToken()
+	id, state, nonce, verifier := newID(), salesStatePrefix+randomMailToken(), randomMailToken(), randomMailToken()
 	expires := time.Now().Add(10 * time.Minute)
 	digest := sha256.Sum256([]byte(state))
 	var email string
@@ -50,7 +52,7 @@ func (s *Server) authorizeSalesGoogle(w http.ResponseWriter, r *http.Request) {
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "sales.mail_consent_started", "sales_member", a.UserID, map[string]any{"brand_id": a.Brand})
 	})
 	if !s.allocError(w, r, err) {
-		writeJSON(w, 200, map[string]any{"url": s.oauth.SalesGoogleURL(s.publicURL+"/v1/sales/google/callback", state, nonce, verifier, email), "expires_at": expires})
+		writeJSON(w, 200, map[string]any{"url": s.oauth.SalesGoogleURL(s.loginRedirectURI(), state, nonce, verifier, email), "expires_at": expires})
 	}
 }
 func (s *Server) finishSalesGoogle(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +91,7 @@ func (s *Server) finishSalesGoogle(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	grant, err := s.oauth.ExchangeSalesGoogle(r.Context(), r.URL.Query().Get("code"), s.publicURL+"/v1/sales/google/callback", nonce, string(verifier))
+	grant, err := s.oauth.ExchangeSalesGoogle(r.Context(), r.URL.Query().Get("code"), s.mailRedirectURI(r, salesLegacyCallback), nonce, string(verifier))
 	if err != nil {
 		done("consent_failed")
 		return
@@ -174,9 +176,14 @@ func (s *Server) queueSalesSync(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]bool{"queued": true})
 	}
 }
-func (s *Server) salesGrant(ctx context.Context, a *access, owner string) (string, salesGoogleCredentials, string, error) {
+
+// salesGrant opens a Sales sender's mailbox: their own Google sign-in, or
+// the company's Google Workspace connection (ADR 15). send asks for a token
+// that may also send.
+func (s *Server) salesGrant(ctx context.Context, a *access, owner string, send bool) (string, salesGoogleCredentials, string, error) {
 	var id string
 	var sealed []byte
+	var integration *string
 	c := salesGoogleCredentials{}
 	m, err := salesMemberAt(ctx, s.pool, a, owner)
 	if err != nil {
@@ -185,12 +192,16 @@ func (s *Server) salesGrant(ctx context.Context, a *access, owner string) (strin
 	if !m.Connected || m.Role != "sdr" && m.Role != "ae" {
 		return id, c, "", errDenied("connect or reconnect your Sales email")
 	}
-	err = s.pool.QueryRow(ctx, `SELECT id::text,credentials_sealed FROM sales_mail_connections WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND status='connected'`, a.WorkspaceID, a.Brand, owner).Scan(&id, &sealed)
+	err = s.pool.QueryRow(ctx, `SELECT id::text,credentials_sealed,workspace_integration_id::text FROM sales_mail_connections WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND status='connected'`, a.WorkspaceID, a.Brand, owner).Scan(&id, &sealed, &integration)
 	if err != nil {
 		return id, c, "", err
 	}
 	if err = s.salesOpen(sealed, id, &c); err != nil {
 		return id, c, "", err
+	}
+	if integration != nil {
+		token, err := s.salesWorkspaceToken(ctx, a, id, owner, *integration, c.Grant.Email, send)
+		return id, c, token, err
 	}
 	token, refresh, err := s.oauth.RefreshSalesGoogle(ctx, c.Grant.RefreshToken)
 	if err != nil {
@@ -209,4 +220,147 @@ func (s *Server) salesGrant(ctx context.Context, a *access, owner string) (strin
 		}
 	}
 	return id, c, token, nil
+}
+
+// salesWorkspaceFor says whether user may read and send their Sales mail
+// through the company's Google Workspace connection: the brand's CRM email
+// rollout names one and they are eligible under it (not excluded, by
+// account or by address).
+func (s *Server) salesWorkspaceFor(ctx context.Context, q mailQuery, ws, brand, user string) (string, bool, error) {
+	rollout, err := readMailRollout(ctx, q, ws, brand)
+	if err != nil || !rollout.Enabled || rollout.WorkspaceIntegrationID == nil || s.integrations == nil {
+		return "", false, err
+	}
+	ok, err := eligibleCRMMail(ctx, q, ws, brand, user)
+	if err != nil || !ok {
+		return "", false, err
+	}
+	return *rollout.WorkspaceIntegrationID, true, nil
+}
+
+// salesWorkspaceToken is a Gmail token for a Sales connection read through
+// the Workspace connection. Eligibility is checked on every use, so taking
+// someone off the rollout stops Sales at once.
+func (s *Server) salesWorkspaceToken(ctx context.Context, a *access, id, owner, integration, email string, send bool) (string, error) {
+	stop := func(code string) error {
+		_, err := s.pool.Exec(ctx, `UPDATE sales_mail_connections SET status='reconnect_required',error_code=$4 WHERE workspace_id=$1 AND brand_id=$2 AND id=$3`, a.WorkspaceID, a.Brand, id, code)
+		return err
+	}
+	current, ok, err := s.salesWorkspaceFor(ctx, s.pool, a.WorkspaceID, a.Brand, owner)
+	if err != nil {
+		return "", err
+	}
+	if !ok || current != integration {
+		if err = stop("workspace_not_allowed"); err != nil {
+			return "", err
+		}
+		return "", errDenied("Google Workspace is no longer set up for this Sales mailbox")
+	}
+	o, err := s.integrations.Open(ctx, s.pool, a.WorkspaceID, integration)
+	if err != nil {
+		return "", err
+	}
+	if o.Connector.Definition().ID != workspace.ID {
+		return "", errDenied("the connection is not a Google Workspace connection")
+	}
+	tokenFor := workspace.Token
+	if send {
+		tokenFor = workspace.ReadSendToken
+	}
+	token, err := tokenFor(ctx, o.Client, o.Creds, email)
+	if err != nil {
+		if k := connectors.KindOf(err); k == connectors.ErrAuth || k == connectors.ErrInvalid {
+			code := "google_connection_failed"
+			if send {
+				code = "send_not_allowed"
+			}
+			if saveErr := stop(code); saveErr != nil {
+				return "", saveErr
+			}
+		}
+		return "", err
+	}
+	return token, nil
+}
+
+// connectSalesWorkspace connects your Sales mail through the company's
+// Google Workspace connection, without signing in to Google.
+func (s *Server) connectSalesWorkspace(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.salesPerson(w, r)
+	if !ok {
+		return
+	}
+	a := accessFrom(r.Context())
+	if m.Role != "sdr" && m.Role != "ae" {
+		writeError(w, r, 403, "forbidden", "ask a manager to assign your Sales role first")
+		return
+	}
+	connectionID := newID()
+	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		integration, ok, err := s.salesWorkspaceFor(r.Context(), tx, a.WorkspaceID, a.Brand, a.UserID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errDenied("Google Workspace isn't set up for your email in this brand; ask an admin to add you in CRM email settings, or connect Gmail")
+		}
+		var email string
+		if err = tx.QueryRow(r.Context(), `SELECT lower(email) FROM users WHERE id=$1`, a.UserID).Scan(&email); err != nil {
+			return err
+		}
+		creds := salesGoogleCredentials{Grant: oauth.PersonalGoogleGrant{Email: email, Subject: workspaceSubject + email}}
+		if _, err = tx.Exec(r.Context(), `DELETE FROM sales_oauth_flows WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3`, a.WorkspaceID, a.Brand, a.UserID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(r.Context(), `INSERT INTO sales_mail_connections(id,workspace_id,brand_id,owner_id,credentials_sealed,workspace_integration_id)VALUES($1,$2,$3,$4,$5,$6)ON CONFLICT(workspace_id,brand_id,owner_id)DO UPDATE SET id=$1,credentials_sealed=$5,workspace_integration_id=$6,status='connected',error_code=NULL,generation=sales_mail_connections.generation+1`,
+			connectionID, a.WorkspaceID, a.Brand, a.UserID, s.salesSeal(connectionID, creds), integration); err != nil {
+			return err
+		}
+		if err = s.enqueueSales(r.Context(), tx, a, jobSalesSync, connectionID, time.Now()); err != nil {
+			return err
+		}
+		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "sales.mail_connected", "sales_member", a.UserID, map[string]any{"brand_id": a.Brand, "via": "workspace"})
+	})
+	if !s.allocError(w, r, err) {
+		writeJSON(w, 200, map[string]bool{"connected": true})
+	}
+}
+
+// revokeSalesWorkspace removes the Sales connections read through the
+// Workspace connection whose owners the brand's rollout no longer allows.
+// Run it in the rollout's transaction, after saving it.
+func (s *Server) revokeSalesWorkspace(ctx context.Context, tx pgx.Tx, ws, brand string) (int, error) {
+	rows, err := tx.Query(ctx, `SELECT owner_id::text,workspace_integration_id::text FROM sales_mail_connections WHERE workspace_id=$1 AND brand_id=$2 AND workspace_integration_id IS NOT NULL`, ws, brand)
+	if err != nil {
+		return 0, err
+	}
+	type conn struct{ owner, integration string }
+	var all []conn
+	for rows.Next() {
+		var c conn
+		if err = rows.Scan(&c.owner, &c.integration); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		all = append(all, c)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, c := range all {
+		current, ok, err := s.salesWorkspaceFor(ctx, tx, ws, brand, c.owner)
+		if err != nil {
+			return 0, err
+		}
+		if ok && current == c.integration {
+			continue
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM sales_mail_connections WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND workspace_integration_id IS NOT NULL`, ws, brand, c.owner); err != nil {
+			return 0, err
+		}
+		removed++
+	}
+	return removed, nil
 }

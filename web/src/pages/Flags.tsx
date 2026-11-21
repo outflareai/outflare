@@ -5,7 +5,7 @@ import { pickedBrandId } from "@/lib/brand";
 // workspace's servers read them; each visitor keeps their variant.
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type { Flag, FlagRule, FlagVariant } from "@outflare/sdk";
+import type { Flag, FlagRule, FlagVariant, SmartList } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, CopyButton, Empty, ErrorText, field, Loading, Menu, PageHeader, toast } from "../ui";
 import { ago } from "../format";
@@ -28,21 +28,43 @@ const attrs: { id: string; label: string; hint?: string }[] = [
   { id: "device", label: "Device" },
   { id: "language", label: "Browser language", hint: "en" },
   { id: "url", label: "Full address", hint: "https://" },
-  { id: "signed_in", label: "Signed in (servers)" },
+  { id: "signed_in", label: "Signed in" },
   { id: "property.", label: "Property (servers)", hint: "plan" },
+  { id: "list", label: "People list" },
+  { id: "person.", label: "Person's field", hint: "plan" },
+  { id: "user_id", label: "User id", hint: "u_123" },
 ];
+// Rule attributes that carry a name after the dot.
+const named = ["query.", "property.", "person."];
 const ops: Record<FlagRule["op"], string> = {
   is: "is", is_not: "is not", contains: "contains", not_contains: "doesn't contain", starts_with: "starts with", ends_with: "ends with", exists: "is there", not_exists: "isn't there",
 };
-const attrOf = (a: string) => (a.startsWith("query.") ? "query." : a.startsWith("property.") ? "property." : a);
+const attrOf = (a: string) => named.find((p) => a.startsWith(p)) ?? a;
 const attrLabel = (a: string) => {
   const base = attrs.find((x) => x.id === attrOf(a))?.label ?? a;
   return a.endsWith(".") || !a.includes(".") ? base : `${base} ${a.slice(a.indexOf(".") + 1)}`;
 };
 
-export function ruleText(r: FlagRule) {
+// ruleText says a rule in words. listNames turns a People list's id into its name.
+export function ruleText(r: FlagRule, listNames?: Record<string, string>) {
+  if (r.attribute === "list") {
+    const lists = (r.values ?? []).map((id) => listNames?.[id] ?? "a People list").join(" or ");
+    return `${r.op === "is_not" ? "not in" : "in"} ${lists}`;
+  }
   const vals = r.op === "exists" || r.op === "not_exists" ? "" : ` ${(r.values ?? []).join(" or ")}`;
   return `${attrLabel(r.attribute)} ${ops[r.op]}${vals}`;
+}
+
+// usePeopleLists loads the brand's People lists, for rules about who the visitor is.
+function usePeopleLists(brand: string) {
+  const [lists, setLists] = useState<SmartList[]>([]);
+  useEffect(() => {
+    if (!brand) return;
+    api.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand } } }).then(({ data }) =>
+      setLists((data?.data ?? []).filter((l) => l.record_type === "person")),
+    );
+  }, [brand]);
+  return lists;
 }
 
 const isSplit = (f: Pick<Flag, "variants">) => f.variants.length > 1;
@@ -147,6 +169,8 @@ function FlagsPage({ ws, canManage, go }: Props) {
   const [editing, setEditing] = useState<Flag | "new" | null>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
   const [error, setError] = useState("");
+  const peopleLists = usePeopleLists(pickedBrandId());
+  const listNames = Object.fromEntries(peopleLists.map((l) => [l.id, l.name]));
 
   const load = useCallback(async () => {
     const { data, error } = await api.GET("/v1/brands/{brand}/flags", { params: { path: { brand: pickedBrandId() } } });
@@ -226,7 +250,7 @@ function FlagsPage({ ws, canManage, go }: Props) {
               ),
             },
             { id: "split", header: "Versions", accessorFn: (f) => (isSplit(f) ? splitText(f.variants) : "Switch"), cell: ({ row: { original: f } }) => (isSplit(f) ? <span className="font-mono text-[12px]">{splitText(f.variants)}</span> : <span className="text-muted-foreground">Switch</span>) },
-            { id: "who", header: "Who", accessorFn: (f) => f.rules.map(ruleText).join(", "), cell: ({ row: { original: f } }) => <span className="text-muted-foreground">{f.rollout < 100 ? `${f.rollout}% of ` : ""}{f.rules.length ? f.rules.map(ruleText).join(", and ") : "everyone"}</span> },
+            { id: "who", header: "Who", accessorFn: (f) => f.rules.map((r) => ruleText(r, listNames)).join(", "), cell: ({ row: { original: f } }) => <span className="text-muted-foreground">{f.rollout < 100 ? `${f.rollout}% of ` : ""}{f.rules.length ? f.rules.map((r) => ruleText(r, listNames)).join(", and ") : "everyone"}</span> },
             { id: "updated", header: "Changed", accessorFn: (f) => f.updated_at, cell: ({ row: { original: f } }) => <span className="text-muted-foreground">{ago(f.updated_at)}</span> },
             {
               id: "menu", header: "", enableSorting: false,
@@ -303,6 +327,7 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
   const [payloads, setPayloads] = useState<string[]>(() => (flag && isSplit(flag) ? flag.variants : []).map((v) => (v.payload == null ? "" : JSON.stringify(v.payload, null, 2))));
   const [rollout, setRollout] = useState(flag?.rollout ?? 100);
   const [rules, setRules] = useState<FlagRule[]>(flag?.rules ?? []);
+  const peopleLists = usePeopleLists(pickedBrandId());
   const [onSite, setOnSite] = useState(flag?.on_site ?? true);
   const [group, setGroup] = useState(flag?.exclusion_group ?? "");
   const [groupShare, setGroupShare] = useState(flag?.group_share || 50);
@@ -445,10 +470,10 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
               const valueless = r.op === "exists" || r.op === "not_exists";
               return (
                 <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
-                  <select aria-label="Looks at" className={field} value={a} onChange={(e) => setRule(i, { attribute: e.target.value, op: e.target.value === "device" || e.target.value === "signed_in" ? "is" : r.op, values: e.target.value === "device" ? ["mobile"] : e.target.value === "signed_in" ? ["true"] : r.values })}>
+                  <select aria-label="Looks at" className={field} value={a} onChange={(e) => setRule(i, { attribute: e.target.value, op: ["device", "signed_in", "list"].includes(e.target.value) ? "is" : r.op, values: e.target.value === "device" ? ["mobile"] : e.target.value === "signed_in" ? ["true"] : e.target.value === "list" ? (peopleLists[0] ? [peopleLists[0].id] : []) : a === "list" ? [] : r.values })}>
                     {attrs.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
                   </select>
-                  {(a === "query." || a === "property.") && (
+                  {named.includes(a) && (
                     <input aria-label="Name" className={`${field} w-32 font-mono`} required placeholder={attrs.find((x) => x.id === a)?.hint} value={r.attribute.slice(a.length)} onChange={(e) => setRule(i, { attribute: a + e.target.value.trim() })} />
                   )}
                   {a === "device" ? (
@@ -457,6 +482,21 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
                       <option value="tablet">is a tablet</option>
                       <option value="desktop">is a computer</option>
                     </select>
+                  ) : a === "list" ? (
+                    peopleLists.length === 0 ? (
+                      <span className="text-muted-foreground">This brand has no People lists yet. Make one under People, then pick it here.</span>
+                    ) : (
+                      <>
+                        <select aria-label="In or not in" className={field} value={r.op === "is_not" ? "is_not" : "is"} onChange={(e) => setRule(i, { op: e.target.value as FlagRule["op"] })}>
+                          <option value="is">is in</option>
+                          <option value="is_not">is not in</option>
+                        </select>
+                        <select aria-label="People list" className={`${field} min-w-40 flex-1`} required value={r.values?.[0] ?? ""} onChange={(e) => setRule(i, { values: e.target.value ? [e.target.value] : [] })}>
+                          {!peopleLists.some((l) => l.id === r.values?.[0]) && <option value={r.values?.[0] ?? ""}>{r.values?.[0] ? "A list that is gone" : "Pick a list"}</option>}
+                          {peopleLists.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.members.toLocaleString()})</option>)}
+                        </select>
+                      </>
+                    )
                   ) : a === "signed_in" ? (
                     <select aria-label="Signed in" className={field} value={r.values?.[0] ?? "true"} onChange={(e) => setRule(i, { op: "is", values: [e.target.value] })}>
                       <option value="true">yes</option>
@@ -477,7 +517,7 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
               );
             })}
             {rules.length < 20 && <Button type="button" variant="ghost" onClick={() => setRules((rs) => [...rs, { attribute: "path", op: "starts_with", values: [] }])}>{rules.length ? "Add another condition" : "Only some visitors…"}</Button>}
-            <p className="text-[12px] text-muted-foreground">{rules.length ? "Visitors who match every condition." : "Every visitor."}</p>
+            <p className="text-[12px] text-muted-foreground">{rules.length ? "Visitors who match every condition." : "Every visitor."}{rules.some((r) => ["list", "person.", "user_id"].includes(attrOf(r.attribute))) && " Conditions about people apply once your product has identified the visitor; anyone else counts as unknown."}</p>
             <label className="flex items-center gap-3">
               <span className="font-medium">Of those, give it to</span>
               <input aria-label="Rollout" type="range" min={0} max={100} step={5} value={rollout} onChange={(e) => setRollout(Number(e.target.value))} className="flex-1" />

@@ -569,8 +569,23 @@ func decodeLarge(w http.ResponseWriter, r *http.Request, v any, limit int64) boo
 }
 
 func (s *Server) internal(w http.ResponseWriter, r *http.Request, err error) {
+	// The caller went away (closed the tab, moved to another page) and the
+	// work stopped because of it: nothing is broken, and no reply is read.
+	// It is recorded as client_closed, not as a server error.
+	if clientGone(r, err) {
+		s.log.Info("request closed by the client", "err", err, "request_id", RequestID(r.Context()))
+		writeError(w, r, statusClientClosed, "client_closed", "the client closed the request before the answer")
+		return
+	}
 	s.log.Error("internal error", "err", err, "request_id", RequestID(r.Context()))
 	writeError(w, r, http.StatusInternalServerError, "internal", "internal error")
+}
+
+// clientGone says whether err is the request's own context being cancelled
+// by its caller. A deadline that ran out is not: that is the server being
+// slow.
+func clientGone(r *http.Request, err error) bool {
+	return errors.Is(err, context.Canceled) && errors.Is(r.Context().Err(), context.Canceled)
 }
 
 func validUUID(s string) bool {

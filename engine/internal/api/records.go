@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/outflareai/outflare/engine/internal/quota"
 	"math"
 	"net/http"
 	"net/mail"
@@ -22,6 +21,8 @@ import (
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/leads"
+	"github.com/outflareai/outflare/engine/internal/quota"
+	"github.com/outflareai/outflare/engine/internal/smartlists"
 )
 
 // Customer records: the people, companies and other things a workspace
@@ -59,12 +60,16 @@ func (s *Server) routesRecords(mux *http.ServeMux) {
 		mux.HandleFunc("GET "+base+"/{record}/identities", on(read, s.listIdentities))
 		mux.HandleFunc("POST "+base+"/{record}/identities", on(manage, s.editsRecords(s.addIdentity)))
 		mux.HandleFunc("POST "+base+"/{record}/identities/{identity}/close", on(manage, s.editsRecords(s.closeIdentity)))
+		mux.HandleFunc("POST "+base+"/{record}/identities/{identity}/prefer", on(manage, s.editsRecords(s.preferIdentity)))
+		mux.HandleFunc("PATCH "+base+"/{record}/relationships/{relationship}", on(manage, s.editsRecords(s.updateRelationship)))
 		mux.HandleFunc("GET "+base+"/{record}/relationships", on(read, s.listRelationships))
 		mux.HandleFunc("POST "+base+"/{record}/relationships", on(manage, s.editsRecords(s.addRelationship)))
 		mux.HandleFunc("POST "+base+"/{record}/relationships/{relationship}/end", on(manage, s.editsRecords(s.endRelationship)))
 	}
 	// Who an email or id belongs to in one brand.
 	mux.HandleFunc("GET /v1/brands/{brand}/records/lookup", s.onBrand(read, s.lookupRecords))
+	// Which websites the brand knows, as digests, for the browser extension.
+	mux.HandleFunc("GET /v1/brands/{brand}/records/known-domains", s.onBrand(read, s.knownDomains))
 	// People from a list in hand (a CSV), matched by user id or email.
 	mux.HandleFunc("POST /v1/brands/{brand}/records/import", s.onBrand(manage, s.editsRecords(s.importRecords)))
 	// Every source's value of a field, and pinning a hand edit (field
@@ -93,6 +98,9 @@ type identityView struct {
 	ValidFrom    time.Time      `json:"valid_from"`
 	ValidTo      *time.Time     `json:"valid_to"`
 	ClosedReason *string        `json:"closed_reason"`
+	// Preferred: the email sends go to. Only one active email is; with
+	// none set, sends use the most recent verified address.
+	Preferred bool `json:"preferred"`
 }
 
 type skippedField struct {
@@ -152,11 +160,11 @@ func scanRecord(row pgx.Row) (recordView, error) {
 	return v, err
 }
 
-const identityColumns = `i.id::text, i.namespace, i.value, i.verified, i.verified_at, i.properties, i.source, i.valid_from, i.valid_to, i.closed_reason`
+const identityColumns = `i.id::text, i.namespace, i.value, i.verified, i.verified_at, i.properties, i.source, i.valid_from, i.valid_to, i.closed_reason, i.preferred`
 
 func scanIdentity(row pgx.CollectableRow) (identityView, error) {
 	var v identityView
-	err := row.Scan(&v.ID, &v.Namespace, &v.Value, &v.Verified, &v.VerifiedAt, &v.Properties, &v.Source, &v.ValidFrom, &v.ValidTo, &v.ClosedReason)
+	err := row.Scan(&v.ID, &v.Namespace, &v.Value, &v.Verified, &v.VerifiedAt, &v.Properties, &v.Source, &v.ValidFrom, &v.ValidTo, &v.ClosedReason, &v.Preferred)
 	return v, err
 }
 
@@ -182,7 +190,7 @@ func withIdentities(ctx context.Context, q pgx.Tx, list []recordView) error {
 	}
 	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (owned, error) {
 		var o owned
-		err := row.Scan(&o.record, &o.ID, &o.Namespace, &o.Value, &o.Verified, &o.VerifiedAt, &o.Properties, &o.Source, &o.ValidFrom, &o.ValidTo, &o.ClosedReason)
+		err := row.Scan(&o.record, &o.ID, &o.Namespace, &o.Value, &o.Verified, &o.VerifiedAt, &o.Properties, &o.Source, &o.ValidFrom, &o.ValidTo, &o.ClosedReason, &o.Preferred)
 		return o, err
 	})
 	if err != nil {
@@ -1066,6 +1074,10 @@ func (s *Server) createRecord(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, view)
 }
 
+// mayMarketSQL is true for a person (records r) who may get marketing
+// email; smart lists test it the same way.
+const mayMarketSQL = smartlists.MayMarketSQL
+
 func (s *Server) getRecord(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var v recordView
@@ -1363,6 +1375,18 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("acquired_via"); v != "" {
 		args = append(args, strings.Split(v, ","))
 		where += fmt.Sprintf(` AND r.acquired_via = ANY($%d)`, len(args))
+	}
+	// marketing=yes|no: the People list's Marketing email column, the same
+	// answer contactability.allowed.marketing gives (contactFor).
+	switch q.Get("marketing") {
+	case "":
+	case "yes":
+		where += ` AND r.record_type = 'person' AND ` + mayMarketSQL
+	case "no":
+		where += ` AND r.record_type = 'person' AND NOT ` + mayMarketSQL
+	default:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "marketing is yes or no")
+		return
 	}
 	// attribute=key:value, repeated: values of one field are alternatives,
 	// different fields must all match. A list value matches when it holds

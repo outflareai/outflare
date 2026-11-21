@@ -102,7 +102,7 @@ export function KnowledgeAsk({
         </div>
         <p className="text-xs text-muted-foreground">
           {audience === "team"
-            ? "Answers the way agents and missions working for your team would, from every published item."
+            ? "Answers the way agents working for your team would, from every published item."
             : "Answers the way a customer would hear it: only from items turned on for customers."}
         </p>
         <ErrorText>{error}</ErrorText>

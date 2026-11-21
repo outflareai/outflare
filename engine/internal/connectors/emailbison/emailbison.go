@@ -47,7 +47,7 @@ func (EmailBison) Definition() c.Definition {
 			{Name: "base_url", Label: "Instance URL", Placeholder: "https://send.youragency-com.example", Help: "The address you open EmailBison at."},
 			{Name: "api_key", Label: "API key", Secret: true, Help: "Create one under Settings > API."},
 		},
-		Capabilities: []string{c.CapObserveMailboxes, c.CapControlMailboxes, c.CapControlWarmup, c.CapReadReplies, c.CapBlocklist, c.CapPushLeads},
+		Capabilities: []string{c.CapObserveMailboxes, c.CapControlMailboxes, c.CapControlWarmup, c.CapReadReplies, c.CapBlocklist, c.CapPushLeads, c.CapContactHistory, c.CapCampaignReadiness},
 	}
 }
 
@@ -66,19 +66,23 @@ func open(cl *c.Client, creds c.Creds) (*api, error) {
 }
 
 func (a *api) do(ctx context.Context, method, path string, body, out any) error {
-	var rd io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		rd = bytes.NewReader(b)
+	if body == nil {
+		return a.send(ctx, method, path, "", nil, out)
 	}
+	b, _ := json.Marshal(body)
+	return a.send(ctx, method, path, "application/json", bytes.NewReader(b), out)
+}
+
+// send makes one request with a body of the given content type.
+func (a *api) send(ctx context.Context, method, path, contentType string, rd io.Reader, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, a.base+path, rd)
 	if err != nil {
 		return c.Errf(c.ErrInvalid, "bad EmailBison request: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+a.token)
 	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	resp, err := a.cl.Do(req)
 	if err != nil {
@@ -90,7 +94,7 @@ func (a *api) do(ctx context.Context, method, path string, body, out any) error 
 		return c.Errf(c.ErrUnavailable, "reading the EmailBison response: %v", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return c.HTTPError("EmailBison", resp.StatusCode, string(raw))
+		return c.HTTPErrorFor("EmailBison", resp, string(raw))
 	}
 	if out != nil && len(raw) > 0 {
 		if err := json.Unmarshal(raw, out); err != nil {

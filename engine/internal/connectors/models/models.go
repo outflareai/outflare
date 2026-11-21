@@ -68,6 +68,11 @@ func (m Model) Definition() c.Definition {
 		Fields:       []c.Field{{Name: "api_key", Label: "API key", Secret: true, Placeholder: placeholder(m.P), Help: i.keyHint}},
 		Capabilities: []string{"plan", "llm.sample"}, Pricing: "Pay per token, billed by " + m.P.Name,
 	}
+	if m.P.ID == llm.OpenAI.ID {
+		// The same key makes pictures with OpenAI's image models
+		// (connectors/media).
+		d.Capabilities = append(d.Capabilities, c.CapMediaImage)
+	}
 	if m.P.ID == llm.OpenRouter.ID {
 		// OpenRouter's sign-in makes a key on the person's own account and
 		// hands it back, so nobody registers an app and usage is still theirs.

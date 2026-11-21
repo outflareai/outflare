@@ -51,7 +51,10 @@ type MenuBadges func(ctx context.Context, workspaceID string) (map[string]string
 const maxBadge = 16
 
 func (s *Server) routesMenuBadges(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/workspaces/{ws}/menu-badges", s.inWorkspace(auth.ScopeWorkspaceRead, s.menuBadgesFor))
+	// Brand-limited callers are let in so their sidebar's poll isn't
+	// refused every minute; they get no badges, which are about the whole
+	// workspace (such as its balance).
+	mux.HandleFunc("GET /v1/workspaces/{ws}/menu-badges", s.inBrand(auth.ScopeWorkspaceRead, s.menuBadgesFor))
 }
 
 // menuBadgesFor answers GET /v1/workspaces/{ws}/menu-badges. A failing
@@ -59,6 +62,10 @@ func (s *Server) routesMenuBadges(mux *http.ServeMux) {
 func (s *Server) menuBadgesFor(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	out := map[string]string{}
+	if a.Brands != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"badges": out})
+		return
+	}
 	for _, fn := range s.menuBadges {
 		badges, err := fn(r.Context(), a.WorkspaceID)
 		if err != nil {

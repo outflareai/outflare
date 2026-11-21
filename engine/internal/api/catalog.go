@@ -55,12 +55,15 @@ func (s *Server) routesCatalog(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+b+"/option-sets", s.onBrand(manage, s.createOptionSet))
 	mux.HandleFunc("PATCH "+b+"/option-sets/{set}", s.onBrand(manage, s.updateOptionSet))
 	mux.HandleFunc("GET "+b+"/events", s.onBrand(read, s.listEventDefinitions))
+	mux.HandleFunc("GET "+b+"/event-problems", s.onBrand(read, s.listEventPlanProblems))
+	mux.HandleFunc("GET "+b+"/event-counts", s.onBrand(read, s.listEventCounts))
 	mux.HandleFunc("POST "+b+"/events", s.onBrand(manage, s.createEventDefinition))
 	mux.HandleFunc("PATCH "+b+"/events/{event}", s.onBrand(manage, s.updateEventDefinition))
 	// Approving a paused event name, and answering the name check's "Is
 	// this a typo?", are part of fixing a brand's data (the Events page),
 	// so customers.manage may do them; changing what an event means stays
 	// with catalog.manage.
+	mux.HandleFunc("GET "+b+"/events/{event}/usage", s.onBrand(read, s.getEventUsage))
 	mux.HandleFunc("POST "+b+"/events/{event}/approve", s.onBrand(auth.ScopeCustomersManage, s.approveEventName))
 	mux.HandleFunc("POST "+b+"/events/{event}/name-check", s.onBrand(auth.ScopeCustomersManage, s.answerEventNameCheck))
 }
@@ -85,6 +88,9 @@ type catalogOption struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
 	Archived bool   `json:"archived"`
+	// Source is, for a sub-source (option set sub_source), the Source it
+	// belongs to: event for a conference, say. Empty everywhere else.
+	Source string `json:"source,omitempty"`
 }
 
 type optionSetView struct {
@@ -157,6 +163,9 @@ type eventProperty struct {
 	Key         string `json:"key"`
 	ValueType   string `json:"value_type"`
 	Description string `json:"description"`
+	// Required: every event of this name must carry it (the tracking
+	// plan). One that doesn't is stored and counted as a problem.
+	Required bool `json:"required"`
 }
 
 // ---- Built in ----
@@ -194,6 +203,37 @@ var billingFields = []fieldView{
 	computedField("billing_status", "Billing status", "select", "billing_status", true, "Trialing, active, past due or canceled, from their subscriptions."),
 }
 
+// sourceField is where a person came from, set once when they are added
+// (migration 0595 works it out when nobody says) and never changed by what
+// happens later: progress lives on deals, not on the person. It is the
+// Source tag on the People list, and Cold is the list of cold contacts.
+var sourceField = builtinField("source", "Source", "select", "person_source", "", false, true,
+	"Where they came from, set once when they are added: Cold (cold outreach), Inbound, Events and conferences, Sign-up, Invited by a teammate, Customer or Other. Nothing that happens later changes it; progress lives on deals.")
+
+// sourceCategoryField says whether a person came to the brand or the brand
+// went to them. The database works it out from Source (migration 0658):
+// Cold and Events and conferences are Outbound, Inbound and Sign-up are
+// Inbound, the rest have none. It changes only when Source does.
+var sourceCategoryField = computedField("source_category", "Lead source category", "select", "lead_source", true,
+	"Inbound (they came to you) or Outbound (you went to them), worked out from their Source: Cold and Events and conferences are Outbound; Inbound and Sign-up are Inbound.")
+
+// subSourceField names where within their Source a person came from: the
+// event or conference they were met at, say. Its options are the brand's
+// own (option set sub_source, each tagged with the Source it belongs to),
+// added as people pick or type them (subsources.go). Unlike Source, it can
+// be changed.
+var subSourceField = builtinField("sub_source", "Sub-source", "select", "sub_source", "", false, true,
+	"Which one within their Source: for Events and conferences, the event or conference they were met at. Pick one of the brand's, or type a new one where people are added.")
+
+// accountFields link people to the customer accounts they are members of
+// (their workspaces in the brand's product, each membership with a role,
+// see people_setup.go), and say which side of a marketplace they are on.
+// Being in an account never sets a person's company.
+var accountFields = []fieldView{
+	builtinField("accounts", "Accounts", "record_reference", "", "customer_account", true, true, "The customer accounts they are a member of: their workspaces in your product. Being in an account never sets their company."),
+	builtinField("marketplace_role", "Buyer or seller", "select", "marketplace_role", "", false, true, "For a marketplace: whether they buy, sell or both."),
+}
+
 // workFields are on people and companies: labels anyone, the API or a
 // journey step can put on a record, and the workspace member who owns it
 // (alerts go to them).
@@ -229,15 +269,15 @@ var dealFields = []fieldView{
 // their own fields, so a workspace may already have a field of that key.
 // Where it does, its own field wins and the built-in is left out.
 var lateBuiltins = func() []string {
-	keys := make([]string, 0, len(billingFields)+len(touchFields)+len(workFields)+len(prFields)+len(accountPlanFields)+len(dealFields)+len(groupFields))
-	for _, f := range slices.Concat(billingFields, touchFields, workFields, prFields, accountPlanFields, dealFields, groupFields) {
+	keys := make([]string, 0, 2+len(billingFields)+len(touchFields)+len(workFields)+len(prFields)+len(accountPlanFields)+len(dealFields)+len(groupFields))
+	for _, f := range slices.Concat([]fieldView{sourceField, subSourceField}, accountFields, billingFields, touchFields, workFields, prFields, accountPlanFields, dealFields, groupFields) {
 		keys = append(keys, f.Key)
 	}
 	return keys
 }()
 
 // lateOptionSets are built-in option sets added the same way.
-var lateOptionSets = []string{"billing_status", "outlet_tier", "lost_reason", "lead_source"}
+var lateOptionSets = []string{"billing_status", "outlet_tier", "lost_reason", "lead_source", "person_source", "marketplace_role"}
 
 // builtinTypes are the record types every workspace has. A person's emails,
 // phones and ids are identities, not fields, so one email is never stored
@@ -256,6 +296,7 @@ var builtinTypes = []recordTypeView{
 			builtinField("timezone", "Time zone", "text", "", "", false, false, "An IANA time zone such as Australia/Sydney, for send times."),
 			builtinField("linkedin_url", "LinkedIn", "url", "", "", false, false, ""),
 			builtinField("lifecycle_stage", "Lifecycle stage", "status", "lifecycle_stage", "", false, true, ""),
+			sourceField, subSourceField, sourceCategoryField, accountFields[0], accountFields[1],
 			billingFields[0], billingFields[1], billingFields[2], billingFields[3], billingFields[4],
 		}, touchFields, workFields, prFields[:2], accountPlanFields)},
 	{Key: "account", Name: "Company", Plural: "Companies", Builtin: true,
@@ -271,6 +312,13 @@ var builtinTypes = []recordTypeView{
 			workFields[0], workFields[1], prFields[2],
 			accountPlanFields[0], accountPlanFields[1], accountPlanFields[2], accountPlanFields[3],
 			groupFields[0],
+		}},
+	{Key: "customer_account", Name: "Account", Plural: "Accounts", Builtin: true,
+		Description: "A customer account: their workspace in your product, with its plan, usage and billing. Its members are people, each with a role; it belongs to one company or none. Its id in your product is its group_id identity.",
+		Fields: []fieldView{
+			builtinField("company", "Company", "record_reference", "", "account", false, true, "The company the account belongs to, if any. An account of an individual has none."),
+			billingFields[0], billingFields[1], billingFields[2], billingFields[3], billingFields[4],
+			workFields[0], workFields[1],
 		}},
 }
 
@@ -314,6 +362,13 @@ var builtinOptionSets = func() []optionSetView {
 			"price", "Price", "timing", "Timing", "competitor", "Chose a competitor", "no_budget", "No budget", "no_need", "No need",
 			"missing_feature", "Missing feature", "no_decision", "No decision", "went_quiet", "Went quiet", "other", "Other")},
 		{Key: "lead_source", Name: "Lead source", Builtin: true, Options: opts("inbound", "Inbound", "outbound", "Outbound")},
+		{Key: "person_source", Name: "Source", Builtin: true, Options: opts(
+			"cold", "Cold", "inbound", "Inbound", "event", "Events and conferences", "signup", "Sign-up", "invited", "Invited", "customer", "Customer", "other", "Other")},
+		// A brand's sub-sources start empty and grow as its people add
+		// them (subsources.go): the brand's own row of this key fills it.
+		{Key: "sub_source", Name: "Sub-sources", Builtin: true, Options: []catalogOption{}},
+		{Key: "marketplace_role", Name: "Buyer or seller", Builtin: true, Options: opts("buyer", "Buyer", "seller", "Seller", "both", "Both")},
+		{Key: "account_role", Name: "Account role", Builtin: true, Options: opts("owner", "Owner", "admin", "Admin", "member", "Member", "billing", "Billing", "viewer", "Viewer")},
 		{Key: "outlet_tier", Name: "Outlet tier", Builtin: true, Options: opts(
 			"national", "National", "trade", "Trade", "regional", "Regional", "local", "Local", "newsletter", "Newsletter or blog")},
 	}
@@ -449,6 +504,19 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws, brand string, withEvents boo
 	if err != nil {
 		return nil, err
 	}
+	sets = slices.DeleteFunc(sets, func(o optionSetView) bool {
+		// The brand's sub-sources fill the built-in set rather than
+		// replacing it, so the built-in Sub-source field keeps working.
+		if o.Key != subSourceSet {
+			return false
+		}
+		for i := range c.OptionSets {
+			if c.OptionSets[i].Key == subSourceSet {
+				c.OptionSets[i].Options = o.Options
+			}
+		}
+		return true
+	})
 	for _, o := range sets {
 		// Likewise a brand's own set: the built-in set steps aside, and
 		// so do the built-in fields that use it, since their values would
@@ -1429,6 +1497,11 @@ func (s *Server) updateEventDefinition(w http.ResponseWriter, r *http.Request) {
 			a.WorkspaceID, name, req.Label, req.Description, req.Properties, req.Status, req.Sensitivity, b,
 			req.OwnerID.Set, req.OwnerID.Value, req.RetentionDays.Set, req.RetentionDays.Value, req.Destinations.Set, req.Destinations.Value); err != nil {
 			return err
+		}
+		if req.Properties != nil && b != nil {
+			if err := settlePlanProblems(ctx, tx, a.WorkspaceID, *b, name, *req.Properties); err != nil {
+				return err
+			}
 		}
 		action := "event_definition.updated"
 		if req.Status != nil && *req.Status != before {

@@ -9,12 +9,12 @@ func TestPartnersBrandLimited(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})
 
 	partner := map[string]string{}
 	reward := map[string]string{}
-	for slug, brand := range map[string]any{"geo": "geonode", "rp": "repocket"} {
+	for slug, brand := range map[string]any{"geo": "northpeak", "rp": "summitly"} {
 		owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": slug, "slug": slug, "kind": "influencer", "brand": brand})
 		partner[slug] = owner.must(201, "POST", base+"/partners", map[string]any{"program": slug, "email": slug + "@example.com"})["id"].(string)
 		reward[slug] = owner.must(201, "POST", base+"/partners/"+partner[slug]+"/fees", map[string]any{"amount_cents": 10000, "note": "video"})["id"].(string)
@@ -25,7 +25,7 @@ func TestPartnersBrandLimited(t *testing.T) {
 	}
 	owner.must(400, "PATCH", base+"/partner-programs/everyone", map[string]any{"brand": ""})
 
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Geonode team", "scopes": []string{"partners.read", "partners.manage", "partners.conversions"}, "brand": "geonode"})["token"].(string)
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Northpeak team", "scopes": []string{"partners.read", "partners.manage", "partners.conversions"}, "brand": "northpeak"})["token"].(string)
 	geo := &client{t: t, h: e.h, bearer: tok}
 	count := func(path string) int {
 		t.Helper()
@@ -38,9 +38,9 @@ func TestPartnersBrandLimited(t *testing.T) {
 	geo.must(404, "GET", base+"/partner-programs/rp", nil)
 	geo.must(200, "PATCH", base+"/partner-programs/geo", map[string]any{"hold_days": 10})
 	geo.must(404, "PATCH", base+"/partner-programs/rp", map[string]any{"hold_days": 10})
-	geo.must(400, "PATCH", base+"/partner-programs/geo", map[string]any{"brand": "repocket"})
-	geo.must(403, "POST", base+"/partner-programs", map[string]any{"name": "Theirs", "kind": "affiliate", "brand": "repocket"})
-	geo.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Geonode referrals", "kind": "referral", "brand": "geonode"})
+	geo.must(400, "PATCH", base+"/partner-programs/geo", map[string]any{"brand": "summitly"})
+	geo.must(403, "POST", base+"/partner-programs", map[string]any{"name": "Theirs", "kind": "affiliate", "brand": "summitly"})
+	geo.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Northpeak referrals", "kind": "referral", "brand": "northpeak"})
 
 	// Partners follow their program.
 	if n := count("/partners"); n != 1 {
@@ -68,7 +68,7 @@ func TestPartnersBrandLimited(t *testing.T) {
 	if len(made) != 1 || made[0].(map[string]any)["partner_id"] != partner["geo"] {
 		t.Fatalf("payouts made: %v", made)
 	}
-	rp := owner.must(200, "POST", base+"/partner-payouts?brand=repocket", map[string]any{"program": "rp"})["data"].([]any)[0].(map[string]any)["id"].(string)
+	rp := owner.must(200, "POST", base+"/partner-payouts?brand=summitly", map[string]any{"program": "rp"})["data"].([]any)[0].(map[string]any)["id"].(string)
 	geo.must(404, "POST", base+"/partner-payouts/"+rp+"/paid", map[string]any{"reference": "x"})
 	if n := count("/partner-payouts"); n != 1 {
 		t.Fatalf("payouts: %d", n)

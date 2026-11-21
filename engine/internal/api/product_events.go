@@ -58,6 +58,7 @@ func (s *Server) ProductEventSink(ctx context.Context, ws, brand string) (track.
 			return nil, err
 		}
 	}
+	s.keepsEvents.Store(true)
 	return &productEventSink{s: s, ws: ws, brand: brand, ids: map[string]bool{}, joined: map[string]bool{}, called: map[string]time.Time{}}, nil
 }
 

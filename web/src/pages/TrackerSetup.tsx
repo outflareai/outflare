@@ -12,6 +12,7 @@ import { pickedBrandId, useBrand } from "@/lib/brand";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, CopyButton, ErrorText, field, Loading, PageHeader, toast } from "../ui";
 import type { Tab } from "../App";
+import { TrackingDomains } from "./Domains";
 
 type Network = Schemas["PostbackSource"];
 type NetworkTemplate = Schemas["AffiliateNetworkTemplate"];
@@ -20,7 +21,8 @@ type Conversion = Schemas["TrackerConversion"];
 
 type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
 
-type Step = { id: string; title: string; done: boolean; help: string; tab?: Tab; action: string };
+// anchor is a card further down this page that the step's button scrolls to.
+type Step = { id: string; title: string; done: boolean; help: string; tab?: Tab; anchor?: string; action: string };
 
 // The parameters a postback takes (docs/campaign-links.md, "Conversions by
 // click id"), with the template macro each is prefilled from.
@@ -93,12 +95,13 @@ export function TrackerSetup({ ws, canManage, go }: Props) {
     const conversions = (conv.data?.data ?? []) as Conversion[];
     setDomains(verified);
     setCampaignNames(Object.fromEntries(campaigns.map((x) => [x.id, x.name])));
-    setNetworks((n.data?.data ?? []) as Network[]);
+    // An archived network takes no conversions, so Setup doesn't offer it.
+    setNetworks(((n.data?.data ?? []) as Network[]).filter((x) => x.status !== "archived"));
     setTemplates((t.data?.data ?? []) as NetworkTemplate[]);
     setConverted(conversions.some((x) => x.type !== "test"));
     setSkipped(readSkipped(b));
     setSteps([
-      { id: "domain", title: "Verify a tracking domain", done: verified.length > 0, help: "Tracker links, postbacks and click URLs answer only on your own domain.", tab: "domains", action: "Open Domains" },
+      { id: "domain", title: "Verify a tracking domain", done: verified.length > 0, help: "Tracker links, postbacks and click URLs answer only on your own domain. Add it below: it is the same one your emails use.", anchor: "tracking-domain", action: "Add below" },
       { id: "source", title: "Add a traffic source", done: ((s.data?.data ?? []) as unknown[]).length > 0, help: "The ad network you buy clicks from, with its click id and cost.", tab: "tracker-sources", action: "Add one" },
       { id: "offer", title: "Add an offer that carries the click id", done: offers.some((x) => !x.missing_click_id), help: "So the network's postback can name the click.", tab: "tracker-offers", action: "Add one" },
       { id: "campaign", title: "Create a campaign and copy its URL", done: campaigns.length > 0, help: "Paste its campaign URL into the ad network as the ad's link.", tab: "tracker-campaigns", action: "Create one" },
@@ -109,6 +112,14 @@ export function TrackerSetup({ ws, canManage, go }: Props) {
   useEffect(() => {
     if (brand) void load();
   }, [brand, load]);
+  // The tracking domain card below reloads on its own (DNS and HTTPS
+  // settle in the background); tick the checklist and refresh the builder
+  // from what it last saw.
+  const domainsChanged = useCallback((list: Schemas["TrackingDomain"][]) => {
+    const verified = list.filter((x) => x.status === "verified").map((x) => x.domain);
+    setDomains(verified);
+    setSteps((st) => st && st.map((s) => (s.id === "domain" ? { ...s, done: verified.length > 0 } : s)));
+  }, []);
   if (!brand) return <PickBrand what="tracker setup" brands={active.length} />;
   if (error) return <ErrorText>{error}</ErrorText>;
   if (!steps) return <Loading />;
@@ -142,6 +153,7 @@ export function TrackerSetup({ ws, canManage, go }: Props) {
                   {!s.done && !isSkipped && (
                     <span className="flex gap-1">
                       {s.tab && <Button variant="ghost" onClick={() => go(s.tab!)}>{s.action}</Button>}
+                      {s.anchor && <Button variant="ghost" onClick={() => document.getElementById(s.anchor!)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{s.action}</Button>}
                       <Button variant="ghost" aria-label={`Skip ${s.title}`} onClick={() => skip(s.id)}>Skip</Button>
                     </span>
                   )}
@@ -151,6 +163,9 @@ export function TrackerSetup({ ws, canManage, go }: Props) {
           </ol>
         </Card>
       )}
+      <div id="tracking-domain" className="scroll-mt-4">
+        <TrackingDomains ws={ws} canManage={canManage} onChange={domainsChanged} />
+      </div>
       {networks.length === 0 ? (
         <Card title="Postback URL">
           <p className="text-sm text-muted-foreground">
@@ -179,9 +194,13 @@ function Builder({ networks, templates, domains, canManage }: { networks: Networ
   const initial = useCallback((): Record<string, Row> => {
     const macros = template?.macros ?? {};
     return Object.fromEntries(postbackParams.map((p) => {
+      const known = (p.macro && macros[p.macro]) || "";
+      // A network from a template sends only what the template has a
+      // placeholder for: a made-up one ({status}) would arrive unfilled.
+      // A custom network starts from the usual four with generic tokens.
+      if (template) return [p.name, { on: p.name === "cid" || !!known, token: known || (p.name === "cid" ? "{click_id}" : "") }];
       const custom = /^p\d+$/.test(p.name) ? "" : `{${p.name === "cid" ? "click_id" : p.name}}`;
-      const token = (p.macro && macros[p.macro]) || custom;
-      return [p.name, { on: ["cid", "payout", "txid", "status"].includes(p.name) || !!(p.macro && macros[p.macro]), token }];
+      return [p.name, { on: ["cid", "payout", "txid", "status"].includes(p.name), token: custom }];
     }));
   }, [template]);
   const [rows, setRows] = useState<Record<string, Row>>(initial);
@@ -252,7 +271,7 @@ function Builder({ networks, templates, domains, canManage }: { networks: Networ
               <tr key={p.name} className="border-t">
                 <td className="py-1"><input type="checkbox" aria-label={`Send ${p.label}`} checked={rows[p.name]?.on ?? false} onChange={(e) => setRows({ ...rows, [p.name]: { ...rows[p.name], on: e.target.checked } })} /></td>
                 <td className="py-1"><span className="font-mono text-xs">{p.name}</span> <span className="text-xs text-muted-foreground">{p.label}</span></td>
-                <td className="py-1"><input aria-label={`${p.label} token`} className={`${field} w-full font-mono text-xs`} value={rows[p.name]?.token ?? ""} onChange={(e) => setRows({ ...rows, [p.name]: { on: true, token: e.target.value } })} /></td>
+                <td className="py-1"><input aria-label={`${p.label} token`} className={`${field} w-full font-mono text-xs placeholder:font-sans`} placeholder={template && !/^p\d+$/.test(p.name) && !(p.macro && template.macros?.[p.macro]) ? `${template.name} has no placeholder for it` : ""} value={rows[p.name]?.token ?? ""} onChange={(e) => setRows({ ...rows, [p.name]: { on: e.target.value.trim() !== "", token: e.target.value } })} /></td>
               </tr>
             ))}
           </tbody>

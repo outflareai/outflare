@@ -23,8 +23,8 @@ var ebWarm = struct {
 	refuse bool
 }{on: map[int]bool{}}
 
-// fakeEmailBison has one live campaign with Ana on it, and three sender
-// emails, for the key "eb-key".
+// fakeEmailBison has one live campaign with Ana on it, one draft campaign
+// nobody has started, and three sender emails, for the key "eb-key".
 type fakeEmailBison struct{}
 
 func (fakeEmailBison) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +68,7 @@ func (fakeEmailBison) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ebWarm.Unlock()
 		w.Write([]byte(`{"data":{"success":true}}`))
 	case "/api/campaigns":
-		w.Write([]byte(`{"data":[{"id":10,"name":"Q4 founders","status":"active"}],"meta":{"last_page":1}}`))
+		w.Write([]byte(`{"data":[{"id":10,"name":"Q4 founders","status":"active"},{"id":11,"name":"Free mail","status":"draft"}],"meta":{"last_page":1}}`))
 	case "/api/campaigns/10/sender-emails":
 		w.Write([]byte(`{"data":[{"id":1,"email":"ana@send-acme.test"}],"meta":{"last_page":1}}`))
 	case "/api/campaigns/10/attach-sender-emails", "/api/campaigns/10/remove-sender-emails":
@@ -329,5 +329,50 @@ func TestWarmupOnAConnectedSequencer(t *testing.T) {
 	ebWarm.Unlock()
 	if !off {
 		t.Fatal("the retry did not turn warm-up off")
+	}
+}
+
+// A draft campaign is linked only when someone names it, as a draft
+// sequence; a plain sync keeps it linked and leaves its status to the
+// platform.
+func TestPlatformSyncLinksNamedDraftCampaign(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	i := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "emailbison",
+		"credentials": map[string]string{"base_url": "https://send.acme.test", "api_key": "eb-key"}})
+	id := i["id"].(string)
+
+	res := owner.must(200, "POST", base+"/platforms/"+id+"/sync", nil)
+	if res["campaigns"] != 1.0 || res["linked"] != nil || res["not_linked"] != nil {
+		t.Fatalf("plain sync: %v", res)
+	}
+	owner.must(400, "POST", base+"/platforms/"+id+"/sync", map[string]any{"link_campaigns": []string{""}})
+	owner.must(400, "POST", base+"/platforms/"+id+"/sync", map[string]any{"campaigns": []string{"11"}})
+
+	res = owner.must(200, "POST", base+"/platforms/"+id+"/sync", map[string]any{"link_campaigns": []string{"11", "11", "99"}})
+	if res["campaigns"] != 2.0 || !slices.Equal(anyStrings(res["linked"]), []string{"11"}) || !slices.Equal(anyStrings(res["not_linked"]), []string{"99"}) {
+		t.Fatalf("linking sync: %v", res)
+	}
+	draft := func() map[string]any {
+		for _, s := range owner.must(200, "GET", base+"/sequences", nil)["data"].([]any) {
+			seq := s.(map[string]any)
+			if l := seq["links"].([]any); len(l) == 1 && l[0].(map[string]any)["external_id"] == "11" {
+				return seq
+			}
+		}
+		return nil
+	}
+	seq := draft()
+	if seq == nil || seq["status"] != "draft" || seq["name"] != "Free mail" {
+		t.Fatalf("draft sequence: %v", seq)
+	}
+	// The next plain sync keeps the link.
+	res = owner.must(200, "POST", base+"/platforms/"+id+"/sync", nil)
+	if res["campaigns"] != 2.0 {
+		t.Fatalf("later sync: %v", res)
+	}
+	if again := draft(); again == nil || again["id"] != seq["id"] || again["status"] != "draft" {
+		t.Fatalf("after a plain sync: %v", again)
 	}
 }

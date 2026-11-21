@@ -125,6 +125,10 @@ func (x *Connector) Verify(ctx context.Context, cl *c.Client, creds c.Creds, ema
 	} else {
 		out.Status = c.Unknown
 	}
+	// The provider says outright that the domain does not accept every
+	// address: the catch-all field is mapped and its answer is a no. A
+	// missing field, or a word such as "unknown", says neither.
+	out.NotCatchAll = r.CatchAll != "" && !out.CatchAll && falsy(lookup(ans, r.CatchAll))
 	if n, ok := num(lookup(ans, r.Score)); ok && r.Score != "" {
 		if s := int(n + 0.5); s >= 0 && s <= 100 {
 			out.Score = &s
@@ -363,6 +367,16 @@ func str(ans any, p string) string { return text(lookup(ans, p)) }
 func truthy(v any) bool {
 	switch strings.ToLower(text(v)) {
 	case "true", "1", "yes":
+		return true
+	}
+	return false
+}
+
+// falsy says whether v is an outright no ("false", "0", "no"). Anything
+// else, a missing value among them, is not.
+func falsy(v any) bool {
+	switch strings.ToLower(text(v)) {
+	case "false", "0", "no":
 		return true
 	}
 	return false

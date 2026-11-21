@@ -15,12 +15,30 @@ import { minorList, rangeOf, type AdAcquisition, type Customers as Bucket } from
 
 const when = (iso: string | null) => (iso ? <span title={new Date(iso).toLocaleString()}>{ago(iso)}</span> : <span className="text-muted-foreground">—</span>);
 
+// A click is tied to its campaign from the network's own click report,
+// which has a click a few hours after it happens; Outflare reads it on
+// every sync. After a day and a half without one, it isn't coming.
+const reportLag = 36 * 3600 * 1000;
+
+// Where the person came from, in words: never a bare id or "unknown"
+// without saying why.
+export function pathOf(a: AdAcquisition, now = Date.now()): { main: string; note?: string; quiet?: boolean } {
+  const network = platformName(a.connector);
+  if (a.campaign.name) {
+    const parts = [a.campaign.name, a.ad_group.name, a.ad.name, a.keyword ? `[${a.keyword}]` : ""].filter(Boolean);
+    return { main: parts.join(" › "), note: !a.ad_group.name && !a.keyword && a.ad_group.external_id === "" ? `${network} · no ad group or keyword came with this click` : undefined };
+  }
+  if (a.campaign.external_id) return { main: "A campaign not in the connected ad account", note: `${network} campaign id ${a.campaign.external_id}. It may belong to another ${network} account: connect that account under Setup.`, quiet: true };
+  if (now - Date.parse(a.clicked_at) < reportLag) return { main: "Arrives in a few hours", note: `${network} reports a click a few hours after it happens`, quiet: true };
+  return { main: "Not matched to a campaign", note: `${network}'s click report has no click with this id. It may belong to another ${network} account.`, quiet: true };
+}
+
 function Path({ a }: { a: AdAcquisition }) {
-  const parts = [a.campaign.name || a.campaign.external_id, a.ad_group.name || a.ad_group.external_id, a.ad.name || a.ad.external_id, a.keyword].filter(Boolean);
+  const p = pathOf(a);
   return (
-    <div className="min-w-48 space-y-0.5">
-      <div className="text-[13px]">{parts.length > 0 ? parts.join(" › ") : <span className="text-muted-foreground">Campaign unknown</span>}</div>
-      <div className="text-[12px] text-muted-foreground">{platformName(a.connector)}{a.click_id_kind && <> · <span className="font-mono">{a.click_id_kind}</span></>}</div>
+    <div className="min-w-48 max-w-md space-y-0.5 whitespace-normal">
+      <div className={p.quiet ? "text-[13px] text-muted-foreground" : "text-[13px]"}>{p.main}</div>
+      <div className="text-[12px] text-muted-foreground">{p.note ?? platformName(a.connector)}</div>
     </div>
   );
 }
@@ -75,8 +93,8 @@ export function Customers({ brand, days, end, customers, campaigns, go, version 
   if (!rows) return <Loading />;
   return (
     <Card
-      title="Customers"
-      description={`People a paid click brought in the last ${days} days: their last visit with an ad click id before they signed up or first paid. ${customers === "new" ? "Only people who have paid." : customers === "returning" ? "Only people who have paid more than once." : "Sign-ups and paying customers."} Open a row for the person.`}
+      title="Customers from ads"
+      description={`Each person a paid click brought in the last ${days} days, and the ad that brought them. ${customers === "new" ? "Only people who have paid." : customers === "returning" ? "Only people who have paid more than once." : "Sign-ups and paying customers."} Open a row for the person. Source: Outflare tracking joined to the ad network's clicks.`}
       action={filter}
     >
       {error && <ErrorText>{error}</ErrorText>}
@@ -105,7 +123,7 @@ export function Customers({ brand, days, end, customers, campaigns, go, version 
               <Badge tone={a.bucket === "payer" ? "green" : "blue"}>{a.bucket === "payer" ? "Paying" : "Signed up"}</Badge>
             </div>
           ) },
-          { id: "path", header: "Campaign › ad group › ad › keyword", accessorFn: (a) => `${a.campaign.name} ${a.ad_group.name} ${a.ad.name} ${a.keyword}`, cell: ({ row: { original: a } }) => <Path a={a} /> },
+          { id: "path", header: "Campaign › ad group › keyword", accessorFn: (a) => pathOf(a).main, cell: ({ row: { original: a } }) => <Path a={a} /> },
           { id: "clicked", header: "Clicked", accessorFn: (a) => a.clicked_at, cell: ({ row: { original: a } }) => when(a.clicked_at) },
           { id: "signed_up", header: "Signed up", accessorFn: (a) => a.signed_up_at ?? "", cell: ({ row: { original: a } }) => when(a.signed_up_at) },
           { id: "first_paid", header: "First paid", accessorFn: (a) => a.first_paid_at ?? "", cell: ({ row: { original: a } }) => when(a.first_paid_at) },

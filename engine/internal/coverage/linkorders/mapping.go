@@ -50,6 +50,7 @@ var headerAliases = map[string]string{
 
 	// Offer terms.
 	"pbn": "pbn", "is_pbn": "pbn",
+	"best_link": "best_link", "best": "best_link", "is_best_link": "best_link",
 	"casino": "casino_allowed", "casino_allowed": "casino_allowed", "gambling": "casino_allowed",
 	"rel": "rel_offered", "rel_offered": "rel_offered", "link_type": "rel_offered", "dofollow": "rel_offered",
 	"slot_type": "slot_types", "slot_types": "slot_types", "placement_type": "slot_types",
@@ -114,15 +115,39 @@ func csvColRule(h string) string {
 	followed := !notFollowed && has("followed", "follow", "dofollow", "df", "do")
 	allTime := strings.Contains(h, "all_time") || has("alltime", "historical", "ever")
 	switch {
+	// A price header that names its currency in more than one way ("Price
+	// USD, $", "Price (USD)", "Цена, $") is still a price; "Paid traffic
+	// cost" and the like are not.
+	case has("price", "prices", "цена", "стоимость") && !has("minor", "cents", "traffic"):
+		switch {
+		case has("usd", "$", "dollar", "dollars"):
+			return "price_usd"
+		case has("eur", "€", "euro", "euros"):
+			return "price_eur"
+		}
+		return "price"
 	case has("geo", "country", "countries") && (has("top", "ahrefstop", "top1", "top2") || strings.Contains(h, "top")):
 		if has("2", "top2", "second") || strings.HasSuffix(h, "2") {
 			return MetricGeoTop2
 		}
 		return MetricGeoTop1
-	case has("referring", "ref", "rd", "refdomains", "referring_domains") && has("ips", "ip"):
-		return MetricReferringIPs
+	// Where the traffic sits, from an SEO export or the admin's own
+	// (top_page_url, top_page_traffic, top 3 pages traffic, home traffic).
+	case has("top") && has("page", "pages") && has("url"):
+		return MetricTopPageURL
+	case (has("top3") || (has("top") && has("3") && has("pages", "page"))) && has("traffic"):
+		return MetricTop3Traffic
+	case has("top") && has("page") && has("traffic"):
+		return MetricTopPageTraffic
+	case has("home", "homepage") && has("traffic"):
+		return MetricHomeTraffic
+	case has("linked") && has("domains", "domain") && has("live", "ahrefs"):
+		return MetricLinkedDomains
+	// Subnets before IPs: Ahrefs exports them as "Ref. IPs / Subnets".
 	case has("referring", "ref") && has("subnets", "subnet"):
 		return MetricReferringSubnets
+	case has("referring", "ref", "rd", "refdomains", "referring_domains") && has("ips", "ip"):
+		return MetricReferringIPs
 	case (has("referring", "ref") && has("domains", "domain")) || has("rd", "refdomains", "referringdomains"):
 		switch {
 		case notFollowed:

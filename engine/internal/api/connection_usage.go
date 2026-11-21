@@ -63,7 +63,7 @@ func (s *Server) usageUnits(ctx context.Context, i connectors.Integration) ([]st
 	case d.Has(connectors.CapVerify) && d.ID != verifiers.BuiltinID,
 		d.Has(connectors.CapSearchPeople), d.Has(connectors.CapEnrichPerson), d.Has(connectors.CapFindEmail):
 		units = append(units, "credit")
-	case d.Has(connectors.CapWebSearch):
+	case d.Has(connectors.CapWebSearch), d.Has(connectors.CapResearchCompany):
 		units = append(units, usagelimits.USD)
 	}
 	// And whatever its calls were booked in lately.

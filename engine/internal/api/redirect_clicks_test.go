@@ -162,7 +162,13 @@ func TestRedirectClickIngest(t *testing.T) {
 	slices.Sort(took)
 	p95 := took[len(took)*95/100]
 	t.Logf("redirects: %d, median %v, p95 %v", len(took), took[len(took)/2], p95)
-	if p95 > 50*time.Millisecond {
-		t.Fatalf("p95 redirect = %v, want under 50ms", p95)
+	// The race detector (the nightly run) slows every request several
+	// times over, so the limit that matters is the one without it.
+	limit := 50 * time.Millisecond
+	if raceDetector {
+		limit = 250 * time.Millisecond
+	}
+	if p95 > limit {
+		t.Fatalf("p95 redirect = %v, want under %v", p95, limit)
 	}
 }

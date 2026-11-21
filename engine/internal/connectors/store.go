@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/outflareai/outflare/engine/internal/secrets"
+	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 // Integration statuses.
@@ -288,8 +291,19 @@ func (s *Store) Checked(ctx context.Context, q Querier, ws, id string, account *
 		status := StatusConnected
 		if KindOf(callErr) == ErrAuth {
 			status = StatusError
+			// An OAuth access token can be refused before it is due to
+			// expire (revoked, or it ran out during a long sync). Renew it
+			// once before calling the connection broken: nothing syncs a
+			// broken connection, so one refusal would otherwise stop it
+			// until someone signs in again.
+			switch healed, why := s.renewRefused(ctx, q, ws, id, callErr); {
+			case healed:
+				status, msg = StatusConnected, ""
+			case why != "":
+				msg = why
+			}
 		}
-		_, err := execQ(ctx, q, `UPDATE integrations SET status = $3, last_error = $4, last_checked_at = now(), updated_at = now()
+		_, err := execQ(ctx, q, `UPDATE integrations SET status = $3, last_error = NULLIF($4, ''), last_checked_at = now(), updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, ws, id, status, msg)
 		return err
 	}
@@ -297,6 +311,62 @@ func (s *Store) Checked(ctx context.Context, q Querier, ws, id string, account *
 	_, err := execQ(ctx, q, `UPDATE integrations SET status = 'connected', last_error = NULL, account = $3, last_checked_at = now(), updated_at = now()
 		WHERE workspace_id = $1 AND id = $2`, ws, id, acct)
 	return err
+}
+
+// renewRefused handles a call an OAuth connection's provider refused: it
+// renews the sign-in with the refresh token and checks it again. healed
+// says the renewed sign-in works (the connection stays connected); else
+// why, when set, is the message to show instead of the call's own, which
+// for a sign-in speaks of an API key the person never gave.
+func (s *Store) renewRefused(ctx context.Context, q Querier, ws, id string, callErr error) (healed bool, why string) {
+	if SignInExpired(callErr) || s.Registry == nil || s.Box == nil {
+		return false, ""
+	}
+	var connector, method string
+	var sealed []byte
+	if err := q.QueryRow(ctx, `SELECT connector, auth_method, credentials FROM integrations WHERE workspace_id = $1 AND id = $2`, ws, id).
+		Scan(&connector, &method, &sealed); err != nil || method != AuthOAuth2 {
+		return false, ""
+	}
+	d, ok := s.Registry.Definition(connector)
+	if !ok || d.OAuth == nil {
+		return false, ""
+	}
+	refused := fmt.Sprintf("%s refused the sign-in. Sign in again to reconnect it.", d.Name)
+	plain, err := s.Box.Open(sealed, []byte(id))
+	if err != nil {
+		return false, refused
+	}
+	var creds Creds
+	if json.Unmarshal(plain, &creds) != nil || creds["refresh_token"] == "" {
+		return false, refused
+	}
+	ev := track.Event{Name: "integration.sign_in_renewed", WorkspaceID: ws, ActorType: "system", Surface: "system",
+		Props: map[string]any{"connector": connector, "integration_id": id}}
+	fail := func(err error, msg string) (bool, string) {
+		ev.Name = "integration.sign_in_expired"
+		ev.Outcome = track.Failure
+		track.Fail(ctx, nil, ev, (&Error{Kind: KindOf(err)}).ErrorCode(), err)
+		return false, msg
+	}
+	fresh, changed, err := ForceRefresh(ctx, s.Client, d, s.OAuthApps[d.ID], creds)
+	if err != nil {
+		if KindOf(err) == ErrAuth {
+			return fail(err, err.Error())
+		}
+		return fail(err, refused)
+	}
+	if !changed {
+		return false, refused
+	}
+	if err := s.UpdateCreds(ctx, q, ws, id, fresh); err != nil {
+		return false, refused
+	}
+	if _, err := s.Test(ctx, connector, fresh); err != nil && KindOf(err) == ErrAuth {
+		return fail(err, fmt.Sprintf("%s refused access even after renewing the sign-in. Sign in again and allow every permission it asks for.", d.Name))
+	}
+	track.Emit(ctx, ev)
+	return true, ""
 }
 
 func execQ(ctx context.Context, q Querier, sql string, args ...any) (int64, error) {
@@ -314,6 +384,29 @@ type Opened struct {
 	Connector Connector
 	Creds     Creds
 	Client    *Client
+}
+
+// Load returns an integration and its stored credentials as they are,
+// without renewing them: for signing in again over a connection whose
+// sign-in expired, which Open would refuse.
+func (s *Store) Load(ctx context.Context, q Querier, ws, id string) (Integration, Creds, error) {
+	var sealed []byte
+	i, err := scanIntegrationWith(q.QueryRow(ctx, `SELECT `+integrationCols+`, credentials FROM integrations WHERE workspace_id = $1 AND id = $2`, ws, id), &sealed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return i, nil, ErrNotFound
+	}
+	if err != nil {
+		return i, nil, err
+	}
+	plain, err := s.Box.Open(sealed, []byte(i.ID))
+	if err != nil {
+		return i, nil, err
+	}
+	var creds Creds
+	if err := json.Unmarshal(plain, &creds); err != nil {
+		return i, nil, err
+	}
+	return i, creds, nil
 }
 
 // Open loads an integration with its credentials and implementation.
@@ -448,4 +541,60 @@ func (s *Store) OpenCapable(ctx context.Context, q Querier, ws, brand, capabilit
 		return s.Open(ctx, q, ws, i.ID)
 	}
 	return nil, ErrNoCapable
+}
+
+// ListGuards lists every integration of the workspace with a capability
+// that serves brand ("" for every brand), oldest first, whatever its
+// status. Where ListCapable leaves out a connection whose last check
+// failed, a guard (CapContactGuard) that is broken must still be asked: it
+// then fails, and a guard that fails clears nobody. Leaving it out would
+// let everyone through. Empty, not an error, when there are none.
+func (s *Store) ListGuards(ctx context.Context, q Querier, ws, brand, capability string) ([]Integration, error) {
+	list, err := s.List(ctx, q, ws, "")
+	if err != nil {
+		return nil, err
+	}
+	out := []Integration{}
+	for _, i := range ForBrand(list, brand) {
+		if d, ok := s.Registry.Definition(i.Connector); !ok || !d.Has(capability) {
+			continue
+		}
+		out = append(out, i)
+	}
+	sort.SliceStable(out, func(a, b int) bool {
+		if !out[a].CreatedAt.Equal(out[b].CreatedAt) {
+			return out[a].CreatedAt.Before(out[b].CreatedAt)
+		}
+		return out[a].ID < out[b].ID
+	})
+	return out, nil
+}
+
+// ListCapable lists the workspace's connected integrations with a
+// capability that serve brand ("" for every brand), oldest first. Where
+// OpenCapable opens only the first, a caller that can use any of them
+// (one provider out of credits must not hide another that works) takes
+// them all. Empty, not an error, when there are none.
+func (s *Store) ListCapable(ctx context.Context, q Querier, ws, brand, capability string) ([]Integration, error) {
+	list, err := s.List(ctx, q, ws, "")
+	if err != nil {
+		return nil, err
+	}
+	out := []Integration{}
+	for _, i := range ForBrand(list, brand) {
+		if i.Status != StatusConnected {
+			continue
+		}
+		if d, ok := s.Registry.Definition(i.Connector); !ok || !d.Has(capability) {
+			continue
+		}
+		out = append(out, i)
+	}
+	sort.SliceStable(out, func(a, b int) bool {
+		if !out[a].CreatedAt.Equal(out[b].CreatedAt) {
+			return out[a].CreatedAt.Before(out[b].CreatedAt)
+		}
+		return out[a].ID < out[b].ID
+	})
+	return out, nil
 }

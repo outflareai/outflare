@@ -21,7 +21,7 @@ func TestWorkspaceSlugs(t *testing.T) {
 			t.Fatalf("%q: slug %v, want %v", name, got, want)
 		}
 	}
-	other := owner.must(201, "POST", "/v1/workspaces", map[string]string{"name": "Geonode"})["id"].(string)
+	other := owner.must(201, "POST", "/v1/workspaces", map[string]string{"name": "Northpeak"})["id"].(string)
 
 	// Changing it: shape, reserved words and taken slugs are refused.
 	owner.must(400, "PATCH", base, map[string]string{"slug": "a"})
@@ -30,10 +30,10 @@ func TestWorkspaceSlugs(t *testing.T) {
 	owner.must(400, "PATCH", base, map[string]string{"slug": "signup"})
 	owner.must(400, "PATCH", base, map[string]string{"slug": ws})
 	owner.must(400, "PATCH", base, map[string]string{"name": " "})
-	if code, out := owner.do("PATCH", base, map[string]string{"slug": "geonode"}); code != 409 || out["error"].(map[string]any)["code"] != "slug_taken" {
+	if code, out := owner.do("PATCH", base, map[string]string{"slug": "northpeak"}); code != 409 || out["error"].(map[string]any)["code"] != "slug_taken" {
 		t.Fatalf("taken: %d %v", code, out)
 	}
-	if out := owner.must(200, "GET", base+"/slug-availability?slug=geonode", nil); out["available"] != false || out["reason"] != "slug is already taken" {
+	if out := owner.must(200, "GET", base+"/slug-availability?slug=northpeak", nil); out["available"] != false || out["reason"] != "slug is already taken" {
 		t.Fatalf("availability taken: %v", out)
 	}
 	if out := owner.must(200, "GET", base+"/slug-availability?slug=Acme", nil); out["available"] != true || out["slug"] != "acme" {
@@ -57,7 +57,7 @@ func TestWorkspaceSlugs(t *testing.T) {
 	if got := owner.must(200, "GET", "/v1/workspaces/acme-outbound", nil)["id"]; got != other {
 		t.Fatalf("claimed slug: %v", got)
 	}
-	owner.must(200, "PATCH", "/v1/workspaces/"+other, map[string]string{"slug": "geonode"})
+	owner.must(200, "PATCH", "/v1/workspaces/"+other, map[string]string{"slug": "northpeak"})
 	owner.must(200, "PATCH", "/v1/workspaces/acme", map[string]string{"slug": "acme"}) // no change
 
 	events := owner.must(200, "GET", base+"/audit-events", nil)["data"].([]any)
@@ -73,15 +73,15 @@ func TestWorkspaceSlugs(t *testing.T) {
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "bot", "scopes": []string{"workspace.read"}})
 	bot := &client{t: t, h: h, bearer: tok["token"].(string)}
 	bot.must(200, "GET", "/v1/workspaces/acme", nil)
-	bot.must(404, "GET", "/v1/workspaces/geonode", nil)
+	bot.must(404, "GET", "/v1/workspaces/northpeak", nil)
 	bot.must(403, "PATCH", "/v1/workspaces/acme", map[string]string{"name": "Nope"})
 
 	inv := owner.must(201, "POST", "/v1/workspaces/"+other+"/invites", map[string]string{"email": "op@example.com", "role": "operator"})
 	op := &client{t: t, h: h}
 	op.must(200, "POST", "/v1/invites/accept", map[string]string{"token": inv["token"].(string), "name": "Op", "password": "op long password"})
 	op.must(404, "GET", "/v1/workspaces/acme", nil)
-	op.must(200, "GET", "/v1/workspaces/geonode", nil)
-	op.must(403, "PATCH", "/v1/workspaces/geonode", map[string]string{"name": "Mine"})
+	op.must(200, "GET", "/v1/workspaces/northpeak", nil)
+	op.must(403, "PATCH", "/v1/workspaces/northpeak", map[string]string{"name": "Mine"})
 }
 
 func TestItemLinks(t *testing.T) {

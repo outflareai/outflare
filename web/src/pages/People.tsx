@@ -51,9 +51,9 @@ type DataTab = (typeof dataTabs)[number];
 export function People({ ws, canManage, canConfigure = false, open, onOpen, go }: { ws: string; canManage: boolean; canConfigure?: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab, item?: string) => void }) {
   const cat = useCatalog(ws);
   // Old links to the list that lived here go to the CRM's.
-  const old = open === "companies";
+  const old = ({ companies: "account", people: "person", accounts: "customer_account" } as Record<string, string>)[open];
   useEffect(() => {
-    if (old) go("crm", "account");
+    if (old) go("crm", old);
   }, [old]); // eslint-disable-line react-hooks/exhaustive-deps
   if (isID(open)) return <RecordPage key={open} ws={ws} id={open} cat={cat} canManage={canManage} onOpen={onOpen} go={go} />;
   if (old) return null;
@@ -346,6 +346,7 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
           </Card>
           {rec.contactability && <Contact c={rec.contactability} />}
           <Identities key={`i${tick}`} rec={rec} canManage={manage} onChange={changed} />
+          {rec.type === "customer_account" && <Members rec={rec} links={links} canManage={manage} onChange={changed} onOpen={onOpen} />}
           <Links rec={rec} links={links} fields={fields} canManage={manage} onChange={changed} onOpen={onOpen} />
           {people && <Consents key={`c${tick}`} brand={brand} id={id} canManage={manage} onChange={changed} go={go} />}
           {people && <div className="rounded-md border p-4 text-sm empty:hidden"><RecordPartners ws={ws} record={id} go={go} /></div>}
@@ -362,7 +363,7 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
               <TabsTrigger value="history" className="px-3 text-[12px]">Field history</TabsTrigger>
             </TabsList>
           </Tabs>
-          {section === "timeline" && <Timeline key={tick} brand={brand} rec={rec} cat={cat} names={names} onOpen={onOpen} canManage={manage} />}
+          {section === "timeline" && <Timeline key={tick} brand={brand} rec={rec} cat={cat} names={names} onOpen={onOpen} go={go} canManage={manage} />}
           {section === "history" && <History key={tick} brand={brand} rec={rec} cat={cat} names={names} onOpen={onOpen} />}
         </div>
       </div>
@@ -476,6 +477,13 @@ function Identities({ rec, canManage, onChange }: { rec: Rec; canManage: boolean
     if (error) return toast(errorMessage(error), "error");
     onChange();
   }
+  const emails = active.filter((i) => i.namespace === "email").length;
+  async function prefer(i: Identity) {
+    const { error } = await api.POST("/v1/brands/{brand}/records/{record}/identities/{identity}/prefer", { params: { path: { brand, record: id, identity: i.id } } });
+    if (error) return toast(errorMessage(error), "error");
+    toast(`Sends now go to ${i.value}`);
+    onChange();
+  }
   const closed = list.filter((i) => i.valid_to);
   const row = (i: Identity) => (
     <li key={i.id} className="flex items-start justify-between gap-2">
@@ -488,7 +496,9 @@ function Identities({ rec, canManage, onChange }: { rec: Rec; canManage: boolean
       </div>
       {!i.valid_to && (
         <div className="flex shrink-0 items-center gap-1.5">
+          {i.namespace === "email" && i.preferred && <Badge tone="blue" title="Sends go to this email.">Preferred</Badge>}
           {i.verified ? <Badge tone="green" title={i.verified_at ? `Verified ${stamp(i.verified_at)}` : "Verified"}>Verified</Badge> : <Badge title="Unverified: it doesn't claim the address, so another record can.">Unverified</Badge>}
+          {canManage && i.namespace === "email" && !i.preferred && emails > 1 && <button className="text-xs text-muted-foreground underline hover:text-foreground" aria-label={`Send to ${i.value}`} onClick={() => prefer(i)}>Make preferred</button>}
           {canManage && <button className="text-xs text-muted-foreground underline hover:text-foreground" aria-label={`Remove ${i.value}`} onClick={() => remove(i)}>Remove</button>}
           {canManage && <button className="text-xs text-muted-foreground underline hover:text-foreground" aria-label={`Delete ${i.value}`} onClick={async () => (await deleteFromRecord(rec, { kind: "identity", id: i.id, label: i.value })) && onChange()}>Delete</button>}
         </div>
@@ -496,7 +506,7 @@ function Identities({ rec, canManage, onChange }: { rec: Rec; canManage: boolean
     </li>
   );
   return (
-    <Card title="Emails and ids" description="What points at this record. Only a verified one claims its value.">
+    <Card title="Emails and ids" description={emails > 1 ? "What points at this record. Only a verified one claims its value. Sends go to the preferred email, or the newest verified one; an opt-out covers them all." : "What points at this record. Only a verified one claims its value."}>
       {active.length === 0 && <p className="text-sm text-muted-foreground">None.</p>}
       <ul className="space-y-2 text-sm">{active.map(row)}</ul>
       {closed.length > 0 && (
@@ -510,7 +520,62 @@ function Identities({ rec, canManage, onChange }: { rec: Rec; canManage: boolean
   );
 }
 
-function Links({ rec, links, fields, canManage, onChange, onOpen }: { rec: Rec; links: Link[]; fields: Field[]; canManage: boolean; onChange: () => void; onOpen: (item: string) => void }) {
+const accountRoles = [
+  ["owner", "Owner"],
+  ["admin", "Admin"],
+  ["member", "Member"],
+  ["billing", "Billing"],
+  ["viewer", "Viewer"],
+] as const;
+
+// A person's role in a customer account, on the link between them.
+function RoleSelect({ rec, l, canManage, onChange }: { rec: Rec; l: Link; canManage: boolean; onChange: () => void }) {
+  const role = typeof l.properties?.role === "string" ? l.properties.role : "";
+  const name = l.record.name || "this account";
+  if (!canManage) return <span>{accountRoles.find(([k]) => k === role)?.[1] ?? "No role"}</span>;
+  return (
+    <select
+      aria-label={`Role in ${name}`}
+      className="rounded border bg-background px-1.5 py-0.5 text-xs"
+      value={role}
+      onChange={async (e) => {
+        const { error } = await api.PATCH("/v1/brands/{brand}/records/{record}/relationships/{relationship}", {
+          params: { path: { brand: rec.brand_id ?? "", record: rec.id, relationship: l.id } },
+          body: { properties: { role: e.target.value || null } },
+        });
+        if (error) return toast(errorMessage(error), "error");
+        onChange();
+      }}
+    >
+      <option value="">No role</option>
+      {accountRoles.map(([k, label]) => (
+        <option key={k} value={k}>{label}</option>
+      ))}
+    </select>
+  );
+}
+
+// Members of a customer account: the people whose Accounts include it.
+function Members({ rec, links, canManage, onChange, onOpen }: { rec: Rec; links: Link[]; canManage: boolean; onChange: () => void; onOpen: (item: string) => void }) {
+  const members = links.filter((l) => l.field_key === "accounts" && l.direction === "incoming");
+  return (
+    <Card title="Members" description="The people in this account and their roles. Being a member never sets a person's company.">
+      {members.length === 0 && <p className="text-sm text-muted-foreground">No members yet. They join when your product sends a group call, or from a person's Accounts field.</p>}
+      <ul className="space-y-2 text-sm">
+        {members.map((l) => (
+          <li key={l.id} className="flex items-center justify-between gap-2">
+            <button className="min-w-0 truncate text-left underline" onClick={() => onOpen(l.record.id)}>{l.record.name || "Unnamed"}</button>
+            <RoleSelect rec={rec} l={l} canManage={canManage} onChange={onChange} />
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function Links({ rec, links: all, fields, canManage, onChange, onOpen }: { rec: Rec; links: Link[]; fields: Field[]; canManage: boolean; onChange: () => void; onOpen: (item: string) => void }) {
+  // An account's members have their own card.
+  const links = rec.type === "customer_account" ? all.filter((l) => !(l.field_key === "accounts" && l.direction === "incoming")) : all;
   if (links.length === 0) return null;
   const kind = (l: Link) => (l.field_key ? (fields.find((f) => f.key === l.field_key)?.label ?? l.field_key) : l.kind.replaceAll("_", " "));
   return (
@@ -521,6 +586,7 @@ function Links({ rec, links, fields, canManage, onChange, onOpen }: { rec: Rec; 
             <button className="min-w-0 truncate text-left underline" onClick={() => onOpen(l.record.id)}>{l.record.name || "Unnamed"}</button>
             <span className="flex shrink-0 items-baseline gap-1.5 text-xs text-muted-foreground">
               {l.direction === "incoming" ? `${l.record.type} · ${kind(l)}` : kind(l)}
+              {l.field_key === "accounts" && l.direction === "outgoing" && <RoleSelect rec={rec} l={l} canManage={canManage} onChange={onChange} />}
               {canManage && <button className="underline hover:text-foreground" aria-label={`Delete the link to ${l.record.name || "this record"}`} onClick={async () => (await deleteFromRecord(rec, { kind: "link", id: l.id, label: `the link to ${l.record.name || "this record"}` })) && onChange()}>Delete</button>}
             </span>
           </li>
@@ -667,11 +733,12 @@ const kinds: Record<TimelineItem["kind"], string> = {
   journey: "Journey",
   list: "List",
   support: "Support conversation",
+  feed: "Slack post",
   task: "Task",
   note: "Note",
 };
 
-function Timeline({ brand, rec, cat, names, onOpen, canManage }: { brand: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void; canManage: boolean }) {
+function Timeline({ brand, rec, cat, names, onOpen, go, canManage }: { brand: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void; go: (t: Tab, item?: string) => void; canManage: boolean }) {
   const [items, setItems] = useState<TimelineItem[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [kind, setKind] = useState("");
@@ -725,6 +792,9 @@ function Timeline({ brand, rec, cat, names, onOpen, canManage }: { brand: string
                 {it.record_id !== rec.id && (
                   <button className="text-xs underline" onClick={() => onOpen(it.record_id)}>{names[it.record_id] ?? "One of their people"}</button>
                 )}
+                {it.kind === "feed" && typeof (it.detail as Record<string, unknown>).lead_id === "string" && (
+                  <button className="ml-2 text-xs underline" onClick={() => go("crm", `sales:lead:${(it.detail as Record<string, unknown>).lead_id}`)}>Open conversation</button>
+                )}
               </div>
               {canManage && it.kind === "event" && rec.brand_id && it.record_id === rec.id && (
                 <button
@@ -768,6 +838,8 @@ function itemTitle(it: TimelineItem, type: string, cat: CatalogInfo): string {
       return (it.detail as Record<string, unknown>).change === "released" ? "A browser stopped being theirs" : "Went from anonymous visitor to known";
     case "message":
       return it.title || "(no subject)";
+    case "feed":
+      return it.title ? `#${it.title}` : kinds.feed;
   }
   return it.title || kinds[it.kind] || it.kind;
 }

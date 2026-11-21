@@ -19,23 +19,6 @@ import (
 	"github.com/outflareai/outflare/engine/internal/metrics"
 )
 
-func salesThreadMatches(m salesMessage, known []salesMessage) bool {
-	for _, p := range known {
-		if p.MessageID == "" {
-			continue
-		}
-		id := strings.Trim(p.MessageID, "<> ")
-		if strings.Trim(m.MessageID, "<> ") == id {
-			return true
-		}
-		for _, ref := range strings.Fields(m.InReplyTo + " " + m.References) {
-			if strings.Trim(ref, "<> ") == id {
-				return true
-			}
-		}
-	}
-	return false
-}
 func salesGmailMessage(full gmailContent, raw, owner, id, thread string) (salesMessage, error) {
 	parsed, err := crmmail.Parse(raw, owner)
 	if err != nil {
@@ -114,7 +97,7 @@ func (s *Server) salesSyncJob(ctx context.Context, job jobs.Job) (runErr error) 
 			_, _ = s.pool.Exec(c, `UPDATE sales_mail_connections SET error_code='sync_failed' WHERE workspace_id=$1 AND brand_id=$2 AND id=$3`, a.WorkspaceID, a.Brand, p.ID)
 		}
 	}()
-	id, credentials, token, err := s.salesGrant(ctx, a, owner)
+	id, credentials, token, err := s.salesGrant(ctx, a, owner, false)
 	if err != nil {
 		return err
 	}
@@ -205,27 +188,18 @@ func (s *Server) salesSyncJob(ctx context.Context, job jobs.Job) (runErr error) 
 			seenPages[batch.Next] = true
 			page = batch.Next
 		}
-		// Gmail pages newest first. Resolve the whole reference graph so a
-		// reconnect imports descendants even when their parents arrived later.
+		// Gmail pages newest first; keep the conversation in the order it
+		// happened. Every candidate is between the assigned rep and this
+		// person (the search and salesMailEligible see to that), so it
+		// belongs here whichever thread it is in: a rep who writes the
+		// person a new email, instead of replying in the original thread,
+		// is still having this conversation.
 		slices.SortFunc(candidates, func(a, b salesMessage) int { return a.OccurredAt.Compare(b.OccurredAt) })
-		for len(candidates) > 0 {
-			waiting := []salesMessage{}
-			progress := false
-			for _, msg := range candidates {
-				if !salesThreadMatches(msg, known) {
-					waiting = append(waiting, msg)
-					continue
-				}
-				if err = s.retainSalesSyncMessage(ctx, a, p.ID, l, msg, "google:"+credentials.Grant.Subject); err != nil {
-					return err
-				}
-				known = append(known, msg)
-				progress = true
+		for _, msg := range candidates {
+			if err = s.retainSalesSyncMessage(ctx, a, p.ID, l, msg, "google:"+credentials.Grant.Subject); err != nil {
+				return err
 			}
-			if !progress {
-				break
-			}
-			candidates = waiting
+			known = append(known, msg)
 		}
 		// The original Bison mailbox remains a source after the rep is introduced.
 		if l.IntegrationID != nil {
@@ -254,16 +228,9 @@ func (s *Server) salesSyncJob(ctx context.Context, job jobs.Job) (runErr error) 
 				if reply.MailboxExternalID != "" && reply.MailboxExternalID != ref.SenderID {
 					continue
 				}
-				msg := salesMessage{Direction: reply.Direction, From: reply.FromEmail, To: reply.To, CC: reply.CC, Subject: reply.Subject, Body: reply.Body, MessageID: reply.MessageID, InReplyTo: reply.InReplyTo, References: reply.References, OccurredAt: reply.ReceivedAt, ProviderID: reply.ExternalID}
-				if msg.Body == "" && reply.HTML != "" {
-					parsed, e := crmmail.Parse("From: capture@outflare.invalid\r\nTo: archive@outflare.invalid\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"+reply.HTML, "capture@outflare.invalid")
-					if e != nil {
-						return e
-					}
-					msg.Body = parsed.Body
-				}
-				if msg.MessageID != "" {
-					msg.MessageID = "<" + strings.Trim(msg.MessageID, "<> ") + ">"
+				msg, e := salesProviderMessage(reply)
+				if e != nil {
+					return e
 				}
 				participants := append(append([]string{msg.From}, msg.To...), msg.CC...)
 				if !salesMailEligible(privacy, crmmail.Message{OwnerEmail: credentials.Grant.Email, Participants: participants}, known) {
@@ -297,7 +264,7 @@ func (s *Server) salesSyncJob(ctx context.Context, job jobs.Job) (runErr error) 
 }
 
 // Sales threads intentionally include the colleague being introduced. Only
-// colleagues already present in this lead's recorded envelope are allowed;
+// colleagues already present in this conversation's recorded envelope are allowed;
 // the CRM's address/domain exclusions still apply to every participant.
 func salesMailEligible(c mailContext, m crmmail.Message, known []salesMessage) bool {
 	allowed := map[string]bool{}

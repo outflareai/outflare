@@ -160,6 +160,13 @@ type Result struct {
 	// opt-out list; OptOutsPushed are opt-out list entries written to it.
 	OptOutsPulled int `json:"opt_outs_pulled"`
 	OptOutsPushed int `json:"opt_outs_pushed"`
+	// StatDays are the mailbox-days of sending counts read from it.
+	StatDays int `json:"stat_days"`
+	// Linked are the campaigns SyncLinking was asked to link that are now
+	// linked; NotLinked are the ones the account doesn't have, or has
+	// archived. Both are left out of a plain sync.
+	Linked    []string `json:"linked,omitempty"`
+	NotLinked []string `json:"not_linked,omitempty"`
 }
 
 // ErrNotPlatform is returned for a connection that cannot report mailboxes.
@@ -169,6 +176,17 @@ var ErrNotPlatform = errors.New("this connection does not report mailboxes and c
 // A failed read is recorded on the account, and every mailbox seen there
 // then counts as busy until a sync succeeds.
 func (s *Service) Sync(ctx context.Context, ws, integrationID string) (Result, error) {
+	return s.SyncLinking(ctx, ws, integrationID, nil)
+}
+
+// SyncLinking is Sync that also links the named campaigns while they are
+// still drafts on the platform. A sync links live campaigns by itself and
+// leaves drafts out, so an unused draft never becomes a sequence; naming
+// one links it as a draft sequence, so it can be chosen as a campaign
+// before anyone has started it there (some platforms refuse to start a
+// campaign with nobody in it). The platform still decides when it runs.
+// Result.Linked and Result.NotLinked say what became of each name.
+func (s *Service) SyncLinking(ctx context.Context, ws, integrationID string, link []string) (Result, error) {
 	var res Result
 	op, err := s.Store.Open(ctx, s.Pool, ws, integrationID)
 	if err != nil {
@@ -217,8 +235,12 @@ func (s *Service) Sync(ctx context.Context, ws, integrationID string) (Result, e
 			if err != nil {
 				return err
 			}
-			if !found && (st == "archived" || st == "draft") {
+			named := slices.Contains(link, c.ExternalID)
+			if !found && (st == "archived" || st == "draft" && !named) {
 				continue
+			}
+			if named && st != "archived" {
+				res.Linked = append(res.Linked, c.ExternalID)
 			}
 			id, seqID, err := links.Upsert(ctx, tx, ws, links.Link{IntegrationID: integrationID, ExternalID: c.ExternalID, Name: c.Name,
 				Status: c.Status, Control: control, SequenceDays: c.SequenceDays, DailyLimit: c.DailyLimit})
@@ -322,6 +344,12 @@ func (s *Service) Sync(ctx context.Context, ws, integrationID string) (Result, e
 		// its mailbox to land in.
 		res.Replies = s.syncReplies(ctx, ws, op)
 		res.OptOutsPulled, res.OptOutsPushed = s.syncBlocklist(ctx, ws, op)
+		res.StatDays = s.syncStats(ctx, ws, op)
+		for _, id := range link {
+			if !slices.Contains(res.Linked, id) && !slices.Contains(res.NotLinked, id) {
+				res.NotLinked = append(res.NotLinked, id)
+			}
+		}
 	}
 	return res, err
 }

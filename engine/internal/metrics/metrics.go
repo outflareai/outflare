@@ -114,7 +114,7 @@ var (
 
 	redirectClickWrites = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "redirect", Name: "click_writes_total",
-		Help: "Redirect clicks by what happened when their batch was written: written, refused_quota (the workspace's click quota), link_gone, failed (the batch waits for the next flush) or dropped_full (too many waiting).",
+		Help: "Redirect clicks by what happened when their batch was written: written, refused_quota (the workspace's click quota), link_gone, failed (the batch waits for the next flush), dropped_full (too many waiting) or dropped_invalid (the database refused that click's values, so it was left out and the rest written).",
 	}, []string{"outcome"})
 	trackerFraudFlags = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "fraud_flags_total",
@@ -133,6 +133,10 @@ var (
 	trackerSourcePostbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "source_postbacks_total",
 		Help: "Conversions sent back to traffic sources' postback URLs, by outcome: queued, filtered (the source's rules don't send it), suspect (a fraud signal flagged the conversion, so it is held back), awaiting_lookup (its click's IP lookup is due, so it is sent once that is done), sent, retried, or why one failed: rejected (the network refused it), unreachable, or invalid (the URL).",
+	}, []string{"outcome"})
+	trackerCostUpdates = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "cost_updates_total",
+		Help: "Tracker campaign costs entered by hand, by outcome: queued, applied (shared out over the campaign's clicks), no_clicks (the period had none to carry it), replaced (a later update for the same days was applied first), retried, or error (it couldn't be applied in five tries).",
 	}, []string{"outcome"})
 	trackerLanderClicks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "lander_clicks_total",
@@ -157,12 +161,36 @@ var (
 	})
 	trackerNetworkCostSyncs = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "network_cost_syncs_total",
-		Help: "Network cost reconciliations (a network's spend per campaign, target and day shared out over the tracker's clicks), by network (zeropark) and outcome: synced (one campaign day), not_connected (a traffic source from the network's template with no connection to read it), no_campaign_token (its campaign URL carries no {campaign_id}), or failed_auth, failed_quota, failed_unavailable or failed_invalid (the connector's error kind).",
+		Help: "Network cost reconciliations (a network's spend per campaign, target and day shared out over the tracker's clicks), by network (zeropark) and outcome: synced (one campaign day), targets_read (one campaign's targets with their state and bid), not_connected (a traffic source from the network's template with no connection to read it), no_campaign_token (its campaign URL carries no {campaign_id}), or failed_auth, failed_quota, failed_unavailable or failed_invalid (the connector's error kind).",
 	}, []string{"network", "outcome"})
 	trackerNetworkCostMicros = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "network_cost_micros_total",
 		Help: "Network spend shared out by reconciliations, in millionths of the network's currency, by network and kind: matched (onto the clicks of the target that spent it), spread (evenly over clicks that named no reported target) or unattributed (no click to put it on). Each pass re-reads recent days, so this counts the same spend again: compare kinds, not totals.",
 	}, []string{"network", "kind"})
+	trackingDomainExpiryChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracking_domain", Name: "expiry_checks_total",
+		Help: "Reads of a verified tracking domain's registration record (public RDAP, no key) for when it runs out, by outcome: checked (a date was read), no_date (the registry has no record or gives no date, as some country registries don't) or failed (the registry or the RDAP service couldn't be reached; tried again a day later). Each domain is read once a week, daily within 45 days of its expiry.",
+	}, []string{"outcome"})
+	trackingDomainsExpiring = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "tracking_domain", Name: "expiring",
+		Help: "Verified tracking domains whose registration runs out soon, across workspaces, by window: expired (already past), 7d (within a week) or 30d (within 8 to 30 days), as last counted by a worker. Their brands were sent the tracking_domain.expiring alert.",
+	}, []string{"window"})
+	trackingDomainExpiryOverdue = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "tracking_domain", Name: "expiry_overdue",
+		Help: "Verified tracking domains whose registration hasn't been read for 14 days or was never read, as last counted by a worker; 0 when the weekly reads keep up.",
+	})
+	trackerPageChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "page_checks_total",
+		Help: "Checks that a page in use still answers (one request for it: a lander about hourly, an offer every six hours, either again ten minutes after a failed check), by kind (lander, offer) and outcome: ok, failed (not found, a server error, or no answer), refused (the page turns automated requests away with 401, 403 or 429, so it can't be checked) or discarded (every check of the pass failed before reaching a page, which is read as this server's network and not recorded).",
+	}, []string{"kind", "outcome"})
+	trackerPagesBroken = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "pages_broken",
+		Help: "Landers and offers in use that failed their last two or more checks, across workspaces, by kind, as last counted by a worker. Their brands were sent the tracker.link_broken alert.",
+	}, []string{"kind"})
+	trackerPageChecksOverdue = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "page_checks_overdue",
+		Help: "Landers in use not checked for 6 hours and offers in use not checked for 24 (or never), by kind, as last counted by a worker; 0 when the checks keep up.",
+	}, []string{"kind"})
 	trackerHoneypot = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "tracker", Name: "honeypot_hits_total",
 		Help: "Hits on the lander script's hidden link (/hp), which only bots follow, by outcome: flagged (its click now carries the honeypot fraud reason), already (flagged before), unknown_click, wrong_domain or error.",
@@ -193,7 +221,7 @@ var (
 	// (the API).
 	flagRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "flags", Name: "requests_total",
-		Help: "Requests to decide a visitor's feature flags, by surface (site, api) and outcome (ok, refused, error).",
+		Help: "Requests to decide a visitor's feature flags, by surface (site, api, or definitions for a server library fetching the rules to decide locally) and outcome (ok, refused, error, or unchanged for definitions).",
 	}, []string{"surface", "outcome"})
 	flagDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "flags", Name: "request_seconds",
@@ -348,7 +376,7 @@ var (
 	// Live record metrics (engine/internal/recmetrics).
 	recordMetricUpdates = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "record_metrics", Name: "updates_total",
-		Help: "Events added to a live metric, by outcome: updated, or why not (backfilled: the backfill counted it; too_old: before the window; no_value: the property isn't a number).",
+		Help: "Events added to a live metric, by outcome: updated, or why not (backfilled: the backfill counted it; too_old: before the window; no_value: the property isn't a number; other_category: the metric counts another product category).",
 	}, []string{"outcome"})
 	recordMetricBackfills = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "record_metrics", Name: "backfill_seconds",
@@ -440,7 +468,7 @@ var (
 	}, []string{"kind"})
 	journeyEntriesRefused = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "journeys", Name: "entries_refused_total",
-		Help: "People a journey's trigger would have started but its limits turned away, by reason (limit: its entry limit per hour or day; reentry: too soon after their last run).",
+		Help: "People a journey's trigger would have started but its limits turned away, by reason (limit: its entry limit per hour or day; reentry: too soon after their last run; late: an event that arrived more than a day after it happened, such as imported history, which starts, moves and ends no run).",
 	}, []string{"reason"})
 	// Exclusions: people a journey, broadcast or sequence left out.
 	excluded = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -470,6 +498,10 @@ var (
 	handEditsExpired = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "hand_edits", Name: "expired_total",
 		Help: "Hand edits whose time to win ran out, by outcome (switched: another source's value took over; kept: no other source had a value, so the next one to write replaces it; error).",
+	}, []string{"outcome"})
+	forecastsKept = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "forecast_history", Name: "kept_total",
+		Help: "Readings of a brand's revenue forecast kept for its week-by-week history, by outcome (kept, error). Each brand with deals or a target gets one a day.",
 	}, []string{"outcome"})
 	queryEndpointCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "query_endpoints", Name: "calls_total",
@@ -591,12 +623,40 @@ var (
 	}, []string{"result"})
 	supportChatRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "support", Name: "chat_requests_total",
-		Help: "Requests from website chat widgets, by route (loader, frame, session, poll, send, articles, feedback) and outcome (ok, not_found, limited, bad_token, invalid, error).",
+		Help: "Requests from website chat widgets, by route (loader, frame, session, poll, send, email, articles, feedback) and outcome (ok, not_found, limited, bad_token, invalid, error).",
 	}, []string{"route", "outcome"})
+	supportChatRouted = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "chat_routed_total",
+		Help: "New website chats and where they went, by how (online: to a teammate who is online, passed: on to the next teammate after no answer, nobody: nobody was online, email: a reply also sent by email because the visitor had left).",
+	}, []string{"how"})
 	supportSLABreaches = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "support", Name: "sla_breaches_total",
 		Help: "Support SLA targets missed, by target (reply: the team's next reply, resolve: resolving the conversation).",
 	}, []string{"target"})
+	supportImportSteps = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "import_steps_total",
+		Help: "Steps of support imports (conversations copied from Intercom), by source and outcome (page: more to read, synced: caught up, paused, failed).",
+	}, []string{"source", "outcome"})
+	supportImportStepDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "support", Name: "import_step_seconds",
+		Help: "Time one support import step takes: a page of changed conversations read and stored.", Buckets: []float64{0.5, 1, 2, 5, 10, 30, 60, 120, 300},
+	}, []string{"source"})
+	supportImportConversations = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "import_conversations_total",
+		Help: "Conversations a support import looked at, by source and result (created, updated, unchanged, error).",
+	}, []string{"source", "result"})
+	supportImportMessages = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "import_messages_total",
+		Help: "Messages a support import added, by source.",
+	}, []string{"source"})
+	supportImportLag = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "support", Name: "import_lag_seconds",
+		Help: "How long ago the support import furthest behind last caught up, by source, across workspaces (0 when none runs).",
+	}, []string{"source"})
+	supportImportFailing = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "support", Name: "imports_failing",
+		Help: "Support imports whose last step failed, by source, across workspaces.",
+	}, []string{"source"})
 	supportOverdue = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "support", Name: "overdue",
 		Help: "Conversations not closed that are past an SLA target, by target (reply, resolve), across workspaces.",
@@ -661,6 +721,12 @@ var (
 		Help: "How far behind sharing is for the furthest-behind joined workspace, beyond the 7 days a send waits to settle.",
 	})
 
+	// Reads of each mailbox's daily counts from a sequencer.
+	mailboxStatsSyncs = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "mailbox_stats", Name: "syncs_total",
+		Help: "Reads of mailboxes' daily sent, reply and bounce counts from a connected sequencer (at most hourly per connection), by connector (instantly, smartlead) and outcome (success, internal, provider_auth, provider_quota, provider_unavailable, provider_invalid and other provider_ kinds). Mostly success; a steady run of one failure for a connector means its counts are going stale.",
+	}, []string{"connector", "outcome"})
+
 	// Conversions sent back to ad platforms. connector is a catalog id.
 	adConversions = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ad_conversions", Name: "total",
@@ -673,6 +739,81 @@ var (
 	adConversionsOldest = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "ad_conversions", Name: "oldest_queued_seconds",
 		Help: "How long the oldest conversion waiting to be sent has waited, as of this process's last round.",
+	})
+	// Customer events forwarded to a brand's own tools
+	// (engine/internal/destinations). kind is webhook, slack, ga4, hubspot,
+	// bigquery or snowflake.
+	destinationSends = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "destination_sends", Name: "total",
+		Help: "Customer events forwarded to destinations, by kind and outcome (sent, skipped, failed; test_sent and test_failed for a test event a person asked for).",
+	}, []string{"kind", "outcome"})
+	eventPlanProblems = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "event_plan", Name: "problems_total",
+		Help: "Customer events that didn't follow their brand's tracking plan, by kind (missing_property, unplanned_property). The events are stored all the same.",
+	}, []string{"kind"})
+	replayParts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "replay", Name: "parts_total",
+		Help: "Requests from the website script with a part of a session recording or a page's heatmap, by outcome (stored, heat_only, off, capped, refused, too_large, error).",
+	}, []string{"outcome"})
+	replayBytes = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "replay", Name: "bytes_total",
+		Help: "Bytes of session recordings stored, before compression.",
+	})
+	replayDeleted = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "replay", Name: "recordings_deleted_total",
+		Help: "Session recordings removed: deleted by a person or past their brand's keep_days.",
+	})
+	replayWaitingDelete = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "replay", Name: "recordings_waiting_delete",
+		Help: "Session recordings a person deleted whose files are still to be removed, as of this process's last sweep.",
+	})
+	assetUploads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "assets", Name: "uploads_total",
+		Help: "Files sent to a brand's assets, by outcome (stored, duplicate for a file the brand already has, refused for a bad type, size or request, error when storage failed).",
+	}, []string{"outcome"})
+	assetBytes = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "assets", Name: "bytes_total",
+		Help: "Bytes of brands' files stored.",
+	})
+	assetsDeleted = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "assets", Name: "deleted_total",
+		Help: "Brands' files deleted for good.",
+	})
+	mediaGenerations = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "media", Name: "generations_total",
+		Help: "Pictures, videos and voice recordings brands asked their own AI accounts for, by kind (image, video, voice), provider and outcome (done, refused when the provider turned the request down, failed when the provider or storage broke, timed_out).",
+	}, []string{"kind", "provider", "outcome"})
+	mediaGenerationSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "media", Name: "generation_seconds",
+		Help: "Time from asking for a picture, video or voice recording to its file being kept, by kind.", Buckets: []float64{2, 5, 10, 20, 40, 60, 120, 300, 600, 1200, 2700},
+	}, []string{"kind"})
+	videosEnded = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "media", Name: "videos_total",
+		Help: "Talking videos that ended, by outcome: made, failed, edited (an edit stitched in) or edit_failed (the video stays as it was).",
+	}, []string{"outcome"})
+	videoSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "media", Name: "video_seconds",
+		Help: "Time from asking for a talking video, or an edit of one, to it being ready, by outcome (made, edited).", Buckets: []float64{30, 60, 120, 300, 600, 1200, 2700, 5400, 10800},
+	}, []string{"outcome"})
+	videoStageSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "media", Name: "video_stage_seconds",
+		Help: "Time one worker spent on a stage of a talking video, by stage. The stages done on the server with ffmpeg (words, finish, edit_cut, edit_stitch) are the heavy ones; a stage a provider renders is waited for elsewhere.", Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600},
+	}, []string{"stage"})
+	creativeRenders = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "creative", Name: "renders_total",
+		Help: "Ads drawn from a creative's picture and words, by outcome (drawn, failed when the picture could not be read or storage broke).",
+	}, []string{"outcome"})
+	creativeRenderSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "creative", Name: "render_seconds",
+		Help: "Time to read a creative's picture, lay its words over it and encode the ad.", Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16},
+	})
+	heatmapClicks = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "heatmap", Name: "clicks_total",
+		Help: "Clicks added to pages' heatmaps.",
+	})
+	destinationsOldest = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "destination_sends", Name: "oldest_queued_seconds",
+		Help: "How long the oldest event waiting to go to a destination has waited, as of this process's last round.",
 	})
 	// The conversion feed (engine/internal/adconv, feed.go): conversions
 	// sent to Google by transport (data_manager, the Data Manager API;
@@ -696,7 +837,7 @@ var (
 	// refunds tied to the ad click that brought them.
 	paidAdsLedgerEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "paidads", Name: "ledger_events_total",
-		Help: "Customer events the paid ads ledger looked at, by kind (signup, payment, refund) and outcome (acquired, recorded, known, no_click, not_ads, no_payment, error).",
+		Help: "Customer events the paid ads ledger looked at, by kind (signup, payment, refund) and outcome (acquired, recorded, known, no_click, not_ads, no_payment, error); and rows whose unknown campaign it filled in later, once the network reported the click (kind fill_acquisition or fill_revenue, outcome filled or error).",
 	}, []string{"kind", "outcome"})
 	paidAdsLedgerLag = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "paidads", Name: "ledger_lag_seconds",
@@ -888,7 +1029,37 @@ var (
 	competitorFound   = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "competitor_found_total", Help: "Pages where a competitor appears that a Presence scan found for the first time, by arrangement (likely_paid, unknown)."}, []string{"arrangement"})
 	competitorSuggest = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "seo", Name: "competitor_suggestions_total", Help: "Daily looks for new competitors of an SEO site, by source (a connector id, or rankings) and outcome: ok and error count looks, suggested counts the competitors they suggested."}, []string{"source", "outcome"})
 	opportunities     = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "opportunities_total", Help: "Presence opportunities, by event: suggested (new) and won (the brand is there now, or the link is back)."}, []string{"event"})
-	newsRuns          = prometheus.NewCounterVec(prometheus.CounterOpts{
+	// Mentions: scans that read what a brand's sources found for its name
+	// and its competitors' names.
+	mentionScans = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "mentions", Name: "scans_total",
+		Help: "Mention scans of a brand, by outcome (success, internal).",
+	}, []string{"outcome"})
+	mentionScanSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "mentions", Name: "scan_duration_seconds",
+		Help: "How long one mention scan of a brand took.", Buckets: prometheus.ExponentialBuckets(0.05, 2, 12),
+	})
+	mentionsFound = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "mentions", Name: "found_total",
+		Help: "Mentions kept for the first time, by source (youtube, podcast, x, reddit, hacker_news, bluesky, news, web) and about (brand, competitor).",
+	}, []string{"source", "about"})
+	mentionSearches = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "mentions", Name: "video_searches_total",
+		Help: "Web searches for videos naming a brand or a competitor, by outcome (success, usage_limit_reached, connector_error).",
+	}, []string{"outcome"})
+	mentionPodcastSearches = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "mentions", Name: "podcast_searches_total",
+		Help: "Podcast directory searches for episodes naming a brand or a competitor, by outcome (success, connector_error).",
+	}, []string{"outcome"})
+	mentionEpisodeReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "mentions", Name: "episode_reads_total",
+		Help: "Reads of a found podcast episode's published transcript, by outcome (read, transcript_unavailable: the show's host failed, transcript_unreadable: gone or empty).",
+	}, []string{"outcome"})
+	mentionVideoReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "mentions", Name: "video_reads_total",
+		Help: "Reads of a found video's page and captions, by outcome (read, none, own_channel: a video the brand or a competitor posted itself, connector_needed, usage_limit_reached, connector_error, internal).",
+	}, []string{"outcome"})
+	newsRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "news", Name: "search_runs_total",
 		Help: "News search runs, by purpose (topic, coverage) and outcome (success, connector_needed, usage_limit_reached, connector_error, internal).",
 	}, []string{"purpose", "outcome"})
@@ -922,6 +1093,24 @@ var (
 		Namespace: namespace, Subsystem: "seo", Name: "link_page_checks_total",
 		Help: "OutflareBot's checks of link prospects' pages, by status (up, gone, redirected, blocked, opted_out, unreachable, failed).",
 	}, []string{"status"})
+	donorEmailSearches = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "link_orders", Name: "email_searches_total",
+		Help: "OutflareBot's searches of donor sites for who to write to, by status (found, none, blocked, unreachable, opted_out, failed).",
+	}, []string{"status"})
+	donorEmailSearchSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "link_orders", Name: "email_search_duration_seconds",
+		Help:    "How long one donor email search takes (up to six pages of one site, politely).",
+		Buckets: []float64{1, 2, 5, 10, 20, 40, 80, 160},
+	})
+	donorAhrefsChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "link_orders", Name: "ahrefs_checks_total",
+		Help: "Ahrefs checks of catalog sites (rating, traffic, referring and linked domains, top pages), by status (checked, no_connection, budget, failed).",
+	}, []string{"status"})
+	donorAhrefsCheckSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "link_orders", Name: "ahrefs_check_duration_seconds",
+		Help:    "How long one Ahrefs check of a catalog site takes (five requests, or none from a copy under a day old).",
+		Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 20, 40},
+	})
 	archiveLookups = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "seo", Name: "archive_lookups_total",
 		Help: "Internet Archive lookups of broken links, by outcome (found, none, error).",
@@ -1098,6 +1287,15 @@ var (
 		Help: "AI receipts charged in another currency given their amount in US dollars once a rate arrived.",
 	})
 
+	linkOrderTables = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "link_orders", Name: "catalog_tables_read_total",
+		Help: "Google Sheet links and Excel workbooks read into CSV for the Link orders catalog import, by source (google_sheet, xlsx) and outcome (success, refused for a private sheet, a bad link or file, error when Google could not be reached).",
+	}, []string{"source", "outcome"})
+	linkOrderTableSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "link_orders", Name: "catalog_table_read_duration_seconds",
+		Help: "Time to read a Google Sheet or an Excel workbook for the catalog import, by source.", Buckets: requestBuckets,
+	}, []string{"source"})
+
 	geoDownloads = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "geoip", Name: "downloads_total",
 		Help: "Downloads of DB-IP's monthly City Lite and ASN Lite files, by file (City, ASN) and outcome (success, not_published when the month's release isn't out yet, error).",
@@ -1184,6 +1382,14 @@ var (
 		Namespace: namespace, Subsystem: "ads", Name: "sync_runs_total",
 		Help: "Runs of the hourly ad sync per connection, by the window each read (first: 90 days on an account's first sync; hourly: 2 days; daily: 7; weekly: 35; monthly: 95) and outcome (success, internal, connector_auth, connector_quota, connector_unavailable, connector_invalid).",
 	}, []string{"window", "outcome"})
+	adSyncOverdue = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "sync_overdue",
+		Help: "Connected ad platform connections whose last successful sync is older than twice their sync interval and a quarter of an hour, by connector. The interval is the workspace's (an extension's, else OUTFLARE_ADS_SYNC_INTERVAL, else an hour), never under the platform's floor. Paused connections don't count.",
+	}, []string{"connector"})
+	adSyncOldest = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "sync_oldest_seconds",
+		Help: "Age in seconds of the oldest last successful sync among connected ad platform connections (since it was connected, for one that has never synced), by connector. 0 with none connected.",
+	}, []string{"connector"})
 	adClicksHarvested = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ads", Name: "clicks_harvested_total",
 		Help: "Paid clicks read from a network's click report (Google click_view) into ad_clicks, by connector and outcome: stored (one per click), or failed (one per read a network refused, with the error kind as connector_<kind>).",
@@ -1198,7 +1404,7 @@ var (
 	}, []string{"connector", "outcome"})
 	adAlerts = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ads", Name: "alerts_total",
-		Help: "Alerts the paid ads alert job raised as new findings, by kind (alert.spend_anomaly, alert.pacing, alert.flatline, alert.zero_conversions, alert.disapproved, alert.auto_apply_on, alert.sends_failing, alert.tracking_broken, overspend_pause). A few a day across all workspaces is normal; dozens an hour is a flood.",
+		Help: "Alerts the paid ads alert job raised as new findings, by kind (alert.spend_anomaly, alert.pacing, alert.flatline, alert.zero_conversions, alert.disapproved, alert.auto_apply_on, alert.sends_failing, alert.sends_not_counted, alert.tracking_broken, overspend_pause). A few a day across all workspaces is normal; dozens an hour is a flood.",
 	}, []string{"kind"})
 	adAlertRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ads", Name: "alert_runs_total",
@@ -1226,7 +1432,7 @@ var (
 var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited, cspReports,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerHoneypot, trackerNetworkCostSyncs, trackerNetworkCostMicros, trackerIPLookups, trackerIPLookupSeconds, trackerIPLookupsDue, trackerIPLookupOldest, trackerSourcePostbacks, trackerFraudFlags, trackerWeightSuggestions, reportDrilldown, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
+	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerHoneypot, trackerPageChecks, trackerPagesBroken, trackerPageChecksOverdue, trackingDomainExpiryChecks, trackingDomainsExpiring, trackingDomainExpiryOverdue, trackerNetworkCostSyncs, trackerNetworkCostMicros, trackerIPLookups, trackerIPLookupSeconds, trackerIPLookupsDue, trackerIPLookupOldest, trackerSourcePostbacks, trackerCostUpdates, trackerFraudFlags, trackerWeightSuggestions, reportDrilldown, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -1235,7 +1441,7 @@ var own = []prometheus.Collector{
 	connectionLimitAlerts, connectionLimitStops,
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
-	queryEndpointCalls, queryEndpointSeconds, queryEndpointRows, handEditsExpired, transactionsSaved, transactionSeconds, txRetries, insightRuns, insightSeconds,
+	queryEndpointCalls, queryEndpointSeconds, queryEndpointRows, handEditsExpired, forecastsKept, transactionsSaved, transactionSeconds, txRetries, insightRuns, insightSeconds,
 	queryRuns, queryDuration, queryRows, queryTypeTablesFailed, querySavedRuns, queryExports, queryExportRows,
 	mcpClientCalls, mcpClientDuration, ruleEvaluations, recordMetricUpdates, recordMetricBackfills, recordMetricSweeps, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, adChanges, adSuggestRuns, adSuggestions, adVerdicts, adTestSteps, adDraftSteps, contentPublishes, accountAttempts, accountTakeovers, browserTasks, browserSteps, browserSessions, mailSignInsMoved,
 	actionsDecided, actionsFinished, agentRunTurns,
@@ -1243,8 +1449,14 @@ var own = []prometheus.Collector{
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
 	helpPages, helpRender,
 	knowledgeSuggestions,
-	supportMessages, supportReplies, supportReplyDuration, supportAssistantRuns, supportAssistantDuration, knowledgeAnswerSearches, knowledgeAnswerSearchDuration, knowledgeWebsiteImports, knowledgeWebsiteImportDuration, knowledgeWebsitePages, knowledgeWebsiteRechecks, knowledgeReplyLearning, knowledgeReplyLearningDuration, supportAssistantHeld, supportSLABreaches, supportOverdue, supportChatRequests, supportSLAChecks, supportSLACheckDuration,
+	supportMessages, supportReplies, supportReplyDuration, supportAssistantRuns, supportAssistantDuration, knowledgeAnswerSearches, knowledgeAnswerSearchDuration, knowledgeWebsiteImports, knowledgeWebsiteImportDuration, knowledgeWebsitePages, knowledgeWebsiteRechecks, knowledgeReplyLearning, knowledgeReplyLearningDuration, supportAssistantHeld, supportSLABreaches, supportOverdue, supportChatRequests, supportChatRouted, supportSLAChecks, supportSLACheckDuration,
+	supportImportSteps, supportImportStepDuration, supportImportConversations, supportImportMessages, supportImportLag, supportImportFailing,
 	adConversions, adConversionsOldest, adConversionAdjustments,
+	destinationSends, destinationsOldest, eventPlanProblems,
+	replayParts, replayBytes, replayDeleted, replayWaitingDelete, heatmapClicks,
+	assetUploads, assetBytes, assetsDeleted,
+	mediaGenerations, mediaGenerationSeconds, videosEnded, videoSeconds, videoStageSeconds, creativeRenders, creativeRenderSeconds,
+	mailboxStatsSyncs,
 	paidAdsLedgerEvents, paidAdsLedgerLag, paidAdsAcquisitions,
 	adsFeedSends, adsFeedBatches, adsPayersListMembers,
 	meetingEvents, meetingEventsPending,
@@ -1252,14 +1464,14 @@ var own = []prometheus.Collector{
 	signalsRaised, signalsEscalated, signalsOpen,
 	scoresComputed, scoresScoring, scoresScoringOldest,
 	revenueCounts, revenueRoundSeconds, recordsRouted, routingBehind, conversationReads, conversationSentiments,
-	reviewReads, reviewsFound, pricingReads, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkAutoSends, linkReplies, linkLiveChecks, webSearches, aiAnswers, aiDemandReads, aiStanceReads, aiPromptDrafts,
+	reviewReads, reviewsFound, pricingReads, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, donorEmailSearches, donorEmailSearchSeconds, donorAhrefsChecks, donorAhrefsCheckSeconds, archiveLookups, linkPitches, linkAutoSends, linkReplies, linkLiveChecks, webSearches, aiAnswers, aiDemandReads, aiStanceReads, aiPromptDrafts,
 	socialPublishes,
 	redditSends,
 	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerFlags, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
 	mailPrivacyChecks, crmMailSends, eventNameChecks,
-	salesSendResults, salesStoredMessages, salesReportingReads,
-	coverageChecks, coverageReviews, coverageFound, coverageSearches, competitorScans, competitorFound, competitorSuggest, opportunities, newsRuns, newsFound, newsReads, storyAIRuns,
+	salesDraftResults, salesSendResults, salesStoredMessages, salesReportingReads,
+	coverageChecks, coverageReviews, coverageFound, coverageSearches, competitorScans, competitorFound, competitorSuggest, opportunities, newsRuns, newsFound, newsReads, storyAIRuns, mentionScans, mentionScanSeconds, mentionsFound, mentionSearches, mentionVideoReads, mentionPodcastSearches, mentionEpisodeReads,
 	quoteApprovalEmails, quoteApprovalPages, quoteApprovalDecisions,
 	automationRuns, automationLag,
 	connectionsUnassigned,
@@ -1271,11 +1483,12 @@ var own = []prometheus.Collector{
 	bulkEdits, bulkEditRecords, bulkEditSeconds,
 	ratesFetched, ratesAge, receiptsConverted,
 	geoDownloads, geoAge,
+	linkOrderTables, linkOrderTableSeconds,
 	quotaChecks,
 	desktopLinks, desktopReports, desktopReadings, desktopReadFailures, desktopDevices, desktopPurged,
 	telegramSteps, telegramAccounts, telegramSynced, telegramSyncRuns, telegramSyncLag, telegramMatches, telegramSummaries, telegramWaiting,
 	buildInfo,
-	adSyncRuns, adClicksHarvested, adChangeEvents, adChangeEventReads, adAlerts, adAlertRuns,
+	adSyncRuns, adSyncOverdue, adSyncOldest, adClicksHarvested, adChangeEvents, adChangeEventReads, adAlerts, adAlertRuns,
 	// Paid ads: the brand knowledge sheet.
 	brandKnowledgeReads,
 	// Paid ads: findings and verdicts.
@@ -1407,6 +1620,9 @@ func TrackerFraudFlag(subject, reason string) {
 // by outcome.
 func TrackerSourcePostback(outcome string) { trackerSourcePostbacks.WithLabelValues(outcome).Inc() }
 
+// TrackerCostUpdate counts a campaign cost entered by hand by outcome.
+func TrackerCostUpdate(outcome string) { trackerCostUpdates.WithLabelValues(outcome).Inc() }
+
 // TrackerLanderClick counts a click on a lander's call to action by
 // outcome.
 func TrackerLanderClick(outcome string) { trackerLanderClicks.WithLabelValues(outcome).Inc() }
@@ -1414,6 +1630,34 @@ func TrackerLanderClick(outcome string) { trackerLanderClicks.WithLabelValues(ou
 // TrackerHoneypot counts a hit on the lander script's hidden link by
 // outcome.
 func TrackerHoneypot(outcome string) { trackerHoneypot.WithLabelValues(outcome).Inc() }
+
+// TrackerPageCheck counts one check of a lander's or an offer's page by
+// kind and outcome.
+func TrackerPageCheck(kind, outcome string) {
+	trackerPageChecks.WithLabelValues(kind, outcome).Inc()
+}
+
+// TrackerPagesChecked sets how many pages of a kind in use are broken, and
+// how many are overdue for a check.
+func TrackerPagesChecked(kind string, broken, overdue int) {
+	trackerPagesBroken.WithLabelValues(kind).Set(float64(broken))
+	trackerPageChecksOverdue.WithLabelValues(kind).Set(float64(overdue))
+}
+
+// TrackingDomainExpiryCheck counts one read of a tracking domain's
+// registration record by outcome.
+func TrackingDomainExpiryCheck(outcome string) {
+	trackingDomainExpiryChecks.WithLabelValues(outcome).Inc()
+}
+
+// TrackingDomainsExpiring sets how many verified tracking domains run out
+// soon, and how many haven't been read for two weeks.
+func TrackingDomainsExpiring(expired, week, month, overdue int) {
+	trackingDomainsExpiring.WithLabelValues("expired").Set(float64(expired))
+	trackingDomainsExpiring.WithLabelValues("7d").Set(float64(week))
+	trackingDomainsExpiring.WithLabelValues("30d").Set(float64(month))
+	trackingDomainExpiryOverdue.Set(float64(overdue))
+}
 
 // TrackerNetworkCostSync counts one network cost reconciliation step.
 func TrackerNetworkCostSync(network, outcome string) {
@@ -1515,7 +1759,8 @@ func InboxStored(stored, rejected, failed int, d time.Duration) {
 }
 
 // FlagsDecided records one request to decide a visitor's flags: its
-// surface (site, api), outcome (ok, refused, error) and time.
+// surface (site, api, definitions), outcome (ok, refused, error, and
+// unchanged for definitions a library already has) and time.
 func FlagsDecided(surface, outcome string, d time.Duration) {
 	flagRequests.WithLabelValues(surface, outcome).Inc()
 	flagDuration.WithLabelValues(surface).Observe(d.Seconds())
@@ -1587,7 +1832,8 @@ func EmailGuarded(trigger, outcome string) {
 }
 
 // JourneyEntryRefused records an automatic entry a journey's limits
-// turned away: limit or reentry.
+// turned away: limit, reentry, or late (an event that arrived more than a
+// day after it happened).
 func JourneyEntryRefused(reason string) { journeyEntriesRefused.WithLabelValues(reason).Inc() }
 
 // JourneyCalled records one try of a journey step's call: its kind
@@ -1729,6 +1975,9 @@ func InsightRun(kind, outcome string, d time.Duration) {
 	insightSeconds.WithLabelValues(kind).Observe(d.Seconds())
 }
 
+// ForecastKept counts one reading of a brand's forecast kept, or not.
+func ForecastKept(outcome string) { forecastsKept.WithLabelValues(outcome).Inc() }
+
 // HandEditExpired counts a hand edit whose time ran out, by outcome
 // (switched, kept or error).
 func HandEditExpired(outcome string) { handEditsExpired.WithLabelValues(outcome).Inc() }
@@ -1802,11 +2051,42 @@ func SupportChatRequest(route, outcome string) {
 	supportChatRequests.WithLabelValues(route, outcome).Inc()
 }
 
+// SupportChatRouted records where a new chat, or a reply to one, went:
+// online, passed, nobody or email.
+func SupportChatRouted(how string) { supportChatRouted.WithLabelValues(how).Inc() }
+
 // SupportSLABreached records one SLA target missed: reply or resolve.
 func SupportSLABreached(target string) { supportSLABreaches.WithLabelValues(target).Inc() }
 
 // SupportOverdue sets how many open conversations are past a target.
 func SupportOverdue(target string, n int) { supportOverdue.WithLabelValues(target).Set(float64(n)) }
+
+// SupportImportStep records one step of a support import: its outcome
+// (page, synced, paused, failed) and how long it took.
+func SupportImportStep(source, outcome string, d time.Duration) {
+	supportImportSteps.WithLabelValues(source, outcome).Inc()
+	supportImportStepDuration.WithLabelValues(source).Observe(d.Seconds())
+}
+
+// SupportImportConversation records one conversation a support import
+// looked at: created, updated, unchanged or error.
+func SupportImportConversation(source, result string) {
+	supportImportConversations.WithLabelValues(source, result).Inc()
+}
+
+// SupportImportMessages records messages a support import added.
+func SupportImportMessages(source string, n int) {
+	if n > 0 {
+		supportImportMessages.WithLabelValues(source).Add(float64(n))
+	}
+}
+
+// SupportImportHealth sets how far behind the furthest-behind import is and
+// how many are failing, for one source.
+func SupportImportHealth(source string, lag time.Duration, failing int) {
+	supportImportLag.WithLabelValues(source).Set(lag.Seconds())
+	supportImportFailing.WithLabelValues(source).Set(float64(failing))
+}
 
 // SupportSLACheck records one run of the SLA check.
 func SupportSLACheck(ok bool, d time.Duration) {
@@ -2008,6 +2288,18 @@ func LinkLiveCheck(outcome string) { linkLiveChecks.WithLabelValues(outcome).Inc
 // LinkPageCheck records one check of a link prospect's page.
 func LinkPageCheck(status string) { linkPageChecks.WithLabelValues(status).Inc() }
 
+// DonorEmailSearch records one search of a donor's site for addresses.
+func DonorEmailSearch(status string, took time.Duration) {
+	donorEmailSearches.WithLabelValues(status).Inc()
+	donorEmailSearchSeconds.Observe(took.Seconds())
+}
+
+// DonorAhrefsCheck records one Ahrefs check of a catalog site.
+func DonorAhrefsCheck(status string, took time.Duration) {
+	donorAhrefsChecks.WithLabelValues(status).Inc()
+	donorAhrefsCheckSeconds.Observe(took.Seconds())
+}
+
 // ArchiveLookup records one Internet Archive lookup.
 func ArchiveLookup(outcome string) { archiveLookups.WithLabelValues(outcome).Inc() }
 
@@ -2021,6 +2313,40 @@ func ReviewPageRead(platform, outcome string, added int) {
 	if added > 0 {
 		reviewsFound.WithLabelValues(platform).Add(float64(added))
 	}
+}
+
+// MentionScan records one mention scan of a brand: its outcome and how long
+// it took.
+func MentionScan(outcome string, took time.Duration) {
+	mentionScans.WithLabelValues(outcome).Inc()
+	mentionScanSeconds.Observe(took.Seconds())
+}
+
+// MentionFound records a mention kept for the first time.
+func MentionFound(source, about string) {
+	mentionsFound.WithLabelValues(source, about).Inc()
+}
+
+// MentionVideoSearch records one web search for videos naming a brand or
+// a competitor.
+func MentionVideoSearch(outcome string) {
+	mentionSearches.WithLabelValues(outcome).Inc()
+}
+
+// MentionPodcastSearch records one podcast directory search for episodes
+// naming a brand or a competitor.
+func MentionPodcastSearch(outcome string) {
+	mentionPodcastSearches.WithLabelValues(outcome).Inc()
+}
+
+// MentionEpisodeRead records one read of a found episode's transcript.
+func MentionEpisodeRead(outcome string) {
+	mentionEpisodeReads.WithLabelValues(outcome).Inc()
+}
+
+// MentionVideoRead records one read of a found video's page and captions.
+func MentionVideoRead(outcome string) {
+	mentionVideoReads.WithLabelValues(outcome).Inc()
 }
 
 // NewsSearchRun records one run of a news search: its outcome, and the
@@ -2092,6 +2418,103 @@ func AdConversions(connector string, sent, skipped, failed int) {
 	adConversions.WithLabelValues(connector, "sent").Add(float64(sent))
 	adConversions.WithLabelValues(connector, "skipped").Add(float64(skipped))
 	adConversions.WithLabelValues(connector, "failed").Add(float64(failed))
+}
+
+// DestinationSends counts what one round of a destination's sends did.
+func DestinationSends(kind string, sent, skipped, failed int) {
+	destinationSends.WithLabelValues(kind, "sent").Add(float64(sent))
+	destinationSends.WithLabelValues(kind, "skipped").Add(float64(skipped))
+	destinationSends.WithLabelValues(kind, "failed").Add(float64(failed))
+}
+
+// DestinationTest counts a "send a test event" by how it went, beside
+// the real sends: outcomes test_sent and test_failed.
+func DestinationTest(kind string, ok bool) {
+	outcome := "test_failed"
+	if ok {
+		outcome = "test_sent"
+	}
+	destinationSends.WithLabelValues(kind, outcome).Inc()
+}
+
+// EventPlanProblems counts events that didn't follow a tracking plan.
+func EventPlanProblems(kind string, n int) { eventPlanProblems.WithLabelValues(kind).Add(float64(n)) }
+
+// ReplayParts counts one request from the website script's recorder.
+func ReplayParts(outcome string) { replayParts.WithLabelValues(outcome).Inc() }
+
+// AssetUploaded counts one file sent to a brand's assets and, when it
+// was stored, its size.
+func AssetUploaded(outcome string, bytes int) {
+	assetUploads.WithLabelValues(outcome).Inc()
+	if bytes > 0 {
+		assetBytes.Add(float64(bytes))
+	}
+}
+
+// MediaGenerated counts one request for a picture, video or voice that
+// ended, and how long it took when it was made.
+func MediaGenerated(kind, provider, outcome string, took time.Duration) {
+	mediaGenerations.WithLabelValues(kind, provider, outcome).Inc()
+	if outcome == "done" {
+		mediaGenerationSeconds.WithLabelValues(kind).Observe(took.Seconds())
+	}
+}
+
+// videoStages are the stages of a talking video, so the label stays a
+// short list.
+var videoStages = map[string]bool{"voice": true, "words": true, "render": true, "upscale": true, "finish": true,
+	"edit_cut": true, "edit_voice": true, "edit_words": true, "edit_render": true, "edit_upscale": true, "edit_stitch": true}
+
+// VideoStage records how long a worker spent on one stage of a talking
+// video.
+func VideoStage(stage string, took time.Duration) {
+	if !videoStages[stage] {
+		stage = "other"
+	}
+	videoStageSeconds.WithLabelValues(stage).Observe(took.Seconds())
+}
+
+// VideoEnded counts a talking video that ended (made, failed, edited,
+// edit_failed), and how long it took when it worked.
+func VideoEnded(outcome string, took time.Duration) {
+	videosEnded.WithLabelValues(outcome).Inc()
+	if outcome == "made" || outcome == "edited" {
+		videoSeconds.WithLabelValues(outcome).Observe(took.Seconds())
+	}
+}
+
+// CreativeRendered counts one ad drawn from a creative, and how long it
+// took when it was drawn.
+func CreativeRendered(outcome string, took time.Duration) {
+	creativeRenders.WithLabelValues(outcome).Inc()
+	if outcome == "drawn" {
+		creativeRenderSeconds.Observe(took.Seconds())
+	}
+}
+
+// AssetDeleted counts a brand's file deleted for good.
+func AssetDeleted() { assetsDeleted.Inc() }
+
+// ReplayBytes counts a stored part's size.
+func ReplayBytes(n int) { replayBytes.Add(float64(n)) }
+
+// ReplayDeleted counts recordings the sweep removed.
+func ReplayDeleted(n int) { replayDeleted.Add(float64(n)) }
+
+// ReplayWaitingDelete records the deleted recordings still to be removed.
+func ReplayWaitingDelete(n int) { replayWaitingDelete.Set(float64(n)) }
+
+// HeatmapClicks counts clicks added to heatmaps.
+func HeatmapClicks(n int) { heatmapClicks.Add(float64(n)) }
+
+// DestinationsOldest records how long the oldest event waiting for a
+// destination has waited.
+func DestinationsOldest(d time.Duration) { destinationsOldest.Set(d.Seconds()) }
+
+// MailboxStatsSync counts one read of a sequencer's per-mailbox counts.
+func MailboxStatsSync(connector, outcome string) {
+	mailboxStatsSyncs.WithLabelValues(connector, outcome).Inc()
 }
 
 // AdConversionAdjustments counts what one round of a rule's adjustments did.
@@ -2375,6 +2798,14 @@ func RatesFetched(outcome string, newest time.Time) {
 	}
 }
 
+// LinkOrderTableRead counts one Google Sheet or workbook read for the
+// catalog import. source is google_sheet or xlsx; outcome is success,
+// refused or error.
+func LinkOrderTableRead(source, outcome string, d time.Duration) {
+	linkOrderTables.WithLabelValues(source, outcome).Inc()
+	linkOrderTableSeconds.WithLabelValues(source).Observe(d.Seconds())
+}
+
 // GeoDownloaded counts one attempt to download a month's DB-IP file.
 func GeoDownloaded(file, outcome string) { geoDownloads.WithLabelValues(file, outcome).Inc() }
 
@@ -2521,6 +2952,16 @@ func TelegramAccounts(counts map[string]int) {
 // window it read (first, hourly, daily, weekly, monthly) and its outcome.
 func AdSyncRun(window, outcome string) {
 	adSyncRuns.WithLabelValues(window, outcome).Inc()
+}
+
+// AdSyncLag sets, for each ad connector this build has, how many of its
+// connections are behind their sync interval and the age in seconds of
+// the oldest last successful sync.
+func AdSyncLag(connectors []string, overdue map[string]int, oldest map[string]float64) {
+	for _, c := range connectors {
+		adSyncOverdue.WithLabelValues(c).Set(float64(overdue[c]))
+		adSyncOldest.WithLabelValues(c).Set(oldest[c])
+	}
 }
 
 // AdClicksHarvested records n paid clicks stored from a network's click

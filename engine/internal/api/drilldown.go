@@ -77,7 +77,11 @@ func drilldownDimsFor(source string) map[string]string {
 // account's day, as platforms report it).
 var drilldownSpendDims = map[string]string{"ad_campaign": "campaign", "ad_adset": "ad_group", "ad_ad": "ad", "day": ""}
 
-var drilldownMetrics = []string{"visits", "visitors", "conversions", "revenue", "cost", "profit", "roi", "roas", "cr", "epv", "cpa"}
+var drilldownMetrics = []string{"visits", "visitors", "conversions", "revenue", "cost", "profit", "roi", "roas", "cr", "epv", "cpa", "lander_views", "lander_clicks", "lander_ctr"}
+
+// drilldownLanderMetrics are the tracker source's own metrics, the last
+// of drilldownMetrics: the site source has no landers.
+const drilldownLanderMetrics = 3
 
 func (s *Server) routesDrilldown(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/brands/{brand}/drilldown", s.onBrand(auth.ScopeAnalyticsRead, s.drilldown))
@@ -95,6 +99,13 @@ type drilldownMetricsView struct {
 	CR          *float64 `json:"cr"`
 	EPV         *float64 `json:"epv"`
 	CPA         *float64 `json:"cpa"`
+	// The tracker source's lander numbers; null on the site source.
+	// LanderViews are the clicks sent to a lander, LanderClicks those that
+	// went on from it (a click on one of its calls to action), and
+	// LanderCTR their share.
+	LanderViews  *int64   `json:"lander_views"`
+	LanderClicks *int64   `json:"lander_clicks"`
+	LanderCTR    *float64 `json:"lander_ctr"`
 	// Custom are the report's custom columns (B5b), by name.
 	Custom map[string]*float64 `json:"custom"`
 }
@@ -125,6 +136,71 @@ type drilldownView struct {
 	// Truncated says rows past the limit were left out; the totals still
 	// count them.
 	Truncated bool `json:"truncated"`
+	// Unconverted names the currencies whose revenue or cost is left
+	// out of every number, because there is no exchange rate from them
+	// to the report's currency.
+	Unconverted []string `json:"unconverted_currencies"`
+	// Names are the names of the things the report keys by id (tracker
+	// campaigns, traffic sources, offers, landers, paths, destinations),
+	// for the ids in its rows and filters.
+	Names map[string]string `json:"names"`
+}
+
+// drilldownNameTables is where the name of each id level's value lives.
+var drilldownNameTables = map[string]string{
+	"tracking_campaign": "tracking_campaigns", "traffic_source": "tracker_traffic_sources", "offer": "tracker_offers", "lander": "tracker_landers",
+	"path": "tracking_link_paths", "destination": "tracking_link_destinations",
+}
+
+// drilldownNames reads the names of the ids a report shows: the keys of
+// its id levels and the values of filters on them. An id with no row (a
+// deleted lander) or an empty name (an unnamed path) has no entry.
+func (s *Server) drilldownNames(ctx context.Context, v drilldownView, filters []drilldownFilter) (map[string]string, error) {
+	a := accessFrom(ctx)
+	ids := map[string][]string{}
+	add := func(dim, id string) {
+		if drilldownNameTables[dim] != "" && validUUID(id) && !slices.Contains(ids[dim], id) {
+			ids[dim] = append(ids[dim], id)
+		}
+	}
+	var walk func(rows []*drilldownRow)
+	walk = func(rows []*drilldownRow) {
+		for _, row := range rows {
+			for i, k := range row.Keys {
+				if i < len(v.GroupBy) {
+					add(v.GroupBy[i], k)
+				}
+			}
+			walk(row.Rows)
+		}
+	}
+	walk(v.Rows)
+	for _, f := range filters {
+		for _, id := range f.values {
+			add(f.dim, id)
+		}
+	}
+	names := map[string]string{}
+	for dim, list := range ids {
+		rows, err := s.pool.Query(ctx, `SELECT id::text, name FROM `+drilldownNameTables[dim]+` WHERE workspace_id = $1 AND brand_id = $2 AND id = ANY($3::uuid[]) AND name <> ''`,
+			a.WorkspaceID, a.Brand, list)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id, name string
+			if err := rows.Scan(&id, &name); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			names[id] = name
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return names, nil
 }
 
 type drilldownFilter struct {
@@ -224,6 +300,10 @@ func drilldownQueryValues(q url.Values) (sp drilldownSpec, err error) {
 			if _, known := dims[dim]; !ok || !known {
 				return sp, errInvalid(kind + " is dimension:value, such as country:US")
 			}
+			// Country codes are stored in capitals; "us" means US.
+			if dim == "country" {
+				val = strings.ToUpper(val)
+			}
 			key := kind + ":" + dim
 			if byDim[key] == nil {
 				byDim[key] = &drilldownFilter{dim: dim, not: kind == "exclude"}
@@ -281,9 +361,19 @@ func (s *Server) drilldown(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	if v.Names, err = s.drilldownNames(r.Context(), v, sp.filters); err != nil {
+		metrics.ReportDrilldown("error", time.Since(start))
+		s.internal(w, r, err)
+		return
+	}
 	metrics.ReportDrilldown("success", time.Since(start))
 	if r.URL.Query().Get("format") == "csv" {
-		header := append(slices.Clone(sp.groups), drilldownMetrics...)
+		// The lander columns come with the tracker source only.
+		names := drilldownMetrics
+		if sp.source != "tracker" {
+			names = names[:len(names)-drilldownLanderMetrics]
+		}
+		header := append(slices.Clone(sp.groups), names...)
 		for _, c := range sp.columns {
 			header = append(header, c.name)
 		}
@@ -295,7 +385,15 @@ func (s *Server) drilldown(w http.ResponseWriter, r *http.Request) {
 					walk(row.Rows)
 					continue
 				}
-				line := append(slices.Clone(row.Keys), row.Metrics.csv()...)
+				// A level keyed by id is written by name, as the screen
+				// shows it; an id with no name stays as it is.
+				keys := slices.Clone(row.Keys)
+				for i, k := range keys {
+					if n := v.Names[k]; n != "" && i < len(sp.groups) && drilldownNameTables[sp.groups[i]] != "" {
+						keys[i] = n
+					}
+				}
+				line := append(keys, row.Metrics.csv()[:len(names)]...)
 				for _, c := range sp.columns {
 					line = append(line, csvNumber(row.Metrics.Custom[c.name]))
 				}
@@ -317,8 +415,15 @@ func (m drilldownMetricsView) csv() []string {
 		return strconv.FormatFloat(*x, 'f', -1, 64)
 	}
 	f := func(x float64) string { return strconv.FormatFloat(x, 'f', -1, 64) }
+	count := func(x *int64) string {
+		if x == nil {
+			return ""
+		}
+		return strconv.FormatInt(*x, 10)
+	}
 	return []string{strconv.FormatInt(m.Visits, 10), strconv.FormatInt(m.Visitors, 10), f(m.Conversions), f(m.Revenue),
-		num(m.Cost), num(m.Profit), num(m.ROI), num(m.ROAS), num(m.CR), num(m.EPV), num(m.CPA)}
+		num(m.Cost), num(m.Profit), num(m.ROI), num(m.ROAS), num(m.CR), num(m.EPV), num(m.CPA),
+		count(m.LanderViews), count(m.LanderClicks), num(m.LanderCTR)}
 }
 
 // sortValue is a metric for sorting; a missing one sorts last.
@@ -350,6 +455,8 @@ func (m drilldownMetricsView) sortValue(name string) float64 {
 		return p(m.EPV)
 	case "cpa":
 		return p(m.CPA)
+	case "lander_views", "lander_clicks", "lander_ctr":
+		return p(m.value(name))
 	}
 	if x, ok := m.Custom[name]; ok {
 		return p(x)
@@ -365,13 +472,18 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 		return v, err
 	}
 
-	// Rows by their keys joined; "" is the totals.
+	// Rows by their keys joined; "" is the totals. A level's empty value
+	// (a click with no offer) is a row of its own, so its key is never the
+	// totals': one level with the value "" would otherwise join to "".
+	rowKey := func(keys []string) string {
+		if len(keys) == 0 {
+			return ""
+		}
+		return "\x01" + strings.Join(keys, "\x00")
+	}
 	nodes := map[string]*drilldownRow{"": {Keys: []string{}}}
 	node := func(keys []string) *drilldownRow {
-		k := strings.Join(keys, "\x00")
-		if len(keys) == 0 {
-			k = ""
-		}
+		k := rowKey(keys)
 		if nodes[k] == nil {
 			nodes[k] = &drilldownRow{Keys: slices.Clone(keys)}
 		}
@@ -465,8 +577,13 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 		// their address hash.
 		from := ` FROM tracking_link_clicks k JOIN tracking_links l ON l.id = k.link_id AND l.workspace_id = k.workspace_id
 			LEFT JOIN tracking_campaigns tc ON tc.id = l.campaign_id`
-		rows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, count(*), count(DISTINCT NULLIF(ip, '')) FROM (
-			SELECT `+inKeys+`k.ip_hash AS ip`+from+`
+		// Of them, the clicks sent to a lander, and those that went on from
+		// it: a click on one of its calls to action, likely bots left out.
+		rows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, count(*), count(DISTINCT NULLIF(ip, '')),
+				count(*) FILTER (WHERE lander), count(*) FILTER (WHERE through) FROM (
+			SELECT `+inKeys+`k.ip_hash AS ip, k.lander_id IS NOT NULL AS lander,
+				k.lander_id IS NOT NULL AND EXISTS (SELECT 1 FROM tracker_lander_clicks lc
+					WHERE lc.click_key = k.click_key AND lc.workspace_id = k.workspace_id AND NOT lc.likely_bot) AS through`+from+`
 			WHERE k.workspace_id = $2 AND k.brand_id = $3 AND k.clicked_at >= $4 AND k.clicked_at < $5 AND NOT k.likely_bot AND $1::text <> ''`+where+`) x`+groupBy, args...)
 		if err != nil {
 			return v, err
@@ -474,13 +591,14 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 		for rows.Next() {
 			keys := keyDest()
 			var bits int
-			var clicks, visitors int64
-			if err := rows.Scan(append(keys, &bits, &clicks, &visitors)...); err != nil {
+			var clicks, visitors, landed, through int64
+			if err := rows.Scan(append(keys, &bits, &clicks, &visitors, &landed, &through)...); err != nil {
 				rows.Close()
 				return v, err
 			}
 			n := node(scanKeys(keys, bits))
 			n.Metrics.Visits, n.Metrics.Visitors = clicks, visitors
+			n.Metrics.LanderViews, n.Metrics.LanderClicks = &landed, &through
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
@@ -488,15 +606,19 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 		}
 		// The click ledger's conversions on those clicks (declined ones
 		// left out), by the click's time (default) or the conversion's.
-		when := `cv.clicked_at`
+		// Counted at its own time, a conversion's day, hour and weekday
+		// (as levels and as filters) are its own too: a report for one
+		// day must not hold a row for the day of the click.
+		when, convKeys, convWhere := `cv.clicked_at`, inKeys, where
 		if convTime == "conversion" {
 			when = `cv.converted_at`
+			convKeys, convWhere = strings.ReplaceAll(inKeys, `k.clicked_at`, when), strings.ReplaceAll(where, `k.clicked_at`, when)
 		}
 		crows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, cur, count(*)::float8, sum(v)::float8 FROM (
-			SELECT `+inKeys+`cv.currency AS cur, cv.payout_micros AS v
+			SELECT `+convKeys+`cv.currency AS cur, cv.payout_micros AS v
 			FROM tracker_conversions cv JOIN tracking_link_clicks k ON k.id = cv.click_id AND k.workspace_id = cv.workspace_id
 			JOIN tracking_links l ON l.id = k.link_id AND l.workspace_id = k.workspace_id LEFT JOIN tracking_campaigns tc ON tc.id = l.campaign_id
-			WHERE cv.workspace_id = $2 AND cv.brand_id = $3 AND cv.status <> 'declined' AND `+when+` >= $4 AND `+when+` < $5 AND $1::text <> ''`+where+`) x`+
+			WHERE cv.workspace_id = $2 AND cv.brand_id = $3 AND cv.status <> 'declined' AND `+when+` >= $4 AND `+when+` < $5 AND $1::text <> ''`+convWhere+`) x`+
 			withCurrency(sets), args...)
 		if err != nil {
 			return v, err
@@ -536,13 +658,13 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 			LEFT JOIN tracker_traffic_sources ts ON ts.id = tc.traffic_source_id
 			WHERE k.workspace_id = $2 AND k.brand_id = $3 AND k.clicked_at >= $4 AND k.clicked_at < $5
 			  AND (NOT k.likely_bot OR COALESCE(tc.cost_model, 'token') = 'token') AND $1::text <> ''` + where,
-			`SELECT ` + inKeys + `CASE WHEN tc.cost_model = 'cpa' THEN ` + fixedCur + ` ELSE cv.currency END AS cur,
+			`SELECT ` + convKeys + `CASE WHEN tc.cost_model = 'cpa' THEN ` + fixedCur + ` ELSE cv.currency END AS cur,
 				CASE WHEN tc.cost_model = 'cpa' THEN tc.cost_amount_micros ELSE cv.payout_micros * tc.cost_share_bp / 10000 END AS v
 			FROM tracker_conversions cv JOIN tracking_link_clicks k ON k.id = cv.click_id AND k.workspace_id = cv.workspace_id
 			JOIN tracking_links l ON l.id = k.link_id AND l.workspace_id = k.workspace_id JOIN tracking_campaigns tc ON tc.id = l.campaign_id
 			LEFT JOIN tracker_traffic_sources ts ON ts.id = tc.traffic_source_id
 			WHERE cv.workspace_id = $2 AND cv.brand_id = $3 AND cv.status <> 'declined' AND tc.cost_model IN ('cpa', 'revshare')
-			  AND ` + when + ` >= $4 AND ` + when + ` < $5 AND $1::text <> ''` + where,
+			  AND ` + when + ` >= $4 AND ` + when + ` < $5 AND $1::text <> ''` + convWhere,
 		}
 		for _, q := range costQueries {
 			srows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, cur, sum(v)::float8 FROM (`+q+`) x WHERE v > 0`+withCurrency(sets), cargs...)
@@ -598,16 +720,19 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 		cargs := append(slices.Clone(args), f.model)
 		pm := "$" + strconv.Itoa(len(cargs))
 		creditJoin := ` JOIN site_sessions s ON s.id = cr.session_id AND s.started_at >= $4 AND s.started_at < $5`
-		when := ``
+		// As for the tracker: at conversion time the time levels and
+		// filters are the conversion's.
+		when, convKeys, convWhere := ``, inKeys, where
 		if convTime == "conversion" {
 			creditJoin = ` LEFT JOIN site_sessions s ON s.id = cr.session_id`
 			when = ` AND c.occurred_at >= $4 AND c.occurred_at < $5`
+			convKeys, convWhere = strings.ReplaceAll(inKeys, `s.started_at`, `c.occurred_at`), strings.ReplaceAll(where, `s.started_at`, `c.occurred_at`)
 		}
 		j, cw := f.creditSQL()
 		crows, err := s.pool.Query(ctx, `SELECT `+outKeys+grouping+`, cur, sum(w)::float8, sum(v)::float8 FROM (
-			SELECT `+inKeys+`c.currency AS cur, cr.weight AS w, cr.weight * c.value_minor AS v
+			SELECT `+convKeys+`c.currency AS cur, cr.weight AS w, cr.weight * c.value_minor AS v
 			FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id`+creditJoin+j+`
-			WHERE cr.workspace_id = $2 AND COALESCE(c.brand_id, outflare_first_brand(c.workspace_id)) = $3 AND cr.model = `+pm+` AND $1::text <> ''`+when+cw+where+`) x`+
+			WHERE cr.workspace_id = $2 AND COALESCE(c.brand_id, outflare_first_brand(c.workspace_id)) = $3 AND cr.model = `+pm+` AND $1::text <> ''`+when+cw+convWhere+`) x`+
 			withCurrency(sets), cargs...)
 		if err != nil {
 			return v, err
@@ -723,20 +848,39 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 	if err != nil {
 		return v, err
 	}
+	// Money with no rate to the report's currency can't be counted; the
+	// report names those currencies, so a zero is never mistaken for
+	// "nothing earned".
+	v.Unconverted = []string{}
+	unconverted := func(m money) {
+		if m.minor != 0 && !slices.Contains(v.Unconverted, m.currency) {
+			v.Unconverted = append(v.Unconverted, m.currency)
+		}
+	}
 	for _, m := range revenue {
 		if rate, ok := rates[m.currency]; ok {
 			m.n.Metrics.Revenue += m.minor / math.Pow10(fxrates.MinorDigits(m.currency)) * rate
+		} else {
+			unconverted(m)
 		}
 	}
 	for _, m := range spend {
 		if rate, ok := rates[m.currency]; ok {
 			m.n.cost += m.minor / 1e6 * rate
+		} else {
+			unconverted(m)
 		}
 	}
+	slices.Sort(v.Unconverted)
 
 	// Ratios, then the tree: each row under its parent, sorted, and cut
 	// at the limit per level.
 	for _, n := range nodes {
+		// A tracker row with conversions but no click in the range still
+		// has lander numbers: none.
+		if sp.source == "tracker" && n.Metrics.LanderViews == nil {
+			n.Metrics.LanderViews, n.Metrics.LanderClicks = new(int64), new(int64)
+		}
 		n.Metrics.finish(n.cost, v.CostAvailable)
 		n.Metrics.custom(sp.columns)
 	}
@@ -750,10 +894,7 @@ func (s *Server) runDrilldown(ctx context.Context, f attributionFilter, sp drill
 	slices.SortFunc(all, func(x, y *drilldownRow) int { return cmp.Compare(len(x.Keys), len(y.Keys)) })
 	total := 0
 	for _, n := range all {
-		parent := nodes[strings.Join(n.Keys[:len(n.Keys)-1], "\x00")]
-		if len(n.Keys) == 1 {
-			parent = nodes[""]
-		}
+		parent := nodes[rowKey(n.Keys[:len(n.Keys)-1])]
 		if parent == nil {
 			continue
 		}
@@ -808,6 +949,9 @@ func (m *drilldownMetricsView) finish(cost float64, costKnown bool) {
 		m.CR = round(m.Conversions / float64(m.Visits))
 		m.EPV = round(m.Revenue / float64(m.Visits))
 	}
+	if m.LanderViews != nil && m.LanderClicks != nil && *m.LanderViews > 0 {
+		m.LanderCTR = round(float64(*m.LanderClicks) / float64(*m.LanderViews))
+	}
 	if !costKnown {
 		return
 	}
@@ -848,6 +992,16 @@ func (m drilldownMetricsView) value(name string) *float64 {
 		return m.EPV
 	case "cpa":
 		return m.CPA
+	case "lander_views":
+		if m.LanderViews != nil {
+			return f(float64(*m.LanderViews))
+		}
+	case "lander_clicks":
+		if m.LanderClicks != nil {
+			return f(float64(*m.LanderClicks))
+		}
+	case "lander_ctr":
+		return m.LanderCTR
 	}
 	return nil
 }

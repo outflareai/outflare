@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"time"
 
@@ -197,6 +198,12 @@ func (s *Syncer) ApplyAccountChange(ctx context.Context, ws, changeID string, la
 					return false, fmt.Sprintf("the platform shows a target cost per conversion of %s micros", budgetWord(x.TargetCPAMicros)), nil
 				case p.TargetROAS != nil && (x.TargetROAS == nil || *x.TargetROAS != *p.TargetROAS):
 					return false, "the platform shows another target return on spend", nil
+				case p.ImpressionShare != nil && (x.ImpressionShare == nil || math.Abs(*x.ImpressionShare-*p.ImpressionShare) > 1e-6):
+					return false, "the platform shows another impression share", nil
+				case p.ImpressionShareLocation != "" && x.ImpressionShareLocation != p.ImpressionShareLocation:
+					return false, "the platform shows the impression share at " + x.ImpressionShareLocation, nil
+				case p.MaxCPCMicros != nil && (x.MaxCPCMicros == nil || *x.MaxCPCMicros != *p.MaxCPCMicros):
+					return false, fmt.Sprintf("the platform shows a most per click of %s micros", budgetWord(x.MaxCPCMicros)), nil
 				}
 				return true, "", nil
 			}

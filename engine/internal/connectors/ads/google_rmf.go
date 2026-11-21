@@ -3,6 +3,7 @@ package ads
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -224,12 +225,18 @@ func portfolioOf(r gaqlRow) c.AdPortfolio {
 			break
 		}
 	}
+	p.ImpressionShareLocation, p.ImpressionShare, p.MaxCPCMicros = b.TargetImpressionShare.read()
+	if v := b.TargetSpend.CpcBidCeilingMicros; v > 0 && p.MaxCPCMicros == nil {
+		p.MaxCPCMicros = ptrI(int64(v))
+	}
 	return p
 }
 
 const portfolioFields = "bidding_strategy.id, bidding_strategy.name, bidding_strategy.type, bidding_strategy.status, bidding_strategy.campaign_count, " +
 	"bidding_strategy.effective_currency_code, bidding_strategy.target_cpa.target_cpa_micros, bidding_strategy.target_roas.target_roas, " +
-	"bidding_strategy.maximize_conversions.target_cpa_micros, bidding_strategy.maximize_conversion_value.target_roas"
+	"bidding_strategy.maximize_conversions.target_cpa_micros, bidding_strategy.maximize_conversion_value.target_roas, " +
+	"bidding_strategy.target_impression_share.location, bidding_strategy.target_impression_share.location_fraction_micros, " +
+	"bidding_strategy.target_impression_share.cpc_bid_ceiling_micros, bidding_strategy.target_spend.cpc_bid_ceiling_micros"
 
 // AdPortfolios lists the account's portfolio strategies that aren't
 // removed.
@@ -251,10 +258,35 @@ func (g GoogleAds) CreatePortfolio(ctx context.Context, cl *c.Client, creds c.Cr
 		return "", err
 	}
 	create := map[string]any{"name": strings.TrimSpace(p.Name)}
-	if p.Type == c.PortfolioTargetCPA {
+	switch p.Type {
+	case c.PortfolioTargetCPA:
 		create["targetCpa"] = map[string]any{"targetCpaMicros": strconv.FormatInt(*p.TargetCPAMicros, 10)}
-	} else {
+	case c.PortfolioTargetROAS:
 		create["targetRoas"] = map[string]any{"targetRoas": *p.TargetROAS}
+	case c.PortfolioMaxConversions:
+		mc := map[string]any{}
+		if p.TargetCPAMicros != nil {
+			mc["targetCpaMicros"] = strconv.FormatInt(*p.TargetCPAMicros, 10)
+		}
+		create["maximizeConversions"] = mc
+	case c.PortfolioMaxValue:
+		mv := map[string]any{}
+		if p.TargetROAS != nil {
+			mv["targetRoas"] = *p.TargetROAS
+		}
+		create["maximizeConversionValue"] = mv
+	case c.PortfolioImpressionShare:
+		body, err := googleShareBody(p.ImpressionShareLocation, p.ImpressionShare, p.MaxCPCMicros)
+		if err != nil {
+			return "", err
+		}
+		create["targetImpressionShare"] = body
+	case c.PortfolioMaxClicks:
+		ts := map[string]any{}
+		if p.MaxCPCMicros != nil {
+			ts["cpcBidCeilingMicros"] = strconv.FormatInt(*p.MaxCPCMicros, 10)
+		}
+		create["targetSpend"] = ts
 	}
 	res, err := g.mutate(ctx, cl, creds, acct, "biddingStrategies", create)
 	if err != nil {
@@ -314,6 +346,38 @@ func (g GoogleAds) UpdatePortfolio(ctx context.Context, cl *c.Client, creds c.Cr
 		}
 		update[field] = map[string]any{"targetRoas": *p.TargetROAS}
 		mask = append(mask, cur.Type+".target_roas")
+	}
+	// A target impression share strategy's place, share and most per
+	// click change one by one; a Maximise clicks strategy's most per click.
+	switch {
+	case p.ImpressionShareLocation != "" || p.ImpressionShare != nil:
+		if cur.Type != c.PortfolioImpressionShare {
+			return c.Errf(c.ErrInvalid, "strategy %s bids %s, which takes no impression share", id, cur.Type)
+		}
+		ts := map[string]any{}
+		if p.ImpressionShareLocation != "" {
+			if p.ImpressionShareLocation != c.SharePage && p.ImpressionShareLocation != c.ShareTop && p.ImpressionShareLocation != c.ShareAbsoluteTop {
+				return c.Errf(c.ErrInvalid, "impression_share_location is anywhere_on_page, top_of_page or absolute_top_of_page")
+			}
+			ts["location"] = strings.ToUpper(p.ImpressionShareLocation)
+			mask = append(mask, "target_impression_share.location")
+		}
+		if p.ImpressionShare != nil {
+			ts["locationFractionMicros"] = strconv.FormatInt(int64(math.Round(*p.ImpressionShare*1e6)), 10)
+			mask = append(mask, "target_impression_share.location_fraction_micros")
+		}
+		if p.MaxCPCMicros != nil {
+			ts["cpcBidCeilingMicros"] = strconv.FormatInt(*p.MaxCPCMicros, 10)
+			mask = append(mask, "target_impression_share.cpc_bid_ceiling_micros")
+		}
+		update["targetImpressionShare"] = ts
+	case p.MaxCPCMicros != nil:
+		field := map[string]string{c.PortfolioImpressionShare: "targetImpressionShare", c.PortfolioMaxClicks: "targetSpend"}[cur.Type]
+		if field == "" {
+			return c.Errf(c.ErrInvalid, "strategy %s bids %s, which takes no max_cpc_micros", id, cur.Type)
+		}
+		update[field] = map[string]any{"cpcBidCeilingMicros": strconv.FormatInt(*p.MaxCPCMicros, 10)}
+		mask = append(mask, cur.Type+".cpc_bid_ceiling_micros")
 	}
 	return g.update(ctx, cl, creds, acct, "biddingStrategies", update, strings.Join(mask, ","))
 }

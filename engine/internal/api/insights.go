@@ -33,6 +33,7 @@ func (s *Server) routesInsights(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/insights/funnel/people", s.onBrand(auth.ScopeCustomersRead, s.funnelPeople))
 	mux.HandleFunc("POST /v1/brands/{brand}/insights/funnel/people/save", s.onBrand(auth.ScopeCustomersManage, s.saveFunnelPeople))
 	mux.HandleFunc("POST /v1/brands/{brand}/insights/funnel/correlation", s.onBrand(read, s.funnelCorrelation))
+	mux.HandleFunc("POST /v1/brands/{brand}/insights/funnel/checks", s.onBrand(read, s.funnelChecks))
 	mux.HandleFunc("POST /v1/brands/{brand}/insights/paths", s.onBrand(read, s.runPaths))
 	mux.HandleFunc("GET /v1/brands/{brand}/annotations", s.onBrand(read, s.listAnnotations))
 	mux.HandleFunc("POST /v1/brands/{brand}/annotations", s.onBrand(manage, s.createAnnotation))
@@ -40,6 +41,8 @@ func (s *Server) routesInsights(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/insights/trend", s.onBrand(read, s.runTrend))
 	mux.HandleFunc("POST /v1/brands/{brand}/insights/retention", s.onBrand(read, s.runRetention))
 	mux.HandleFunc("POST /v1/brands/{brand}/insights/lifecycle", s.onBrand(read, s.runLifecycle))
+	s.registerInsightAsk(mux)
+	mux.HandleFunc("POST /v1/brands/{brand}/insights/stickiness", s.onBrand(read, s.runStickiness))
 	mux.HandleFunc("GET /v1/brands/{brand}/insights", s.onBrand(read, s.listInsights))
 	mux.HandleFunc("POST /v1/brands/{brand}/insights", s.onBrand(manage, s.createInsight))
 	mux.HandleFunc("GET /v1/brands/{brand}/insights/{insight}", s.onBrand(read, s.getInsight))
@@ -127,16 +130,31 @@ func (f funnelSpec) funnel(now time.Time) (insights.Funnel, error) {
 
 // trendSpec is a trend as the API, saved insights and MCP send it.
 type trendSpec struct {
-	Series    []insights.Series `json:"series"`
-	DateRange dateRange         `json:"date_range"`
-	Interval  string            `json:"interval,omitempty"`
-	Breakdown string            `json:"breakdown,omitempty"`
-	Formula   string            `json:"formula,omitempty"`
-	Compare   bool              `json:"compare,omitempty"`
-	// Display is how the app draws it (line, bar, number, table); the
-	// engine ignores it.
+	Series     []insights.Series `json:"series"`
+	DateRange  dateRange         `json:"date_range"`
+	Interval   string            `json:"interval,omitempty"`
+	Breakdown  string            `json:"breakdown,omitempty"`
+	Breakdown2 string            `json:"breakdown_2,omitempty"`
+	Formula    string            `json:"formula,omitempty"`
+	Compare    bool              `json:"compare,omitempty"`
+	// Display and the options below are how the app draws it; the
+	// engine checks them and otherwise ignores them.
 	Display string `json:"display,omitempty"`
+	// Forecast false hides the app's forecast.
+	Forecast *bool `json:"forecast,omitempty"`
+	// Cumulative draws a running total; Percent each group's share of
+	// the whole; Smoothing a moving average over that many periods;
+	// ValueLabels the number on each point or bar; RightAxis the
+	// series (A, B, ...) drawn against a second axis on the right.
+	Cumulative  bool     `json:"cumulative,omitempty"`
+	Percent     bool     `json:"percent,omitempty"`
+	Smoothing   int      `json:"smoothing,omitempty"`
+	ValueLabels bool     `json:"value_labels,omitempty"`
+	RightAxis   []string `json:"right_axis,omitempty"`
 }
+
+// TrendDisplays are the ways the app draws a trend.
+var trendDisplays = []string{"line", "area", "bar", "stacked_bar", "horizontal_bar", "pie", "map", "number", "table"}
 
 func (t trendSpec) trend(now time.Time) (insights.Trend, error) {
 	from, to, err := t.DateRange.resolve(now)
@@ -155,10 +173,24 @@ func (t trendSpec) trend(now time.Time) (insights.Trend, error) {
 			interval = "month"
 		}
 	}
-	if t.Display != "" && !slices.Contains([]string{"line", "bar", "number", "table"}, t.Display) {
-		return insights.Trend{}, insights.Invalid("display is line, bar, number or table")
+	if t.Display != "" && !slices.Contains(trendDisplays, t.Display) {
+		return insights.Trend{}, insights.Invalid("display is one of " + strings.Join(trendDisplays, ", "))
 	}
-	out := insights.Trend{Series: t.Series, From: from, To: to, Interval: interval, Breakdown: t.Breakdown, Formula: t.Formula, Compare: t.Compare, Location: now.Location()}
+	if t.Display == "map" && t.Breakdown != "country" {
+		return insights.Trend{}, insights.Invalid("a map needs the breakdown country")
+	}
+	if !slices.Contains([]int{0, 1, 3, 7, 14, 28}, t.Smoothing) {
+		return insights.Trend{}, insights.Invalid("smoothing is 1, 3, 7, 14 or 28 periods")
+	}
+	if len(t.RightAxis) >= len(t.Series) && len(t.RightAxis) > 0 {
+		return insights.Trend{}, insights.Invalid("right_axis leaves at least one series on the left")
+	}
+	for _, l := range t.RightAxis {
+		if len(l) != 1 || l[0] < 'A' || int(l[0]-'A') >= len(t.Series) {
+			return insights.Trend{}, insights.Invalid("right_axis names series as A, B, C")
+		}
+	}
+	out := insights.Trend{Series: t.Series, From: from, To: to, Interval: interval, Breakdown: t.Breakdown, Breakdown2: t.Breakdown2, Formula: t.Formula, Compare: t.Compare, Location: now.Location()}
 	return out, out.Validate()
 }
 
@@ -313,11 +345,74 @@ func (s *Server) runLifecycle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// stickinessSpec is a stickiness question as the API, saved insights
+// and MCP send it.
+type stickinessSpec struct {
+	Step      insights.Step `json:"step"`
+	DateRange dateRange     `json:"date_range"`
+	Interval  string        `json:"interval,omitempty"`
+}
+
+func (t stickinessSpec) stickiness(now time.Time) (insights.Stickiness, error) {
+	from, to, err := t.DateRange.resolve(now)
+	if err != nil {
+		return insights.Stickiness{}, err
+	}
+	interval := t.Interval
+	if interval == "" {
+		interval = "day"
+	}
+	out := insights.Stickiness{Step: t.Step, From: from, To: to, Interval: interval, Location: now.Location()}
+	return out, out.Validate()
+}
+
+// runStickiness answers a stickiness question: how many people were
+// active in one period of the dates, in two, in three and so on.
+func (s *Server) runStickiness(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	var in stickinessSpec
+	if !decode(w, r, &in) {
+		return
+	}
+	start := time.Now()
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	q, err := in.stickiness(start.In(loc))
+	var res insights.StickinessResult
+	if err == nil {
+		err = s.readInsight(r.Context(), func(tx pgx.Tx) error {
+			c, err := insights.CompileStickiness(r.Context(), tx, a.WorkspaceID, a.Brand, q)
+			if err != nil {
+				return err
+			}
+			res, err = c.Run(r.Context(), tx)
+			return err
+		})
+	}
+	if err != nil {
+		metrics.InsightRun("stickiness", s.insightError(w, r, err), time.Since(start))
+		return
+	}
+	metrics.InsightRun("stickiness", "success", time.Since(start))
+	writeJSON(w, http.StatusOK, res)
+}
+
 // readInsight runs fn in a read-only transaction with the insight time
 // limit, so a heavy question can't hold the database.
+//
+// JIT compilation is off for it. An insight is a chain of CTEs whose row
+// counts the planner can't foresee, so it guesses a huge cost and
+// compiles the whole plan: for a 20-step funnel over a million events
+// that took 14 of 21 seconds, while running it took 7.
 func (s *Server) readInsight(ctx context.Context, fn func(pgx.Tx) error) error {
 	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = '`+strconv.Itoa(int(insightTimeout.Seconds()))+`s'`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SET LOCAL jit = off`); err != nil {
 			return err
 		}
 		return fn(tx)
@@ -438,6 +533,10 @@ type catalogEvent struct {
 	Name     string    `json:"name"`
 	Count    int       `json:"count"`
 	LastSeen time.Time `json:"last_seen"`
+	// Label and Description are the event dictionary's, "" when nobody
+	// wrote them.
+	Label       string `json:"label"`
+	Description string `json:"description"`
 }
 
 type catalogConversion struct {
@@ -458,16 +557,19 @@ type catalogNetwork struct {
 func (s *Server) insightsCatalog(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
-	rows, err := s.pool.Query(ctx, `SELECT name, count(*)::int, max(occurred_at) FROM customer_events
-		WHERE workspace_id = $1 AND brand_id = $2 AND occurred_at > now() - interval '90 days'
-		GROUP BY name ORDER BY count(*) DESC, name LIMIT 300`, a.WorkspaceID, a.Brand)
+	rows, err := s.pool.Query(ctx, `SELECT e.name, e.n, e.last, COALESCE(d.label, ''), COALESCE(d.description, '') FROM (
+			SELECT name, count(*)::int AS n, max(occurred_at) AS last FROM customer_events
+			WHERE workspace_id = $1 AND brand_id = $2 AND occurred_at > now() - interval '90 days'
+			GROUP BY name ORDER BY count(*) DESC, name LIMIT 300) e
+		LEFT JOIN event_definitions d ON d.workspace_id = $1 AND d.brand_id = $2 AND d.name = e.name
+		ORDER BY e.n DESC, e.name`, a.WorkspaceID, a.Brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (catalogEvent, error) {
 		var e catalogEvent
-		return e, row.Scan(&e.Name, &e.Count, &e.LastSeen)
+		return e, row.Scan(&e.Name, &e.Count, &e.LastSeen, &e.Label, &e.Description)
 	})
 	if err != nil {
 		s.internal(w, r, err)
@@ -539,11 +641,32 @@ func (s *Server) insightsCatalog(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	personFields, err := breakdownFields(ctx, s.pool, a.WorkspaceID, a.Brand, "person")
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	companyFields, err := breakdownFields(ctx, s.pool, a.WorkspaceID, a.Brand, "account")
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	breakdowns := map[string][]string{}
 	for _, k := range insights.Kinds {
 		breakdowns[k] = insights.Breakdowns(k)
 	}
 	breakdowns[insights.KindAd] = insights.TrendBreakdowns(insights.KindAd)
+	for _, k := range insights.SourceKinds {
+		breakdowns[k] = insights.TrendBreakdowns(k)
+	}
+	// The analytics and search tools with daily numbers stored for this
+	// brand, for an analytics series' connector.
+	var analyticsConnectors []string
+	if err := s.pool.QueryRow(ctx, `SELECT COALESCE(array_agg(DISTINCT connector ORDER BY connector), '{}') FROM analytics_daily
+		WHERE workspace_id = $1 AND brand_id = $2 AND report = 'traffic' AND day > current_date - 400`, a.WorkspaceID, a.Brand).Scan(&analyticsConnectors); err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events":      nonNil(events),
 		"conversions": nonNil(convs),
@@ -552,20 +675,30 @@ func (s *Server) insightsCatalog(w http.ResponseWriter, r *http.Request) {
 			"event":   fields(insights.EventFields),
 			"visit":   fields(insights.VisitFields),
 			"payment": fields(insights.PaymentFields),
+			"search":  fields(insights.SearchFields),
 		},
-		"breakdowns":   breakdowns,
-		"experiments":  nonNil(experiments),
-		"measures":     insights.Measures,
-		"ad_metrics":   insights.AdMetrics,
-		"intervals":    insights.Intervals,
-		"ops":          insights.Ops,
-		"date_presets": datePresets,
+		"breakdowns":     breakdowns,
+		"person_fields":  breakdownFieldList(personFields),
+		"company_fields": breakdownFieldList(companyFields),
+		"experiments":    nonNil(experiments),
+		"measures":       insights.Measures,
+		"ad_metrics":     insights.AdMetrics,
+		"source_metrics": map[string][]string{
+			insights.KindAnalytics:  insights.AnalyticsMetrics,
+			insights.KindBacklinks:  insights.BacklinkMetrics,
+			insights.KindLinkOrders: insights.LinkOrderMetrics,
+			insights.KindSearch:     insights.SearchMetrics,
+		},
+		"analytics_connectors": nonNil(analyticsConnectors),
+		"intervals":            insights.Intervals,
+		"ops":                  insights.Ops,
+		"date_presets":         datePresets,
 	})
 }
 
 // Saved insights.
 
-var insightKinds = []string{"funnel", "trend", "retention", "paths", "lifecycle"}
+var insightKinds = []string{"funnel", "trend", "retention", "paths", "lifecycle", "stickiness"}
 
 type insightView struct {
 	ID          string          `json:"id"`
@@ -653,8 +786,19 @@ func checkSpec(kind string, raw json.RawMessage) ([]byte, error) {
 			return nil, errInvalid("spec: " + err.Error())
 		}
 		return json.Marshal(l)
+	case "stickiness":
+		var l stickinessSpec
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&l); err != nil {
+			return nil, errInvalid("spec is a stickiness question: " + err.Error())
+		}
+		if _, err := l.stickiness(time.Now()); err != nil {
+			return nil, errInvalid("spec: " + err.Error())
+		}
+		return json.Marshal(l)
 	}
-	return nil, errInvalid("kind is funnel, trend, retention, paths or lifecycle")
+	return nil, errInvalid("kind is funnel, trend, retention, paths, lifecycle or stickiness")
 }
 
 func (s *Server) createInsight(w http.ResponseWriter, r *http.Request) {
@@ -676,7 +820,7 @@ func (s *Server) createInsight(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case !slices.Contains(insightKinds, kind):
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is funnel, trend, retention, paths or lifecycle")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is funnel, trend, retention, paths, lifecycle or stickiness")
 		return
 	case name == "" || len(name) > 120:
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "name is 1 to 120 characters")
@@ -735,6 +879,13 @@ func insightProps(kind string, spec []byte) map[string]any {
 	}
 	if kind == "lifecycle" {
 		var l lifecycleSpec
+		if json.Unmarshal(spec, &l) == nil {
+			props["step_kind"] = l.Step.Kind
+			props["interval"] = l.Interval
+		}
+	}
+	if kind == "stickiness" {
+		var l stickinessSpec
 		if json.Unmarshal(spec, &l) == nil {
 			props["step_kind"] = l.Step.Kind
 			props["interval"] = l.Interval
@@ -805,7 +956,7 @@ func (s *Server) listInsights(w http.ResponseWriter, r *http.Request) {
 	}
 	kind := r.URL.Query().Get("kind")
 	if kind != "" && !slices.Contains(insightKinds, kind) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is funnel, trend, retention, paths or lifecycle")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is funnel, trend, retention, paths, lifecycle or stickiness")
 		return
 	}
 	rows, err := s.pool.Query(r.Context(), `SELECT `+insightColumns+` FROM insights i
@@ -916,4 +1067,109 @@ func (s *Server) deleteInsight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// breakdownTypes are the kinds of field whose values make sense as the
+// groups of a report: choices, yes/no, numbers and short text.
+var breakdownTypes = []string{"select", "status", "checkbox", "rating", "number", "currency", "text"}
+
+func init() {
+	insights.BreakdownFields = func(ctx context.Context, q insights.Querier, ws, brand, recordType string) (map[string]string, error) {
+		return breakdownFields(ctx, q, ws, brand, recordType)
+	}
+}
+
+// breakdownFields lists the fields of a brand's people or companies a
+// funnel may be split by (person:<key>), as key to label: the built-in
+// and the brand's own fields that hold a choice, a yes/no, a number or
+// text. Names and fields marked confidential or restricted are left out,
+// because a breakdown shows its values to anyone who may read analytics.
+func breakdownFields(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, ws, brand, recordType string) (map[string]string, error) {
+	out := map[string]string{}
+	ok := func(f fieldView) bool {
+		return !f.Archived && slices.Contains(breakdownTypes, f.ValueType) && f.Sensitivity != "confidential" && f.Sensitivity != "restricted" &&
+			f.Key != "first_name" && f.Key != "last_name"
+	}
+	for _, t := range builtinTypes {
+		if t.Key != recordType {
+			continue
+		}
+		for _, f := range t.Fields {
+			if ok(f) {
+				out[f.Key] = f.Label
+			}
+		}
+	}
+	rows, err := q.Query(ctx, `SELECT key, label, value_type, sensitivity, archived_at IS NOT NULL FROM field_definitions
+		WHERE workspace_id = $1 AND brand_id::text = $2 AND record_type = $3`, ws, brand, recordType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var f fieldView
+		if err := rows.Scan(&f.Key, &f.Label, &f.ValueType, &f.Sensitivity, &f.Archived); err != nil {
+			return nil, err
+		}
+		// The brand's own field of a key wins over a built-in, also when
+		// that takes it out.
+		delete(out, f.Key)
+		if ok(f) {
+			out[f.Key] = f.Label
+		}
+	}
+	return out, rows.Err()
+}
+
+type breakdownField struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
+
+func breakdownFieldList(m map[string]string) []breakdownField {
+	out := make([]breakdownField, 0, len(m))
+	for k, l := range m {
+		out = append(out, breakdownField{Key: k, Label: l})
+	}
+	slices.SortFunc(out, func(a, b breakdownField) int {
+		return strings.Compare(strings.ToLower(a.Label), strings.ToLower(b.Label))
+	})
+	return out
+}
+
+// funnelChecks looks at the data behind a funnel's steps for signs that a
+// drop-off is a tracking problem: a step nothing arrives for, one whose
+// data stopped, or one sent under an id that doesn't lead back to the
+// earlier steps.
+func (s *Server) funnelChecks(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	var in struct {
+		Funnel funnelSpec `json:"funnel"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	start := time.Now()
+	// Days are the brand's (B4a), or ?timezone='s.
+	loc, ok := s.reportZone(w, r)
+	if !ok {
+		return
+	}
+	f, err := in.Funnel.funnel(start.In(loc))
+	var found insights.ChecksResult
+	if err == nil {
+		err = s.readInsight(r.Context(), func(tx pgx.Tx) error {
+			var err error
+			found, err = insights.Checks(r.Context(), tx, a.WorkspaceID, a.Brand, f, start)
+			return err
+		})
+	}
+	if err != nil {
+		metrics.InsightRun("funnel_checks", s.insightError(w, r, err), time.Since(start))
+		return
+	}
+	metrics.InsightRun("funnel_checks", "success", time.Since(start))
+	writeJSON(w, http.StatusOK, found)
 }

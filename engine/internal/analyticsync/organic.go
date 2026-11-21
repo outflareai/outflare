@@ -104,7 +104,7 @@ func (s *Syncer) storeOrganicConversions(ctx context.Context, ws, id, site, host
 		}
 		if ref.brand == nil {
 			var b *string
-			if err := s.Pool.QueryRow(ctx, `SELECT outflare_site_brand_or_first($1, $2)`, id, site).Scan(&b); err == nil {
+			if err := s.Pool.QueryRow(ctx, `SELECT outflare_site_brand_now($1, $2)`, id, site).Scan(&b); err == nil {
 				ref.brand = b
 			}
 		}
@@ -125,6 +125,23 @@ func (s *Syncer) storeOrganicConversions(ctx context.Context, ws, id, site, host
 		copyRows = append(copyRows, []any{ws, ref.brand, ref.site, id, site, d, h, truncate(r.Path, 1000), truncate(r.CanonicalPath, 1000),
 			r.OrganicSessions, r.Signups, r.SignupPeople, r.Payments, r.PaymentPeople, r.RevenueUSD})
 	}
+	countryRows := make([][]any, 0)
+	for _, r := range seointel.RollupOrganicCountries(got, host) {
+		d, err := time.Parse(time.DateOnly, r.Day)
+		if err != nil || d.Before(from) || d.After(to) {
+			continue
+		}
+		h := truncate(r.Host, 255)
+		if h == "" {
+			continue
+		}
+		ref := siteFor(h)
+		if ref.brand == nil {
+			continue
+		}
+		countryRows = append(countryRows, []any{ws, ref.brand, ref.site, id, site, d, h, truncate(r.Country, 2),
+			r.Sessions, r.Seconds, r.Signups, r.Payments, r.RevenueUSD})
+	}
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		oldest := to.AddDate(0, -16, 0)
 		if backfill {
@@ -137,6 +154,16 @@ func (s *Syncer) storeOrganicConversions(ctx context.Context, ws, id, site, host
 			[]string{"workspace_id", "brand_id", "seo_site_id", "integration_id", "site", "day", "host", "path", "canonical_path",
 				"organic_sessions", "signups", "signup_people", "payments", "payment_people", "revenue_usd"},
 			pgx.CopyFromRows(copyRows))
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM organic_countries WHERE integration_id = $1 AND site = $2 AND (day BETWEEN $3 AND $4 OR day < $5)`, id, site, from, to, oldest); err != nil {
+			return err
+		}
+		_, err = tx.CopyFrom(ctx, pgx.Identifier{"organic_countries"},
+			[]string{"workspace_id", "brand_id", "seo_site_id", "integration_id", "site", "day", "host", "country",
+				"organic_sessions", "session_seconds", "signups", "payments", "revenue_usd"},
+			pgx.CopyFromRows(countryRows))
 		return err
 	})
 	if err != nil {

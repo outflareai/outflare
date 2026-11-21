@@ -4,7 +4,7 @@ import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { PostgreSQL, sql } from "@codemirror/lang-sql";
 
-// The SQL editor of Query Studio: CodeMirror 6 with Postgres highlighting
+// The SQL editor of Queries: CodeMirror 6 with Postgres highlighting
 // and autocomplete from the tables and columns the brand's query can read.
 // Cmd/Ctrl+Enter runs the query.
 

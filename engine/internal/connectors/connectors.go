@@ -15,10 +15,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -219,7 +222,8 @@ var BrandKinds = []string{KindBrand, KindSplit, KindShared}
 // KindFor is a connector's default kind: its own BrandKind, else by
 // category. Analytics and ads read many sites or accounts with one
 // sign-in, so they are split; models, notifications, data, verification,
-// DNS and SEO data tools (DataForSEO, Ahrefs) serve every brand, and so do
+// DNS, SEO data tools (DataForSEO, Ahrefs) and the accounts that make
+// pictures, video and voice serve every brand, and so do
 // mailbox sign-ins, whose mailboxes each carry their own brand (none is
 // shared); the rest carry one brand's data.
 func KindFor(d Definition) string {
@@ -229,7 +233,7 @@ func KindFor(d Definition) string {
 	switch d.Category {
 	case CategoryAnalytics, CategoryAds:
 		return KindSplit
-	case CategoryModel, CategoryNotification, CategoryData, CategorySignals, CategoryVerification, CategoryDNS, CategoryRegistrar, CategorySEO, CategoryMailbox, CategoryFraud:
+	case CategoryModel, CategoryNotification, CategoryData, CategorySignals, CategoryVerification, CategoryDNS, CategoryRegistrar, CategorySEO, CategoryMailbox, CategoryFraud, CategoryMedia:
 		return KindShared
 	}
 	return KindBrand
@@ -375,7 +379,7 @@ func (c *Client) DoWithin(req *http.Request, wait time.Duration) (*http.Response
 		h = c.HTTP
 	}
 	if wait > 0 {
-		h = &http.Client{Timeout: wait, Transport: h.Transport, CheckRedirect: h.CheckRedirect, Jar: h.Jar}
+		h = &http.Client{Timeout: wait, Transport: waitingTransport(h.Transport, wait), CheckRedirect: h.CheckRedirect, Jar: h.Jar}
 	} else if h.Timeout == 0 {
 		h = &http.Client{Timeout: 45 * time.Second, Transport: h.Transport}
 	}
@@ -393,6 +397,34 @@ func (c *Client) DoWithin(req *http.Request, wait time.Duration) (*http.Response
 	return resp, err
 }
 
+// patientTransports holds, per shared transport, a copy of it with no
+// limit on the wait for response headers, so every long call reuses one
+// copy and its pooled connections.
+var patientTransports sync.Map // *http.Transport -> *http.Transport
+
+// waitingTransport is the transport for a call allowed to wait up to wait.
+// A transport's own limit on the wait for response headers (netguard's 30
+// seconds) would cut off a call the service itself holds longer (Treg
+// answers after up to 60 seconds, a page read or long poll after up to
+// 60): the cut-off call reads as a timeout although it was allowed more.
+// When the call's wait is longer, it goes through a copy of the transport
+// without that limit; the client's Timeout (wait) still bounds the whole
+// call. The copy keeps everything else, the dialer that refuses private
+// addresses among it.
+func waitingTransport(rt http.RoundTripper, wait time.Duration) http.RoundTripper {
+	t, ok := rt.(*http.Transport)
+	if !ok || t.ResponseHeaderTimeout <= 0 || wait <= t.ResponseHeaderTimeout {
+		return rt
+	}
+	if p, ok := patientTransports.Load(t); ok {
+		return p.(*http.Transport)
+	}
+	p := t.Clone()
+	p.ResponseHeaderTimeout = 0
+	got, _ := patientTransports.LoadOrStore(t, p)
+	return got.(*http.Transport)
+}
+
 // redactURL drops a URL's query, fragment and user info.
 func redactURL(raw string) string {
 	u, err := url.Parse(raw)
@@ -407,18 +439,44 @@ func redactURL(raw string) string {
 // Failures come back as *Error with a kind; name is the service's name for
 // messages. Answers over 8 MB are cut off.
 func DoJSON(ctx context.Context, cl *Client, name string, req *http.Request, v any) (int, error) {
+	return DoJSONWithin(ctx, cl, name, req, v, 0)
+}
+
+// DoJSONWithin is DoJSON, waiting up to wait for the whole answer, for a
+// call the service itself takes long to answer (an AI assistant searching
+// the web and writing). Zero keeps the client's own timeout. A call that
+// ran out of time comes back as an unavailable *Error that IsTimeout
+// recognises.
+func DoJSONWithin(ctx context.Context, cl *Client, name string, req *http.Request, v any, wait time.Duration) (int, error) {
+	return doJSON(ctx, cl, name, req, v, wait, false)
+}
+
+// DoJSONRateLimited is DoJSONWithin for a service whose HTTP 429 is a rate
+// limit and never the account's quota (HTTPErrorFor).
+func DoJSONRateLimited(ctx context.Context, cl *Client, name string, req *http.Request, v any, wait time.Duration) (int, error) {
+	return doJSON(ctx, cl, name, req, v, wait, true)
+}
+
+func doJSON(ctx context.Context, cl *Client, name string, req *http.Request, v any, wait time.Duration, rateLimits bool) (int, error) {
 	req = req.WithContext(ctx)
 	req.Header.Set("Accept", "application/json")
-	resp, err := cl.Do(req)
+	resp, err := cl.DoWithin(req, wait)
 	if err != nil {
-		return 0, Errf(ErrUnavailable, "could not reach %s: %v", name, err)
+		e := Errf(ErrUnavailable, "could not reach %s: %v", name, err)
+		e.timeout = timedOut(err)
+		return 0, e
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return resp.StatusCode, Errf(ErrUnavailable, "reading the %s response: %v", name, err)
+		e := Errf(ErrUnavailable, "reading the %s response: %v", name, err)
+		e.timeout = timedOut(err)
+		return resp.StatusCode, e
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		if rateLimits {
+			return resp.StatusCode, HTTPErrorFor(name, resp, string(body))
+		}
 		return resp.StatusCode, HTTPError(name, resp.StatusCode, string(body))
 	}
 	if v != nil {
@@ -436,6 +494,43 @@ type Error struct {
 	// invalid: the request was refused.
 	Kind    string
 	Message string
+	// Code is the service's own short code for the failure
+	// ("not_allowed_token_type"), when it gave one: an enum of the service's,
+	// never text. It lets an event or a log line say why without quoting
+	// the service's answer.
+	Code string
+	// timeout marks a call that got no answer in time, as opposed to a
+	// service that is down.
+	timeout bool
+	// expired marks an OAuth sign-in the provider no longer honours (its
+	// refresh token expired or was revoked): only signing in again mends it.
+	expired bool
+	// busy marks a provider that has no room for the call right now and
+	// charged nothing; retryAfter is when it said to ask again. throttled:
+	// it has no room because this account is calling it too fast.
+	busy       bool
+	throttled  bool
+	retryAfter time.Duration
+}
+
+// SignInExpired says whether err is a provider refusing to renew an OAuth
+// sign-in, so the person has to sign in again.
+func SignInExpired(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.expired
+}
+
+// timedOut says whether a transport error is a call running out of time.
+func timedOut(err error) bool {
+	var ne net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout())
+}
+
+// IsTimeout says whether err is a call to a connected service that got no
+// answer in time.
+func IsTimeout(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.timeout
 }
 
 func (e *Error) Error() string { return e.Message }
@@ -453,9 +548,75 @@ const (
 	ErrInvalid     = "invalid"
 )
 
+// ProviderCode is the service's own code for err ("" when it gave none or
+// it isn't a plain code): lowercase letters, digits and underscores, at most
+// 60 characters, so it is safe on an event.
+func ProviderCode(err error) string {
+	var e *Error
+	if !errors.As(err, &e) || e.Code == "" || len(e.Code) > 60 {
+		return ""
+	}
+	for _, r := range e.Code {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') {
+			return ""
+		}
+	}
+	return e.Code
+}
+
 // Errf builds an Error.
 func Errf(kind, format string, a ...any) *Error {
 	return &Error{Kind: kind, Message: fmt.Sprintf(format, a...)}
+}
+
+// TimedOutf builds an unavailable Error for a call that got no answer in
+// time, which IsTimeout recognises: a connector that waits for a service's
+// own job (submit, then ask for the result) uses it when the wait runs out.
+func TimedOutf(format string, a ...any) *Error {
+	e := Errf(ErrUnavailable, format, a...)
+	e.timeout = true
+	return e
+}
+
+// Busyf builds an unavailable Error for a provider that has no room for
+// the call right now (its capacity is in use, or it asked for fewer calls)
+// and charged nothing, which IsBusy recognises. retryAfter is when it said
+// to ask again. It is not the account's quota: nothing needs fixing, the
+// same call succeeds a moment later, and it says nothing about what was
+// asked, so it is never a miss and never a verdict.
+func Busyf(retryAfter time.Duration, format string, a ...any) *Error {
+	e := Errf(ErrUnavailable, format, a...)
+	e.busy, e.retryAfter = true, max(retryAfter, 0)
+	return e
+}
+
+// Throttledf builds a busy Error (Busyf) for a provider that turned the
+// call down because this account is calling it too fast: a rate limit.
+// IsThrottled recognises it, so a caller that paces its calls slows down.
+// A provider whose capacity is used up by everyone else is Busyf alone:
+// calling it more slowly would not have helped.
+func Throttledf(retryAfter time.Duration, format string, a ...any) *Error {
+	e := Busyf(retryAfter, format, a...)
+	e.throttled = true
+	return e
+}
+
+// IsThrottled says whether err is a provider asking this account for
+// fewer calls (Throttledf).
+func IsThrottled(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.throttled
+}
+
+// IsBusy says whether err is a provider with no room for the call right
+// now (Busyf, Throttledf), and how long it said to wait before asking
+// again.
+func IsBusy(err error) (time.Duration, bool) {
+	var e *Error
+	if errors.As(err, &e) && e.busy {
+		return e.retryAfter, true
+	}
+	return 0, false
 }
 
 // KindOf returns an error's kind, or unavailable for unexplained errors.
@@ -482,6 +643,38 @@ func HTTPError(name string, status int, body string) *Error {
 		return Errf(ErrUnavailable, "%s is not responding properly (HTTP %d). Try again in a few minutes.", name, status)
 	}
 	return Errf(ErrInvalid, "%s refused the request (HTTP %d): %s", name, status, body)
+}
+
+// HTTPErrorFor is HTTPError for a service whose HTTP 429 is a rate limit
+// and never the account's quota (402 is): it is busy (Throttledf), with
+// how long its Retry-After header said to wait. Nothing needs fixing and
+// the same call succeeds a little later, so a caller waits it out, slowing
+// down, and never stops for a person.
+func HTTPErrorFor(name string, resp *http.Response, body string) *Error {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return Throttledf(RetryAfter(resp.Header, time.Now()), "%s asked for fewer calls (HTTP %d).", name, resp.StatusCode)
+	}
+	return HTTPError(name, resp.StatusCode, body)
+}
+
+// maxRetryAfter bounds what a provider can ask a caller to wait.
+const maxRetryAfter = 15 * time.Minute
+
+// RetryAfter reads a Retry-After header, in seconds or as an HTTP date:
+// zero when there is none or it can't be read, and never more than 15
+// minutes.
+func RetryAfter(h http.Header, now time.Time) time.Duration {
+	v := strings.TrimSpace(h.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	var d time.Duration
+	if n, err := strconv.Atoi(v); err == nil {
+		d = time.Duration(n) * time.Second
+	} else if t, err := http.ParseTime(v); err == nil {
+		d = t.Sub(now)
+	}
+	return min(max(d, 0), maxRetryAfter)
 }
 
 // Registry holds every connector the engine knows.
@@ -594,8 +787,17 @@ type Verification struct {
 	Free       bool   `json:"free"`
 	Suggestion string `json:"suggestion,omitempty"` // a likely correction, e.g. gmail.com for gmial.com
 	Score      *int   `json:"score,omitempty"`      // 0–100 when the provider gives one
+	// NotCatchAll is the provider saying outright that the domain does not
+	// accept every address. CatchAll false alone does not say that: most
+	// providers only flag a domain that does. It is for a caller deciding
+	// whether a second opinion is needed, and is not stored.
+	NotCatchAll bool `json:"-"`
 	// The provider's own status words, kept for people who know them.
 	ProviderStatus string `json:"provider_status"`
+	// CostMicros is what the provider said the check cost, in millionths
+	// of a dollar, over every call it took: 0 when it said nothing. It is
+	// for booking the check and is not stored.
+	CostMicros float64 `json:"-"`
 }
 
 // IPScore is one address's reputation, in provider-neutral terms: a risk
@@ -623,6 +825,46 @@ type IPScorer interface {
 type Verifier interface {
 	Connector
 	Verify(ctx context.Context, c *Client, creds Creds, email string) (Verification, error)
+}
+
+// FallbackVerifier is a Verifier whose first check can be unavailable (a
+// provider behind a gateway that errors or is still working). VerifyWith
+// is Verify, except that when that first check gave no answer it asks
+// fallback, another verifier of the workspace's own, before going on:
+//
+//   - fallback says undeliverable: undeliverable.
+//   - fallback says deliverable and that the domain does not accept every
+//     address (Verification.NotCatchAll): deliverable.
+//   - fallback says deliverable or risky on a domain that accepts every
+//     address, or that it did not confirm does not: the connector's own
+//     second opinion decides, as in Verify.
+//   - fallback says risky on a domain it confirmed does not accept every
+//     address: risky.
+//   - fallback says unknown, or fails: as Verify.
+//
+// A real answer from the first check (invalid, accept-all, unknown) never
+// asks fallback. A nil fallback is Verify.
+type FallbackVerifier interface {
+	VerifyWith(ctx context.Context, c *Client, creds Creds, email string, fallback func(ctx context.Context, email string) (Verification, error)) (Verification, error)
+}
+
+// AccountsVerifier is a FallbackVerifier that can use several of the
+// workspace's own connections to it for one check, such as two accounts at
+// a gateway. VerifyAcross is VerifyWith with every account's credentials,
+// the workspace's chosen verifier first: the accounts take turns, and one
+// that is refused, out of balance or has no room for a call hands that
+// same call to the next. account is the index of the account whose answer
+// decided, or the error came from.
+type AccountsVerifier interface {
+	VerifyAcross(ctx context.Context, c *Client, accounts []Creds, email string, fallback func(ctx context.Context, email string) (Verification, error)) (v Verification, account int, err error)
+}
+
+// SlowVerifier is a Verifier that names how long one address may take
+// when that is longer than the verification service's own limit: a
+// gateway that holds a call for a minute and is asked again when it has
+// no room.
+type SlowVerifier interface {
+	VerifyWait() time.Duration
 }
 
 // Importer reads another sequencer's campaigns, leads and sending

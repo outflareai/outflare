@@ -86,18 +86,18 @@ func TestInboundEmail(t *testing.T) {
 	if sup["email"] != "acme-outbound-support@in.example.test" || sup["brand_id"] == nil {
 		t.Fatalf("support address: %v", sup)
 	}
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket", "website": "https://repocket.com"})
-	rp := owner.must(201, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "repocket"})
-	if rp["email"] != "repocket-support@in.example.test" || rp["brand_id"] == nil {
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "handle": "summitly", "website": "https://summitly.example"})
+	rp := owner.must(201, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "summitly"})
+	if rp["email"] != "summitly-support@in.example.test" || rp["brand_id"] == nil {
 		t.Fatalf("brand address: %v", rp)
 	}
 	owner.must(400, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "nope"})
-	owner.must(400, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "repocket", "name": "Help Desk"})
-	owner.must(409, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "repocket", "name": "acme-outbound-support"})
-	if r := owner.must(201, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "repocket", "name": "help-repocket"}); r["email"] != "help-repocket@in.example.test" {
+	owner.must(400, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "summitly", "name": "Help Desk"})
+	owner.must(409, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "summitly", "name": "acme-outbound-support"})
+	if r := owner.must(201, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "summitly", "name": "help-summitly"}); r["email"] != "help-summitly@in.example.test" {
 		t.Fatalf("renamed: %v", r)
 	}
-	if r := owner.must(200, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "repocket", "name": "help-repocket"}); r["email"] != "help-repocket@in.example.test" {
+	if r := owner.must(200, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support", "brand": "summitly", "name": "help-summitly"}); r["email"] != "help-summitly@in.example.test" {
 		t.Fatalf("same name: %v", r)
 	}
 	if got := owner.must(200, "GET", base+"/inbound-addresses", nil); got["available"] != true || got["domain"] != "in.example.test" || len(got["data"].([]any)) != 3 || len(got["purposes"].([]any)) != 2 {
@@ -112,7 +112,7 @@ func TestInboundEmail(t *testing.T) {
 	if code, _ := deliver(e.h, "nobody-1234567890@in.example.test", raw, inboundSecret); code != 404 {
 		t.Fatalf("unknown address: %d", code)
 	}
-	if code, _ := deliver(e.h, "repocket-support@in.example.test", raw, inboundSecret); code != 404 {
+	if code, _ := deliver(e.h, "summitly-support@in.example.test", raw, inboundSecret); code != 404 {
 		t.Fatalf("renamed address: %d", code)
 	}
 	code, out := deliver(e.h, email, raw, inboundSecret)

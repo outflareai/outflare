@@ -138,10 +138,13 @@ func (s *Server) createConnectRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Verification connectors become the verification service unless told not to.
-	useVerify := def.Has(connectors.CapVerify)
+	// Verification connectors become the verification service unless told
+	// not to. A connector of another kind that can also verify (Treg, an
+	// email finder) does only when asked, so connecting it for what it is
+	// mainly for never replaces the verifier the workspace chose.
+	useVerify := def.Has(connectors.CapVerify) && def.Category == connectors.CategoryVerification
 	if req.UseForVerification != nil {
-		useVerify = *req.UseForVerification && useVerify
+		useVerify = *req.UseForVerification && def.Has(connectors.CapVerify)
 	}
 	secret, hash := auth.NewToken(prefixConnect)
 	var out connectRequest

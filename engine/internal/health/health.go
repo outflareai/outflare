@@ -92,6 +92,7 @@ func Check(ctx context.Context, q Querier, ws string, ids []string) ([]Mailbox, 
 		       m.warmup_enabled OR EXISTS (SELECT 1 FROM mailbox_platforms mp WHERE mp.mailbox_id = m.id AND mp.warmup_enabled), m.warmup_started_at,
 		       s.sent24, s.sent7, s.failed24, s.last_failure,
 		       b.b24, b.b7, r.replies7,
+		       pd.sent24, pd.sent7, pd.b24, pd.b7, pd.replies7,
 		       d.spf, d.dkim, d.dmarc, d.status, d.blocklists
 		FROM mailboxes m
 		LEFT JOIN LATERAL (
@@ -106,6 +107,13 @@ func Check(ctx context.Context, q Querier, ws string, ids []string) ([]Mailbox, 
 		LEFT JOIN LATERAL (
 			SELECT count(*)::int AS replies7 FROM inbound_messages
 			WHERE mailbox_id = m.id AND kind = 'reply' AND received_at > now() - interval '7 days') r ON true
+		LEFT JOIN LATERAL (
+			-- What connected sequencers sent from it (mailbox_platform_days,
+			-- whole UTC days): today stands in for the last 24 hours.
+			SELECT COALESCE(sum(sent) FILTER (WHERE day = (now() AT TIME ZONE 'UTC')::date), 0)::int AS sent24, COALESCE(sum(sent), 0)::int AS sent7,
+			       COALESCE(sum(bounced) FILTER (WHERE day = (now() AT TIME ZONE 'UTC')::date), 0)::int AS b24, COALESCE(sum(bounced), 0)::int AS b7,
+			       COALESCE(sum(replies), 0)::int AS replies7
+			FROM mailbox_platform_days WHERE mailbox_id = m.id AND day > (now() AT TIME ZONE 'UTC')::date - 7) pd ON true
 		LEFT JOIN sending_domains d ON d.workspace_id = m.workspace_id AND d.domain = m.domain
 		WHERE m.workspace_id = $1 AND (cardinality($2::uuid[]) = 0 OR m.id = ANY($2))
 		ORDER BY m.email`, ws, ids)
@@ -117,8 +125,10 @@ func Check(ctx context.Context, q Querier, ws string, ids []string) ([]Mailbox, 
 	for rows.Next() {
 		var r row
 		var sent24, sent7, failed24, b24, b7, replies *int
+		var pSent24, pSent7, pB24, pB7, pReplies int
 		if err := rows.Scan(&r.MailboxID, &r.Email, &r.Domain, &r.Provider, &r.Status, &r.statusReason, &r.syncError, &r.lastSynced, &r.created,
 			&r.warmup, &r.warmupStarted, &sent24, &sent7, &failed24, &r.lastFailure, &b24, &b7, &replies,
+			&pSent24, &pSent7, &pB24, &pB7, &pReplies,
 			&r.spf, &r.dkim, &r.dmarc, &r.domainStatus, &r.blocklists); err != nil {
 			return nil, err
 		}
@@ -128,7 +138,11 @@ func Check(ctx context.Context, q Querier, ws string, ids []string) ([]Mailbox, 
 			}
 			return *p
 		}
-		r.Stats = Stats{Sent24h: n(sent24), Sent7d: n(sent7), Failed24h: n(failed24), Bounced24h: n(b24), Bounced7d: n(b7), Replies7d: n(replies)}
+		// A connected sequencer's sends and bounces are added to Outflare's
+		// own. Its replies may also be in the inbox already, so the larger
+		// count is taken, not the sum.
+		r.Stats = Stats{Sent24h: n(sent24) + pSent24, Sent7d: n(sent7) + pSent7, Failed24h: n(failed24),
+			Bounced24h: n(b24) + pB24, Bounced7d: n(b7) + pB7, Replies7d: max(n(replies), pReplies)}
 		out = append(out, grade(r, time.Now()))
 	}
 	return out, rows.Err()

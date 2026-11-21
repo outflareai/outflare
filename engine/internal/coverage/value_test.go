@@ -36,7 +36,7 @@ func TestAccessOf(t *testing.T) {
 // The owner's complaint: google.com and youtube.com (DR 100) topped the
 // list. A relevant earned comparison on a real site must beat them.
 func TestValueRanksEarnedOverPlatforms(t *testing.T) {
-	topic := NewTopic([]string{"residential proxies", "rotating proxy", "datacenter proxies", "proxy for scraping", "web scraping api"}, []string{"Rival", "Geonode"})
+	topic := NewTopic([]string{"residential proxies", "rotating proxy", "datacenter proxies", "proxy for scraping", "web scraping api"}, []string{"Rival", "Northpeak"})
 	google := Value(Link{URL: "https://www.google.com/url?q=rival", DomainRating: f(100), DomainTraffic: f(5e9), Topic: topic})
 	youtube := Value(Link{URL: "https://www.youtube.com/channel/rival", DomainRating: f(100), DomainTraffic: f(3e9), Topic: topic})
 	comparison := Value(Link{URL: "https://reviews.example/best-residential-proxies", Title: "The 9 best residential proxies, tested",
@@ -61,8 +61,8 @@ func TestValueRanksEarnedOverPlatforms(t *testing.T) {
 }
 
 func TestTopicLeavesOutNames(t *testing.T) {
-	topic := NewTopic([]string{"geonode proxies", "geonode pricing", "residential proxy"}, []string{"Geonode"})
-	if topic.Match("https://geonode.example/") != 0 || topic.Match("Best proxies for scraping") != 1 {
+	topic := NewTopic([]string{"northpeak proxies", "northpeak pricing", "residential proxy"}, []string{"Northpeak"})
+	if topic.Match("https://northpeak.example/") != 0 || topic.Match("Best proxies for scraping") != 1 {
 		t.Fatalf("topic words: %v", topic.words)
 	}
 }

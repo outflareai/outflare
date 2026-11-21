@@ -1,11 +1,11 @@
 // A brand's own playbooks (docs/playbooks.md, "Your own playbooks"): a
-// title and a purpose around rules, journeys, lists and signal types the
-// brand already has. The builder is one full page: name it, tick what
+// title and a purpose around rules, journeys, lists, signal types, scores,
+// routing rules, emails and metrics the brand already has. The builder is one full page: name it, tick what
 // belongs to it, save. Its page then shows what each part has done.
 
 import { useEffect, useState, type FormEvent } from "react";
 import type { Schemas } from "@outflare/sdk";
-import { PlaybookHomeSection, partKind } from "@/components/playbook-home";
+import { PlaybookHomeSection, PlaybookLiftSection, partKind } from "@/components/playbook-home";
 import { track } from "@/lib/analytics";
 import { api, errorMessage } from "../api";
 import { plural } from "../format";
@@ -16,15 +16,20 @@ export type OwnPlaybook = Schemas["OwnPlaybook"];
 type Kind = OwnPlaybook["parts"][number]["kind"];
 type Choice = { kind: Kind; id: string; name: string; note: string };
 
-const kindOrder: Kind[] = ["rule", "journey", "smart_list", "signal_type"];
-const kindTitle: Record<Kind, string> = { rule: "Rules", journey: "Journeys", smart_list: "Lists", signal_type: "Signal types" };
+const kindOrder: Kind[] = ["rule", "journey", "smart_list", "signal_type", "score", "routing_rule", "email", "metric"];
+const kindTitle: Record<Kind, string> = { rule: "Rules", journey: "Journeys", smart_list: "Lists", signal_type: "Signal types", score: "Scores", routing_rule: "Routing rules", email: "Emails", metric: "Metrics" };
 const kindHelp: Record<Kind, string> = {
   rule: "What it watches for.",
   journey: "What happens next.",
   smart_list: "Who it is about.",
   signal_type: "What it puts in Needs attention.",
+  score: "How it ranks them.",
+  routing_rule: "Who gets them.",
+  email: "What it sends.",
+  metric: "What it measures.",
 };
-const kindTab: Record<Kind, Tab> = { rule: "rules", journey: "journeys", smart_list: "lists", signal_type: "signals" };
+const kindTab: Record<Kind, Tab> = { rule: "rules", journey: "journeys", smart_list: "lists", signal_type: "signals", score: "people", routing_rule: "people", email: "templates", metric: "people" };
+const kindItem: Partial<Record<Kind, string>> = { score: "scores", routing_rule: "routing", metric: "metrics" };
 const statusText = (s: string) => (s === "active" ? "On" : s === "paused" ? "Paused" : s === "draft" ? "Draft" : s);
 const partId = (p: { kind: Kind; key: string }) => `${p.kind} ${p.key}`;
 
@@ -40,7 +45,11 @@ function useChoices(brandId: string): { choices: Choice[] | null; error: string 
       api.GET("/v1/brands/{brand}/journeys", path),
       api.GET("/v1/brands/{brand}/smart-lists", path),
       api.GET("/v1/brands/{brand}/signal-types", path),
-    ]).then(([rules, journeys, lists, types]) => {
+      api.GET("/v1/brands/{brand}/scores", path),
+      api.GET("/v1/brands/{brand}/routing", path),
+      api.GET("/v1/brands/{brand}/email-templates", path),
+      api.GET("/v1/brands/{brand}/metrics", path),
+    ]).then(([rules, journeys, lists, types, scores, routing, emails, metrics]) => {
       if (!live) return;
       const failed = rules.error ?? journeys.error ?? lists.error ?? types.error;
       if (failed) return setError(errorMessage(failed));
@@ -49,6 +58,11 @@ function useChoices(brandId: string): { choices: Choice[] | null; error: string 
         ...(journeys.data?.data ?? []).filter((x) => x.status !== "archived").map((x) => ({ kind: "journey" as const, id: x.id, name: x.name, note: statusText(x.status) })),
         ...(lists.data?.data ?? []).map((x) => ({ kind: "smart_list" as const, id: x.id, name: x.name, note: x.kind === "static" ? "Fixed list" : "Smart list" })),
         ...(types.data?.data ?? []).map((x) => ({ kind: "signal_type" as const, id: x.key, name: x.label, note: "" })),
+        // These four are extras: someone who can't read one of them still builds a playbook from the rest.
+        ...(scores.data?.data ?? []).filter((x) => x.status !== "archived").map((x) => ({ kind: "score" as const, id: x.id, name: x.label, note: x.record_type === "account" ? "Companies" : x.record_type === "deal" ? "Deals" : "People" })),
+        ...(routing.data?.data ?? []).map((x) => ({ kind: "routing_rule" as const, id: x.id, name: x.name, note: x.status === "paused" ? "Paused" : "On" })),
+        ...(emails.data?.data ?? []).filter((x) => x.status !== "archived").map((x) => ({ kind: "email" as const, id: x.id, name: x.name, note: "" })),
+        ...(metrics.data?.data ?? []).filter((x) => x.status !== "archived").map((x) => ({ kind: "metric" as const, id: x.id, name: x.name, note: "" })),
       ]);
     });
     return () => {
@@ -98,7 +112,7 @@ export function OwnPlaybookBuilder({ brandId, playbook, onDone }: { brandId: str
       <PageHeader
         title={playbook ? "Change playbook" : "New playbook"}
         back={{ label: playbook ? playbook.title : "Playbooks", onClick: () => onDone(playbook?.id) }}
-        description="A playbook of your own is a name around rules, journeys, lists and signal types you already have, so what works together is found, switched on and measured together. Saving changes none of them."
+        description="A playbook of your own is a name around the rules, journeys, lists, signals, scores, routing rules, emails and metrics you already have, so what works together is found, switched on and measured together. Saving changes none of them."
         action={
           <>
             <Button variant="ghost" type="button" onClick={() => onDone(playbook?.id)}>Cancel</Button>
@@ -232,12 +246,13 @@ export function OwnPlaybookPage({
         <div className="max-w-3xl space-y-4 text-[13px]">
           <p className="text-muted-foreground">{counts.map(([k, n]) => `${n} ${n === 1 ? partKind[k].toLowerCase() : kindTitle[k].toLowerCase()}`).join(", ")}. Open a part to change it or turn it on.</p>
           <PlaybookHomeSection home={p} go={go} title="What it has done" />
+          <PlaybookLiftSection brand={brandId} playbook={p.id} go={go} own />
           <p className="text-[12px] text-muted-foreground">
             Want to add to it?{" "}
             {kindOrder.slice(0, 3).map((k, i) => (
               <span key={k}>
                 {i > 0 && ", "}
-                <button className="underline underline-offset-4" onClick={() => go(kindTab[k])}>{kindTitle[k]}</button>
+                <button className="underline underline-offset-4" onClick={() => go(kindTab[k], kindItem[k])}>{kindTitle[k]}</button>
               </span>
             ))}{" "}
             are where you make new parts; then come back and press Change.

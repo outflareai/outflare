@@ -44,7 +44,7 @@ func withContactability(ctx context.Context, q pgx.Tx, list []recordView) error 
 		return nil
 	}
 	rows, err := q.Query(ctx, `
-		SELECT r.id::text, r.origin, r.acquired_via, w.customer_marketing,
+		SELECT r.id::text, outflare_contact_origin(r.origin, r.attributes), r.acquired_via, w.customer_marketing,
 			COALESCE((SELECT c.status FROM consents c WHERE c.workspace_id = r.workspace_id AND c.record_id = r.id
 				AND c.channel = 'email' AND c.topic = '' AND c.purpose = 'marketing'
 				ORDER BY c.occurred_at DESC, c.created_at DESC LIMIT 1), ''),

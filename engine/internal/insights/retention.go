@@ -131,6 +131,9 @@ func CompileRetention(ctx context.Context, q Querier, ws, brand string, r Retent
 	}
 	c := &CompiledRetention{r: r}
 	a := &c.args
+	if err := a.leaveOutInternal(ctx, q, ws, brand); err != nil {
+		return nil, err
+	}
 	pWS, pBrand := a.add(ws), a.add(brand)
 	pFrom, pTo := a.add(r.From), a.add(r.To)
 	// Returns are followed Periods after the last cohort's start.

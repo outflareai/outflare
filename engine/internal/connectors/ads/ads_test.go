@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -201,6 +203,8 @@ func TestMetaAds(t *testing.T) {
 		"GET /v24.0/act_55/campaigns": map[string]any{"data": []any{map[string]any{"id": "9", "name": "Prospecting", "effective_status": "PAUSED", "objective": "OUTCOME_LEADS", "daily_budget": "2500"}}},
 		"GET /v24.0/9":                map[string]any{"id": "9", "name": "Prospecting", "effective_status": "PAUSED", "objective": "OUTCOME_LEADS", "daily_budget": "2500", "account_id": "55"},
 		"POST /v24.0/9":               map[string]any{"success": true},
+		"POST /v24.0/31":              map[string]any{"success": true},
+		"POST /v24.0/41":              map[string]any{"success": true},
 		"GET /v24.0/act_55/insights": map[string]any{"data": []any{map[string]any{
 			"campaign_id": "9", "campaign_name": "Prospecting", "date_start": "2026-10-01", "spend": "25.40", "impressions": "900", "clicks": "12",
 			"actions":       []any{map[string]any{"action_type": "lead", "value": "2"}, map[string]any{"action_type": "link_click", "value": "12"}},
@@ -224,6 +228,15 @@ func TestMetaAds(t *testing.T) {
 	}
 	if _, err := m.Test(ctx, cl, c.Creds{"api_key": "bad"}); c.KindOf(err) != c.ErrAuth {
 		t.Fatalf("bad token: %v", err)
+	}
+
+	// An app Meta has switched off: said in plain words, not Meta's JSON.
+	off := c.Errf(c.ErrInvalid, `Meta refused the request (HTTP 400): {"error":{"message":"API access deactivated. To reactivate, go to the app dashboard.","code":200,"error_subcode":5258007}}`)
+	if got := metaAppOff(off); c.KindOf(got) != c.ErrInvalid || !strings.Contains(got.Error(), "choose a different app") || strings.Contains(got.Error(), "{") {
+		t.Fatalf("app off: %v", got)
+	}
+	if other := c.Errf(c.ErrAuth, "no"); metaAppOff(other) != error(other) {
+		t.Fatal("other errors pass through")
 	}
 
 	// Managing: the campaign by id, resumed, and its budget in cents.
@@ -252,6 +265,41 @@ func TestMetaAds(t *testing.T) {
 	if err := m.SetCampaignStatus(ctx, cl, creds, accts[0], "9x", true); c.KindOf(err) != c.ErrInvalid {
 		t.Fatalf("bad id: %v", err)
 	}
+
+	// Below the campaign: an ad set paused and its own budget set in
+	// cents (whole yen on the yen account), an ad resumed.
+	if err := m.SetAdGroupStatus(ctx, cl, creds, accts[0], "31", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetAdGroupDailyBudget(ctx, cl, creds, accts[0], "31", 12_345_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetAdGroupDailyBudget(ctx, cl, creds, accts[1], "31", 1_500_000_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetAdStatus(ctx, cl, creds, accts[0], "31", "41", true); err != nil {
+		t.Fatal(err)
+	}
+	posts = nil
+	for _, r := range *reqs {
+		if r.method == "POST" && (r.path == "/v24.0/31" || r.path == "/v24.0/41") {
+			posts = append(posts, strings.TrimPrefix(r.path, "/v24.0/")+" "+r.body)
+		}
+	}
+	if len(posts) != 4 || !strings.Contains(posts[0], `31 {"status":"PAUSED"}`) || !strings.Contains(posts[1], `"daily_budget":"1235"`) ||
+		!strings.Contains(posts[2], `"daily_budget":"1500"`) || !strings.Contains(posts[3], `41 {"status":"ACTIVE"}`) {
+		t.Fatalf("ad set and ad posts: %v", posts)
+	}
+	for _, err := range []error{
+		m.SetAdGroupStatus(ctx, cl, creds, accts[0], "31/x", false),
+		m.SetAdGroupDailyBudget(ctx, cl, creds, accts[0], "", 1_000_000),
+		m.SetAdGroupDailyBudget(ctx, cl, creds, accts[0], "31", 0),
+		m.SetAdStatus(ctx, cl, creds, accts[0], "31", "act_55", true),
+	} {
+		if c.KindOf(err) != c.ErrInvalid {
+			t.Fatalf("a bad id or budget: %v", err)
+		}
+	}
 }
 
 func TestMicrosoftAds(t *testing.T) {
@@ -272,7 +320,7 @@ func TestMicrosoftAds(t *testing.T) {
 		"POST /Accounts/Search":            map[string]any{"Accounts": []any{map[string]any{"Id": 77, "Name": "Northpeak", "CurrencyCode": "USD", "TimeZone": "PacificTimeUSCanadaTijuana", "ParentCustomerId": 8}}},
 		"POST /Campaigns/QueryByAccountId": map[string]any{"Campaigns": []any{map[string]any{"Id": 31, "Name": "Bing brand", "Status": "Active", "CampaignType": "Search", "DailyBudget": 20.0}}},
 		"POST /Campaigns/QueryByIds":       map[string]any{"Campaigns": []any{map[string]any{"Id": 31, "Name": "Bing brand", "Status": "Paused", "CampaignType": "Search", "DailyBudget": 20.0}}},
-		"POST /Campaigns/Update":           map[string]any{"PartialErrors": []any{}},
+		"PUT /Campaigns":                   map[string]any{"PartialErrors": []any{}},
 		"POST /GenerateReport/Submit":      map[string]any{"ReportRequestId": "r1"},
 		"GET /download/report.zip":         zipped.Bytes(),
 		"POST /GenerateReport/Poll": func(*http.Request) any {
@@ -319,7 +367,7 @@ func TestMicrosoftAds(t *testing.T) {
 	}
 	var updates []string
 	for _, r := range *reqs {
-		if r.path == "/Campaigns/Update" {
+		if r.method == "PUT" && r.path == "/Campaigns" {
 			updates = append(updates, r.body)
 		}
 	}
@@ -518,20 +566,134 @@ func TestMetaAdsConversions(t *testing.T) {
 	})
 	m, creds, acct := MetaAds{}, c.Creds{"api_key": "tok"}, c.AdAccount{ID: "55"}
 	ts, err := m.ConversionTargets(ctx, cl, creds, acct)
-	if err != nil || len(ts) != 1 || ts[0].EventTypes[0] != "Purchase" {
+	if err != nil || len(ts) != 1 || ts[0].EventTypes[0] != "Purchase" || !slices.Contains(ts[0].EventTypes, "InitiateCheckout") {
 		t.Fatalf("targets %+v %v", ts, err)
 	}
 	cv := conv(0, map[string]string{"fbclid": "abc"})
 	cv.EventType, cv.ClickTime = "Purchase", time.UnixMilli(1_700_000_000_000)
+	cv.IPAddress, cv.UserAgent = "203.0.113.7", "Mozilla/5.0 (test)"
 	res, err := m.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv})
 	if err != nil || !res[0].OK {
 		t.Fatalf("send %+v %v", res, err)
 	}
 	body := (*reqs)[len(*reqs)-1].body
-	for _, want := range []string{`"fbc":"fb.1.1700000000000.abc"`, `"event_id":"msg-1"`, `"event_name":"Purchase"`, `"ph":["` + c.HashID("15550100") + `"]`, `"value":12.5`} {
+	for _, want := range []string{`"fbc":"fb.1.1700000000000.abc"`, `"event_id":"msg-1"`, `"event_name":"Purchase"`, `"ph":["` + c.HashID("15550100") + `"]`, `"value":12.5`,
+		`"client_ip_address":"203.0.113.7"`, `"client_user_agent":"Mozilla/5.0 (test)"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("events body lacks %s: %s", want, body)
 		}
+	}
+	if k := strings.Join(res[0].MatchKeys, ","); !strings.Contains(k, "ip_address") || !strings.Contains(k, "user_agent") {
+		t.Fatalf("match keys %v", res[0].MatchKeys)
+	}
+}
+
+// Meta's match quality: the score, identifier coverage and problems per
+// event; an event without a quality block is left out.
+func TestMetaAdsMatchQuality(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /v24.0/dataset_quality": map[string]any{"web": []any{
+			map[string]any{"event_name": "Purchase", "event_match_quality": map[string]any{"composite_score": 6.2,
+				"match_key_feedback": []any{map[string]any{"identifier": "email", "coverage": map[string]any{"percentage": 99.9}}},
+				"diagnostics":        []any{map[string]any{"name": "Empty IP", "description": "No address.", "solution": "Send it.", "percentage": 12.5}}}},
+			map[string]any{"event_name": "Lead"},
+		}},
+	})
+	m, creds, acct := MetaAds{}, c.Creds{"api_key": "tok"}, c.AdAccount{ID: "55"}
+	got, err := m.MatchQuality(ctx, cl, creds, acct, "777")
+	if err != nil || len(got) != 1 || got[0].Event != "Purchase" || got[0].Score == nil || *got[0].Score != 6.2 ||
+		len(got[0].Keys) != 1 || got[0].Keys[0] != (c.MatchKey{Key: "email", Percent: 99.9}) ||
+		len(got[0].Issues) != 1 || got[0].Issues[0].Name != "Empty IP" || got[0].Issues[0].Percent != 12.5 {
+		t.Fatalf("quality %+v %v", got, err)
+	}
+	q := (*reqs)[len(*reqs)-1].query
+	if !strings.Contains(q, "dataset_id=777") || !strings.Contains(q, "composite_score") {
+		t.Fatalf("query: %s", q)
+	}
+	if _, err := m.MatchQuality(ctx, cl, creds, acct, "777/x"); err == nil {
+		t.Fatal("a pixel id that isn't a number went into the request")
+	}
+}
+
+// Below the campaign: ad groups read campaign by campaign, ads from the ad
+// report's summary, and both reports by day.
+func TestMicrosoftAdsItems(t *testing.T) {
+	old := msPoll
+	msPoll.every, msPoll.limit = time.Millisecond, time.Second
+	t.Cleanup(func() { msPoll = old })
+	zipOf := func(csv string) []byte {
+		var b bytes.Buffer
+		zw := zip.NewWriter(&b)
+		f, _ := zw.Create("report.csv")
+		f.Write([]byte("\ufeff" + csv))
+		zw.Close()
+		return b.Bytes()
+	}
+	// The report asked for last: its type and aggregation name the file.
+	var asked []string
+	var srvURL string
+	cl, reqs, u := fake(t, map[string]any{
+		"POST /Campaigns/QueryByAccountId": map[string]any{"Campaigns": []any{
+			map[string]any{"Id": 31, "Name": "Bing brand", "Status": "Active", "CampaignType": "Search"},
+			map[string]any{"Id": 32, "Name": "Shopping", "Status": "Paused", "CampaignType": "Shopping"}}},
+		"POST /AdGroups/QueryByCampaignId": func(r *http.Request) any {
+			var body struct{ CampaignId int64 }
+			json.NewDecoder(r.Body).Decode(&body)
+			if body.CampaignId == 31 {
+				return map[string]any{"AdGroups": []any{map[string]any{"Id": 501, "Name": "Exact", "Status": "Active"}, map[string]any{"Id": 502, "Name": "Old", "Status": "Expired"}}}
+			}
+			return map[string]any{"AdGroups": []any{map[string]any{"Id": 601, "Name": "All products", "Status": "Paused"}}}
+		},
+		"POST /GenerateReport/Submit": func(r *http.Request) any {
+			var body struct {
+				ReportRequest struct{ Type, Aggregation string }
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			asked = append(asked, body.ReportRequest.Type+" "+body.ReportRequest.Aggregation)
+			return map[string]any{"ReportRequestId": strconv.Itoa(len(asked))}
+		},
+		"POST /GenerateReport/Poll": func(*http.Request) any {
+			name := map[string]string{"AdPerformanceReportRequest Summary": "ads", "AdGroupPerformanceReportRequest Daily": "groupdays", "AdPerformanceReportRequest Daily": "addays"}[asked[len(asked)-1]]
+			return map[string]any{"ReportRequestStatus": map[string]any{"Status": "Success", "ReportDownloadUrl": srvURL + "/download/" + name + ".zip"}}
+		},
+		"GET /download/ads.zip": zipOf("\"AdGroupId\",\"AdId\",\"AdTitle\",\"TitlePart1\",\"AdDescription\",\"FinalUrl\",\"AdStatus\",\"Impressions\"\r\n" +
+			"\"501\",\"9001\",\"\",\"Acme CRM\",\"Close more deals\",\"https://acme.example/crm?utm_source=bing&of_campaign={CampaignId}\",\"Active\",\"1,200\"\r\n" +
+			"\"501\",\"9002\",\"Plain ad\",\"\",\"\",\"https://acme.example/\",\"Paused\",\"40\"\r\n"),
+		"GET /download/groupdays.zip": zipOf("\"TimePeriod\",\"CampaignId\",\"AdGroupId\",\"AdGroupName\",\"Spend\",\"Impressions\",\"Clicks\",\"Conversions\",\"Revenue\"\r\n" +
+			"\"2026-10-01\",\"31\",\"501\",\"Exact\",\"1,204.50\",\"20000\",\"300\",\"7\",\"900.00\"\r\n"),
+		"GET /download/addays.zip": zipOf("\"TimePeriod\",\"AdGroupId\",\"AdId\",\"AdTitle\",\"Spend\",\"Impressions\",\"Clicks\",\"Conversions\",\"Revenue\"\r\n" +
+			"\"10/1/2026\",\"501\",\"9001\",\"Acme CRM\",\"12.25\",\"900\",\"30\",\"1\",\"0\"\r\n\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"\r\n"),
+	})
+	srvURL = u
+	ms, creds, acct := MicrosoftAds{}, c.Creds{"access_token": "tok", "developer_token": "dev"}, c.AdAccount{ID: "77", Currency: "USD", Meta: map[string]string{"customer_id": "8"}}
+	groups, err := ms.AdItems(ctx, cl, creds, acct, c.AdLevelGroup)
+	if err != nil || len(groups) != 3 || groups[0].ID != "501" || groups[0].ParentID != "31" || groups[0].Status != c.AdActive || groups[2].ParentID != "32" || groups[2].Status != c.AdPaused {
+		t.Fatalf("ad groups %+v %v", groups, err)
+	}
+	ads, err := ms.AdItems(ctx, cl, creds, acct, c.AdLevelAd)
+	if err != nil || len(ads) != 2 || ads[0].ID != "9001" || ads[0].ParentID != "501" || ads[0].Name != "Acme CRM" || ads[0].Details[c.AdDetailText] != "Close more deals" ||
+		ads[0].Details[c.AdDetailTemplated] != "true" || ads[1].Name != "Plain ad" || ads[1].Status != c.AdPaused || ads[1].Details[c.AdDetailTemplated] != "false" {
+		t.Fatalf("ads %+v %v", ads, err)
+	}
+	gd, err := ms.AdItemDays(ctx, cl, creds, acct, c.AdLevelGroup, "2026-10-01", "2026-10-02")
+	if err != nil || len(gd) != 1 || gd[0].ID != "501" || gd[0].ParentID != "31" || gd[0].Name != "Exact" || gd[0].SpendMicros != 1_204_500_000 || *gd[0].ConversionValueMicros != 900_000_000 {
+		t.Fatalf("ad group days %+v %v", gd, err)
+	}
+	// A date written the American way is read, and a blank line is left out.
+	ad, err := ms.AdItemDays(ctx, cl, creds, acct, c.AdLevelAd, "2026-10-01", "2026-10-02")
+	if err != nil || len(ad) != 1 || ad[0].ID != "9001" || ad[0].ParentID != "501" || ad[0].Date != "2026-10-01" || ad[0].SpendMicros != 12_250_000 || ad[0].Clicks != 30 {
+		t.Fatalf("ad days %+v %v", ad, err)
+	}
+	if strings.Join(asked, ", ") != "AdPerformanceReportRequest Summary, AdGroupPerformanceReportRequest Daily, AdPerformanceReportRequest Daily" {
+		t.Fatalf("reports asked for: %v", asked)
+	}
+	for _, r := range *reqs {
+		if (strings.HasPrefix(r.path, "/GenerateReport") || strings.HasPrefix(r.path, "/AdGroups")) && (r.header.Get("CustomerAccountId") != "77" || r.header.Get("CustomerId") != "8") {
+			t.Fatalf("a call without the account headers: %s %v", r.path, r.header)
+		}
+	}
+	if _, err := ms.AdItems(ctx, cl, creds, acct, "campaign"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a wrong level: %v", err)
 	}
 }
 
@@ -649,6 +811,98 @@ func TestTikTokAds(t *testing.T) {
 	}
 }
 
+// Below the campaign: ad groups with their own daily budget, ads with
+// their text and landing page, and the report by ad group and by ad.
+func TestTikTokAdsItems(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /adgroup/get/": map[string]any{"code": 0, "data": map[string]any{
+			"list": []any{
+				map[string]any{"adgroup_id": "g1", "adgroup_name": "US 18-34", "campaign_id": "c1", "operation_status": "ENABLE", "budget": 20, "budget_mode": "BUDGET_MODE_DAY"},
+				map[string]any{"adgroup_id": "g2", "adgroup_name": "Lookalike", "campaign_id": "c1", "operation_status": "DISABLE", "budget": 500, "budget_mode": "BUDGET_MODE_TOTAL"},
+			},
+			"page_info": map[string]any{"page": 1, "total_page": 1}}},
+		"GET /ad/get/": map[string]any{"code": 0, "data": map[string]any{
+			"list": []any{
+				map[string]any{"ad_id": "a1", "ad_name": "Demo video", "adgroup_id": "g1", "operation_status": "ENABLE", "ad_text": "See it work", "landing_page_url": "https://acme.example/demo?utm_source=tiktok&of_campaign=__CAMPAIGN_ID__"},
+				map[string]any{"ad_id": "a2", "ad_name": "Plain", "adgroup_id": "g1", "operation_status": "ENABLE", "secondary_status": "AD_STATUS_DELETE", "landing_page_url": "https://acme.example/"},
+			},
+			"page_info": map[string]any{"page": 1, "total_page": 1}}},
+		"POST /adgroup/status/update/": map[string]any{"code": 0, "message": "OK"},
+		"POST /ad/status/update/":      map[string]any{"code": 0, "message": "OK"},
+		"POST /adgroup/update/":        map[string]any{"code": 0, "message": "OK"},
+		"GET /report/integrated/get/": func(r *http.Request) any {
+			row := map[string]any{"dimensions": map[string]any{"adgroup_id": "g1", "stat_time_day": "2026-10-01 00:00:00"},
+				"metrics": map[string]any{"adgroup_name": "US 18-34", "campaign_id": "c1", "spend": "12.34", "impressions": "1000", "clicks": "25", "conversion": "3"}}
+			if r.URL.Query().Get("data_level") == "AUCTION_AD" {
+				row = map[string]any{"dimensions": map[string]any{"ad_id": "a1", "stat_time_day": "2026-10-01 00:00:00"},
+					"metrics": map[string]any{"ad_name": "Demo video", "adgroup_id": "g1", "spend": 7.5, "impressions": 600, "clicks": 9, "conversion": "0",
+						"video_play_actions": "500", "video_watched_2s": "240", "video_watched_6s": 90, "video_views_p25": "200", "video_views_p50": "120", "video_views_p75": "70", "video_views_p100": "30"}}
+			}
+			return map[string]any{"code": 0, "data": map[string]any{"list": []any{row}, "page_info": map[string]any{"page": 1, "total_page": 1}}}
+		},
+	})
+	tk, creds, acct := TikTokAds{}, c.Creds{"access_token": "tok"}, c.AdAccount{ID: "700", Currency: "USD"}
+	groups, err := tk.AdItems(ctx, cl, creds, acct, c.AdLevelGroup)
+	if err != nil || len(groups) != 2 || groups[0].ID != "g1" || groups[0].ParentID != "c1" || groups[0].Status != c.AdActive || *groups[0].DailyBudgetMicros != 20_000_000 ||
+		groups[1].Status != c.AdPaused || groups[1].DailyBudgetMicros != nil {
+		t.Fatalf("ad groups %+v %v", groups, err)
+	}
+	ads, err := tk.AdItems(ctx, cl, creds, acct, c.AdLevelAd)
+	if err != nil || len(ads) != 2 || ads[0].ParentID != "g1" || ads[0].Details[c.AdDetailText] != "See it work" || ads[0].Details[c.AdDetailTemplated] != "true" ||
+		ads[1].Status != c.AdRemoved || ads[1].Details[c.AdDetailTemplated] != "false" {
+		t.Fatalf("ads %+v %v", ads, err)
+	}
+	n := len(*reqs)
+	gd, err := tk.AdItemDays(ctx, cl, creds, acct, c.AdLevelGroup, "2026-10-01", "2026-10-01")
+	if err != nil || len(gd) != 1 || gd[0].ID != "g1" || gd[0].ParentID != "c1" || gd[0].Name != "US 18-34" || gd[0].SpendMicros != 12_340_000 || gd[0].Clicks != 25 || *gd[0].Conversions != 3 {
+		t.Fatalf("ad group days %+v %v", gd, err)
+	}
+	ad, err := tk.AdItemDays(ctx, cl, creds, acct, c.AdLevelAd, "2026-10-01", "2026-10-01")
+	if err != nil || len(ad) != 1 || ad[0].ID != "a1" || ad[0].ParentID != "g1" || ad[0].SpendMicros != 7_500_000 || ad[0].Impressions != 600 || ad[0].Date != "2026-10-01" {
+		t.Fatalf("ad days %+v %v", ad, err)
+	}
+	// How far the video was watched: 2-second plays, 6-second plays and
+	// the quarters. The ad group's row had no plays, so it has none.
+	if *ad[0].VideoViews != 240 || *ad[0].VideoThruPlays != 90 || *ad[0].VideoP25 != 200 || *ad[0].VideoP50 != 120 || *ad[0].VideoP75 != 70 || *ad[0].VideoP100 != 30 || gd[0].VideoViews != nil || gd[0].VideoP25 != nil {
+		t.Fatalf("video %+v %+v", ad[0].AdExtra, gd[0].AdExtra)
+	}
+	if got := (*reqs)[n:]; len(got) != 2 || !strings.Contains(got[0].query, "data_level=AUCTION_ADGROUP") || !strings.Contains(got[0].query, "adgroup_id") ||
+		!strings.Contains(got[1].query, "data_level=AUCTION_AD") || !strings.Contains(got[1].query, "video_watched_6s") {
+		t.Fatalf("report calls %+v", got)
+	}
+	if _, err := tk.AdItems(ctx, cl, creds, acct, "campaign"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a wrong level: %v", err)
+	}
+
+	// Changes: an ad group paused, its daily budget set to the cent, an
+	// ad resumed.
+	n = len(*reqs)
+	if err := tk.SetAdGroupStatus(ctx, cl, creds, acct, "1801", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := tk.SetAdGroupDailyBudget(ctx, cl, creds, acct, "1801", 25_504_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := tk.SetAdStatus(ctx, cl, creds, acct, "1801", "1901", true); err != nil {
+		t.Fatal(err)
+	}
+	got := (*reqs)[n:]
+	if len(got) != 3 || !strings.Contains(got[0].body, `"adgroup_ids":["1801"]`) || !strings.Contains(got[0].body, `"operation_status":"DISABLE"`) ||
+		!strings.Contains(got[1].body, `"adgroup_id":"1801"`) || !strings.Contains(got[1].body, `"budget":25.5`) ||
+		!strings.Contains(got[2].body, `"ad_ids":["1901"]`) || !strings.Contains(got[2].body, `"operation_status":"ENABLE"`) {
+		t.Fatalf("changes sent: %+v", got)
+	}
+	for _, err := range []error{
+		tk.SetAdGroupStatus(ctx, cl, creds, acct, "g1", false),
+		tk.SetAdStatus(ctx, cl, creds, acct, "1801", "", true),
+		tk.SetAdGroupDailyBudget(ctx, cl, creds, acct, "1801", 0),
+	} {
+		if c.KindOf(err) != c.ErrInvalid {
+			t.Fatalf("a bad id or budget: %v", err)
+		}
+	}
+}
+
 func TestTikTokAdsRefusals(t *testing.T) {
 	cl, _, _ := fake(t, map[string]any{
 		"GET /advertiser/info/": map[string]any{"code": 40105, "message": "Access token is incorrect or has been revoked."},
@@ -679,13 +933,16 @@ func TestTikTokAdsConversions(t *testing.T) {
 	}
 	cv := conv(0, map[string]string{"ttclid": "tt1", "ttp": "cookie1"})
 	cv.EventType = "CompletePayment"
-	empty := c.AdConversion{EventID: "msg-2", Index: 1, ClickIDs: map[string]string{"gclid": "g"}}
+	cv.IPAddress, cv.UserAgent = "203.0.113.7", "Mozilla/5.0 (test)"
+	// An address and a browser alone are never enough to send.
+	empty := c.AdConversion{EventID: "msg-2", Index: 1, ClickIDs: map[string]string{"gclid": "g"}, IPAddress: "203.0.113.7", UserAgent: "Mozilla/5.0 (test)"}
 	res, err := tk.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv, empty})
 	if err != nil || !res[0].OK || !res[1].Skipped {
 		t.Fatalf("send %+v %v", res, err)
 	}
 	last := (*reqs)[len(*reqs)-1]
-	for _, want := range []string{`"event_source_id":"PX1"`, `"event":"CompletePayment"`, `"ttclid":"tt1"`, `"ttp":"cookie1"`, `"event_id":"msg-1"`, `"value":12.5`, `"email":"` + c.HashID("ana@acme.example") + `"`} {
+	for _, want := range []string{`"event_source_id":"PX1"`, `"event":"CompletePayment"`, `"ttclid":"tt1"`, `"ttp":"cookie1"`, `"event_id":"msg-1"`, `"value":12.5`, `"email":"` + c.HashID("ana@acme.example") + `"`,
+		`"ip":"203.0.113.7"`, `"user_agent":"Mozilla/5.0 (test)"`} {
 		if !strings.Contains(last.body, want) {
 			t.Fatalf("event body lacks %s: %s", want, last.body)
 		}
@@ -777,6 +1034,67 @@ func TestSnapchatAds(t *testing.T) {
 	}
 }
 
+// Below the campaign: ad squads with their own daily budget, ads with
+// their creative's headline and page, and days by ad, which an ad squad's
+// days are the sum of.
+func TestSnapchatAdsItems(t *testing.T) {
+	stats := func(id string, days ...map[string]any) map[string]any {
+		var ts []any
+		for i, st := range days {
+			ts = append(ts, map[string]any{"start_time": "2026-10-0" + strconv.Itoa(i+1) + "T00:00:00.000+02:00", "stats": st})
+		}
+		return map[string]any{"id": id, "timeseries": ts}
+	}
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /adaccounts/a1/adsquads": map[string]any{"adsquads": []any{
+			map[string]any{"adsquad": map[string]any{"id": "s1", "name": "DE 18-24", "status": "ACTIVE", "campaign_id": "c1", "daily_budget_micro": 15_000_000}},
+			map[string]any{"adsquad": map[string]any{"id": "s2", "name": "Lifetime", "status": "PAUSED", "campaign_id": "c1", "lifetime_budget_micro": 900_000_000}}}},
+		"GET /adaccounts/a1/ads": map[string]any{"ads": []any{
+			map[string]any{"ad": map[string]any{"id": "d1", "name": "Lens A", "ad_squad_id": "s1", "creative_id": "k1", "status": "ACTIVE"}},
+			map[string]any{"ad": map[string]any{"id": "d2", "name": "Lens B", "ad_squad_id": "s1", "creative_id": "k2", "status": "PAUSED"}},
+			map[string]any{"ad": map[string]any{"id": "d3", "name": "Story", "ad_squad_id": "s2", "creative_id": "k9", "status": "ACTIVE"}}}},
+		"GET /adaccounts/a1/creatives": map[string]any{"creatives": []any{
+			map[string]any{"creative": map[string]any{"id": "k1", "headline": "Try it free", "web_view_properties": map[string]any{"url": "https://acme.example/try?utm_source=snapchat&of_campaign={{campaign.id}}"}}},
+			map[string]any{"creative": map[string]any{"id": "k2", "headline": "Plain", "web_view_properties": map[string]any{"url": "https://acme.example/"}}}}},
+		"GET /adaccounts/a1/stats": map[string]any{"timeseries_stats": []any{map[string]any{"timeseries_stat": map[string]any{"breakdown_stats": map[string]any{
+			"ad": []any{
+				stats("d1", map[string]any{"impressions": 800, "swipes": 12, "spend": 4_500_000, "conversion_purchases": 2}, map[string]any{"impressions": 100, "swipes": 1, "spend": 500_000}),
+				stats("d2", map[string]any{"impressions": 200, "swipes": 3, "spend": 1_500_000, "conversion_purchases": 1}, map[string]any{"impressions": 0, "swipes": 0, "spend": 0}),
+				stats("gone", map[string]any{"impressions": 50, "swipes": 1, "spend": 250_000}),
+			}}}}}},
+	})
+	sn, creds, acct := SnapchatAds{}, c.Creds{"access_token": "tok"}, c.AdAccount{ID: "a1", Currency: "EUR", TimeZone: "Europe/Berlin"}
+	squads, err := sn.AdItems(ctx, cl, creds, acct, c.AdLevelGroup)
+	if err != nil || len(squads) != 2 || squads[0].ParentID != "c1" || squads[0].Status != c.AdActive || *squads[0].DailyBudgetMicros != 15_000_000 ||
+		squads[1].Status != c.AdPaused || squads[1].DailyBudgetMicros != nil {
+		t.Fatalf("ad squads %+v %v", squads, err)
+	}
+	ads, err := sn.AdItems(ctx, cl, creds, acct, c.AdLevelAd)
+	if err != nil || len(ads) != 3 || ads[0].ParentID != "s1" || ads[0].Details[c.AdDetailHeadline] != "Try it free" || ads[0].Details[c.AdDetailTemplated] != "true" ||
+		ads[1].Status != c.AdPaused || ads[1].Details[c.AdDetailTemplated] != "false" || len(ads[2].Details) != 0 {
+		t.Fatalf("ads %+v %v", ads, err)
+	}
+	n := len(*reqs)
+	ad, err := sn.AdItemDays(ctx, cl, creds, acct, c.AdLevelAd, "2026-10-01", "2026-10-02")
+	if err != nil || len(ad) != 4 || ad[0].ID != "d1" || ad[0].ParentID != "s1" || ad[0].Name != "Lens A" || ad[0].SpendMicros != 4_500_000 || *ad[0].Conversions != 2 ||
+		ad[1].Date != "2026-10-02" || ad[2].ID != "d2" || ad[3].ID != "gone" || ad[3].ParentID != "" {
+		t.Fatalf("ad days %+v %v", ad, err)
+	}
+	if got := (*reqs)[n:]; len(got) != 2 || !strings.Contains(got[1].query, "breakdown=ad") || !strings.Contains(got[1].query, "granularity=DAY") {
+		t.Fatalf("stats call %+v", got)
+	}
+	// The squad's first day is both ads'; the second only the first ad's.
+	// An ad no longer listed adds to no squad.
+	sq, err := sn.AdItemDays(ctx, cl, creds, acct, c.AdLevelGroup, "2026-10-01", "2026-10-02")
+	if err != nil || len(sq) != 2 || sq[0].ID != "s1" || sq[0].Date != "2026-10-01" || sq[0].SpendMicros != 6_000_000 || sq[0].Clicks != 15 || sq[0].Impressions != 1000 || *sq[0].Conversions != 3 ||
+		sq[1].Date != "2026-10-02" || sq[1].SpendMicros != 500_000 || sq[1].Conversions != nil {
+		t.Fatalf("ad squad days %+v %v", sq, err)
+	}
+	if _, err := sn.AdItemDays(ctx, cl, creds, acct, "campaign", "2026-10-01", "2026-10-02"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a wrong level: %v", err)
+	}
+}
+
 func TestSnapchatAdsConversions(t *testing.T) {
 	cl, reqs, _ := fake(t, map[string]any{
 		"GET /adaccounts/a1/pixels": map[string]any{"pixels": []any{map[string]any{"pixel": map[string]any{"id": "PX9", "name": "Site"}}}},
@@ -793,8 +1111,12 @@ func TestSnapchatAdsConversions(t *testing.T) {
 	}
 	cv := conv(0, map[string]string{"ScCid": "sc1", "scid": "cookie9"})
 	cv.EventType = "PURCHASE"
+	cv.IPAddress, cv.UserAgent = "203.0.113.7", "Mozilla/5.0 (test)"
 	empty := c.AdConversion{EventID: "msg-2", Index: 1, ClickIDs: map[string]string{"gclid": "g"}}
 	res, err := sn.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv, empty})
+	if err == nil && !strings.Contains((*reqs)[len(*reqs)-1].body, `"client_ip_address":"203.0.113.7","client_user_agent":"Mozilla/5.0 (test)"`) {
+		t.Fatalf("no address and browser: %s", (*reqs)[len(*reqs)-1].body)
+	}
 	if err != nil || !res[0].OK || !res[1].Skipped {
 		t.Fatalf("send %+v %v", res, err)
 	}
@@ -863,6 +1185,227 @@ func TestPinterestAds(t *testing.T) {
 	}
 }
 
+// LinkedIn's creatives sit directly in what Outflare calls a campaign.
+func TestLinkedInCampaignAds(t *testing.T) {
+	day := func(urn string, d int, cost string, imp, clicks int) map[string]any {
+		return map[string]any{"pivotValues": []string{urn}, "dateRange": map[string]any{"start": map[string]any{"year": 2026, "month": 10, "day": d}},
+			"costInLocalCurrency": cost, "impressions": imp, "clicks": clicks, "externalWebsiteConversions": 1, "conversionValueInLocalCurrency": "25.00"}
+	}
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /adAccounts/501/creatives": func(r *http.Request) any {
+			if r.URL.Query().Get("pageToken") == "" {
+				return map[string]any{"metadata": map[string]any{"nextPageToken": "t2"}, "elements": []any{
+					map[string]any{"id": "urn:li:sponsoredCreative:9001", "campaign": "urn:li:sponsoredCampaign:61", "name": "CFO webinar", "intendedStatus": "ACTIVE",
+						"isServing": true, "review": map[string]any{"status": "APPROVED"}, "content": map[string]any{"reference": "urn:li:share:1"}},
+					map[string]any{"id": "urn:li:sponsoredCreative:9002", "campaign": "urn:li:sponsoredCampaign:61", "intendedStatus": "PAUSED", "review": map[string]any{"status": "REJECTED"}},
+				}}
+			}
+			return map[string]any{"elements": []any{
+				map[string]any{"id": "urn:li:sponsoredCreative:9003", "campaign": "urn:li:sponsoredCampaign:62", "intendedStatus": "DRAFT"},
+				map[string]any{"id": "urn:li:sponsoredCreative:9004", "campaign": "urn:li:sponsoredCampaign:62", "intendedStatus": "ARCHIVED"},
+			}}
+		},
+		"GET /adAnalytics": map[string]any{"elements": []any{
+			day("urn:li:sponsoredCreative:9001", 1, "40.10", 2000, 12),
+			day("urn:li:sponsoredCreative:9002", 1, "0", 0, 0),
+			day("urn:li:sponsoredCreative:7777", 1, "5.00", 100, 1),
+		}},
+	})
+	l, creds, acct := LinkedInAds{}, c.Creds{"access_token": "tok"}, c.AdAccount{ID: "501", Currency: "USD"}
+	items, days, err := l.CampaignAds(ctx, cl, creds, acct, "2026-10-01", "2026-10-07")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 4 || items[0].ID != "9001" || items[0].ParentID != "61" || items[0].Name != "CFO webinar" || items[0].Status != c.AdActive ||
+		items[0].Details[c.AdDetailPolicy] != "approved" || items[1].Status != c.AdPaused || items[1].Details[c.AdDetailPolicy] != "disapproved" ||
+		items[2].ParentID != "62" || items[2].Status != c.AdPaused || len(items[2].Details) != 0 || items[3].Status != c.AdRemoved {
+		t.Fatalf("items %+v", items)
+	}
+	// A creative with nothing shown, and one the list doesn't have, are
+	// left out of the days.
+	if len(days) != 1 || days[0].ID != "9001" || days[0].ParentID != "61" || days[0].Name != "CFO webinar" || days[0].Date != "2026-10-01" || days[0].SpendMicros != 40_100_000 ||
+		days[0].Clicks != 12 || *days[0].Conversions != 1 || *days[0].ConversionValueMicros != 25_000_000 {
+		t.Fatalf("days %+v", days)
+	}
+	var finder, analytics []seen
+	for _, r := range *reqs {
+		if strings.HasSuffix(r.path, "/creatives") {
+			finder = append(finder, r)
+		} else {
+			analytics = append(analytics, r)
+		}
+	}
+	if len(finder) != 2 || finder[0].header.Get("X-RestLi-Method") != "FINDER" || !strings.Contains(finder[0].query, "q=criteria") || !strings.Contains(finder[1].query, "pageToken=t2") {
+		t.Fatalf("creative calls %+v", finder)
+	}
+	if len(analytics) != 1 || !strings.Contains(analytics[0].query, "pivot=CREATIVE") || !strings.Contains(analytics[0].query, "accounts=List(urn%3Ali%3AsponsoredAccount%3A501)") {
+		t.Fatalf("analytics calls %+v", analytics)
+	}
+	// 40 days are two analytics calls.
+	n := len(*reqs)
+	if _, _, err := l.CampaignAds(ctx, cl, creds, acct, "2026-09-01", "2026-10-10"); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*reqs)[n:]; len(got) != 4 || !strings.Contains(got[2].query, "end:(year:2026,month:10,day:1)") || !strings.Contains(got[3].query, "start:(year:2026,month:10,day:2)") {
+		t.Fatalf("long window: %d calls", len(got))
+	}
+}
+
+// A Reddit ad group or ad is paused and resumed with configured_status,
+// after checking it is in the account.
+func TestRedditAdsItemStatus(t *testing.T) {
+	var bodies []string
+	patch := func(r *http.Request) any {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, r.URL.Path+" "+string(b))
+		return map[string]any{"data": map[string]any{}}
+	}
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /ad_groups/g1":   map[string]any{"data": map[string]any{"id": "g1", "ad_account_id": "a1"}},
+		"PATCH /ad_groups/g1": patch,
+		"GET /ads/d1":         map[string]any{"data": map[string]any{"id": "d1", "ad_account_id": "a1"}},
+		"PATCH /ads/d1":       patch,
+		"GET /ads/d9":         map[string]any{"data": map[string]any{"id": "d9", "ad_account_id": "other"}},
+	})
+	r, creds, acct := RedditAds{}, c.Creds{"access_token": "tok"}, c.AdAccount{ID: "a1"}
+	if err := r.SetAdGroupStatus(ctx, cl, creds, acct, "g1", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAdStatus(ctx, cl, creds, acct, "g1", "d1", true); err != nil {
+		t.Fatal(err)
+	}
+	want := `/ad_groups/g1 {"data":{"configured_status":"PAUSED"}} /ads/d1 {"data":{"configured_status":"ACTIVE"}}`
+	if got := strings.Join(bodies, " "); strings.ReplaceAll(got, "\n", "") != want {
+		t.Fatalf("bodies %q", got)
+	}
+	// Another account's ad, and a bad id, are refused before any change.
+	n := len(bodies)
+	if err := r.SetAdStatus(ctx, cl, creds, acct, "g1", "d9", false); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("another account's ad: %v", err)
+	}
+	calls := len(*reqs)
+	if err := r.SetAdGroupStatus(ctx, cl, creds, acct, "g 1", false); c.KindOf(err) != c.ErrInvalid || len(*reqs) != calls {
+		t.Fatalf("a bad id: %v", err)
+	}
+	if len(bodies) != n {
+		t.Fatal("a refused change reached Reddit")
+	}
+}
+
+func TestPinterestAdsItems(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /ad_accounts/549/ad_groups": map[string]any{"items": []any{
+			map[string]any{"id": "2680", "name": "Home decor", "status": "ACTIVE", "campaign_id": "626", "budget_in_micro_currency": 5_000_000, "budget_type": "DAILY"},
+			map[string]any{"id": "2681", "name": "Lifetime", "status": "PAUSED", "campaign_id": "626", "budget_in_micro_currency": 90_000_000, "budget_type": "LIFETIME"},
+		}},
+		"GET /ad_accounts/549/ads": map[string]any{"items": []any{
+			map[string]any{"id": "6870", "name": "Lamp pin", "status": "ACTIVE", "ad_group_id": "2680", "campaign_id": "626", "creative_type": "REGULAR",
+				"destination_url": "https://acme.example/lamps?utm_source=pinterest&of_campaign={campaignid}"},
+			map[string]any{"id": "6871", "status": "ARCHIVED", "ad_group_id": "2680", "campaign_id": "626", "creative_type": "VIDEO", "destination_url": "https://acme.example/"},
+			map[string]any{"id": "6872", "name": "No link", "status": "PAUSED", "ad_group_id": "2681"},
+		}},
+		"GET /ad_accounts/549/ad_groups/analytics": []any{
+			map[string]any{"AD_GROUP_ID": "2680", "DATE": "2026-10-01", "SPEND_IN_MICRO_DOLLAR": 4_000_000, "IMPRESSION_1": 600, "CLICKTHROUGH_1": 20, "TOTAL_CONVERSIONS": 3},
+			map[string]any{"AD_GROUP_ID": 2681, "DATE": "2026-10-01", "SPEND_IN_MICRO_DOLLAR": 0, "IMPRESSION_1": 0, "CLICKTHROUGH_1": 0},
+		},
+		"GET /ad_accounts/549/ads/analytics": []any{
+			map[string]any{"AD_ID": "6870", "DATE": "2026-10-01", "SPEND_IN_MICRO_DOLLAR": 3_000_000, "IMPRESSION_1": 500, "CLICKTHROUGH_1": 15, "TOTAL_CONVERSIONS": 2},
+			map[string]any{"AD_ID": "6871", "DATE": "2026-10-01", "SPEND_IN_MICRO_DOLLAR": 1_000_000, "IMPRESSION_1": 100, "CLICKTHROUGH_1": 5},
+			map[string]any{"AD_ID": "9999", "DATE": "2026-10-01", "SPEND_IN_MICRO_DOLLAR": 1, "IMPRESSION_1": 1, "CLICKTHROUGH_1": 1},
+		},
+	})
+	pn, creds, acct := PinterestAds{}, c.Creds{"access_token": "tok"}, c.AdAccount{ID: "549", Currency: "USD"}
+	groups, err := pn.AdItems(ctx, cl, creds, acct, c.AdLevelGroup)
+	if err != nil || len(groups) != 2 || groups[0].ParentID != "626" || groups[0].Status != c.AdActive || *groups[0].DailyBudgetMicros != 5_000_000 ||
+		groups[1].Status != c.AdPaused || groups[1].DailyBudgetMicros != nil {
+		t.Fatalf("ad groups %+v %v", groups, err)
+	}
+	if got := (*reqs)[len(*reqs)-1]; !strings.Contains(got.query, "entity_statuses=ACTIVE%2CPAUSED%2CARCHIVED") {
+		t.Fatalf("archived ad groups are listed too: %s", got.query)
+	}
+	ads, err := pn.AdItems(ctx, cl, creds, acct, c.AdLevelAd)
+	if err != nil || len(ads) != 3 || ads[0].ParentID != "2680" || ads[0].Details[c.AdDetailType] != "regular" || ads[0].Details[c.AdDetailTemplated] != "true" ||
+		ads[1].Status != c.AdRemoved || ads[1].Details[c.AdDetailTemplated] != "false" || len(ads[2].Details) != 0 {
+		t.Fatalf("ads %+v %v", ads, err)
+	}
+	gd, err := pn.AdItemDays(ctx, cl, creds, acct, c.AdLevelGroup, "2026-10-01", "2026-10-02")
+	if err != nil || len(gd) != 1 || gd[0].ID != "2680" || gd[0].ParentID != "626" || gd[0].Name != "Home decor" || gd[0].SpendMicros != 4_000_000 || *gd[0].Conversions != 3 {
+		t.Fatalf("ad group days %+v %v", gd, err)
+	}
+	if got := (*reqs)[len(*reqs)-1]; !strings.Contains(got.query, "ad_group_ids=2680%2C2681") || !strings.Contains(got.query, "granularity=DAY") {
+		t.Fatalf("ad group analytics call %s", got.query)
+	}
+	// An ad the list doesn't have is left out: nothing says where it goes.
+	ad, err := pn.AdItemDays(ctx, cl, creds, acct, c.AdLevelAd, "2026-10-01", "2026-10-02")
+	if err != nil || len(ad) != 2 || ad[0].ID != "6870" || ad[0].ParentID != "2680" || ad[0].Clicks != 15 || ad[1].ID != "6871" || ad[1].Conversions != nil {
+		t.Fatalf("ad days %+v %v", ad, err)
+	}
+	if got := (*reqs)[len(*reqs)-1]; !strings.Contains(got.query, "ad_ids=6870%2C6871%2C6872") {
+		t.Fatalf("ad analytics call %s", got.query)
+	}
+	if _, err := pn.AdItems(ctx, cl, creds, acct, "campaign"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a wrong level: %v", err)
+	}
+}
+
+func TestRedditAdsItems(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /ad_accounts/a1/ad_groups": map[string]any{"data": []any{
+			map[string]any{"id": "g1", "campaign_id": "c1", "name": "r/homelab", "configured_status": "ACTIVE", "effective_status": "ACTIVE", "goal_type": "DAILY_SPEND", "goal_value": 20_000_000},
+			map[string]any{"id": "g2", "campaign_id": "c1", "name": "Paused", "configured_status": "ACTIVE", "effective_status": "CAMPAIGN_PAUSED", "goal_type": "LIFETIME_SPEND", "goal_value": 500_000_000},
+			map[string]any{"id": "g3", "campaign_id": "c2", "name": "Set by hand", "configured_status": "PAUSED"},
+		}},
+		"GET /ad_accounts/a1/ads": map[string]any{"data": []any{
+			map[string]any{"id": "d1", "ad_group_id": "g1", "name": "Rack post", "configured_status": "ACTIVE", "effective_status": "ACTIVE",
+				"click_url": "https://acme.example/racks?utm_source=reddit&of_campaign={{CAMPAIGN_ID}}"},
+			map[string]any{"id": "d2", "ad_group_id": "g1", "name": "Waiting", "configured_status": "ACTIVE", "effective_status": "PENDING_APPROVAL", "click_url": "https://acme.example/"},
+			map[string]any{"id": "d3", "ad_group_id": "g2", "name": "Group off", "configured_status": "ACTIVE", "effective_status": "AD_GROUP_PAUSED"},
+		}},
+		"POST /ad_accounts/a1/reports": func(r *http.Request) any {
+			body, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(body), `"AD_ID"`) {
+				return map[string]any{"data": map[string]any{"metrics": []any{
+					map[string]any{"ad_group_id": "g1", "ad_id": "d1", "date": "2026-10-01", "spend": 2_500_000, "impressions": 400, "clicks": 8, "key_conversion_total_count": 1},
+					map[string]any{"ad_group_id": "g9", "ad_id": "gone", "date": "2026-10-02", "spend": 100_000, "impressions": 10, "clicks": 0},
+				}}}
+			}
+			return map[string]any{"data": map[string]any{"metrics": []any{
+				map[string]any{"campaign_id": "c1", "ad_group_id": "g1", "date": "2026-10-01T00:00:00Z", "spend": 3_000_000, "impressions": 500, "clicks": 9, "key_conversion_total_count": 2},
+				map[string]any{"campaign_id": "c1", "date": "2026-10-01", "spend": 5},
+			}}}
+		},
+	})
+	r, creds, acct := RedditAds{}, c.Creds{"access_token": "tok"}, c.AdAccount{ID: "a1", Currency: "USD", TimeZone: "America/Chicago"}
+	groups, err := r.AdItems(ctx, cl, creds, acct, c.AdLevelGroup)
+	if err != nil || len(groups) != 3 || groups[0].ParentID != "c1" || groups[0].Name != "r/homelab" || groups[0].Status != c.AdActive || *groups[0].DailyBudgetMicros != 20_000_000 ||
+		groups[1].Status != c.AdPaused || groups[1].ProviderStatus != "CAMPAIGN_PAUSED" || groups[1].DailyBudgetMicros != nil || groups[2].Status != c.AdPaused {
+		t.Fatalf("ad groups %+v %v", groups, err)
+	}
+	ads, err := r.AdItems(ctx, cl, creds, acct, c.AdLevelAd)
+	if err != nil || len(ads) != 3 || ads[0].ParentID != "g1" || ads[0].Details[c.AdDetailTemplated] != "true" || ads[1].Status != c.AdOther ||
+		ads[1].Details[c.AdDetailTemplated] != "false" || ads[2].Status != c.AdPaused || len(ads[2].Details) != 0 {
+		t.Fatalf("ads %+v %v", ads, err)
+	}
+	gd, err := r.AdItemDays(ctx, cl, creds, acct, c.AdLevelGroup, "2026-10-01", "2026-10-02")
+	if err != nil || len(gd) != 1 || gd[0].ID != "g1" || gd[0].ParentID != "c1" || gd[0].Date != "2026-10-01" || gd[0].SpendMicros != 3_000_000 || *gd[0].Conversions != 2 {
+		t.Fatalf("ad group days %+v %v", gd, err)
+	}
+	if last := (*reqs)[len(*reqs)-1]; !strings.Contains(last.body, `"breakdowns":["DATE","CAMPAIGN_ID","AD_GROUP_ID"]`) || !strings.Contains(last.body, `"ends_at":"2026-10-03T00:00:00Z"`) {
+		t.Fatalf("ad group report body %s", last.body)
+	}
+	// An ad no longer listed still comes with its ad group.
+	ad, err := r.AdItemDays(ctx, cl, creds, acct, c.AdLevelAd, "2026-10-01", "2026-10-02")
+	if err != nil || len(ad) != 2 || ad[0].ID != "d1" || ad[0].ParentID != "g1" || ad[0].Clicks != 8 || ad[1].ID != "gone" || ad[1].ParentID != "g9" || ad[1].Conversions != nil {
+		t.Fatalf("ad days %+v %v", ad, err)
+	}
+	if last := (*reqs)[len(*reqs)-1]; !strings.Contains(last.body, `"breakdowns":["DATE","AD_GROUP_ID","AD_ID"]`) {
+		t.Fatalf("ad report body %s", last.body)
+	}
+	if _, err := r.AdItemDays(ctx, cl, creds, acct, "campaign", "2026-10-01", "2026-10-02"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a wrong level: %v", err)
+	}
+}
+
 func TestPinterestAdsConversions(t *testing.T) {
 	cl, reqs, _ := fake(t, map[string]any{
 		"POST /ad_accounts/549/events": map[string]any{"num_events_received": 2, "num_events_processed": 1, "events": []any{
@@ -879,6 +1422,7 @@ func TestPinterestAdsConversions(t *testing.T) {
 	}
 	cv := conv(0, map[string]string{"epik": "ep1"})
 	cv.EventType = "checkout"
+	cv.IPAddress, cv.UserAgent = "203.0.113.7", "Mozilla/5.0 (test)"
 	cv2 := conv(1, nil)
 	empty := c.AdConversion{EventID: "msg-3", Index: 2, ClickIDs: map[string]string{"gclid": "g"}}
 	res, err := pn.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv, cv2, empty})
@@ -886,7 +1430,7 @@ func TestPinterestAdsConversions(t *testing.T) {
 		t.Fatalf("send %+v %v", res, err)
 	}
 	last := (*reqs)[len(*reqs)-1]
-	for _, want := range []string{`"event_name":"checkout"`, `"click_id":"ep1"`, `"action_source":"web"`, `"value":"12.5"`, `"ph":["` + c.HashID("15550100") + `"]`} {
+	for _, want := range []string{`"event_name":"checkout"`, `"click_id":"ep1"`, `"action_source":"web"`, `"value":"12.5"`, `"ph":["` + c.HashID("15550100") + `"]`, `"client_ip_address":"203.0.113.7"`, `"client_user_agent":"Mozilla/5.0 (test)"`} {
 		if !strings.Contains(last.body, want) {
 			t.Fatalf("event body lacks %s: %s", want, last.body)
 		}
@@ -1189,12 +1733,15 @@ func TestXAdsConversions(t *testing.T) {
 	}
 	none := conv(1, nil)
 	none.Emails, none.Phones = nil, nil
-	res, err := x.SendConversions(ctx, cl, creds, acct, ts[1], []c.AdConversion{conv(0, map[string]string{"twclid": "tw1"}), none})
+	none.IPAddress, none.UserAgent = "203.0.113.7", "Mozilla/5.0 (test)"
+	first := conv(0, map[string]string{"twclid": "tw1"})
+	first.IPAddress, first.UserAgent = "203.0.113.7", "Mozilla/5.0 (test)"
+	res, err := x.SendConversions(ctx, cl, creds, acct, ts[1], []c.AdConversion{first, none})
 	if err != nil || !res[0].OK || !res[1].Skipped {
 		t.Fatalf("send %+v %v", res, err)
 	}
 	last := (*reqs)[len(*reqs)-1]
-	for _, want := range []string{`"event_id":"o8z2y"`, `"twclid":"tw1"`, `"hashed_email":"` + c.HashID("ana@acme.example") + `"`,
+	for _, want := range []string{`{"ip_address":"203.0.113.7","user_agent":"Mozilla/5.0 (test)"}`, `"event_id":"o8z2y"`, `"twclid":"tw1"`, `"hashed_email":"` + c.HashID("ana@acme.example") + `"`,
 		`"conversion_id":"msg-1"`, `"conversion_time":"2026-10-01T09:30:00.000Z"`, `"value":"12.50"`, `"price_currency":"USD"`} {
 		if !strings.Contains(last.body, want) {
 			t.Fatalf("body %s lacks %s", last.body, want)
@@ -1331,12 +1878,13 @@ func TestRedditAdsConversionsV3(t *testing.T) {
 	}
 	cv := conv(0, map[string]string{"rdt_cid": "r1"})
 	cv.EventType = "Purchase"
+	cv.IPAddress, cv.UserAgent = "203.0.113.7", "Mozilla/5.0 (test)"
 	res, err := r.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv})
 	if err != nil || !res[0].OK {
 		t.Fatalf("send %+v %v", res, err)
 	}
 	last := (*reqs)[len(*reqs)-1]
-	for _, want := range []string{`{"data":{"events":[`, `"click_id":"r1"`, `"tracking_type":"PURCHASE"`, `"action_source":"WEBSITE"`,
+	for _, want := range []string{`"ip_address":"203.0.113.7"`, `"user_agent":"Mozilla/5.0 (test)"`, `{"data":{"events":[`, `"click_id":"r1"`, `"tracking_type":"PURCHASE"`, `"action_source":"WEBSITE"`,
 		`"event_at":1790847000000`, `"conversion_id":"msg-1"`, `"value":12.5`} {
 		if !strings.Contains(last.body, want) {
 			t.Fatalf("body %s lacks %s", last.body, want)

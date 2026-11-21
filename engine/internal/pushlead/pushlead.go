@@ -100,3 +100,76 @@ func Push(ctx context.Context, store *connectors.Store, ws string, l Link, lead 
 	metrics.SequencerPushed(l.Connector, res.Outcome)
 	return res, nil
 }
+
+// PushMany adds several people to the link's campaign on the workspace's
+// own connection, in as few calls as the sequencer allows
+// (connectors.LeadsPusher), else one by one, and counts each outcome. It
+// answers one outcome per lead, in their order, with Push's errors.
+func PushMany(ctx context.Context, store *connectors.Store, ws string, l Link, leads []connectors.PushedLead) []connectors.PushOutcome {
+	out := make([]connectors.PushOutcome, len(leads))
+	failAll := func(err error) []connectors.PushOutcome {
+		for i := range out {
+			out[i].Err = err
+		}
+		return out
+	}
+	if store == nil {
+		return failAll(ErrCannotPush)
+	}
+	o, err := store.Open(ctx, store.Pool, ws, l.IntegrationID)
+	if errors.Is(err, connectors.ErrNotFound) {
+		return failAll(ErrGone)
+	}
+	if err != nil {
+		return failAll(err)
+	}
+	p, ok := o.Connector.(connectors.LeadPusher)
+	if !ok {
+		return failAll(ErrCannotPush)
+	}
+	if many, ok := p.(connectors.LeadsPusher); ok {
+		out = many.PushLeads(ctx, o.Client, o.Creds, l.CampaignID, leads)
+	} else {
+		for i, lead := range leads {
+			out[i].LeadPushed, out[i].Err = p.PushLead(ctx, o.Client, o.Creds, l.CampaignID, lead)
+		}
+	}
+	var last error
+	for i := range out {
+		if out[i].Err != nil {
+			last = out[i].Err
+			metrics.SequencerPushed(l.Connector, "error")
+			out[i].Err = fmt.Errorf("pushlead: %s: %w", l.Connector, out[i].Err)
+			continue
+		}
+		metrics.SequencerPushed(l.Connector, out[i].Outcome)
+	}
+	_ = store.Checked(ctx, store.Pool, ws, o.ID, nil, last)
+	return out
+}
+
+// Ready reads whether the link's campaign can take people now, on the
+// workspace's own connection (connectors.CampaignReadiness). Nil, with no
+// error, when the sequencer can't say. ErrGone when the connection was
+// removed; a refused sign-in is the connector's error.
+func Ready(ctx context.Context, store *connectors.Store, ws string, l Link) (*connectors.Readiness, error) {
+	if store == nil {
+		return nil, nil
+	}
+	o, err := store.Open(ctx, store.Pool, ws, l.IntegrationID)
+	if errors.Is(err, connectors.ErrNotFound) {
+		return nil, ErrGone
+	}
+	if err != nil {
+		return nil, err
+	}
+	r, ok := o.Connector.(connectors.CampaignReadiness)
+	if !ok {
+		return nil, nil
+	}
+	got, err := r.CampaignReady(ctx, o.Client, o.Creds, l.CampaignID)
+	if err != nil {
+		return nil, fmt.Errorf("pushlead: %s readiness: %w", l.Connector, err)
+	}
+	return &got, nil
+}

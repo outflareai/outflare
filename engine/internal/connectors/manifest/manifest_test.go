@@ -2,14 +2,17 @@ package manifest
 
 import (
 	"context"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"reflect"
 	"strings"
 	"testing"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/connectors/data"
 	"github.com/outflareai/outflare/integrations"
 )
 
@@ -198,5 +201,76 @@ func TestLookup(t *testing.T) {
 		if truthy(v) != want {
 			t.Errorf("truthy(%v)", v)
 		}
+	}
+}
+
+// Bouncer as the second verifier behind a gateway whose first check is
+// unavailable (connectors.FallbackVerifier): a deliverable address on a
+// domain Bouncer says is not accept-all passes without BounceBan; on an
+// accept-all domain, or one Bouncer can't tell about, BounceBan decides.
+func TestBouncerAsTheFallbackVerifier(t *testing.T) {
+	conns, err := Load(integrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bouncer *Connector
+	for _, x := range conns {
+		if x.Definition().ID == "bouncer" {
+			bouncer = x
+		}
+	}
+	if bouncer == nil {
+		t.Fatal("no Bouncer manifest")
+	}
+	const email = "ana@acme.example"
+	for _, tc := range []struct {
+		name, acceptAll string
+		bounceBan       bool
+		want            c.Verification
+	}{
+		{name: "not accept-all", acceptAll: `"no"`,
+			want: c.Verification{Email: email, Status: c.Deliverable, Reason: "accepted_email (Filtrat: no answer)", NotCatchAll: true,
+				ProviderStatus: "filtrat:no answer/fallback:deliverable"}},
+		{name: "accept-all", acceptAll: `"yes"`, bounceBan: true,
+			want: c.Verification{Email: email, Status: c.Undeliverable, CatchAll: true, Reason: "accepted_email, BounceBan: undeliverable",
+				ProviderStatus: "filtrat:no answer/fallback:deliverable/bounceban:undeliverable"}},
+		{name: "can't tell", acceptAll: `"unknown"`, bounceBan: true,
+			want: c.Verification{Email: email, Status: c.Undeliverable, Reason: "accepted_email, BounceBan: undeliverable",
+				ProviderStatus: "filtrat:no answer/fallback:deliverable/bounceban:undeliverable"}},
+		{name: "not said", acceptAll: `null`, bounceBan: true,
+			want: c.Verification{Email: email, Status: c.Undeliverable, Reason: "accepted_email, BounceBan: undeliverable",
+				ProviderStatus: "filtrat:no answer/fallback:deliverable/bounceban:undeliverable"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var asked []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				asked = append(asked, r.URL.Path)
+				switch r.URL.Path {
+				case "/call/filtrat.people.email.verify.resolve_catchall":
+					w.WriteHeader(http.StatusBadGateway)
+				case "/v1.1/email/verify":
+					if r.Header.Get("x-api-key") != "test-not-a-real-key" || r.URL.Query().Get("email") != email {
+						t.Errorf("Bouncer request: %s %v", r.URL, r.Header)
+					}
+					io.WriteString(w, `{"status":"deliverable","reason":"accepted_email","domain":{"acceptAll":`+tc.acceptAll+`}}`)
+				case "/call/bounceban.people.email.verify":
+					io.WriteString(w, `{"id":"bb_1","status":"success","result":"undeliverable"}`)
+				default:
+					t.Errorf("unexpected %s", r.URL.Path)
+				}
+			}))
+			defer srv.Close()
+			cl := &c.Client{BaseURLs: map[string]string{"treg": srv.URL, "bouncer": srv.URL}}
+			got, err := data.Treg{}.VerifyWith(context.Background(), cl, c.Creds{"api_key": "trg_test_not_a_real_token"}, email,
+				func(ctx context.Context, e string) (c.Verification, error) {
+					return bouncer.Verify(ctx, cl, c.Creds{"api_key": "test-not-a-real-key"}, e)
+				})
+			if err != nil || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %+v %v, want %+v", got, err, tc.want)
+			}
+			if bb := len(asked) == 3; bb != tc.bounceBan || len(asked) < 2 {
+				t.Fatalf("asked %v, want BounceBan asked: %v", asked, tc.bounceBan)
+			}
+		})
 	}
 }

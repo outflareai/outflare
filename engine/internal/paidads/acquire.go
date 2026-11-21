@@ -8,6 +8,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -47,6 +48,11 @@ type Ledger struct {
 	Settle time.Duration
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+
+	mu sync.Mutex
+	// filled is, per brand, what the last pass filling in unknown campaigns
+	// saw (fill.go).
+	filled map[string]string
 }
 
 // Result is what a run did.
@@ -54,6 +60,9 @@ type Result struct {
 	// Events read, acquisitions made (sign-ups and first payers with a paid
 	// click), revenue rows written.
 	Events, Acquisitions, Revenue int
+	// Filled is the acquisitions and revenue rows whose unknown campaign
+	// was filled in.
+	Filled int
 }
 
 func (l *Ledger) now() time.Time {
@@ -103,6 +112,7 @@ func (l *Ledger) Tick(ctx context.Context) (Result, error) {
 		total.Events += r.Events
 		total.Acquisitions += r.Acquisitions
 		total.Revenue += r.Revenue
+		total.Filled += r.Filled
 		if err != nil && ctx.Err() == nil {
 			track.Fail(ctx, l.Log, track.Event{Name: "paidads.run_failed", WorkspaceID: ws, ActorType: "system", Surface: "system"}, "internal", err)
 		}
@@ -203,7 +213,9 @@ func (r *run) do(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	// Campaigns unknown when their rows were written, filled in once the
+	// network has reported the click (usually the next day).
+	return r.fill(ctx)
 }
 
 // loadBrands reads each brand's economics, consent mode and the event
@@ -430,6 +442,14 @@ func locate(ctx context.Context, q Querier, ws, brand, record string, anon *stri
 			return nil, err
 		}
 	}
+	// A later visit can carry the same click id without the ad ids the
+	// first one had (a sign-up page on another domain that keeps the click
+	// id but not of_campaign), and a network doesn't report every click.
+	if c.id != "" && c.campaignExt == "" && c.adGroupExt == "" && c.adExt == "" {
+		if err := landed(ctx, q, ws, brand, record, anon, &c); err != nil {
+			return nil, err
+		}
+	}
 	if err := resolve(ctx, q, ws, brand, &c, utmCampaign); err != nil {
 		return nil, err
 	}
@@ -455,8 +475,52 @@ func harvested(ctx context.Context, q Querier, ws, brand string, c *click) error
 	return err
 }
 
+// landed fills a click's ids from the person's earlier visit within
+// ClickKeepDays that carried the very same click id with the template's ad
+// ids. The same click id is the same click, so its campaign is the one
+// that landing named; a visit with any other click id is a different click
+// and lends nothing.
+func landed(ctx context.Context, q Querier, ws, brand, record string, anon *string, c *click) error {
+	rows, err := q.Query(ctx, `
+		SELECT s.ad FROM site_sessions s
+		WHERE s.workspace_id = $1
+		  AND (s.record_id = $2 OR ($3::text IS NOT NULL AND s.anonymous_id = $3)
+		       OR s.anonymous_id IN (SELECT v.anonymous_id FROM site_visitors v WHERE v.workspace_id = $1 AND v.record_id = $2))
+		  AND s.started_at <= $4 AND s.started_at > $4 - make_interval(days => $5)
+		  AND (s.brand_id IS NULL OR s.brand_id = $6::uuid)
+		  AND s.click_ids->>$7 = $8 AND s.ad <> '{}'::jsonb
+		ORDER BY s.started_at DESC LIMIT 5`, ws, record, anon, c.at, ClickKeepDays, brand, c.kind, c.id)
+	if err != nil {
+		return err
+	}
+	ads, err := pgx.CollectRows(rows, pgx.RowTo[[]byte])
+	if err != nil {
+		return err
+	}
+	for _, raw := range ads {
+		var in map[string]any
+		_ = json.Unmarshal(raw, &in)
+		ids, _ := adtrack.CleanAd(in)
+		if ids["campaign"] == "" && ids["adset"] == "" && ids["ad"] == "" {
+			continue
+		}
+		c.campaignExt, c.adGroupExt, c.adExt = ids["campaign"], ids["adset"], ids["ad"]
+		c.matchedBy = "template"
+		if c.adGroupExt == "" && c.adExt == "" {
+			for _, k := range adtrack.ClickIDs {
+				if k.Param == c.kind && k.Network == "google" {
+					c.matchedBy = "campaign_param"
+				}
+			}
+		}
+		return nil
+	}
+	return nil
+}
+
 // resolve maps a click's network ids to the brand's ad entities, and the
-// campaign by its name from the UTM tags when the click carried no id.
+// campaign from the UTM tags when the click carried no id: utm_campaign as
+// the campaign's id when it is all digits, else as its name.
 func resolve(ctx context.Context, q Querier, ws, brand string, c *click, utmCampaign string) error {
 	find := func(level, external, by string) (*string, *string, string, error) {
 		var id, acct, connector string
@@ -486,8 +550,20 @@ func resolve(ctx context.Context, q Querier, ws, brand string, c *click, utmCamp
 			return err
 		}
 	} else if utmCampaign != "" && c.adGroupID == nil && c.adID == nil {
-		if c.campaignID, acct, connector, err = find("campaign", utmCampaign, `lower(e.name) = lower($4)`); err != nil {
-			return err
+		// Some links put the campaign's own id in utm_campaign (Google's
+		// {campaignid}): try it as the id first, then as the name.
+		if digits(utmCampaign) {
+			if c.campaignID, acct, connector, err = find("campaign", utmCampaign, `e.external_id = $4`); err != nil {
+				return err
+			}
+			if c.campaignID != nil {
+				c.campaignExt = utmCampaign
+			}
+		}
+		if c.campaignID == nil {
+			if c.campaignID, acct, connector, err = find("campaign", utmCampaign, `lower(e.name) = lower($4)`); err != nil {
+				return err
+			}
 		}
 	}
 	// Parents fill what the click didn't name.
@@ -738,6 +814,20 @@ func value(props []byte, fallback string) (int64, string) {
 		return int64(math.Round(f * 100)), cur
 	}
 	return 0, cur
+}
+
+// digits says whether s is a number and nothing else, as a network's
+// campaign id is.
+func digits(s string) bool {
+	if s == "" || len(s) > 30 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func cut(s string, n int) string {

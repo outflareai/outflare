@@ -27,7 +27,12 @@ export function UsedByBadge({ i, brands, brand }: { i: Integration; brands: Bran
   if (brands.length === 0) return null;
   if (i.brand_kind === "brand" && !i.brand_id) return <Badge tone="amber" title="Its data shows in no brand until you assign it">No brand yet</Badge>;
   if (!brand) return <span className="text-[12px] text-muted-foreground">{usedBy(i, brands)}</span>;
-  return i.brand_id ? <Badge title={`Only ${brand.name} uses this connection`}>{brand.name}'s own</Badge> : <span className="text-[12px] text-muted-foreground" title={`Connected once for the workspace; ${usedBy(i, brands).toLowerCase()} use it`}>Shared from workspace</span>;
+  if (i.brand_id) return <Badge title={`Only ${brand.name} uses this connection`}>{brand.name}'s own</Badge>;
+  // A split sign-in (Google Analytics, Search Console, ad accounts) reads
+  // every site or account of the login, and each belongs to one brand: this
+  // brand sees only its own, nothing is imported into it wholesale.
+  if (i.brand_kind === "split") return <span className="text-[12px] text-muted-foreground" title={`One sign-in for the workspace. Each of its sites or accounts belongs to one brand; ${brand.name} sees only its own.`}>Split by site</span>;
+  return <span className="text-[12px] text-muted-foreground" title={`Connected once for the workspace; ${usedBy(i, brands).toLowerCase()} use it`}>Shared from workspace</span>;
 }
 
 // ConnectionBrandsDialog picks a connection's kind and its brands: the
@@ -132,7 +137,7 @@ function AssignAccount({ ws, account: a, brands, onDone }: { ws: string; account
   const value = a.source === "assigned" ? a.brand_id ?? "" : "";
   return (
     <select aria-label={`Brand for ${a.name || a.account}`} className={`${field} w-44 shrink-0`} disabled={busy} value={value} onChange={(e) => assign(e.target.value)}>
-      <option value="">{a.source === "none" ? "No brand" : `${brands.find((b) => b.id === a.brand_id)?.name ?? "Its connection's"} (default)`}</option>
+      <option value="">{a.source === "none" ? "No brand" : `${brands.find((b) => b.id === a.brand_id)?.name ?? "Its connection's"} (${a.source === "domain" ? "its website" : "default"})`}</option>
       {a.suggested_brand_id && !value && <option value={a.suggested_brand_id}>{brands.find((b) => b.id === a.suggested_brand_id)?.name} (matches its domain)</option>}
       {brands.filter((b) => b.id !== a.suggested_brand_id || value).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
     </select>

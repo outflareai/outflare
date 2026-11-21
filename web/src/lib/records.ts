@@ -60,6 +60,11 @@ export function useCatalogWrite(ws: string) {
   }), [brand]);
 }
 
+// catalogChanged is the window event that makes every useCatalog read its
+// catalog again: send it after adding something to it outside the catalog
+// settings, such as a new sub-source.
+export const catalogChanged = "outflare:catalog-changed";
+
 // The catalog's fields and option labels, read once per page. Each brand
 // has its own catalog: brandId's (a record's brand), else the brand picked
 // in the switcher, else, with all brands picked, the workspace's first
@@ -69,9 +74,16 @@ export function useCatalog(ws: string, brandId?: string | null) {
   const brand = brandId || picked?.id || brands[0]?.id || "";
   const [catalog, setCatalog] = useState<Schemas["Catalog"] | null>(null);
   const [error, setError] = useState("");
+  // A change made elsewhere on the page (a new sub-source, say) reloads it.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const again = () => setTick((n) => n + 1);
+    window.addEventListener(catalogChanged, again);
+    return () => window.removeEventListener(catalogChanged, again);
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
-    setCatalog(null);
+    if (tick === 0) setCatalog(null);
     setError("");
     if (!brand) return () => controller.abort();
     api.GET("/v1/brands/{brand}/catalog", { params: { path: { brand }, query: { archived: true } }, signal: controller.signal }).then(({ data, error }) => {
@@ -80,7 +92,7 @@ export function useCatalog(ws: string, brandId?: string | null) {
       else setError(errorMessage(error));
     }).catch((error) => { if (!controller.signal.aborted) setError(errorMessage(error)); });
     return () => controller.abort();
-  }, [ws, brand]);
+  }, [ws, brand, tick]);
   return useMemo(() => {
     const labels = new Map<string, Map<string, string>>();
     for (const s of catalog?.option_sets ?? [])
@@ -88,7 +100,10 @@ export function useCatalog(ws: string, brandId?: string | null) {
     const fields = (type: string) =>
       catalog?.types
         .find((t) => t.key === type)
-        ?.fields.filter((f) => !f.archived) ?? [];
+        // A person has no pipeline (Source says where they came from,
+        // progress lives on deals), so a person's lifecycle stage, kept in
+        // the API for journeys and older data, is never shown.
+        ?.fields.filter((f) => !f.archived && !(type === "person" && f.key === "lifecycle_stage")) ?? [];
     const options = (f: Field) =>
       catalog?.option_sets
         .find((s) => s.key === f.option_set)

@@ -45,6 +45,7 @@
     reason: accepted_email
     provider_status: deliverable
     catch_all: false
+    not_catch_all: true
     disposable: false
     role: false
     free: false
@@ -62,7 +63,19 @@
       account: { role: "yes" }
       didYouMean: ""
       score: 50
-  expect: { status: risky, catch_all: true, role: true, score: 50 }
+  expect: { status: risky, catch_all: true, not_catch_all: false, role: true, score: 50 }
+
+- name: a domain Bouncer can't tell is neither catch-all nor confirmed not one
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: bo@acme.example }
+  answer:
+    body:
+      status: deliverable
+      reason: accepted_email
+      domain: { acceptAll: unknown, disposable: "no", free: "no" }
+      score: 90
+  expect: { status: deliverable, catch_all: false, not_catch_all: false, score: 90 }
 
 - name: an unknown status stays unknown
   run: verify
@@ -70,7 +83,7 @@
   input: { email: li@acme.example }
   answer:
     body: { status: unknown, reason: dns_error }
-  expect: { status: unknown, reason: dns_error }
+  expect: { status: unknown, reason: dns_error, catch_all: false, not_catch_all: false }
 
 - name: out of credits is a quota error
   run: verify

@@ -10,8 +10,10 @@ import (
 )
 
 // Ad groups (Meta's ad sets) and ads, below the campaigns, from what the
-// ad sync stored for the platforms that read them (Meta and Google). Their
-// numbers are already in their campaign's.
+// ad sync stored for the platforms that read them (Meta, Google, TikTok,
+// Snapchat, Microsoft, Pinterest and Reddit, and Taboola, Outbrain and
+// LinkedIn, where a campaign is its own ad group). Their numbers are
+// already in their campaign's.
 
 type adItemOut struct {
 	ID                string            `json:"id"`
@@ -32,6 +34,11 @@ type adItemOut struct {
 	BrandID           *string           `json:"brand_id"`
 	Currency          string            `json:"currency"`
 	Totals            adTotals          `json:"totals"`
+	// Currency is the ad account's; ReportCurrency is what totals are in
+	// (the brand's currency for one brand), and ExchangeRate how many of
+	// it one unit of Currency is.
+	ReportCurrency string  `json:"report_currency"`
+	ExchangeRate   float64 `json:"exchange_rate"`
 }
 
 func (s *Server) listAdItems(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +92,11 @@ func (s *Server) listAdItems(w http.ResponseWriter, r *http.Request) {
 		f.args = append(f.args, st)
 		where += ` AND e.status = $` + strconv.Itoa(len(f.args))
 	}
+	// idle=true lists every one, also those that never spent or showed.
+	having := `HAVING sum(m.spend_micros) > 0 OR sum(m.impressions) > 0 OR e.status = 'active'`
+	if q.Get("idle") == "true" {
+		having = ""
+	}
 	f.args = append(f.args, limit)
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT e.id, e.level, e.parent_id, COALESCE(p.name, ''),
@@ -97,7 +109,7 @@ func (s *Server) listAdItems(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN ad_metrics_daily m ON m.ad_entity_id = e.id AND m.day BETWEEN $2 AND $3
 		WHERE e.workspace_id = $1`+where+`
 		GROUP BY e.id, a.id, p.id, g.id
-		HAVING sum(m.spend_micros) > 0 OR sum(m.impressions) > 0 OR e.status = 'active'
+		`+having+`
 		ORDER BY COALESCE(sum(m.spend_micros), 0) DESC, COALESCE(sum(m.impressions), 0) DESC, lower(e.name), e.id
 		LIMIT $`+strconv.Itoa(len(f.args)), f.args...)
 	if err != nil {
@@ -123,6 +135,15 @@ func (s *Server) listAdItems(w http.ResponseWriter, r *http.Request) {
 	if rows.Err() != nil {
 		s.internal(w, r, rows.Err())
 		return
+	}
+	rows.Close()
+	report, err := s.adReport(r)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	for i := range out {
+		out[i].ReportCurrency, out[i].ExchangeRate = report.apply(out[i].Currency, &out[i].Totals)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"from": f.from, "to": f.to, "data": out})
 }

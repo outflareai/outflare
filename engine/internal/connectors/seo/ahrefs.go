@@ -42,7 +42,7 @@ func (Ahrefs) Definition() c.Definition {
 }
 
 func (Ahrefs) SEOReports() []string {
-	return []string{c.SEOOverview, c.SEOKeywords, c.SEOBacklinks, c.SEOLinks, c.SEOCompetitors, c.SEOPages, c.SEOAudit}
+	return []string{c.SEOOverview, c.SEOKeywords, c.SEOBacklinks, c.SEOLinks, c.SEOCompetitors, c.SEOPages, c.SEOAudit, c.SEODonor}
 }
 
 // rowUnits is what one row costs: 1, plus 10 for each volume or traffic
@@ -55,6 +55,10 @@ func (Ahrefs) Estimate(q c.SEOQuery) c.SEOCost {
 		return c.SEOCost{Units: 150, Estimated: true}
 	case c.SEOAudit:
 		return c.SEOCost{Units: 100, Estimated: true}
+	case c.SEODonor:
+		// Five requests at Ahrefs' 50-unit minimum each (the three top
+		// pages cost less than the minimum).
+		return c.SEOCost{Units: 250, Estimated: true}
 	}
 	if q.Report == c.SEOLinks {
 		return c.SEOCost{Units: math.Max(50, float64(q.Limit)*linkUnits(q)), Estimated: true}
@@ -198,6 +202,61 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 			rep.Totals.TrafficValue = c.Num(*metrics.M.OrgCost / 100)
 		}
 		rep.Notes = append(rep.Notes, "Keywords and traffic are for "+q.Country+"; links are worldwide.")
+	case c.SEODonor:
+		// Worldwide (no country): a donor's value is all its traffic.
+		var dr struct {
+			DR struct {
+				DomainRating *float64 `json:"domain_rating"`
+			} `json:"domain_rating"`
+		}
+		var metrics struct {
+			M struct {
+				OrgTraffic *float64 `json:"org_traffic"`
+			} `json:"metrics"`
+		}
+		var in struct {
+			M struct {
+				LiveRefdomains *float64 `json:"live_refdomains"`
+			} `json:"metrics"`
+		}
+		var out struct {
+			M struct {
+				LinkedDomains *float64 `json:"linked_domains"`
+			} `json:"metrics"`
+		}
+		var pages struct {
+			Pages []struct {
+				URL     string   `json:"url"`
+				Traffic *float64 `json:"sum_traffic"`
+			} `json:"pages"`
+		}
+		if err := a.report(ctx, cl, creds, "/site-explorer/domain-rating", url.Values{"target": {q.Target}, "date": {today}, "output": {"json"}}, &dr); err != nil {
+			return rep, err
+		}
+		if err := a.report(ctx, cl, creds, "/site-explorer/metrics", base, &metrics); err != nil {
+			return rep, err
+		}
+		if err := a.report(ctx, cl, creds, "/site-explorer/backlinks-stats", base, &in); err != nil {
+			return rep, err
+		}
+		oq := cloneValues(base)
+		oq.Del("date")
+		if err := a.report(ctx, cl, creds, "/site-explorer/outlinks-stats", oq, &out); err != nil {
+			return rep, err
+		}
+		pq := cloneValues(base)
+		pq.Set("select", "url,sum_traffic")
+		pq.Set("order_by", "sum_traffic:desc")
+		pq.Set("limit", "3")
+		if err := a.report(ctx, cl, creds, "/site-explorer/top-pages", pq, &pages); err != nil {
+			return rep, err
+		}
+		rep.Totals = c.SEOMetrics{DomainRating: n(dr.DR.DomainRating), OrganicTraffic: n(metrics.M.OrgTraffic),
+			ReferringDomains: n(in.M.LiveRefdomains), LinkedDomains: n(out.M.LinkedDomains)}
+		for _, p := range pages.Pages {
+			rep.Rows = append(rep.Rows, c.SEORow{Key: p.URL, URL: p.URL, SEOMetrics: c.SEOMetrics{OrganicTraffic: n(p.Traffic)}})
+		}
+		rep.Notes = append(rep.Notes, "Traffic is worldwide; outlinks-stats is in beta at Ahrefs.")
 	case c.SEOKeywords:
 		v := cloneValues(base)
 		v.Set("country", country)

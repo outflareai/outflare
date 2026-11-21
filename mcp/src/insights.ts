@@ -43,9 +43,13 @@ const step = z.object({
     .optional()
     .describe("The time limit for this step, such as within 3 days of signing up."),
   label: z.string().max(80).optional(),
+  optional: z
+    .boolean()
+    .optional()
+    .describe("Funnels only, for a step in the middle: people who skip it still count at the next step, and its result says how many skipped it. Use it when not everyone has to do the step, such as a sign-up before a payment when some payers already had an account."),
 });
 const funnel = {
-  steps: z.array(step).min(2).max(10).describe("In order. Only people who did step 1 are counted in later steps, so each step shows its drop-off."),
+  steps: z.array(step).min(2).max(20).describe("In order. Only people who did step 1 are counted in later steps, so each step shows its drop-off."),
   date_range: z
     .object({
       preset: z.enum(["today", "yesterday", "last_7_days", "last_14_days", "last_30_days", "last_90_days", "last_180_days", "last_365_days", "this_month", "last_month", "this_year"]).optional(),
@@ -110,29 +114,41 @@ const dateRange = z
   .describe("A preset moves with today; or fixed from and to dates. Default: the last 30 days.");
 const series = z.object({
   kind: z
-    .enum(["event", "page", "visit", "conversion", "payment", "ad"])
-    .describe("event: a product event. page: page views. visit: website visits. conversion: a conversion definition. payment: successful payments. ad: the ad networks' own clicks, impressions, spend or conversions."),
+    .enum(["event", "page", "visit", "conversion", "payment", "ad", "analytics", "backlinks", "link_orders", "search"])
+    .describe("event: a product event. page: page views. visit: website visits. conversion: a conversion definition. payment: successful payments. ad: the ad networks' own clicks, impressions, spend or conversions. analytics: the daily totals of the brand's search and analytics tools (Search Console, Bing, Google Analytics). backlinks: its referring domains. link_orders: its paid link orders. search: Search Console clicks, impressions, ctr and position, filtered and broken down by query, page, country or device (query, or country and device, in one series, not both)."),
   event: z.string().optional().describe("For an event series: the event's name, such as signed_up."),
   conversion: z.string().optional().describe("For a conversion series: the conversion definition's id or key."),
   filters: z.array(filter).max(10).optional().describe("All must match."),
   first: z.boolean().optional().describe("Only each person's first ever event or payment."),
   measure: z
-    .enum(["count", "people", "sum", "average", "clicks", "impressions", "spend", "conversions"])
+    .enum(["count", "people", "sum", "average", "median", "p90", "p99", "min", "max", "per_person_average", "per_person_median", "per_person_max", "weekly_active", "monthly_active", "clicks", "impressions", "spend", "conversions", "ctr", "position", "visitors", "pageviews", "sessions", "referring_domains", "dofollow_referring_domains", "new_referring_domains", "lost_referring_domains", "committed", "published", "paid"])
     .optional()
-    .describe("count (default), people, sum or average; for an ad series clicks (default), impressions, spend or conversions."),
-  property: z.string().optional().describe("What sum and average add up: amount for payments (default), or a property of the event."),
+    .describe(
+      "count (default); people (distinct people, so daily active by day); sum, average, median, p90, p99, min or max of a property; per_person_average, per_person_median or per_person_max of how many times each person did it in the period; weekly_active or monthly_active (distinct people in the 7 or 30 days up to the end of each period). For an ad series clicks (default), impressions, spend or conversions. For analytics: clicks (default), impressions, ctr, position, visitors, pageviews, sessions or conversions. For backlinks: referring_domains (default, live at the end of each period), dofollow_referring_domains, new_referring_domains or lost_referring_domains. For link_orders: spend (default, US dollars paid), committed, published or paid.",
+    ),
+  property: z.string().optional().describe("What sum, average, median, p90, p99, min and max read: amount for payments (default), or a property of the event."),
   network: z.enum(["google", "meta", "microsoft", "linkedin", "reddit", "x", "tiktok"]).optional().describe("For an ad series: one network, or all when left out."),
   campaign: z.string().optional().describe("For an ad series: only campaigns whose name contains this."),
+  connector: z.string().max(60).optional().describe("For an analytics series: one tool, such as google_search_console, bing_webmaster or google_analytics; every tool when left out."),
   label: z.string().max(80).optional(),
 });
 const trend = {
   series: z.array(series).min(1).max(6).describe("A, B, C … in a formula."),
   date_range: dateRange.optional(),
   interval: z.enum(["day", "week", "month"]).optional().describe("Default: day."),
-  breakdown: z.string().optional().describe("Split every series by a property, such as utm_campaign, network or country; the 10 largest groups are shown."),
+  breakdown: z.string().optional().describe("Split every series by a property, such as utm_campaign, network or country; the 25 largest groups are shown, then $other."),
   formula: z.string().max(200).optional().describe("A sum between series, such as A / B for cost per sign-up when A is ad spend and B is sign-ups: + - * / and brackets."),
   compare: z.boolean().optional().describe("Also run the period before, the same length, as previous."),
-  display: z.enum(["line", "bar", "number", "table"]).optional().describe("How the team sees it: line (default), bar, number (totals only) or table."),
+  breakdown_2: z.string().optional().describe("Split each group again by a second property, such as country then plan. Needs breakdown; not with ad series."),
+  display: z
+    .enum(["line", "area", "bar", "stacked_bar", "horizontal_bar", "pie", "map", "number", "table"])
+    .optional()
+    .describe("How the team sees it: line (default), area, bar, stacked_bar, horizontal_bar or pie (each group's total), map (needs the breakdown country), number (totals only) or table."),
+  cumulative: z.boolean().optional().describe("Draw a running total."),
+  percent: z.boolean().optional().describe("With a breakdown: draw each group as its share of the whole."),
+  smoothing: z.union([z.literal(1), z.literal(3), z.literal(7), z.literal(14), z.literal(28)]).optional().describe("Draw a moving average over this many periods."),
+  value_labels: z.boolean().optional().describe("Show the number on each point or bar."),
+  right_axis: z.array(z.string().regex(/^[A-F]$/)).max(5).optional().describe("Series (A, B, …) read against a second axis on the right."),
 };
 const retentionStep = step.omit({ within: true });
 const retention = {
@@ -146,6 +162,11 @@ const lifecycle = {
   step: retentionStep.describe("What counts as being active: a visit, a page, an event, a conversion or a payment, with filters."),
   date_range: dateRange.optional().describe("The periods shown. Default: the last 30 days; the last 90 suits weeks."),
   interval: z.enum(["day", "week", "month"]).optional().describe("The period. Default: week."),
+};
+const stickiness = {
+  step: retentionStep.describe("What counts as being active: a visit, a page, an event, a conversion or a payment, with filters."),
+  date_range: dateRange.optional().describe("The dates counted. Default: the last 30 days."),
+  interval: z.enum(["day", "week", "month"]).optional().describe("What a period is. Default: day."),
 };
 const dashboardRef = z.string().uuid().describe("The dashboard's id, from list_dashboards.");
 const tilePlace = {
@@ -210,6 +231,19 @@ export function registerInsightTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "run_stickiness",
+    {
+      title: "Run a stickiness question",
+      description:
+        "How many different days (or weeks, or months) of the dates each person did the step in: one bucket per number of periods with its people and share of everyone who did it, " +
+        "plus the average number of periods. Shows whether people come back often or once.",
+      inputSchema: { brand: brandRef, ...stickiness },
+      annotations: read,
+    },
+    ({ brand, ...spec }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/insights/stickiness", { params: { path: { brand: b } }, body: spec as never }))),
+  );
+
+  server.registerTool(
     "run_lifecycle",
     {
       title: "Run a lifecycle question",
@@ -232,7 +266,7 @@ export function registerInsightTools(server: McpServer, gtm: MissionClient, work
       inputSchema: {
         brand: brandRef,
         funnel: z.object(funnel),
-        step: z.number().int().min(1).max(10).describe("1-based."),
+        step: z.number().int().min(1).max(20).describe("1-based."),
         dropped: z.boolean().optional().describe("The people who dropped off before this step (not for step 1)."),
         breakdown: z.string().optional().describe("Only this breakdown group's people."),
         limit: z.number().int().min(1).max(500).optional(),
@@ -253,12 +287,27 @@ export function registerInsightTools(server: McpServer, gtm: MissionClient, work
       inputSchema: {
         brand: brandRef,
         funnel: z.object(funnel),
-        step: z.number().int().min(2).max(10).optional().describe("The step reached; the last when left out."),
+        step: z.number().int().min(2).max(20).optional().describe("The step reached; the last when left out."),
         limit: z.number().int().min(1).max(50).optional().describe("Items each way. Default 10."),
       },
       annotations: read,
     },
     ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/insights/funnel/correlation", { params: { path: { brand: b } }, body: body as never }))),
+  );
+
+  server.registerTool(
+    "check_funnel_data",
+    {
+      title: "Check a funnel's data",
+      description:
+        "Says whether a funnel's drop-offs can be trusted, by looking at each step on its own. steps has, for every step: people (everyone who did it in the dates, whether or not they did the steps before), " +
+        "from_previous (the two-step funnel of it and the step before: started and reached), nothing_before (how many of its people have no visit, page view or event on record before it) and last_received_at with per_day. " +
+        "data lists what looks wrong: never_received (nothing has arrived for the step), stopped (its data used to arrive and has stopped) and unlinked (many people did it with nothing on record before it, so it is probably sent under a different id). " +
+        "A tracking problem on one step lowers every step after it: compare a step's people with its count in run_funnel, and make a broken step optional to stop it lowering the rest. For funnels in order.",
+      inputSchema: { brand: brandRef, funnel: z.object(funnel) },
+      annotations: read,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/insights/funnel/checks", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -289,8 +338,8 @@ export function registerInsightTools(server: McpServer, gtm: MissionClient, work
     "list_insights",
     {
       title: "List saved insights",
-      description: "A brand's saved funnels, trends, retention, paths and lifecycle questions, newest change first, each with its kind and spec. Run one with run_funnel, run_trend, run_retention, run_paths or run_lifecycle and its spec. Page with cursor=next_cursor.",
-      inputSchema: { brand: brandRef, kind: z.enum(["funnel", "trend", "retention", "paths", "lifecycle"]).optional(), limit: z.number().int().min(1).max(500).optional(), cursor: z.string().optional() },
+      description: "A brand's saved funnels, trends, retention, paths, lifecycle and stickiness questions, newest change first, each with its kind and spec. Run one with run_funnel, run_trend, run_retention, run_paths, run_lifecycle or run_stickiness and its spec. Page with cursor=next_cursor.",
+      inputSchema: { brand: brandRef, kind: z.enum(["funnel", "trend", "retention", "paths", "lifecycle", "stickiness"]).optional(), limit: z.number().int().min(1).max(500).optional(), cursor: z.string().optional() },
       annotations: read,
     },
     ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/insights", { params: { path: { brand: b }, query: q } }))),
@@ -336,7 +385,7 @@ export function registerInsightTools(server: McpServer, gtm: MissionClient, work
       inputSchema: {
         brand: brandRef,
         funnel: z.object(funnel),
-        step: z.number().int().min(1).max(10).describe("1-based."),
+        step: z.number().int().min(1).max(20).describe("1-based."),
         dropped: z.boolean().optional().describe("The people who dropped off before this step (not for step 1)."),
         breakdown: z.string().optional().describe("Only this breakdown group's people."),
         name: z.string().min(1).max(200).describe("The new list's name."),
@@ -376,7 +425,7 @@ export function registerInsightTools(server: McpServer, gtm: MissionClient, work
       description: "Saves a funnel, a trend or a retention question for the brand, so the team sees it on its page and can put it on a dashboard. Use a preset date range so it stays current.",
       inputSchema: {
         brand: brandRef,
-        kind: z.enum(["funnel", "trend", "retention", "paths", "lifecycle"]).optional().describe("Default: funnel."),
+        kind: z.enum(["funnel", "trend", "retention", "paths", "lifecycle", "stickiness"]).optional().describe("Default: funnel."),
         name: z.string().min(1).max(120),
         description: z.string().max(1000).optional(),
         spec: z.union([z.object(funnel), z.object(trend), z.object(retention)]).describe("A funnel's steps, a trend's series or a retention question's start and return, by kind."),
@@ -454,12 +503,15 @@ export function registerInsightTools(server: McpServer, gtm: MissionClient, work
     "add_dashboard_tile",
     {
       title: "Add a tile to a dashboard",
-      description: "Puts a saved funnel, trend or retention question (insight_id), or a note, on a dashboard, below everything unless placed.",
+      description:
+        "Puts a saved funnel, trend or retention question (insight_id), a saved report (report_view_id, from list_report_views; it must be shared with the team), or a note, on a dashboard, below everything unless placed. A report tile shows the report's first level and totals over the dates saved with the report.",
       inputSchema: {
         brand: brandRef,
         dashboard: dashboardRef,
         insight_id: insightRef.optional(),
+        report_view_id: z.string().uuid().optional().describe("A saved report of the brand that is shared with the team (list_report_views)."),
         note: z.string().max(4000).optional().describe("Markdown, for a note tile."),
+        own_dates: z.boolean().optional().describe("Keep the insight's own dates on a dashboard that sets a date range for its tiles. For an insight tile only."),
         ...tilePlace,
       },
       annotations: write,

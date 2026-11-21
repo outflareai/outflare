@@ -459,8 +459,9 @@ func (in *weightsInput) check() error {
 	default:
 		return errInvalid("source is suggestion or manual")
 	}
-	if len(in.Weights) == 0 || len(in.Weights) > maxLinkDestinations*11 {
-		return errInvalid("weights has 1 to 220 destination_id and weight pairs")
+	// Every list of a link or flow at its limits: its paths' and its own.
+	if most := (maxListLanders + maxListOnward) * (maxLinkPaths + 1); len(in.Weights) == 0 || len(in.Weights) > most {
+		return errInvalid("weights has 1 to " + strconv.Itoa(most) + " destination_id and weight pairs")
 	}
 	seen := map[string]bool{}
 	for _, w := range in.Weights {

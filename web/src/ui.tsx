@@ -1,7 +1,7 @@
 // The app's UI kit. Components are shadcn/ui (src/components/ui, on Radix
 // and Tailwind); this file wraps them in the small API the pages use.
 
-import { Component, useEffect, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
+import { Component, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { toast as sonner } from "sonner";
 import { cn } from "@/lib/utils";
@@ -41,7 +41,7 @@ export function Input({ label, hint, ...props }: InputHTMLAttributes<HTMLInputEl
 export const field = "h-8 rounded-md border border-input bg-transparent px-2.5 text-[13px] shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground hover:border-ring/60 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive dark:bg-input/30 [textarea&]:h-auto [textarea&]:py-1.5 [select&]:pr-7";
 
 export function ErrorText({ children }: { children: ReactNode }) {
-  return children ? <p role="alert" className="text-sm text-destructive">{children}</p> : null;
+  return children ? <p role="alert" className="min-w-0 text-sm text-destructive [overflow-wrap:anywhere]">{children}</p> : null;
 }
 
 export function Card({ title, children, action, description }: { title: ReactNode; children: ReactNode; action?: ReactNode; description?: ReactNode }) {
@@ -61,7 +61,23 @@ export function Card({ title, children, action, description }: { title: ReactNod
 
 // The title row every page starts with: what this page is, in one line, and
 // its main action.
+// A page shown inside another page's tabs (Partnerships shows Presence,
+// Partners and Link ROI this way) is inside a Section: its header becomes a
+// smaller one, under the outer page's title and tabs.
+export const InsideSection = createContext(false);
+
 export function PageHeader({ title, description, action, back }: { title: ReactNode; description?: ReactNode; action?: ReactNode; back?: { label: string; onClick: () => void } }) {
+  const inside = useContext(InsideSection);
+  if (inside && !back)
+    return (
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">{title}</h2>
+          {description && <p className="mt-1 max-w-3xl text-[13px] text-muted-foreground">{description}</p>}
+        </div>
+        {action && <div className="flex flex-wrap gap-2">{action}</div>}
+      </div>
+    );
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3 border-b pb-5">
       <div className="min-w-0">
@@ -75,6 +91,16 @@ export function PageHeader({ title, description, action, back }: { title: ReactN
       </div>
       {action && <div className="flex flex-wrap gap-2">{action}</div>}
     </div>
+  );
+}
+
+// BackButton: the way back from one item to its list, always at the top
+// left of the page's own space and always saying where it goes.
+export function BackButton({ to, onClick }: { to: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="mb-4 inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted">
+      <span aria-hidden>←</span>Back to {to}
+    </button>
   );
 }
 
@@ -155,6 +181,27 @@ export function CopyButton({ text, label = "Copy", className = "" }: { text: str
     >
       {done ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
     </button>
+  );
+}
+
+/** A button that says what it copies ("Copy error") and shows "Copied" for a moment. */
+export function CopyTextButton({ text, label, variant = "ghost", onCopied }: { text: string | (() => string); label: string; variant?: "ghost" | "primary"; onCopied?: () => void }) {
+  const [done, setDone] = useState(false);
+  return (
+    <Button
+      type="button"
+      variant={variant}
+      onClick={async () => {
+        await navigator.clipboard?.writeText(typeof text === "function" ? text() : text);
+        track("ui.copied");
+        setDone(true);
+        onCopied?.();
+        setTimeout(() => setDone(false), 1500);
+      }}
+    >
+      {done ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      {done ? "Copied" : label}
+    </Button>
   );
 }
 
@@ -320,6 +367,16 @@ export function DialogHost() {
 export function toast(text: string, tone: "ok" | "error" = "ok") {
   if (tone === "error") sonner.error(text, { id: `error:${text}`, duration: 8000 });
   else sonner.success(text, { id: `ok:${text}`, duration: 4000 });
+}
+
+// A toast for something done that can be taken back, with an Undo button.
+export function toastUndo(text: string, undo: () => void) {
+  sonner.success(text, { id: `ok:${text}`, duration: 8000, action: { label: "Undo", onClick: undo } });
+}
+
+// A toast for news with one thing to do about it, such as Open.
+export function toastAction(text: string, label: string, run: () => void) {
+  sonner.message(text, { id: `news:${text}`, duration: 10000, action: { label, onClick: run } });
 }
 
 export function ToastHost() {

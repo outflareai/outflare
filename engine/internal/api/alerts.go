@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,6 +14,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/connectors/telegrambot"
 )
 
 // Alerts: what needs someone now, from every module, and who hears about
@@ -126,20 +128,26 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 }
 
 type alertSetting struct {
-	BrandID          *string   `json:"brand_id"`
-	Kind             string    `json:"kind"`
-	Email            *string   `json:"email"`
-	SlackIntegration *string   `json:"slack_integration_id"`
-	SlackChannel     *string   `json:"slack_channel"`
-	SlackChannelName *string   `json:"slack_channel_name"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	BrandID          *string `json:"brand_id"`
+	Kind             string  `json:"kind"`
+	Email            *string `json:"email"`
+	SlackIntegration *string `json:"slack_integration_id"`
+	SlackChannel     *string `json:"slack_channel"`
+	SlackChannelName *string `json:"slack_channel_name"`
+	// The chat of the workspace's own Telegram bot the kind posts to.
+	TelegramIntegration *string   `json:"telegram_integration_id"`
+	TelegramChat        *string   `json:"telegram_chat"`
+	TelegramChatName    *string   `json:"telegram_chat_name"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
-const alertSettingCols = `brand_id::text, kind, email, slack_integration_id::text, slack_channel, slack_channel_name, updated_at`
+const alertSettingCols = `brand_id::text, kind, email, slack_integration_id::text, slack_channel, slack_channel_name,
+	telegram_integration_id::text, telegram_chat, telegram_chat_name, updated_at`
 
 func scanAlertSetting(row pgx.Row) (alertSetting, error) {
 	var v alertSetting
-	return v, row.Scan(&v.BrandID, &v.Kind, &v.Email, &v.SlackIntegration, &v.SlackChannel, &v.SlackChannelName, &v.UpdatedAt)
+	return v, row.Scan(&v.BrandID, &v.Kind, &v.Email, &v.SlackIntegration, &v.SlackChannel, &v.SlackChannelName,
+		&v.TelegramIntegration, &v.TelegramChat, &v.TelegramChatName, &v.UpdatedAt)
 }
 
 func (s *Server) getAlertSettings(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +208,8 @@ func (s *Server) setAlertSettings(w http.ResponseWriter, r *http.Request) {
 		Email            optString `json:"email"`
 		SlackIntegration optString `json:"slack_integration_id"`
 		SlackChannel     optString `json:"slack_channel"`
+		TelegramBot      optString `json:"telegram_integration_id"`
+		TelegramChat     optString `json:"telegram_chat"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -234,15 +244,61 @@ func (s *Server) setAlertSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "send slack_integration_id and slack_channel together, or both null to stop posting")
 		return
 	}
-	if !req.Email.Set && !req.SlackIntegration.Set {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "send email, or slack_integration_id and slack_channel")
+	if req.TelegramBot.Set != req.TelegramChat.Set || (req.TelegramBot.Value == nil) != (req.TelegramChat.Value == nil) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "send telegram_integration_id and telegram_chat together, or both null to stop posting")
+		return
+	}
+	if !req.Email.Set && !req.SlackIntegration.Set && !req.TelegramBot.Set {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "send email, slack_integration_id and slack_channel, or telegram_integration_id and telegram_chat")
 		return
 	}
 	ctx := r.Context()
-	var channelName *string
-	if req.SlackIntegration.Value != nil {
-		o, ok := s.openNotifier(w, r, a, *req.SlackIntegration.Value)
+	var channelName, chatName *string
+	if req.TelegramBot.Value != nil {
+		o, ok := s.openNotifier(w, r, a, *req.TelegramBot.Value, "telegram_integration_id")
 		if !ok {
+			return
+		}
+		if o.Connector.Definition().ID != telegrambot.ID {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "telegram_integration_id is not a Telegram bot connection; connect your bot under Connectors")
+			return
+		}
+		// The chat is one the bot heard from lately, or any chat it can
+		// see, named by its id.
+		list, err := o.n.Channels(ctx, o.Client, o.Creds)
+		if err != nil {
+			s.connectorFailed(w, r, err)
+			return
+		}
+		want := strings.TrimSpace(*req.TelegramChat.Value)
+		i := slices.IndexFunc(list, func(c connectors.Channel) bool { return c.ID == want })
+		var chat connectors.Channel
+		if i >= 0 {
+			chat = list[i]
+		} else {
+			finder, _ := o.Connector.(connectors.ChannelFinder)
+			if finder == nil {
+				writeError(w, r, http.StatusBadRequest, "invalid_request", "telegram_chat is not a chat this bot can see; GET .../alerts/channels lists them")
+				return
+			}
+			if chat, err = finder.Channel(ctx, o.Client, o.Creds, want); err != nil {
+				if connectors.KindOf(err) == connectors.ErrInvalid {
+					writeError(w, r, http.StatusBadRequest, "invalid_request", "telegram_chat is not a chat this bot can see: add the bot to the group or channel, or send it a message, then pick it from GET .../alerts/channels or pass its id")
+					return
+				}
+				s.connectorFailed(w, r, err)
+				return
+			}
+		}
+		req.TelegramChat.Value, chatName = &chat.ID, &chat.Name
+	}
+	if req.SlackIntegration.Value != nil {
+		o, ok := s.openNotifier(w, r, a, *req.SlackIntegration.Value, "slack_integration_id")
+		if !ok {
+			return
+		}
+		if o.Connector.Definition().ID == telegrambot.ID {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "slack_integration_id is a Telegram bot connection; send it as telegram_integration_id with telegram_chat")
 			return
 		}
 		list, err := o.n.Channels(ctx, o.Client, o.Creds)
@@ -285,16 +341,21 @@ func (s *Server) setAlertSettings(w http.ResponseWriter, r *http.Request) {
 				slack_integration_id = CASE WHEN $6 THEN $7::uuid ELSE slack_integration_id END,
 				slack_channel = CASE WHEN $6 THEN $8 ELSE slack_channel END,
 				slack_channel_name = CASE WHEN $6 THEN $9 ELSE slack_channel_name END,
+				telegram_integration_id = CASE WHEN $11 THEN $12::uuid ELSE telegram_integration_id END,
+				telegram_chat = CASE WHEN $11 THEN $13 ELSE telegram_chat END,
+				telegram_chat_name = CASE WHEN $11 THEN $14 ELSE telegram_chat_name END,
 				updated_by = $10, updated_at = now()
 			WHERE `+match+` RETURNING `+alertSettingCols,
 			a.WorkspaceID, req.BrandID, req.Kind, req.Email.Set, req.Email.Value,
-			req.SlackIntegration.Set, req.SlackIntegration.Value, req.SlackChannel.Value, channelName, actor))
+			req.SlackIntegration.Set, req.SlackIntegration.Value, req.SlackChannel.Value, channelName, actor,
+			req.TelegramBot.Set, req.TelegramBot.Value, req.TelegramChat.Value, chatName))
 		if err != nil {
 			return err
 		}
-		data := map[string]any{"brand_id": req.BrandID, "kind": req.Kind, "email": v.Email, "slack": v.SlackIntegration != nil}
+		data := map[string]any{"brand_id": req.BrandID, "kind": req.Kind, "email": v.Email, "slack": v.SlackIntegration != nil,
+			"telegram": v.TelegramIntegration != nil}
 		// Nothing chosen any more: the row goes, so the default applies.
-		if v.Email == nil && v.SlackIntegration == nil {
+		if v.Email == nil && v.SlackIntegration == nil && v.TelegramIntegration == nil {
 			if _, err := tx.Exec(ctx, `DELETE FROM alert_settings WHERE `+match, a.WorkspaceID, req.BrandID, req.Kind); err != nil {
 				return err
 			}
@@ -323,14 +384,14 @@ type openedNotifier struct {
 
 // openNotifier opens one of the workspace's connections that can post
 // alerts, or answers why not.
-func (s *Server) openNotifier(w http.ResponseWriter, r *http.Request, a *access, id string) (openedNotifier, bool) {
+func (s *Server) openNotifier(w http.ResponseWriter, r *http.Request, a *access, id, field string) (openedNotifier, bool) {
 	if !validUUID(id) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "slack_integration_id is not a connection in this workspace")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", field+" is not a connection in this workspace")
 		return openedNotifier{}, false
 	}
 	o, err := s.integrations.Open(r.Context(), s.pool, a.WorkspaceID, id)
 	if errors.Is(err, connectors.ErrNotFound) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "slack_integration_id is not a connection in this workspace")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", field+" is not a connection in this workspace")
 		return openedNotifier{}, false
 	}
 	if err != nil {
@@ -339,7 +400,7 @@ func (s *Server) openNotifier(w http.ResponseWriter, r *http.Request, a *access,
 	}
 	n, ok := o.Connector.(connectors.Notifier)
 	if !ok {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "that connection can't post alerts; connect Slack under Connectors")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "that connection can't post alerts; connect Slack or a Telegram bot under Connectors")
 		return openedNotifier{}, false
 	}
 	return openedNotifier{o, n}, true
@@ -348,7 +409,7 @@ func (s *Server) openNotifier(w http.ResponseWriter, r *http.Request, a *access,
 // listAlertChannels lists where a chat connection can post.
 func (s *Server) listAlertChannels(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	o, ok := s.openNotifier(w, r, a, r.URL.Query().Get("integration_id"))
+	o, ok := s.openNotifier(w, r, a, r.URL.Query().Get("integration_id"), "integration_id")
 	if !ok {
 		return
 	}
@@ -376,15 +437,39 @@ func alertUser(a *access) string {
 func (s *Server) setAlertMute(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
-		Kind  string `json:"kind"`
-		Muted bool   `json:"muted"`
+		Kind  string   `json:"kind"`
+		Kinds []string `json:"kinds"`
+		Muted bool     `json:"muted"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	if _, ok := alerts.Find(req.Kind); !ok {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is not a kind of alert; GET .../alerts/settings lists them")
+	// One kind, or many at once (Mute all on the Alerts page): all or none.
+	kinds := req.Kinds
+	switch {
+	case req.Kind != "" && req.Kinds != nil:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "give kind or kinds, not both")
 		return
+	case req.Kind != "":
+		kinds = []string{req.Kind}
+	case len(kinds) == 0:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind or kinds is required")
+		return
+	case len(kinds) > 200:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "at most 200 kinds at once")
+		return
+	}
+	seen := map[string]bool{}
+	unique := kinds[:0:0]
+	for _, k := range kinds {
+		if _, ok := alerts.Find(k); !ok {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "kinds holds something that is not a kind of alert; GET .../alerts/settings lists them")
+			return
+		}
+		if !seen[k] {
+			seen[k] = true
+			unique = append(unique, k)
+		}
 	}
 	user := alertUser(a)
 	if user == "" {
@@ -402,20 +487,40 @@ func (s *Server) setAlertMute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	changed := 0
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q, action := `DELETE FROM brand_alert_mutes WHERE workspace_id = $1 AND user_id = $2 AND kind = $3 AND brand_id = $4`, "alert.unmuted"
 		if req.Muted {
 			q, action = `INSERT INTO brand_alert_mutes (workspace_id, user_id, kind, brand_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`, "alert.muted"
 		}
-		tag, err := tx.Exec(ctx, q, a.WorkspaceID, user, req.Kind, brand)
-		if err != nil || tag.RowsAffected() == 0 {
-			return err
+		for _, kind := range unique {
+			tag, err := tx.Exec(ctx, q, a.WorkspaceID, user, kind, brand)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() == 0 {
+				continue
+			}
+			changed++
+			props := map[string]any{"kind": kind, "brand_id": brand}
+			if len(unique) > 1 {
+				props["bulk"] = true
+			}
+			if err := record(ctx, tx, &a.principal, a.WorkspaceID, action, "user", user, props); err != nil {
+				return err
+			}
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "user", user, map[string]any{"kind": req.Kind, "brand_id": brand})
+		return nil
 	})
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"kind": req.Kind, "muted": req.Muted})
+	out := map[string]any{"muted": req.Muted, "changed": changed}
+	if req.Kind != "" {
+		out["kind"] = req.Kind
+	} else {
+		out["kinds"] = unique
+	}
+	writeJSON(w, http.StatusOK, out)
 }

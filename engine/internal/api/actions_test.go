@@ -198,6 +198,49 @@ func TestActionLayer(t *testing.T) {
 	}
 }
 
+// An agent takes back its own held change, and says which later one
+// replaces it; nobody else's, and never one already decided.
+func TestActionCancel(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	bb := brandBase(t, e, ws)
+	agent, _ := gatedAgent(t, owner, base, "Agent", "sequences.read", "sequences.manage", "actions.read")
+	other, _ := gatedAgent(t, owner, base, "Other agent", "sequences.manage", "actions.read")
+	hold := func(c *client, name string) string {
+		t.Helper()
+		code, res := c.do("POST", base+"/sequences", map[string]any{"name": name, "steps": []map[string]any{{"subject": "Hi", "body": "Hello"}}})
+		if code != 202 {
+			t.Fatalf("hold %s: %d %v", name, code, res)
+		}
+		return res["action"].(map[string]any)["id"].(string)
+	}
+	first, second, theirs := hold(agent, "First try"), hold(agent, "Second try"), hold(other, "Theirs")
+
+	// Not someone else's, by an agent or by a person; a person rejects.
+	agent.must(403, "POST", bb+"/actions/"+theirs+"/cancel", nil)
+	owner.must(403, "POST", bb+"/actions/"+first+"/cancel", nil)
+	agent.must(400, "POST", bb+"/actions/"+first+"/cancel", map[string]any{"superseded_by": first})
+	agent.must(409, "POST", bb+"/actions/"+first+"/cancel", map[string]any{"superseded_by": theirs})
+	v := agent.must(200, "POST", bb+"/actions/"+first+"/cancel", map[string]any{"note": "wrong budget", "superseded_by": second})
+	if v["status"] != "cancelled" || v["superseded_by"] != second || v["decision_note"] != "wrong budget" {
+		t.Fatalf("cancelled: %v", v)
+	}
+	// It can no longer be approved or cancelled again, and the other waits.
+	owner.must(409, "POST", bb+"/actions/"+first+"/approve", nil)
+	agent.must(409, "POST", bb+"/actions/"+first+"/cancel", nil)
+	if v := owner.must(200, "GET", bb+"/actions/"+second, nil); v["status"] != "held" || v["superseded_by"] != nil {
+		t.Fatalf("second: %v", v)
+	}
+	if n := len(owner.must(200, "GET", base+"/sequences", nil)["data"].([]any)); n != 0 {
+		t.Fatalf("a cancelled change created %d sequences", n)
+	}
+	if n := len(named(got(), "action.cancelled")); n != 1 {
+		t.Fatalf("action.cancelled events: %d", n)
+	}
+}
+
 func TestActionBigBodies(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
@@ -329,19 +372,19 @@ func TestActionLayerEdges(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	bb := brandBase(t, e, ws)
-	geoB := "/v1/brands/" + owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "https://www.geonode.com/"})["id"].(string)
-	rpB := "/v1/brands/" + owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com/"})["id"].(string)
+	geoB := "/v1/brands/" + owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "https://www.northpeak.example/"})["id"].(string)
+	rpB := "/v1/brands/" + owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "https://summitly.example/"})["id"].(string)
 	scopes := []string{"workspace.read", "context.manage", "actions.read"}
 	mk := func(name, brand string) (*client, string) {
 		t.Helper()
 		out := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": name, "scopes": scopes, "brand": brand, "action_gate": true})
 		return &client{t: t, h: owner.h, bearer: out["token"].(string)}, out["api_token"].(map[string]any)["id"].(string)
 	}
-	rp, rpID := mk("Repocket agent", "repocket")
-	geo, _ := mk("Geonode agent", "geonode")
+	rp, rpID := mk("Summitly agent", "summitly")
+	geo, _ := mk("Northpeak agent", "northpeak")
 
 	// Held, and readable by the agent that made it, kept to its brand.
-	st, res := rp.do("POST", base+"/memories", map[string]any{"text": "Repocket fact", "kind": "fact"})
+	st, res := rp.do("POST", base+"/memories", map[string]any{"text": "Summitly fact", "kind": "fact"})
 	if st != 202 {
 		t.Fatalf("brand agent's change: %d %v", st, res)
 	}
@@ -387,7 +430,7 @@ func TestActionLayerEdges(t *testing.T) {
 	leadAction := res["action"].(map[string]any)["id"].(string)
 	var geoID string
 	for _, b := range owner.must(200, "GET", base+"/brands", nil)["data"].([]any) {
-		if b.(map[string]any)["handle"] == "geonode" {
+		if b.(map[string]any)["handle"] == "northpeak" {
 			geoID = b.(map[string]any)["id"].(string)
 		}
 	}
@@ -395,7 +438,7 @@ func TestActionLayerEdges(t *testing.T) {
 	if st != 202 || res["action"].(map[string]any)["brand_id"] != geoID {
 		t.Fatalf("brand from the body: %d %v", st, res)
 	}
-	geoApprover := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Geonode approver", "scopes": []string{"actions.read", "actions.approve"}, "brand": "geonode"})
+	geoApprover := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Northpeak approver", "scopes": []string{"actions.read", "actions.approve"}, "brand": "northpeak"})
 	limited := &client{t: t, h: owner.h, bearer: geoApprover["token"].(string)}
 	limited.must(404, "GET", geoB+"/actions/"+leadAction, nil)
 	limited.must(404, "POST", geoB+"/actions/"+leadAction+"/approve", nil)

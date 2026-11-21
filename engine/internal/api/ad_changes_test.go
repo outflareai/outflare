@@ -55,6 +55,28 @@ func TestAdCampaignChanges(t *testing.T) {
 	if c := owner.must(200, "GET", base+"/ads/campaigns?status=paused", nil)["data"].([]any); len(c) != 1 || c[0].(map[string]any)["id"] != active {
 		t.Fatalf("mirror after the pause: %v", c)
 	}
+	// A paused campaign with no spend in the range is left out of the list,
+	// but its own page still finds it by id.
+	old := "from=2001-01-01&to=2001-01-02"
+	if c := owner.must(200, "GET", base+"/ads/campaigns?"+old, nil)["data"].([]any); len(c) != 0 {
+		t.Fatalf("no spend, paused: %v", c)
+	}
+	if c := owner.must(200, "GET", base+"/ads/campaigns?"+old+"&id="+active, nil)["data"].([]any); len(c) != 1 || c[0].(map[string]any)["id"] != active {
+		t.Fatalf("by id: %v", c)
+	}
+	// idle=true lists it, and the other paused one, as a table set to All does.
+	if c := owner.must(200, "GET", base+"/ads/campaigns?"+old+"&idle=true&status=paused", nil)["data"].([]any); len(c) != 2 {
+		t.Fatalf("idle, paused: %v", c)
+	}
+	// The performance table, which the campaigns page reads, does the same.
+	pb := brandBase(t, e, ws)
+	if c := owner.must(200, "GET", pb+"/ads/performance?"+old, nil)["data"].([]any); len(c) != 0 {
+		t.Fatalf("performance, no spend: %v", c)
+	}
+	if c := owner.must(200, "GET", pb+"/ads/performance?"+old+"&idle=true", nil)["data"].([]any); len(c) < 2 {
+		t.Fatalf("performance, idle: %v", c)
+	}
+	owner.must(400, "GET", base+"/ads/campaigns?id=nope", nil)
 
 	// Resume, and a budget in micros, which Meta takes in cents.
 	res = owner.must(202, "POST", base+"/ads/campaigns/"+active+"/resume", nil)
@@ -253,4 +275,70 @@ func metaCampaigns(t *testing.T, e *env, ws string) (active, paused string) {
 		}
 	}
 	return active, paused
+}
+
+// A brand's ceiling on its total daily ad budget: a raise past it is
+// refused until a signed-in person says to go ahead; a cut always passes,
+// and only a person raises or removes the ceiling.
+func TestAdBudgetCeiling(t *testing.T) {
+	e := freshEnv(t)
+	ctx := context.Background()
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	metaState.Lock()
+	metaState.campaigns, metaState.posts, metaState.refuse = nil, nil, false
+	metaState.Unlock()
+	i := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "meta_ads", "credentials": map[string]string{"api_key": "mt"}})
+	if _, err := e.ads.SyncOnce(ctx, ws, i["id"].(string)); err != nil {
+		t.Fatal(err)
+	}
+	active, paused := metaCampaigns(t, e, ws)
+	var brand string
+	if err := e.pool.QueryRow(ctx, `SELECT COALESCE(e.brand_id, a.brand_id)::text FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id WHERE e.id = $1`, active).Scan(&brand); err != nil {
+		t.Fatal(err)
+	}
+	econ := "/v1/brands/" + brand + "/ads/economics"
+	owner.must(400, "PUT", econ, map[string]any{"daily_budget_ceiling_micros": 0})
+	// The Overview's other targets and which numbers it shows.
+	owner.must(400, "PUT", econ, map[string]any{"target_roas": 0})
+	owner.must(400, "PUT", econ, map[string]any{"overview_numbers": []string{"spend", "spend"}})
+	owner.must(400, "PUT", econ, map[string]any{"overview_numbers": []string{"nope"}})
+	if got := owner.must(200, "PUT", econ, map[string]any{"target_new_payers_monthly": 50, "monthly_budget_micros": 5_500_000_000, "target_revenue_monthly_micros": 15_000_000_000, "target_roas": 3.004,
+		"overview_numbers": []string{"roas", "spend", "clicks"}}); got["target_new_payers_monthly"] != 50.0 || got["monthly_budget_micros"] != 5_500_000_000.0 || got["target_roas"] != 3.0 ||
+		len(got["overview_numbers"].([]any)) != 3 || got["overview_numbers"].([]any)[0] != "roas" {
+		t.Fatalf("overview targets: %v", got)
+	}
+	if got := owner.must(200, "PUT", econ, map[string]any{"target_roas": nil, "overview_numbers": []string{}}); got["target_roas"] != nil || len(got["overview_numbers"].([]any)) != 0 || got["target_new_payers_monthly"] != 50.0 {
+		t.Fatalf("overview targets cleared: %v", got)
+	}
+	if got := owner.must(200, "PUT", econ, map[string]any{"daily_budget_ceiling_micros": 35_000_000}); got["daily_budget_ceiling_micros"] != 35_000_000.0 {
+		t.Fatalf("ceiling: %v", got)
+	}
+	// The campaign runs at 30 a day: 40 passes the ceiling, 25 is a cut.
+	st, res := owner.do("PATCH", base+"/ads/campaigns/"+active, map[string]any{"daily_budget_micros": 40_000_000})
+	if st != 409 || res["error"].(map[string]any)["code"] != "ad_budget_ceiling" {
+		t.Fatalf("over the ceiling: %d %v", st, res)
+	}
+	if l := owner.must(200, "GET", base+"/ads/changes", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("a refused raise queued a change: %v", l)
+	}
+	owner.must(202, "PATCH", base+"/ads/campaigns/"+active, map[string]any{"daily_budget_micros": 40_000_000, "over_ceiling": true})
+	// Resuming the paused campaign brings its whole budget back: over the
+	// ceiling it is refused until a person says to go ahead.
+	if _, err := e.pool.Exec(ctx, `UPDATE ad_entities SET daily_budget_micros = 20000000 WHERE id = $1`, paused); err != nil {
+		t.Fatal(err)
+	}
+	st, res = owner.do("POST", base+"/ads/campaigns/"+paused+"/resume", nil)
+	if st != 409 || res["error"].(map[string]any)["code"] != "ad_budget_ceiling" {
+		t.Fatalf("resume over the ceiling: %d %v", st, res)
+	}
+	machine := &client{t: t, h: e.h, bearer: owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Ads", "scopes": []string{"ads.manage"}})["token"].(string)}
+	if st, _ := machine.do("POST", base+"/ads/campaigns/"+paused+"/resume", map[string]any{"over_ceiling": true}); st != 409 {
+		t.Fatalf("a token went over the ceiling on a resume: %d", st)
+	}
+	owner.must(202, "POST", base+"/ads/campaigns/"+paused+"/resume", map[string]any{"over_ceiling": true})
+	// No ceiling again: nothing is refused.
+	if got := owner.must(200, "PUT", econ, map[string]any{"daily_budget_ceiling_micros": nil}); got["daily_budget_ceiling_micros"] != nil {
+		t.Fatalf("cleared: %v", got)
+	}
 }

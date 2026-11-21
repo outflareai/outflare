@@ -145,7 +145,10 @@ func TestBuildSuggestions(t *testing.T) {
 		}
 	}
 	free := byURL["https://northpeak.example/free-proxy-list"]
-	if len(free.Reasons) != 2 || free.Reasons[0].Kind != ReasonKeywordGap || free.Kind != TargetProduct || !free.KindGuessed {
+	// SE Ranking has it at 13 for "free proxy" (near the top), and two
+	// competitors outrank it (keyword gaps); "proxy site" at 28 is too far.
+	if len(free.Reasons) != 3 || free.Reasons[0].Kind != ReasonNearTop || free.Reasons[0].Keyword != "free proxy" || *free.Reasons[0].YourPosition != 13 ||
+		free.Reasons[1].Kind != ReasonKeywordGap || free.Kind != TargetProduct || !free.KindGuessed {
 		t.Fatalf("free-proxy-list: %+v", free)
 	}
 	if len(free.Competitors) != 2 || free.Competitors[0] != "other.example" {
@@ -154,6 +157,8 @@ func TestBuildSuggestions(t *testing.T) {
 	if got.Data[0].URL != free.URL {
 		t.Fatalf("the page with two high-volume gaps should rank first: %s", got.Data[0].URL)
 	}
+	// An Ahrefs position is not SE Ranking's: residential at 4 there is
+	// no near_top reason.
 	res := byURL["https://northpeak.example/proxies/residential"]
 	if len(res.Reasons) != 1 || res.Reasons[0].Kind != ReasonCompetitorLinks || res.Reasons[0].ReferringDomains != 2 || res.Reasons[0].Keyword != "residential proxies" {
 		t.Fatalf("residential: %+v", res.Reasons)
@@ -212,5 +217,27 @@ func TestAnchorOptions(t *testing.T) {
 	none := anchorOptions("https://northpeak.example/", "", nil, nil, pageTargetRow{})
 	if len(none.Primary) != 0 || len(none.Secondary.Brand) != 0 || len(none.Secondary.URL) != 2 || none.Secondary.Keyword == nil {
 		t.Fatalf("no data: %+v", none)
+	}
+}
+
+func TestNearTop(t *testing.T) {
+	in := targetInputs{
+		BrandName: "Northpeak",
+		Hosts:     []string{"northpeak.example"},
+		OurKeywords: []kwRow{
+			{Connector: "seranking", Keyword: "proxy checker", URL: "https://northpeak.example/tools/checker", Position: f(6), Volume: f(1000)},
+			{Connector: "seranking", Keyword: "ip lookup", URL: "https://northpeak.example/tools/ip", Position: f(16), Volume: f(1000)},
+			{Connector: "seranking", Keyword: "proxy", URL: "https://northpeak.example/", Position: f(2), Volume: f(90000)},
+			{Connector: "seranking", Keyword: "socks5", URL: "https://northpeak.example/socks", Position: f(35), Volume: f(9000)},
+			// two pages for one keyword: only the better one is credited
+			{Connector: "seranking", Keyword: "ip lookup", URL: "https://northpeak.example/blog/ip", Position: f(19), Volume: f(1000)},
+		},
+	}
+	got := buildSuggestions(in, "", 0)
+	if len(got.Data) != 2 || got.Data[0].URL != "https://northpeak.example/tools/checker" || got.Data[1].URL != "https://northpeak.example/tools/ip" {
+		t.Fatalf("near top: %+v", got.Data)
+	}
+	if got.Data[0].Score <= got.Data[1].Score || got.Data[0].Reasons[0].Kind != ReasonNearTop {
+		t.Fatalf("positions 4 to 10 should weigh more: %+v", got.Data)
 	}
 }

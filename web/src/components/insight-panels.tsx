@@ -4,6 +4,7 @@ import { api } from "../api";
 import { InsightTile } from "../pages/Dashboards";
 import { TrendView } from "../pages/Trends";
 import { track } from "@/lib/analytics";
+import { AdsChart } from "../pages/ads/AdsChart";
 
 // Insight panels: the funnels and trends Outflare shows on its own pages
 // (Paid ads, Visitors and Home), built from what the brand has, so nobody
@@ -17,9 +18,9 @@ type TrendSpec = Schemas["TrendSpec"];
 type DateRange = Schemas["InsightDateRange"];
 type RetentionSpec = Schemas["RetentionSpec"];
 type PathsSpec = Schemas["PathsSpec"];
-type LifecycleSpec = Schemas["LifecycleSpec"];
+type LifecycleSpec = Schemas["LifecycleSpec"] | Schemas["StickinessSpec"];
 
-export type PanelKind = "funnel" | "trend" | "retention" | "paths" | "lifecycle";
+export type PanelKind = "funnel" | "trend" | "retention" | "paths" | "lifecycle" | "stickiness";
 export type PanelGo = (tab: "funnels" | "trends" | "retention" | "paths" | "dashboards") => void;
 
 const draftKey = "outflare:insight-draft";
@@ -107,8 +108,8 @@ export function Panel({ brand, kind, name, spec, go, from, height = 320 }: { bra
 }
 
 // AdsPanels is Paid ads' own view of what the spend brought: the people
-// funnel under the networks' clicks, spend beside sign-ups over time, and
-// the cost of each sign-up.
+// funnel under the networks' clicks, and the ads' numbers over time
+// (AdsChart).
 export function AdsPanels({ brand, days, go }: { brand: string; days: number; go: PanelGo }) {
   const catalog = useInsightsCatalog(brand);
   if (!catalog || !catalog.networks.some((n) => n.connected)) return null;
@@ -120,18 +121,6 @@ export function AdsPanels({ brand, days, go }: { brand: string; days: number; go
     steps: [{ kind: "visit", filters: [{ property: "network", op: "exists" }], label: "Visited from an ad" }, ...(signUp ? [{ ...signUp, within: { value: 7, unit: "day" as const } }] : []), { kind: "payment", first: true, label: "First payment", within: { value: 14, unit: "day" } }],
     breakdown: "network",
   };
-  const outcome: Schemas["TrendSeries"] = signUp
-    ? signUp.kind === "conversion"
-      ? { kind: "conversion", conversion: signUp.conversion, label: signUp.label }
-      : { kind: "event", event: signUp.event, label: signUp.label }
-    : { kind: "payment", first: true, label: "First payments" };
-  const over: TrendSpec = {
-    date_range: range,
-    interval: days > 60 ? "week" : "day",
-    display: "line",
-    series: [{ kind: "ad", measure: "spend", label: "Ad spend" }, { kind: "visit", filters: [{ property: "network", op: "exists" }], label: "Visits from ads" }, outcome],
-  };
-  const cost: TrendSpec = { date_range: range, interval: "day", display: "number", compare: true, series: [{ kind: "ad", measure: "spend", label: "Ad spend" }, outcome], formula: "A / B" };
   return (
     <section aria-labelledby="ads-insights" className="space-y-3">
       <div className="flex items-center">
@@ -139,12 +128,7 @@ export function AdsPanels({ brand, days, go }: { brand: string; days: number; go
         <button onClick={() => go("dashboards")} className="font-mono text-[12px] text-muted-foreground hover:text-foreground">Dashboards →</button>
       </div>
       <Panel brand={brand} kind="funnel" name="From ad click to first payment" spec={funnel} go={go} from="ads" height={500} />
-      <div className="grid gap-3 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <Panel brand={brand} kind="trend" name="Spend, visits and sign-ups" spec={over} go={go} from="ads" />
-        </div>
-        <Panel brand={brand} kind="trend" name={signUp ? `Cost per ${signUp.label?.toLowerCase() ?? "sign-up"}` : "Cost per first payment"} spec={cost} go={go} from="ads" />
-      </div>
+      <AdsChart brand={brand} days={days} go={go} />
     </section>
   );
 }

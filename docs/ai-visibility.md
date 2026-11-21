@@ -577,6 +577,41 @@ traffic reports keep working, and `connections` in the answer says which
 permission is missing. How many days Cloudflare keeps depends on the zone's
 plan, and zones beyond the first 20 are not read.
 
+#### Without Cloudflare: report from your own server
+
+A site that isn't behind Cloudflare can count the crawlers itself. AI
+crawlers run no scripts, so the website script never sees them; only the
+server that answers the request does. Call the server library's crawler
+tracker for every request, from a middleware:
+
+```ts
+import { Tracker } from "@outflare/sdk";
+const tracker = new Tracker({ token: process.env.OUTFLARE_TOKEN, brand: "northpeak" });
+
+app.use((req, _res, next) => {
+  tracker.crawlerVisit({ userAgent: req.headers["user-agent"], host: req.headers.host });
+  next();
+});
+```
+
+```python
+tracker.crawler_visit(request.headers.get("user-agent"), request.headers.get("host"))
+```
+
+The call returns at once and never slows a request: it keeps a count in
+memory only when the user agent looks like a crawler, and sends the counts
+with the tracker's next flush (`POST /v1/brands/{brand}/ai-bot-hits`, scope
+customers.manage, up to 1,000 entries, each a `user_agent`, a `host` and
+optionally `requests` and a `day` in the last 7 days). Outflare works out
+which are AI crawlers it knows and keeps only how many requests each made
+per host and day: no user agent, path or address is stored, and ordinary
+browsers and unknown bots are ignored (`ignored` in the answer). A user
+agent can be faked, so treat these as counts, not proof of who called.
+
+The same table shows both sources, with a Source column. Where Cloudflare's
+logs cover a host and day, they are used and the server's count for that
+day is left out, so nothing counts twice.
+
 ## Cost
 
 A screen answer costs what DataForSEO charges, about US$0.004, paid from your

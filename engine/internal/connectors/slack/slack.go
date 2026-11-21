@@ -22,8 +22,8 @@ const api = "https://slack.com/api"
 // joined, and to list them.
 var scopes = []string{"chat:write", "chat:write.public", "channels:read", "groups:read"}
 
-// All returns Slack for alerts and Slack for knowledge.
-func All() []c.Connector { return []c.Connector{Slack{}, Knowledge{}} }
+// All returns Slack for alerts, Slack for knowledge and Slack for sales channels.
+func All() []c.Connector { return []c.Connector{Slack{}, Knowledge{}, Feeds{}} }
 
 // Slack posts alerts to a channel.
 type Slack struct{}
@@ -73,15 +73,25 @@ func call(ctx context.Context, cl *c.Client, creds c.Creds, method, path string,
 		return c.Errf(c.ErrUnavailable, "Slack returned something unexpected")
 	}
 	if !a.OK {
+		var e *c.Error
 		switch a.Error {
 		case "invalid_auth", "not_authed", "account_inactive", "token_revoked", "token_expired", "missing_scope":
-			return c.Errf(c.ErrAuth, "Slack refused the token (%s). Connect Slack again.", a.Error)
+			e = c.Errf(c.ErrAuth, "Slack refused the token (%s). Connect Slack again.", a.Error)
+		case "not_allowed_token_type", "no_permission", "access_denied", "user_is_bot", "team_access_not_granted",
+			"two_factor_setup_required", "org_login_required", "ekm_access_denied", "enterprise_is_restricted":
+			// The token is real but may not make this call: a bot token
+			// where Slack wants a person's, or a workspace rule. Asking
+			// again gets the same answer, so it is not "unavailable".
+			e = c.Errf(c.ErrAuth, "Slack doesn't let this token do that (%s). Check the token's kind and scopes on the Slack connection.", a.Error)
 		case "ratelimited":
-			return c.Errf(c.ErrQuota, "Slack is rate limiting this app; it is tried again shortly")
+			e = c.Errf(c.ErrQuota, "Slack is rate limiting this app; it is tried again shortly")
 		case "channel_not_found", "not_in_channel", "is_archived":
-			return c.Errf(c.ErrInvalid, "Slack can't post to that channel (%s). Pick another, or invite the app to it.", a.Error)
+			e = c.Errf(c.ErrInvalid, "Slack can't post to that channel (%s). Pick another, or invite the app to it.", a.Error)
+		default:
+			e = c.Errf(c.ErrUnavailable, "Slack said %s", a.Error)
 		}
-		return c.Errf(c.ErrUnavailable, "Slack said %s", a.Error)
+		e.Code = a.Error
+		return e
 	}
 	if out != nil {
 		return json.Unmarshal(raw, out)

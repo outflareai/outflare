@@ -253,6 +253,41 @@ export function RevenueForecast({ ws, brandId, canManage, go, onBack }: { ws: st
         </Card>
       )}
 
+      {(f.history.length > 0 || f.quarter === quarters()[0]) && (
+        <Card title="How the forecast moved" description="What the forecast said in each week of the quarter, so you can see whether it is climbing or slipping. A reading is saved once a day; the last one of a week stands for it.">
+          {f.history.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No readings yet. The first one is saved within a day of the first deal or target, and a new line is added each week.</p>
+          ) : (
+            <>
+              <ul className="divide-y">
+                {f.history.map((w, i) => {
+                  const top = Math.max(1, ...f.history.map((x) => Math.max(x.forecast_minor, x.target_minor ?? 0)));
+                  const change = w.change_minor;
+                  return (
+                    <li key={w.week} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-sm">
+                      <span className="w-28 shrink-0 text-muted-foreground">{i === f.history.length - 1 && f.quarter === quarters()[0] ? "This week" : `Week of ${day(w.week)}`}</span>
+                      <span className="relative h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-muted" role="img" aria-label={`Forecast ${money(w.forecast_minor, ccy)}, of which ${money(w.won_minor, ccy)} won`}>
+                        <span className="absolute inset-y-0 left-0 bg-primary/35" style={{ width: `${(w.forecast_minor / top) * 100}%` }} />
+                        <span className="absolute inset-y-0 left-0 bg-primary" style={{ width: `${(w.won_minor / top) * 100}%` }} />
+                        {w.target_minor != null && w.target_minor > 0 && <span className="absolute inset-y-0 w-0.5 bg-foreground" style={{ left: `${Math.min(99.5, (w.target_minor / top) * 100)}%` }} />}
+                      </span>
+                      <span className={`w-28 shrink-0 text-right text-xs tabular-nums ${!change ? "text-muted-foreground" : change > 0 ? "text-emerald-600 dark:text-emerald-500" : "text-red-600 dark:text-red-500"}`}>
+                        {change == null ? "First reading" : change === 0 ? "No change" : `${change > 0 ? "Up" : "Down"} ${money(Math.abs(change), ccy)}`}
+                      </span>
+                      <span className="w-24 shrink-0 text-right font-medium tabular-nums">{money(w.forecast_minor, ccy)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="mt-3 text-xs text-muted-foreground">
+                The solid part of each bar is what was won by then, the lighter part what was still expected{f.history.some((w) => w.target_minor != null) ? ", and the line marks the target" : ""}.
+                {f.history.length === 1 && " Next week's line will show how far it moved."}
+              </p>
+            </>
+          )}
+        </Card>
+      )}
+
       {f.owners.some((o) => o.owner_id) && (
         <Card title="By owner" description="Who the forecast sits with: what each teammate has won, plus what is expected from the renewals and open deals they own.">
           <ul className="divide-y">

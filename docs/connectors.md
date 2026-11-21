@@ -24,10 +24,10 @@ Credentials are sealed with the instance key (`OUTFLARE_SECRET_KEY`, AES-256-GCM
 
 | Category | Examples |
 | --- | --- |
-| `email_verification` | Built-in checks, ZeroBounce, NeverBounce, MillionVerifier, Bouncer, Reoon, Emailable, DeBounce, Hunter. Bouncer and Reoon run from manifests in [`integrations/`](../integrations/README.md) |
+| `email_verification` | Built-in checks, ZeroBounce, NeverBounce, MillionVerifier, Bouncer, Reoon, Emailable, DeBounce, Hunter, Treg (Filtrat, with BounceBan as the second opinion; see [email-finding.md](email-finding.md#treg)). Bouncer and Reoon run from manifests in [`integrations/`](../integrations/README.md) |
 | `mailbox_provider` | Cheap Inboxes, Mailreef, Infraforge. Without one, upload mailboxes directly (IMAP/SMTP or CSV) |
 | `sequencer` | Instantly, Smartlead, EmailBison, PlusVibe, Apollo |
-| `data` | Apollo, People Data Labs, MoltSets, Prospeo, LeadMagic, Findymail, Hunter (email finder). Planned: Clay, ZoomInfo, Lusha and more. See [lists.md](lists.md) |
+| `data` | Apollo, People Data Labs, MoltSets, Blitz, Prospeo, LeadMagic, Findymail, Treg, Hunter (email finder). Planned: Clay, ZoomInfo, Lusha and more. See [lists.md](lists.md). Parallel researches one company on the web, and finds who works there; see [Company research](#company-research). A product's own account lookup and a shared outreach blocklist say who must not be contacted; see [May an address be contacted](#may-an-address-be-contacted) |
 | `signals` | Planned: Crunchbase, TheirStack, PredictLeads, UserGems, RB2B, Common Room, Trigify |
 | `analytics` | Google Analytics 4, Google Search Console, Bing Webmaster Tools, PostHog, Plausible, Fathom, Matomo, Umami, Mixpanel, Amplitude, Cloudflare Web Analytics, Simple Analytics, Microsoft Clarity, Vercel Web Analytics. See [analytics.md](analytics.md) |
 | `seo` | DataForSEO, Ahrefs, SE Ranking. Paid per call, with a monthly budget. See [seo.md](seo.md). SE Ranking also brings the keywords its projects track into [rank tracking](search-intelligence.md#keywords-tracked-in-se-ranking) (`ranks.tracked`). Geonode reads pages through its own network: an unknown email domain's homepage for [classification.md](classification.md), and your own site's pages when its firewall blocks OutflareBot or they need JavaScript; see [crawler.md](crawler.md). It also checks Google rankings for [rank tracking](search-intelligence.md#rank-tracking) (`serp.read`), runs web searches (`web.search`) on your Geonode account, for finding companies to research, finds brands' social links on their websites, reads public X follower counts ([social.md](social.md)), finds and reads brands' review pages ([reviews.md](reviews.md)), and runs saved news searches ([news-watch.md](news-watch.md)) |
@@ -39,8 +39,9 @@ Credentials are sealed with the instance key (`OUTFLARE_SECRET_KEY`, AES-256-GCM
 | `partners` | Tolt, read only: move a referral or affiliate program over. See [Partner programs](#partner-programs) |
 | `calendar` | Google Calendar, Outlook, Calendly, Cal.com |
 | `dns`, `registrar` | Cloudflare, Namecheap, GoDaddy, Route 53 |
-| `notification` | Slack: [alerts](alerts.md) posted to a channel the workspace picks |
+| `notification` | Slack and Telegram bot: [alerts](alerts.md) posted to a channel or chat the workspace picks |
 | `knowledge` | Slack (knowledge), read only: the [support assistant](support-inbox.md#the-support-assistant) looks in the channels you pick for answers your team already gave, and suggests them in Knowledge for a person to approve. Separate from the Slack connection that posts alerts, which never reads |
+| `support` | Intercom, read only: every conversation with its messages, notes, ratings and Fin's results is copied into the [support inbox](support-inbox.md#where-the-mail-comes-from) and kept in step, and each customer joins the brand's people. You keep answering in Intercom |
 | `warehouse` | Exports |
 | `model` | Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek, or a router (OpenRouter, Vercel AI Gateway, Requesty: one key for many vendors' models), with your own API key. OpenAI and xAI are tagged for subscription sign-in (ChatGPT plans, SuperGrok), which is coming; use a key for now. DeepSeek is tagged **Hosted in China**: it processes prompts, including customer details in them, in China; its models are also on the routers. They plan missions from a goal, run Outflare's built-in agent and ask the questions [AI visibility](ai-visibility.md) samples. Pick one under Workspace settings → AI model |
 | `custom` | A generic HTTP API or MCP server registered by the workspace |
@@ -67,6 +68,9 @@ Every catalog entry says how it connects in one list, `auth_options`: each way (
 | Attio | Attio app | Access token |
 | Slack | Slack app | Bot token from the workspace's own Slack app |
 | Slack (knowledge) | Slack app | Bot token from the workspace's own Slack app |
+| Slack (sales channels) | none: key only | Bot token (scopes `channels:read`, `groups:read`, `channels:history`, `groups:history`) and an optional search token (user scope `search:read`), both from the workspace's own Slack app |
+| Telegram bot | none: a bot has no consent screen | Bot token from the workspace's own bot, made with @BotFather |
+| Intercom | Intercom app | Access token from an internal app in the workspace's own Developer Hub, plus its data region (us, eu or au) |
 | PostHog | PostHog Cloud, no app to register | Personal API key (also self-hosted) |
 | Calendly | Calendly app | Personal access token |
 | Apollo | Apollo app | Master API key |
@@ -101,7 +105,9 @@ open "$OUTFLARE_URL/v1/workspaces/$WS/integrations/oauth/hubspot/authorize"
 | GET, POST | `/v1/workspaces/{ws}/integrations` | List or connect |
 | GET, PATCH, DELETE | `/v1/workspaces/{ws}/integrations/{id}` | Read, rename, replace the key, change config, disconnect |
 | POST | `/v1/workspaces/{ws}/integrations/{id}/test` | Sign in again with the stored key |
-| GET | `/v1/workspaces/{ws}/integrations/oauth/{connector}/authorize` | Start an OAuth sign-in |
+| GET | `/v1/workspaces/{ws}/integrations/oauth/{connector}/authorize` | Start an OAuth sign-in; `?integration=<id>` signs that existing connection in again instead of adding one, keeping its accounts and history |
+
+When a provider refuses a signed-in connection's token, Outflare renews it once with the refresh token and checks again before calling the connection broken, so a token that ran out early (during a long sync, say) mends itself. A connection whose sign-in can't be renewed shows "The sign-in to … expired or was revoked" and a **Sign in again** button on **Connectors**, which signs that same connection in again (and every other connection to the same account, such as Google Analytics beside Search Console). Google ends the sign-ins of an OAuth app whose consent screen is still in **Testing** after 7 days: publish the app (Google Cloud, Google Auth Platform, Audience, Publish app) so they last.
 
 Signing in needs an app registered at the provider. Set `CONNECTOR_<ID>_CLIENT_ID` and `CONNECTOR_<ID>_CLIENT_SECRET` (for example `CONNECTOR_HUBSPOT_CLIENT_ID`) and use `<PUBLIC_URL>/v1/integrations/oauth/callback` as the redirect URL. Google connectors fall back to `GOOGLE_OAUTH_CLIENT_ID`, Outlook to `MICROSOFT_OAUTH_CLIENT_ID`, PostHog needs no app at all (only a public https `PUBLIC_URL`), and neither does OpenRouter. If the app was registered with different scopes, `CONNECTOR_<ID>_SCOPES` (space separated) replaces the defaults. Without an app, connectors that also take a key still connect with the key.
 
@@ -111,6 +117,7 @@ Signing in needs an app registered at the provider. Set `CONNECTOR_<ID>_CLIENT_I
 | LinkedIn | linkedin.com/developers, create an app with the Community Management API product (scopes: `r_basicprofile`, `w_member_social`, `r_organization_social`, `w_organization_social`, `rw_organization_admin`) | `CONNECTOR_LINKEDIN_CLIENT_ID`, `_CLIENT_SECRET` |
 | Slack | api.slack.com/apps, Create app, OAuth & Permissions (bot scopes: `chat:write`, `chat:write.public`, `channels:read`, `groups:read`) | `CONNECTOR_SLACK_CLIENT_ID`, `_CLIENT_SECRET` |
 | Slack (knowledge) | A second Slack app, read only (bot scopes: `channels:read`, `groups:read`, `channels:history`, `groups:history`, `channels:join`) | `CONNECTOR_SLACK_KNOWLEDGE_CLIENT_ID`, `_CLIENT_SECRET` |
+| Intercom | app.intercom.com, Developer Hub, New app (a public app), with read permissions for conversations, users and companies, and admins (set on the app, not the consent screen). Sign-in serves US-hosted Intercom workspaces; EU and Australian ones connect with an access token | `CONNECTOR_INTERCOM_CLIENT_ID`, `_CLIENT_SECRET` |
 | Attio | build.attio.com, create an app with read access to records, object configuration, lists, list entries, list configuration, notes, tasks and workspace members (scopes are set on the app, not the consent screen) | `CONNECTOR_ATTIO_CLIENT_ID`, `_CLIENT_SECRET` |
 | Calendly | developer.calendly.com, Create a new app (scopes `users:read`, `scheduled_events:read`) | `CONNECTOR_CALENDLY_CLIENT_ID`, `_CLIENT_SECRET` |
 | Apollo | Apollo, Settings, Integrations, API, OAuth registration (people search, person enrichment, email accounts) | `CONNECTOR_APOLLO_CLIENT_ID`, `_CLIENT_SECRET` |
@@ -148,16 +155,16 @@ On Mailboxes → Domains, a domain whose mailboxes are on Google Workspace or Mi
 In a workspace with [brands](../README.md#brands), a tool is connected once and shared, and a brand with an account of its own can still have it:
 
 - **A workspace connection** (`brand_id` null) is used by every brand, or only by the brands in `brand_ids`. One Google sign-in covers Analytics and Search Console for every brand, and each brand reads its own properties on it ([analytics.md](analytics.md)).
-- **A brand's own connection** (`brand_id` set) is used by that brand alone, in place of the workspace's connections to the same tool. Repocket can have its own Plausible while every other brand keeps the company's.
+- **A brand's own connection** (`brand_id` set) is used by that brand alone, in place of the workspace's connections to the same tool. Summitly can have its own Plausible while every other brand keeps the company's.
 
-`GET /v1/workspaces/{ws}/integrations?brand=repocket` lists what a brand uses: its own connections and the shared ones, minus any shared connection to a tool it has its own of. `brand=none` lists the connections every brand shares. Set who uses a connection with `POST /integrations` or `PATCH /integrations/{id}` (`brand_id`, `brand_ids`), or `?brand=` on the OAuth `authorize` link; moving a connection to a brand stops sharing it. In the app, **Connectors** shows who uses each connection, and lists what the brand picked in the sidebar uses. Someone kept to some brands sees only the connections their brands use. The SQL function `integration_serves(integration, brand)` gives the same answer to queries.
+`GET /v1/workspaces/{ws}/integrations?brand=summitly` lists what a brand uses: its own connections and the shared ones, minus any shared connection to a tool it has its own of. `brand=none` lists the connections every brand shares. Set who uses a connection with `POST /integrations` or `PATCH /integrations/{id}` (`brand_id`, `brand_ids`), or `?brand=` on the OAuth `authorize` link; moving a connection to a brand stops sharing it. In the app, **Connectors** shows who uses each connection, and lists what the brand picked in the sidebar uses. Someone kept to some brands sees only the connections their brands use. The SQL function `integration_serves(integration, brand)` gives the same answer to queries.
 
 ### Connections and brands
 
 No brand, no data. Each connection has a kind (`brand_kind`), chosen when connecting (`brand_kind` on `POST /integrations`, `PATCH /integrations/{id}` and the OAuth `authorize` link; each connector in `GET /v1/connectors` has a default):
 
 - **`brand`**: the whole connection belongs to one brand (`brand_id`), such as Stripe for Acme. Payments, CRMs, sequencers, email providers and calendars default to it.
-- **`split`**: one sign-in whose sites, properties or ad accounts belong to different brands, each assigned on its own: Google Analytics properties, Search Console sites, Meta and Google ad accounts. Analytics and ads default to it.
+- **`split`**: one sign-in whose sites, properties or ad accounts belong to different brands, each assigned on its own: Google Analytics properties, Search Console sites, Meta and Google ad accounts. Analytics and ads default to it. Nothing is imported into a brand wholesale: on a brand's **Connectors** page a split connection says "Split by site", More, "Choose {brand}'s sites" picks which are the brand's, and a brand's pages never read another brand's site. "Disconnect for every brand" removes the sign-in from the whole workspace; to stop a site counting for a brand, choose its sites instead. Signing in again with the same account (More, Sign in again) renews the connection instead of adding a second one.
 - **`shared`**: a tool every brand uses (or the brands in `brand_ids`), such as DataForSEO, the AI model key or Slack. What it produces belongs to the brand that used it. Models, notifications, data, verification, DNS and SEO data tools default to it, and so do Gmail and Outlook mailbox sign-ins: each mailbox carries its own brand, and one with none is unassigned and sends for no brand's sequences.
 
 Data from a brand connection with no brand, or a site or ad account nobody assigned, is stored with no brand and shown in none. `GET /v1/workspaces/{ws}/connections/unassigned` lists them; assign a connection with `PATCH /integrations/{id}` (`brand_id`) and a site or ad account with `PUT /integrations/{id}/accounts/{account}` (`GET /integrations/{id}/accounts` lists them, with a brand whose domains match each site as a suggestion; a domain never assigns a site by itself). Assigning moves what was stored for it to that brand. In a workspace with one brand everything is that brand's, and a new brand connection gets it when connected. The app shows a notice above every page while anything has no brand, and **Connectors** lists each item with a brand to pick. The SQL function `outflare_site_brand(integration, site)` is a site's brand: its assignment, else its connection's brand, else the workspace's only brand.
@@ -259,6 +266,125 @@ To write one in Go:
 7. To react when someone connects or disconnects, append to `Store.OnConnect` / `Store.OnDisconnect`; the hooks run in the same transaction.
 8. To receive webhooks (live updates), implement `connectors.Hooked` (`HookSetup`, `VerifyHook`, `ParseHook`; `connectors.VerifyHMAC` checks the usual signature formats) and list `connectors.CapHooks`. If the tool's API can add and remove webhooks, implement `connectors.HookRegistrar` too, and Outflare sets the address up for the workspace. To act on an event, register a handler with `inbound.Service.On(connector, handler)`; events with no handler are logged.
 
+## Company research
+
+Connectors with the `research.company` capability (Parallel, with the workspace's own API key) implement `connectors.CompanyResearcher`: given a company's domain, optionally its name, and a brief that says what to find out, they answer in sections of text, each with the pages it came from (title, address and the passage quoted, when the provider gives one). Outflare has no research key of its own: without a connection there is no research.
+
+- **Effort** caps what a request may spend: `light`, `standard` (the default) or `deep`. On Parallel these are the `lite`, `base` and `core` processors of its Task API, charged per completed run on your Parallel balance (about US$0.005, US$0.01 and US$0.025 at its list prices). Each answer is booked in the spend ledger on the connection, worked out from the price list, and counts towards the connection's usage limits.
+- **Research takes a while.** A request waits a bounded time for the provider (two to six minutes on Parallel, by effort). Research that outlasts the wait fails as a timeout that names the provider's run; asking again with that run id reads the result without starting, or paying for, another.
+- **Findings are data.** They are the provider's reading of pages on the web. Outflare keeps the text, never follows instructions in it, and drops sources that aren't web addresses.
+- **Errors** use the usual kinds: `auth` (the key was refused), `quota` (out of credit or rate limited), `unavailable` (the provider is down, or the research failed or timed out) and `invalid` (a missing domain or brief, or a tier the account can't use).
+
+The engine has no feature of its own that calls it yet; extensions reach it through `Connections().Open(..., outflare.CapResearchCompany)` and `Connection.Research`.
+
+### People research
+
+Connectors with the `research.people` capability (Parallel) implement `connectors.PeopleResearcher`: given a company's domain, and its name when known, they read the web for up to eight people who work there now, decision makers first. Each person has a name, a title, their own LinkedIn profile when one was found, the page that shows they work there, and a work email only when a page publishes it (with that page). A query can name people to leave out. It is for a company a people-data provider has nobody for.
+
+- **Effort, the wait and picking a run up again** are company research's: the same processors and prices, the same bounded wait, the same run id to ask again with.
+- **Nobody found is an answer**, not an error, and the run is still paid for.
+- **People are data.** They are the provider's reading of the web. Outflare keeps a LinkedIn address only when it is a person's profile, an email only when it is one plain address, and sources only when they are web addresses; nobody has checked the email, so it is verified like any other before it is used.
+
+Extensions reach it through `Connections().Open(..., outflare.CapResearchPeople)` and `Connection.ResearchPeople`.
+
+## Reading a profile
+
+Connectors with the `data.read_profile` capability (Treg, through Fetchin, with the workspace's own Treg token; Blitz, with the workspace's own Blitz key) implement `connectors.ProfileReader`: given a person's LinkedIn profile address, they return the profile's headline, location and the jobs it lists as current (company, the company's page when the profile links one, and the title). A feature uses it to check that someone it is about to contact still works where it found them. Outflare has no key of its own for it: without a connection there is no lookup.
+
+- **A missing profile is an answer.** A profile the provider says doesn't exist comes back as not found, with no error. On Treg that is its `PROFILE_NOT_FOUND` code, or the profile provider's own 404 that says so; any other 404 (a route that moved) is an `invalid` error, never a missing person.
+- **A profile with no current jobs says nothing** about where the person works: it is a gap, not a sign they left.
+- **Cost.** Treg reports what each lookup cost and it is booked in the spend ledger on the connection. Blitz counts one record for a profile it has and nothing for one it doesn't, booked as one credit.
+- **Profiles are data.** What a person wrote on their profile is never followed as instructions. Only the fields above are read.
+
+The engine has no feature of its own that calls it yet; extensions reach it through `Connections().Open(..., outflare.CapReadProfile)` and `Connection.ReadProfile`.
+
+## Finding a profile by name
+
+Connectors with the `data.find_profile` capability (Treg, through Crawl4AI's person lookup, with the workspace's own Treg token) implement `connectors.ProfileLocator`: given a person's first and last name and their company's domain, they return the LinkedIn profile the provider has on record, with the name, title and company it has for it. Blitz has no lookup by name. Outflare has no key of its own for it: without a connection there is no lookup.
+
+- **The match is the provider's guess.** The answer says who and where the provider has the profile; a feature checks that the name and the company are the ones it asked about before it uses the profile, because a wrong profile is worse than none.
+- **Nobody on record is an answer.** Crawl4AI's 404 for a name it has no record of comes back as not found, with no error, and costs nothing. A person on record without a profile address is not found too.
+- **Cost.** Treg reports what each lookup cost (about a tenth of a cent for a person found) and it is booked in the spend ledger on the connection.
+
+Extensions reach it through `Connections().Open(..., outflare.CapFindProfile)` and `Connection.FindProfile`.
+
+## A company's LinkedIn page
+
+Connectors with the `data.company_page` capability (Blitz) implement `connectors.CompanyLocator`: given a company's domain, they return its LinkedIn page and its name there. A domain the provider knows no page for is an answer (not found, and free on Blitz), not an error; a page costs one record, booked as one credit.
+
+A connector that searches people from that page can also implement `connectors.CompanyPageSearcher`, which searches a page that is already known without looking it up again. Blitz's own people search does both steps; a feature that keeps the page (to tell "no page" from "nobody on it", or to search it on another connection) asks them apart.
+
+Extensions reach both through `Connection.CompanyPage` and `Connection.SearchPeopleAt`, which searches the page when the connector can and the company's domain otherwise.
+
+Connectors with the `data.company_profile` capability (Blitz) implement `connectors.CompanyProfiler`: given the company's LinkedIn page, they return its size: the employee range the page states and how many people list the company as their current employer there. A page the provider has no record of is an answer (not found, and free on Blitz), not an error; a page it has costs one record, booked as one credit. Extensions reach it through `Connection.CompanyProfile`.
+
+## Several connections for one job
+
+`Connections().Open` takes the oldest connection that has a capability. A feature that can use any of them asks for all with `Connections().OpenAll(ctx, workspaceID, brand, capability, prefer...)`: every connected connection with the capability that serves the brand, the connectors named in `prefer` first and in that order, then the rest, the oldest first. So a provider that is out of credits doesn't hide another that works: the feature moves on to the next when one refuses. A connection that can't be opened (an expired sign-in) is left out and logged. In the engine it is `Store.ListCapable`.
+
+## Has the sequencer already emailed someone
+
+Connectors with the `observe.contact_history` capability (EmailBison) implement `connectors.ContactHistory`: given an address, they say whether the account has a lead with it and how many emails it has sent them (`GET /api/leads?search=`, the row whose email is the address; `overall_stats.emails_sent`, else the lead's own `emails_sent`). It only reads and costs nothing. A feature uses it to leave out someone the account is already writing to. Extensions reach it through `Connection.ContactSent`.
+
+## Adding people to a sequencer's campaign
+
+Connectors with `push.leads` (Smartlead, Instantly, EmailBison) implement `connectors.LeadPusher`; journeys' `push_to_sequencer` steps and the shared people steps' `enroll` use it. A push never adds anyone twice: someone already in the campaign is `already_in`. With `AllowElsewhere` off, someone the account already holds elsewhere is left out (`refused`).
+
+EmailBison also implements `connectors.LeadsPusher`, which the people steps use for a batch: each address is looked up in the campaign and in the account (`GET /api/leads?search=`); a contact the account already holds is left out unless it is the push's own unused one (it carries the push's `Note`, is in no campaign, and has no sends and no replies, read with `GET /api/leads/{id}`), which is an earlier try that failed before the attach. New contacts are created together with `POST /api/leads/create-or-update/multiple` (`existing_lead_behavior: patch`; `email`, `first_name`, `last_name`, `company`, `notes`, `custom_variables`), and everyone is attached with one `POST /api/campaigns/{id}/leads/attach-leads`.
+
+## Is a campaign ready to take people
+
+Connectors with `observe.campaign_readiness` (EmailBison) implement `connectors.CampaignReadiness`: before people are pushed, the campaign is read (`GET /api/campaigns/{id}`, `/api/campaigns/v1.1/{id}/sequence-steps`, `/api/campaigns/{id}/schedule`, every page of `/api/campaigns/{id}/sender-emails`). It is not ready when it isn't active, its sequence has no steps, a step has an empty subject or body or a `{TAG}` people pushed from Outflare don't fill (anything but `FIRST_NAME`, `LAST_NAME`, `EMAIL`, `COMPANY`), its schedule has no sending day, no valid window or time zone, or it has no connected sender with a daily limit. Its daily capacity is the connected senders' daily limits within the campaign's `max_new_leads_per_day` and `max_emails_per_day`. The enroll step holds people (`campaign_not_ready`) while it isn't ready, and past the day's capacity (`campaign_daily_capacity`, counted from `sequence.lead_pushed` since midnight UTC). A ready answer is reused for two minutes.
+
+## May an address be contacted
+
+Connectors with the `guard.contact` capability implement `connectors.ContactGuard`: given people a feature is about to contact (an address, and the company's domain when known), or companies it is about to look into (a domain and no address, so nothing is spent on a company that may not be contacted), they return one verdict for each, in the same order: `clear`, `blocked` with a reason (`customer` or `blocklisted`), or `unknown` with a short code. They answer from a source outside Outflare that the workspace runs or subscribes to itself, so its address is part of the connection beside the key. Outflare has no key or service of its own for either: without a connection there is no outside check.
+
+**A guard fails closed.** Only a clean `clear` lets a person through. A timeout, a redirect, a status that is not 200, a body that is not the JSON documented below, an answer that is short, out of order, stale or about another address, an input the service refuses: each is `unknown` for the people that call was about, and unknown is never read as clear. The failure comes back beside the verdicts with its code (`http_503`, `timeout`, `schema`, `incomplete_check`, `content_type`, `body_limit`, `transport`, `base_url`, `credential`) and, for a rate limit, how long the service asked to be left alone. A guard never follows a redirect, so a key is never sent to another address. Nothing is remembered between checks, except the outreach blocklist's daily domains export (below): every check asks again.
+
+| Connector | Fields | Asks | Blocks as |
+| --- | --- | --- | --- |
+| `accountlookup` (Product account lookup) | `base_url` (the lookup's https address, without `/check`; a path is fine), `api_key` | `GET <base_url>/check?q=<email or domain>`, 1 to 50 `q` a call, `Authorization: Bearer <api_key>`; its whole list from `GET <base_url>/accounts` (below) | `customer` |
+| `outreachblocklist` (Outreach blocklist) | `base_url` (an https origin: no path, query or sign-in), `api_key` | `POST <base_url>/api/v1/check` with `{"emails": [...]}`, 1 to 100 a call, `Authorization: Bearer <api_key>`; for a company alone, `GET <base_url>/api/v1/exports?format=csv&view=domains` once a day; its whole list from both exports (below) | `blocklisted` |
+
+Connect one like any API key connector: `POST /v1/workspaces/{ws}/integrations` with `{"connector": "accountlookup", "credentials": {"base_url": "https://admin.yourproduct.example/api/admin/v1/account-lookup", "api_key": "..."}}`. Connecting makes one read-only call (a reserved domain, or a reserved address) to prove the address and the key.
+
+**The account lookup** is your own product's API: it knows which email addresses and company domains already have an account. It answers `{"success": true, "result": {"checkedAt": "<RFC 3339>", "results": [{"input", "result", "matchedBy", "sources", "reason"}]}}`, one result for each `q` in the same order, where `result` is `match`, `no_match` or `invalid`, `matchedBy` is `email`, `domain` or null, `sources` lists `account`, `deleted_account` or `reseller_sub_user`, and `reason` says why an input is invalid.
+
+- **What is asked about a person:** their address, the registrable domain of that address, and their company's domain. Any match blocks them as a customer; they are clear only when everything asked came back `no_match`. `invalid` is unknown.
+- **A whole answer or none:** `checkedAt` must be within the last two minutes (and at most 30 seconds ahead); every input is echoed in its place; a match says what matched and where and has no reason; a `no_match` has none of them; an `invalid` says why.
+- **A mailbox provider's domain decides nothing.** The domain of a free mail provider, a private mailbox service or a relay (`gmail.com`) is never asked about: one customer with a Gmail address must not make every Gmail user a customer, and no answer about `gmail.com` clears anyone. For such an address only the address itself is asked about, and a match the lookup says was by domain is unknown.
+- **A company asked about alone** (a domain and no address): its registrable domain is asked; a match blocks it as a customer, `no_match` clears it. A mailbox provider's domain is not a company's and is never asked: it is `unknown` (`mailbox_domain`). A domain that can't be read is `unknown` (`invalid_domain`).
+- **A rate limit (429)** is waited out once, for the time `Retry-After` (else `RateLimit-Reset`) names, a minute when neither does, when that fits in the 60 seconds one check may take (less when the caller has less). A second 429, or a longer wait, is a failure that carries the wait. Nothing else is asked twice. One call may take 45 seconds.
+
+**The outreach blocklist** is a list a company keeps outside any one tool. It answers `{"success": true, "result": {"results": [{"input", "status"}]}}`, one result for each address in the same order, each echoing its input, with `status` `blocked`, `not_blocked` or `unknown`. Only `not_blocked` clears an address. One call may take 12 seconds, reading the answer included, and nothing is asked twice; a failed call clears nobody, and nothing after it is asked.
+
+A company asked about alone (a domain and no address) is checked against the service's domains export, a snapshot of every blocked domain kept in memory for each connection: `GET <base_url>/api/v1/exports?format=csv&view=domains`, answered `200` with `Content-Type: text/csv`, an `X-Generated-At` time (RFC 3339 or an HTTP date) and one column named `domain`, a lower-case domain a row. It is downloaded on the first such check of each UTC day (45 seconds at most); a failed download keeps the last snapshot and is tried again after a minute. A company is `blocked` as `blocklisted` when its domain, or a domain it is under, is listed, and `clear` when not, but only while the export is under a day old: with none, or an older one, every company is `unknown` (`stale_export`, or the download's code such as `http_503`). An export with another column, a row that is not a domain, no generated time or another content type is not used (`schema`, `content_type`). A key that may check addresses but not export (401 or 403 on the export) is `export_refused`: companies wait, and the connection is not marked as refused, since its address checks still work. The key needs the service's `export` scope beside `check`.
+
+### A copy of each guard's whole list
+
+Both guards' whole lists can be read (`connectors.GuardLister`), so the engine keeps a copy of each in the workspace's opt-out list, read by a job on a schedule (`engine/internal/guardsync`) and never in a request:
+
+| Connector | Reads | Mode | Every | Entries |
+| --- | --- | --- | --- | --- |
+| `accountlookup` | `GET <base_url>/accounts?limit=500&after=<cursor>` (no `after` for the first page), answered `{"success": true, "result": {"accounts": [{"email", "freeEmailProvider", ...}], "nextCursor", "hasMore"}}` | `feed`: oldest first, each sync reads only what came after the last cursor | 5 minutes | each account's address, and its registrable domain unless that is a mailbox provider's (by the classifier, or `freeEmailProvider: true`), reason `customer` |
+| `outreachblocklist` | `GET <base_url>/api/v1/exports?format=csv&view=emails` (one column, `email`) and `...&view=domains` (one column, `domain`), as above | `snapshot`: both read whole each time, a row at a time | 30 minutes | each address and domain, reason `blocklist` |
+
+Only `email` and `freeEmailProvider` are read of an account; nothing else about it is kept. A feed page is checked like an answer: at most 500 accounts, a page with accounts names a new `nextCursor`, `hasMore` with no accounts or no cursor is refused (`feed_cursor`), and an empty last page keeps the cursor it was given, so accounts added later are read next time. An export over a day old (`stale_export`), not the shape described (`schema`), cut off, or over 1 GB (`body_limit`) fails whole.
+
+Entries carry the source `<connector>_sync`, the connection's id and its brand (none for `blocklist`, which is every brand's). A mailbox provider's domain (`gmail.com`) is never added as a domain, from either list, since it would stop everyone with an address there; the address alone is. A feed's first sync reads it all in runs of at most 4 minutes and 400 pages, each page kept with its cursor in one transaction, and the next run starts straight away from where the last one stopped. A snapshot is read into a table of its transaction and compared with the copy: new entries are added, and this connection's own entries that left it are removed (`suppressions.removed`), never one a person or another source added. A read that fails half way changes nothing. One sync of a connection runs at a time; a failed one waits at least a minute, or as long as the service asked, and is the event `guard_list.sync_failed` with the guard's code in `detail`.
+
+**The copy answers for companies.** While a guard's copy is fresh (its sync is on, has read the whole list once, and last succeeded within twice its interval), `ContactGuard.CompanyFromList(ctx, domain)` answers for a company from it with no call: `blocked` with the guard's reason when the domain, or a domain it is under, is on the copy, else `clear`. When it is not fresh, or the domain is a mailbox provider's, it says so and the caller asks the guard. Checking a person before they are added to a campaign always asks the guard itself, since the copy is only as new as its last sync.
+
+**Whoever joins a list is stopped like anyone on the opt-out list**: a sequence Outflare sends checks the list before every email and ends the enrollment as blocked, and the opt-out syncs write it to each connected sequencer's blocklist (`suppression-syncs`, push on by default), so a copy of a large list also goes to each sequencer, at most 10,000 entries per sequencer sync.
+
+| Method | Path | Does |
+| --- | --- | --- |
+| GET | `/v1/workspaces/{ws}/guard-list-syncs` | Each copy: `mode`, `interval_minutes`, `fresh`, `backfilled_at`, `succeeded_at`, `last_added`, `last_removed`, `last_duration_ms`, `entries`, `last_error`, `error_code`, `retry_at` (MCP `list_guard_list_syncs`) |
+| PATCH | `/v1/workspaces/{ws}/guard-list-syncs/{integration}` | `enabled`, `interval_minutes` (1 to 1440, null for the default) (MCP `update_guard_list_sync`) |
+
+Extensions reach guards through `Connections().ContactGuards(ctx, workspaceID, brand, prefer...)` and `ContactGuard.Check`. Unlike `OpenAll`, `ContactGuards` leaves no connection out: a guard whose key was refused at its last check, or that can't be opened, is still returned and its check fails with everyone unknown, because a broken guard must hold people, never let them through. A refused key marks the connection, so the Connectors page shows it. In the engine it is `Store.ListGuards`. The engine has no feature of its own that calls a guard yet; it only keeps the copies above.
+
 ## Email verification
 
 Every lead's address is checked before its first email. Undeliverable addresses are never emailed. Each workspace picks a verification connector (the free built-in checks by default) and decides whether risky, catch-all and unknown addresses are blocked too.
@@ -271,6 +397,8 @@ Every lead's address is checked before its first email. Undeliverable addresses 
 | GET | `/v1/workspaces/{ws}/verifications/summary` | Counts by status and how many are waiting |
 
 All providers' answers are mapped to four statuses: `deliverable`, `undeliverable`, `risky` and `unknown`, with `catch_all`, `disposable`, `role` and `free` flags and the provider's own words in `provider_status`. If the connected service refuses the key or runs out of credits, verification falls back to the built-in checks so sending is not held up, and the connection shows the error.
+
+A verifier whose first check can be unavailable (a gateway such as Treg, whose first provider may fail or still be working) implements `connectors.FallbackVerifier`. When the workspace has another verification service connected, `verify.Service` gives it that one to ask instead: the oldest other connected verifier that serves the brand, on its own key, one credit an address it answers booked to its own connection. [email-finding.md](email-finding.md#treg) says what Treg does with its answer. With no other verifier connected nothing changes.
 
 Engine code verifies with `verify.Enqueue` (queued, in a transaction) or `verify.Service.Verify` (now, in a job).
 
@@ -358,7 +486,7 @@ A supplier connector that implements `connectors.PushVendor` (Cheap Inboxes does
 
 ## Google Workspace (team email into the CRM)
 
-`google_workspace_mail` (Google Workspace email and calendar) reads the team's work mail and calendars into the CRM with the company's own Google Cloud service account, so nobody has to sign in one by one. Connect it with the service account's JSON key and an address in the Workspace to test with; in the Google Admin console (Security, API controls, Domain-wide delegation) give the service account's client id `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/calendar.readonly`. Outflare tests it by reading only that user's mailbox address, and records which scopes Google lets it use (`account.details.scopes`): delegate `https://www.googleapis.com/auth/gmail.send` too for people to send from their own address through Outflare. Every module uses this one connection ([ADR 15](adr/0015-google-layer.md)). An admin then chooses it in the brand's CRM email rollout ([customers.md](customers.md#email-with-your-contacts)); it never sends or changes anything in Google.
+`google_workspace_mail` (Google Workspace email and calendar) reads the team's work mail and calendars into the CRM with the company's own Google Cloud service account, so nobody has to sign in one by one. Connect it with the service account's JSON key and an address in the Workspace to test with; in the Google Admin console (Security, API controls, Domain-wide delegation) give the service account's client id `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/calendar.readonly`. Outflare tests it by reading only that user's mailbox address, and records which scopes Google lets it use (`account.details.scopes`): delegate `https://www.googleapis.com/auth/gmail.send` too for people to send from their own address through Outflare. Every module uses this one connection ([ADR 15](adr/0015-google-layer.md)): CRM email and meetings, and Sales reps who choose **Use Google Workspace** ([sales workflow](engineering/sales-workflow.md)). An admin then chooses it in the brand's CRM email rollout ([customers.md](customers.md#email-with-your-contacts)); it never sends or changes anything in Google.
 
 ## Calendars and CRMs (outcomes)
 
@@ -420,3 +548,22 @@ capability (`UpdateWorkspaceUser`) reports each part as `updated`, `failed` or
 (forwarding) `pending`, so one refused part doesn't hide the others. It never creates, deletes or
 suspends users, and never reads or sets passwords. A connection left read-only
 returns `workspace_writes_off`.
+
+#### Creating users
+
+To let Outflare create new users in the tenant, set the connection's **Allow
+creating users** to `yes` and authorize the service account for
+`https://www.googleapis.com/auth/admin.directory.user`. It is separate from
+profile changes: one doesn't turn on the other. The `workspace.create_users`
+capability (`CreateWorkspaceUser`) creates one user as the delegated
+administrator, with the name, password and optional recovery email the caller
+gives. The password is sent to Google once and is never stored, logged or
+returned. Each new user takes one of the tenant's own licences; Outflare never
+buys one. Creating is safe to retry: when the address is already a user of the
+connection's own customer ID, nothing is changed and the result says
+`created: false`. An address that belongs to a user elsewhere returns
+`workspace_user_elsewhere`, and a connection that doesn't allow creating
+returns `workspace_create_off`. `CheckWorkspaceCreate` says whether the
+connection could create a user now, by reading one user with that scope, and
+changes nothing. It never deletes or suspends a user, changes an
+existing user's password, or enrolls two-factor authentication.

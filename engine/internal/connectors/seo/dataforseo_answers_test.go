@@ -1,8 +1,13 @@
 package seo
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
@@ -60,5 +65,31 @@ func TestDataForSEOAnswer(t *testing.T) {
 	}
 	if _, err := d.Answer(ctx, cl, creds, "gemini", c.AnswerQuery{Prompt: "x", Country: "ZZ"}); c.KindOf(err) != c.ErrInvalid {
 		t.Fatalf("country: %v", err)
+	}
+}
+
+// An assistant takes a minute or more to answer, longer than the client's
+// usual timeout: the answer call waits for it, and one that still runs out
+// of time says so rather than that DataForSEO is down.
+func TestDataForSEOAnswerWaitsForSlowAnswers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		json.NewEncoder(w).Encode(dfs(0.004, map[string]any{"model": "gpt-6", "markdown": "Northpeak."}))
+	}))
+	t.Cleanup(srv.Close)
+	cl := &c.Client{HTTP: &http.Client{Timeout: 50 * time.Millisecond}, BaseURLs: map[string]string{"dataforseo": srv.URL}}
+	creds := c.Creds{"login": "jo@example.com", "password": "pw"}
+	got, err := DataForSEO{}.Answer(ctx, cl, creds, "chatgpt", c.AnswerQuery{Prompt: "best widgets"})
+	if err != nil || got.Text != "Northpeak." || got.Cost.USD != 0.004 {
+		t.Fatalf("a slow answer was cut off: %+v %v", got, err)
+	}
+	short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	_, err = DataForSEO{}.Answer(short, cl, creds, "chatgpt", c.AnswerQuery{Prompt: "best widgets"})
+	if c.KindOf(err) != c.ErrUnavailable || !c.IsTimeout(err) {
+		t.Fatalf("an answer that ran out of time: %v", err)
+	}
+	if _, err := (DataForSEO{}).Answer(ctx, &c.Client{BaseURLs: map[string]string{"dataforseo": "http://127.0.0.1:1"}}, creds, "chatgpt", c.AnswerQuery{Prompt: "x"}); err == nil || c.IsTimeout(err) {
+		t.Fatalf("an unreachable service is not a timeout: %v", err)
 	}
 }

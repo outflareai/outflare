@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createClient } from "@outflare/sdk";
 import { createServer } from "../dist/server.js";
-import { CORE, MAX_CORE } from "../dist/toolbox.js";
+import { CORE, GROUPS, GROUP_INFO, MAX_CORE, READ_POSTS, groupTools, toolMode } from "../dist/toolbox.js";
 
 const WS = "11111111-1111-4111-8111-111111111111";
 const SEQ = "22222222-2222-4222-8222-222222222222";
@@ -409,28 +409,28 @@ test("memory tools save, correct and forget, and stay out of read-only mode", as
 });
 
 test("brand tools reach the brand routes, and OUTFLARE_BRAND is the list default", async () => {
-  const { client, calls } = await connect(() => [200, { data: [] }], { brand: "repocket" });
+  const { client, calls } = await connect(() => [200, { data: [] }], { brand: "summitly" });
   await client.callTool({ name: "list_mailboxes", arguments: {} });
-  assert.equal(calls[0].url.search, "?brand=repocket");
+  assert.equal(calls[0].url.search, "?brand=summitly");
   await client.callTool({ name: "list_mailboxes", arguments: { brand: "all" } });
   assert.equal(calls[1].url.search, "?brand=all");
-  await client.callTool({ name: "update_brand_context", arguments: { brand: "geonode", voice: "Plain." } });
+  await client.callTool({ name: "update_brand_context", arguments: { brand: "northpeak", voice: "Plain." } });
   assert.equal(calls[2].method, "PATCH");
-  assert.equal(calls[2].url.pathname, `/v1/workspaces/${WS}/brands/geonode/context`);
+  assert.equal(calls[2].url.pathname, `/v1/workspaces/${WS}/brands/northpeak/context`);
   assert.deepEqual(JSON.parse(calls[2].body), { voice: "Plain." });
   await client.callTool({ name: "get_context", arguments: {} });
-  assert.ok(calls.some((c) => c.url.pathname.endsWith("/context") && c.url.search === "?brand=repocket"));
+  assert.ok(calls.some((c) => c.url.pathname.endsWith("/context") && c.url.search === "?brand=summitly"));
 });
 
 test("customer tools and run_query use the brand routes, looking a handle up first", async () => {
 
   const { client, calls } = await connect((req) => {
     const u = new URL(req.url);
-    if (u.pathname.endsWith("/brands/repocket")) return [200, { id: BRAND, handle: "repocket" }];
+    if (u.pathname.endsWith("/brands/summitly")) return [200, { id: BRAND, handle: "summitly" }];
     return [200, { data: [], columns: [], rows: [] }];
   });
-  await client.callTool({ name: "list_records", arguments: { brand: "repocket", type: "person" } });
-  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/brands/repocket`);
+  await client.callTool({ name: "list_records", arguments: { brand: "summitly", type: "person" } });
+  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/brands/summitly`);
   assert.equal(calls[1].url.pathname, `/v1/brands/${BRAND}/records`);
   assert.equal(calls[1].url.search, "?type=person");
   await client.callTool({ name: "get_record_timeline", arguments: { brand: BRAND, record_id: SEQ } });
@@ -449,11 +449,11 @@ test("activation tools use the brand routes: rules, journeys, lifecycle email an
 
   const { client, calls } = await connect((req) => {
     const u = new URL(req.url);
-    if (u.pathname.endsWith("/brands/repocket")) return [200, { id: BRAND, handle: "repocket" }];
+    if (u.pathname.endsWith("/brands/summitly")) return [200, { id: BRAND, handle: "summitly" }];
     return [200, { data: [] }];
   });
-  await client.callTool({ name: "list_rules", arguments: { brand: "repocket" } });
-  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/brands/repocket`);
+  await client.callTool({ name: "list_rules", arguments: { brand: "summitly" } });
+  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/brands/summitly`);
   assert.equal(calls[1].url.pathname, `/v1/brands/${BRAND}/rules`);
   await client.callTool({ name: "add_to_journey", arguments: { brand: BRAND, journey: SEQ, record_id: WS } });
   assert.equal(calls[2].url.pathname, `/v1/brands/${BRAND}/journeys/${SEQ}/runs`);
@@ -475,11 +475,11 @@ test("reddit tools: guide, campaign prompt, actions and the report; read-only le
   const { client, calls } = await connect(() => [200, { data: [] }]);
   const guide = await client.readResource({ uri: "outflare://reddit-guide" });
   assert.match(guide.contents[0].text, /place_reddit_action/);
-  const p = await client.getPrompt({ name: "run_reddit_campaign", arguments: { brand: "geonode", budget: "300" } });
-  assert.match(p.messages[0].content.text, /geonode.*300 Engain credits/);
+  const p = await client.getPrompt({ name: "run_reddit_campaign", arguments: { brand: "northpeak", budget: "300" } });
+  assert.match(p.messages[0].content.text, /northpeak.*300 Engain credits/);
 
   const thread = "https://www.reddit.com/r/proxies/comments/1abc2d/best_residential_proxies/";
-  await client.callTool({ name: "place_reddit_action", arguments: { brand: BRAND, kind: "comment", target_url: thread, content: "Geonode held up for me", brand_mentioned: true } });
+  await client.callTool({ name: "place_reddit_action", arguments: { brand: BRAND, kind: "comment", target_url: thread, content: "Northpeak held up for me", brand_mentioned: true } });
   assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/reddit/actions`);
   assert.equal(JSON.parse(calls[0].body).kind, "comment");
@@ -540,6 +540,26 @@ test("search insights retain brand routing, model assumptions and write permissi
   assert.ok(names.includes("get_search_insights") && names.includes("list_search_groups") && names.includes("get_search_workspace") && names.includes("get_search_report_run"));
   assert.ok(!names.includes("save_search_work") && !names.includes("save_search_schedule") && !names.includes("run_search_report"));
   assert.ok(!names.includes("save_search_group") && !names.includes("refresh_search_insights"));
+});
+
+test("partner program tools preserve a credit start time, omission and null", async () => {
+  const { client, calls } = await connect(() => [200, {}]);
+  const credits_from = "2026-11-01T08:00:00.123456+08:00";
+  const created = await client.callTool({ name: "create_partner_program", arguments: { brand: BRAND, name: "Affiliates", kind: "affiliate", credits_from } });
+  assert.equal(created.isError, undefined);
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/partner-programs`);
+  assert.equal(JSON.parse(calls[0].body).credits_from, credits_from);
+  for (const fields of [{ credits_from }, { credits_from: null }, { hold_days: 0 }]) {
+    const result = await client.callTool({ name: "update_partner_program", arguments: { brand: BRAND, program: SEQ, ...fields } });
+    assert.equal(result.isError, undefined);
+    assert.equal(calls.at(-1).method, "PATCH");
+    assert.equal(calls.at(-1).url.pathname, `/v1/brands/${BRAND}/partner-programs/${SEQ}`);
+    assert.deepEqual(JSON.parse(calls.at(-1).body), fields);
+  }
+  const invalid = await client.callTool({ name: "update_partner_program", arguments: { brand: BRAND, program: SEQ, credits_from: "yesterday" } });
+  assert.equal(invalid.isError, true);
+  assert.equal(calls.length, 4);
 });
 
 test("partner proof tools: the proof, its json export, and the new list and bulk params", async () => {
@@ -621,6 +641,135 @@ test("call_tool runs any tool through the API, and explains mistakes", async () 
   assert.match(typo.content[0].text, /Did you mean: .*create_email_template/);
 });
 
+test("call_read_tool runs read tools, is marked read-only and refuses writes", async () => {
+  const { client, calls } = await connect(() => [200, { data: [] }], { tools: "core" });
+  const tools = (await client.listTools()).tools;
+  const reader = tools.find((t) => t.name === "call_read_tool");
+  assert.equal(reader.annotations.readOnlyHint, true);
+  assert.equal(tools.find((t) => t.name === "call_tool").annotations.readOnlyHint, false);
+  for (const name of ["list_dashboards", "get_dashboard", "get_insight", "run_trend", "run_funnel"]) assert.ok(tools.some((t) => t.name === name && t.annotations.readOnlyHint), name);
+
+  const res = await client.callTool({ name: "call_read_tool", arguments: { name: "get_journey", arguments: { brand: BRAND, journey: SEQ } } });
+  assert.equal(res.isError, undefined, res.content?.[0]?.text);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].headers.get("outflare-tool"), "get_journey");
+
+  const write = await client.callTool({ name: "call_read_tool", arguments: { name: "send_email", arguments: {} } });
+  assert.equal(write.isError, true);
+  assert.match(write.content[0].text, /changes things.*call_tool/);
+  assert.equal(calls.length, 1);
+
+  const self = await client.callTool({ name: "call_read_tool", arguments: { name: "call_tool", arguments: {} } });
+  assert.equal(self.isError, true);
+});
+
+// fill makes the smallest arguments a tool's input_schema accepts, so a
+// test can run every tool against the fake API.
+function fill(s) {
+  if (!s) return undefined;
+  if (s.enum) return s.enum[0];
+  if (s.const !== undefined) return s.const;
+  if (s.anyOf) return fill(s.anyOf.find((x) => x.type !== "null") ?? s.anyOf[0]);
+  const t = Array.isArray(s.type) ? s.type.find((x) => x !== "null") : s.type;
+  if (t === "string") {
+    if (s.format === "uuid" || s.pattern) return SEQ;
+    if (s.format === "email") return "ana@acme.example";
+    if (s.format === "date") return "2026-01-01";
+    if (s.format === "date-time") return "2026-01-01T00:00:00Z";
+    if (s.format === "uri") return "https://acme.example/";
+    return "x".repeat(Math.max(1, s.minLength ?? 1));
+  }
+  if (t === "number" || t === "integer") return s.minimum ?? 1;
+  if (t === "boolean") return false;
+  if (t === "array") return Array.from({ length: s.minItems ?? 0 }, () => fill(s.items));
+  if (t === "object") return Object.fromEntries((s.required ?? []).map((k) => [k, fill(s.properties?.[k])]));
+  return "x";
+}
+
+// A read-only label lets apps run a tool without asking, and call_read_tool
+// runs only tools with it, so the label must be true: every tool marked
+// read-only sends only GET, or a POST that READ_POSTS lists as a preview or
+// query. A new one that sends anything else fails here; check it writes,
+// sends and spends nothing before adding it to READ_POSTS, or mark it as a
+// write.
+test("tools marked read-only only read", async () => {
+  const { client, calls } = await connect((req) => [200, req.method === "GET" && /\/brands\/[^/]+$/.test(new URL(req.url).pathname) ? { id: BRAND } : { data: [], id: SEQ }], { tools: "all" });
+  const tools = (await client.listTools()).tools.filter((t) => t.annotations?.readOnlyHint === true && !["find_tools", "call_read_tool", "call_tool"].includes(t.name));
+  assert.ok(tools.length > 300, `${tools.length} read-only tools`);
+  const posted = new Set();
+  const wrote = [];
+  for (const t of tools) {
+    const before = calls.length;
+    // Tools whose smallest arguments are refused before any request.
+    const args = { classify_email: { domain: "acme.example" } }[t.name] ?? fill(t.inputSchema) ?? {};
+    const res = await client.callTool({ name: t.name, arguments: args });
+    if (res.isError && /marked read-only but tried to change something/.test(res.content?.[0]?.text ?? "")) wrote.push(t.name);
+    for (const c of calls.slice(before)) {
+      assert.ok(c.method === "GET" || c.method === "POST", `${t.name} sent ${c.method}`);
+      if (c.method === "POST") posted.add(t.name);
+    }
+  }
+  assert.deepEqual(wrote, [], "marked read-only but tried to change something: check what they do, then add them to READ_POSTS or mark them as writes");
+  const stale = [...READ_POSTS].filter((n) => !posted.has(n));
+  assert.deepEqual(stale, [], "READ_POSTS lists tools that are gone, aren't read-only, or no longer POST");
+});
+
+test("a tool marked read-only can't send a write, even when it tries", async () => {
+  const sent = [];
+  const fetch = async (req) => {
+    sent.push(req.method);
+    return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const api = createClient({ baseUrl: "http://gtm.test", token: "oft_x", fetch });
+  const server = createServer({ client: api, workspace: WS, tools: "core" });
+  const attempt = (method) => async () => {
+    try {
+      await api[method]("/v1/workspaces/{ws}/leads", { params: { path: { ws: WS } }, body: {} });
+      return { content: [{ type: "text", text: "sent" }] };
+    } catch (e) {
+      return { isError: true, content: [{ type: "text", text: e.message }] };
+    }
+  };
+  server.registerTool("get_mislabelled", { description: "A read that writes.", annotations: { readOnlyHint: true } }, attempt("DELETE"));
+  server.registerTool("get_mislabelled_post", { description: "A read that posts.", annotations: { readOnlyHint: true } }, attempt("POST"));
+  server.registerTool("delete_labelled", { description: "A write.", annotations: { readOnlyHint: false } }, attempt("DELETE"));
+  const client = new Client({ name: "test", version: "0" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(a), client.connect(b)]);
+  for (const [tool, via] of [["get_mislabelled", "call_read_tool"], ["get_mislabelled_post", "call_read_tool"], ["get_mislabelled", "call_tool"]]) {
+    const res = await client.callTool({ name: via, arguments: { name: tool, arguments: {} } });
+    assert.match(res.content[0].text, /marked read-only but tried to change something/, `${tool} through ${via}`);
+  }
+  assert.deepEqual(sent, []);
+  const write = await client.callTool({ name: "call_tool", arguments: { name: "delete_labelled", arguments: {} } });
+  assert.equal(write.content[0].text, "sent");
+  assert.deepEqual(sent, ["DELETE"]);
+  const refused = await client.callTool({ name: "call_read_tool", arguments: { name: "delete_labelled", arguments: {} } });
+  assert.match(refused.content[0].text, /changes things/);
+  assert.deepEqual(sent, ["DELETE"]);
+});
+
+test("tool groups add whole areas to the core set, each under every app's cap", async () => {
+  assert.equal(toolMode(undefined), "core");
+  assert.equal(toolMode("all"), "all");
+  assert.equal(toolMode("core,all"), "all");
+  assert.equal(toolMode(" SEO, analytics ,nope,seo"), "core,analytics,seo");
+  assert.equal(toolMode("core"), "core");
+  assert.equal(toolMode("__proto__,constructor"), "core");
+  assert.deepEqual(Object.keys(GROUP_INFO).sort(), Object.keys(GROUPS).sort());
+  const all = (await (await connect(() => [200, {}], { tools: "all" })).client.listTools()).tools.map((t) => t.name);
+  for (const g of Object.keys(GROUPS)) {
+    const members = groupTools(g, all);
+    assert.ok(members.length >= 5, `group ${g} has ${members.length} tools; check its entries match tool names`);
+    const listed = new Set([...CORE, ...members]);
+    assert.ok(listed.size <= 180, `core plus ${g} lists ${listed.size} tools; keep it under 180 so apps that keep 200 see them all`);
+  }
+  const names = (await (await connect(() => [200, {}], { tools: toolMode("core,seo,analytics") })).client.listTools()).tools.map((t) => t.name);
+  for (const n of ["get_dashboard", "add_dashboard_tile", "run_retention", "list_crawl_issues", "check_rankings", "find_tools", "call_read_tool", "get_context"]) assert.ok(names.includes(n), n);
+  assert.ok(!names.includes("create_journey"), "a group lists only its own area");
+  assert.deepEqual([...names].sort(), [...new Set([...CORE, ...groupTools("seo", all), ...groupTools("analytics", all)])].sort());
+});
+
 test("read-only connections can't reach write tools through call_tool", async () => {
   const { client, calls } = await connect(() => [200, {}], { readOnly: true, tools: "core" });
   const tools = (await client.listTools()).tools;
@@ -635,10 +784,10 @@ test("get_context and the instructions say how to find every tool", async () => 
   const { client } = await connect(() => [200, {}], { tools: "core" });
   assert.match(client.getInstructions(), /find_tools/);
   const res = await client.callTool({ name: "get_context", arguments: {} });
-  assert.match(res.structuredContent.tools, /find_tools.*call_tool/s);
+  assert.match(res.structuredContent.tools, /find_tools.*call_read_tool.*call_tool/s);
 });
 
-test("the hosted server lists the core set, every tool with ?tools=all, and reports the server's version", async () => {
+test("the hosted server lists the core set, groups with ?tools=core,seo, every tool with ?tools=all, and reports the server's version", async () => {
   const { createServer: createHttp } = await import("node:http");
   const { serveHttp } = await import("../dist/http.js");
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
@@ -673,10 +822,145 @@ test("the hosted server lists the core set, every tool with ?tools=all, and repo
     assert.ok(n <= MAX_CORE, `${n} tools`);
     const all = await open("?tools=all");
     assert.ok((await all.listTools()).tools.length > 500);
+    const seo = await open("?tools=core,seo");
+    const seoTools = (await seo.listTools()).tools.map((t) => t.name);
+    assert.ok(seoTools.length > n && seoTools.includes("list_crawl_issues"), `${seoTools.length} tools with ?tools=core,seo`);
+    await seo.close();
     await core.close();
     await all.close();
   } finally {
     mcp.close();
     api.close();
   }
+});
+
+test("Sales team reporting keeps its date range and filters in read-only mode", async () => {
+  const { client, calls } = await connect(() => [200, { members: [], data: [], next_cursor: null }], { readOnly: true });
+  const query = { from: "2026-11-10T23:00:00Z", to: "2026-11-11T23:00:00Z", user_id: SEQ, action: "lead_seen", search: "Northpeak", fields: ["action", "occurred_at"], cursor: "next-page" };
+  const result = await client.callTool({ name: "get_sales_team_reporting", arguments: { brand: BRAND, ...query } });
+  assert.equal(result.isError, undefined);
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/sales/reporting/team`);
+  assert.deepEqual({ ...Object.fromEntries(calls[0].url.searchParams), fields: calls[0].url.searchParams.getAll("fields").flatMap(v => v.split(",")) }, query);
+});
+
+test("Sales channel tools call the brand routes; read-only keeps the reads and drops the writes", async () => {
+  const ITEM = "44444444-4444-4444-8444-444444444444";
+  const { client, calls } = await connect(() => [200, {}]);
+  await client.callTool({ name: "get_sales_feeds", arguments: { brand: BRAND } });
+  await client.callTool({ name: "list_sales_feed_items", arguments: { brand: BRAND, status: "needs_look", limit: 20 } });
+  await client.callTool({ name: "search_sales_lead_slack", arguments: { brand: BRAND, id: ITEM } });
+  await client.callTool({ name: "set_sales_feeds", arguments: { brand: BRAND, integration_id: SEQ, channels: [{ channel_id: "C0TEST", kind: "signal", signal_type: "upsell", read_back_days: 2 }] } });
+  await client.callTool({ name: "resolve_sales_feed_item", arguments: { brand: BRAND, id: ITEM, action: "assign_person", email: "ana@acme.example" } });
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.url.pathname}`), [
+    `GET /v1/brands/${BRAND}/sales/feeds`,
+    `GET /v1/brands/${BRAND}/sales/feed-items`,
+    `GET /v1/brands/${BRAND}/sales/leads/${ITEM}/slack-search`,
+    `PUT /v1/brands/${BRAND}/sales/feeds`,
+    `POST /v1/brands/${BRAND}/sales/feed-items/${ITEM}/actions`,
+  ]);
+  assert.equal(calls[1].url.searchParams.get("status"), "needs_look");
+  assert.deepEqual(JSON.parse(calls[4].body), { action: "assign_person", email: "ana@acme.example" });
+  const tools = (await client.listTools()).tools;
+  assert.equal(tools.find((t) => t.name === "set_sales_feeds").annotations.destructiveHint, true);
+  assert.equal(tools.find((t) => t.name === "search_sales_lead_slack").annotations.openWorldHint, true);
+  const ro = (await (await connect(() => [200, {}], { readOnly: true })).client.listTools()).tools.map((t) => t.name);
+  for (const n of ["get_sales_feeds", "list_sales_feed_items", "search_sales_lead_slack"]) assert.ok(ro.includes(n), n);
+  for (const n of ["set_sales_feeds", "resolve_sales_feed_item"]) assert.ok(!ro.includes(n), n);
+});
+
+test("discovery agent tools call the lead finder's brand routes; read-only drops proposing; a 404 says the server may not run it", async () => {
+  const RUN = "55555555-5555-4555-8555-555555555555";
+  const { client, calls } = await connect((req) => (new URL(req.url).pathname.endsWith("/lanes") ? [404, { error: { code: "not_found", message: "Not found." } }] : [200, {}]));
+  await client.callTool({
+    name: "propose_discovery_companies",
+    arguments: { brand: BRAND, profile_id: SEQ, lane: "Payroll tools on review sites", agent: "scout-1", companies: [{ domain: "payrollco.example", evidence: "Listed among payroll tools." }] },
+  });
+  const lanes = await client.callTool({ name: "get_discovery_lanes", arguments: { brand: BRAND, days: 30 } });
+  await client.callTool({ name: "list_discovery_lane_companies", arguments: { brand: BRAND, run_id: RUN, source: "proposal:api_token:x", stage: "to_review" } });
+  await client.callTool({ name: "get_lead_finder_run", arguments: { brand: BRAND, run_id: RUN } });
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.url.pathname}`), [
+    `POST /v1/brands/${BRAND}/cloud/lead-finder/profiles/${SEQ}/proposals`,
+    `GET /v1/brands/${BRAND}/cloud/lead-finder/lanes`,
+    `GET /v1/brands/${BRAND}/cloud/lead-finder/lanes/companies`,
+    `GET /v1/brands/${BRAND}/cloud/lead-finder/runs/${RUN}`,
+  ]);
+  assert.deepEqual(JSON.parse(calls[0].body), { lane: "Payroll tools on review sites", agent: "scout-1", companies: [{ domain: "payrollco.example", evidence: "Listed among payroll tools." }] });
+  assert.equal(calls[1].url.searchParams.get("days"), "30");
+  assert.equal(calls[2].url.searchParams.get("stage"), "to_review");
+  assert.equal(calls[2].url.searchParams.get("lane"), "");
+  assert.equal(lanes.isError, true);
+  assert.match(lanes.content[0].text, /doesn't run the lead finder/);
+  const ro = (await (await connect(() => [200, {}], { readOnly: true })).client.listTools()).tools.map((t) => t.name);
+  for (const n of ["get_discovery_lanes", "list_discovery_lane_companies", "get_lead_finder_run"]) assert.ok(ro.includes(n), n);
+  assert.ok(!ro.includes("propose_discovery_companies"));
+});
+
+test("discovery lane tools: read the board, propose, claim, upload with a lane and an idempotency key, score, note, usage and a person's controls", async () => {
+  const PROFILE = SEQ;
+  const LANE = "66666666-6666-4666-8666-666666666666";
+  const results = [
+    { domain: "payrollco.example", status: "new", why: null, lane_id: LANE },
+    { domain: "known.example", status: "known", why: "in_people_list", lane_id: LANE },
+  ];
+  const { client, calls } = await connect((req) => {
+    const path = new URL(req.url).pathname;
+    if (path.endsWith("/proposals")) return [200, { run_id: SEQ, accepted: 1, duplicates: 1, results, lanes: [{ lane_id: LANE, stop_probe: true }] }];
+    if (path.endsWith("/board")) return [404, { error: { code: "not_found", message: "Not found." } }];
+    return [200, {}];
+  });
+  const P = `/v1/brands/${BRAND}/cloud/lead-finder/profiles/${PROFILE}`;
+  const board = await client.callTool({ name: "get_discovery_board", arguments: { brand: BRAND, profile_id: PROFILE } });
+  await client.callTool({
+    name: "propose_discovery_lanes",
+    arguments: { brand: BRAND, profile_id: PROFILE, agent: "scout-1", lanes: [{ title: "Payroll tools on review sites", kind: "list", recipe: { urls: ["https://reviews.example/payroll"] } }] },
+  });
+  await client.callTool({ name: "claim_discovery_lane", arguments: { brand: BRAND, profile_id: PROFILE, agent: "scout-1" } });
+  const companies = [{ domain: "payrollco.example" }, { domain: "known.example" }];
+  const sent = await client.callTool({ name: "propose_discovery_companies", arguments: { brand: BRAND, profile_id: PROFILE, lane_id: LANE, agent: "scout-1", companies } });
+  await client.callTool({ name: "propose_discovery_companies", arguments: { brand: BRAND, profile_id: PROFILE, lane_id: LANE, agent: "scout-1", companies } });
+  await client.callTool({ name: "propose_discovery_companies", arguments: { brand: BRAND, profile_id: PROFILE, lane_id: LANE, idempotency_key: "batch-0001", companies } });
+  await client.callTool({ name: "report_discovery_usage", arguments: { brand: BRAND, profile_id: PROFILE, lane_id: LANE, usage: [{ tool: "web_search", units: 12, cost_cents: 1.8 }] } });
+  await client.callTool({ name: "score_discovery_lane", arguments: { brand: BRAND, profile_id: PROFILE, lane_id: LANE, agent: "scout-1", learned: "Review sites list vendors, not buyers.", est_size: 400 } });
+  await client.callTool({ name: "add_discovery_note", arguments: { brand: BRAND, profile_id: PROFILE, lane_id: LANE, agent: "scout-1", kind: "dead_end", text: "Review sites list vendors." } });
+  await client.callTool({ name: "add_discovery_note", arguments: { brand: BRAND, profile_id: PROFILE, agent: "scout-1", kind: "tip", text: "Job ads name buyers." } });
+  await client.callTool({ name: "update_discovery_lane", arguments: { brand: BRAND, profile_id: PROFILE, lane_id: LANE, action: "pause", reason: "Example reason." } });
+  await client.callTool({ name: "list_discovery_lane_companies", arguments: { brand: BRAND, lane_id: LANE, stage: "stopped" } });
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.url.pathname}`), [
+    `GET ${P}/lanes/board`,
+    `POST ${P}/lanes`,
+    `POST ${P}/lanes/claim`,
+    `POST ${P}/proposals`,
+    `POST ${P}/proposals`,
+    `POST ${P}/proposals`,
+    `POST ${P}/lanes/${LANE}/usage`,
+    `POST ${P}/lanes/${LANE}/score`,
+    `POST ${P}/lanes/${LANE}/notes`,
+    `POST ${P}/lanes/notes`,
+    `PATCH ${P}/lanes/${LANE}`,
+    `GET /v1/brands/${BRAND}/cloud/lead-finder/lanes/companies`,
+  ]);
+  // A 404 on the board says the server may not run the lead finder.
+  assert.equal(board.isError, true);
+  assert.match(board.content[0].text, /doesn't run the lead finder/);
+  // Uploads carry the lane and answer per company, unchanged.
+  assert.deepEqual(JSON.parse(calls[3].body), { lane_id: LANE, agent: "scout-1", companies });
+  assert.deepEqual(JSON.parse(sent.content[0].text).results, results);
+  assert.equal(JSON.parse(sent.content[0].text).lanes[0].stop_probe, true);
+  // The same batch sent again carries the same key, so a retry replays the first answer; an agent's own key wins.
+  const key = calls[3].headers.get("idempotency-key");
+  assert.match(key, /^discovery:[0-9a-f]{48}$/);
+  assert.equal(calls[4].headers.get("idempotency-key"), key);
+  assert.equal(calls[5].headers.get("idempotency-key"), "batch-0001");
+  assert.deepEqual(JSON.parse(calls[1].body), { agent: "scout-1", lanes: [{ title: "Payroll tools on review sites", kind: "list", recipe: { urls: ["https://reviews.example/payroll"] } }] });
+  assert.deepEqual(JSON.parse(calls[2].body), { agent: "scout-1" });
+  assert.deepEqual(JSON.parse(calls[6].body), { usage: [{ tool: "web_search", units: 12, cost_cents: 1.8 }] });
+  assert.deepEqual(JSON.parse(calls[7].body), { agent: "scout-1", learned: "Review sites list vendors, not buyers.", est_size: 400 });
+  assert.deepEqual(JSON.parse(calls[9].body), { agent: "scout-1", kind: "tip", text: "Job ads name buyers." });
+  assert.deepEqual(JSON.parse(calls[10].body), { action: "pause", reason: "Example reason." });
+  assert.equal(calls[11].url.searchParams.get("lane_id"), LANE);
+  assert.equal(calls[11].url.searchParams.get("lane"), null);
+  const ro = (await (await connect(() => [200, {}], { readOnly: true })).client.listTools()).tools.map((t) => t.name);
+  assert.ok(ro.includes("get_discovery_board"));
+  for (const n of ["propose_discovery_lanes", "claim_discovery_lane", "score_discovery_lane", "add_discovery_note", "report_discovery_usage", "update_discovery_lane"]) assert.ok(!ro.includes(n), n);
 });

@@ -13,8 +13,8 @@ func TestKnowledge(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	kb := base + "/knowledge"
 
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "handle": "geonode"})["id"].(string)
-	rep := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})["id"].(string)
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})["id"].(string)
+	rep := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "handle": "summitly"})["id"].(string)
 
 	// Folders are a brand's: with no brand named, the workspace's first;
 	// one inside a brand's takes it.
@@ -22,12 +22,12 @@ func TestKnowledge(t *testing.T) {
 	if policies["name"] != "Policies" || policies["brand_id"] == nil || policies["item_count"] != 0.0 {
 		t.Fatalf("folder = %v", policies)
 	}
-	product := owner.must(201, "POST", kb+"/collections", map[string]any{"name": "Product", "brand_id": "geonode"})
-	pricing := owner.must(201, "POST", kb+"/collections?brand=geonode", map[string]any{"name": "Pricing", "parent_id": product["id"]})
+	product := owner.must(201, "POST", kb+"/collections", map[string]any{"name": "Product", "brand_id": "northpeak"})
+	pricing := owner.must(201, "POST", kb+"/collections?brand=northpeak", map[string]any{"name": "Pricing", "parent_id": product["id"]})
 	if pricing["brand_id"] != geo || pricing["position"] != 0.0 {
 		t.Fatalf("sub folder = %v", pricing)
 	}
-	owner.must(400, "POST", kb+"/collections", map[string]any{"name": "x", "parent_id": product["id"], "brand_id": "repocket"})
+	owner.must(400, "POST", kb+"/collections", map[string]any{"name": "x", "parent_id": product["id"], "brand_id": "summitly"})
 	owner.must(400, "PATCH", kb+"/collections/"+product["id"].(string), map[string]any{"parent_id": pricing["id"]})
 	owner.must(400, "POST", kb+"/collections", map[string]any{"name": ""})
 
@@ -39,17 +39,17 @@ func TestKnowledge(t *testing.T) {
 		art["excerpt"] != "We refund any plan within 30 days." || art["owner_id"] == nil || art["body"] == nil {
 		t.Fatalf("article = %v", art)
 	}
-	snip := owner.must(201, "POST", kb+"/items?brand=geonode", map[string]any{
+	snip := owner.must(201, "POST", kb+"/items?brand=northpeak", map[string]any{
 		"kind": "snippet", "title": "Do you offer a free trial?", "body": "Yes, 7 days.", "visibility": "customers_ai", "collection_id": pricing["id"],
 	})
 	if snip["brand_id"] != geo {
 		t.Fatalf("snippet takes its folder's brand = %v", snip)
 	}
 	owner.must(400, "POST", kb+"/items", map[string]any{"kind": "snippet", "title": "Empty?"})
-	owner.must(400, "POST", kb+"/items", map[string]any{"title": "Wrong brand", "collection_id": pricing["id"], "brand_id": "repocket"})
+	owner.must(400, "POST", kb+"/items", map[string]any{"title": "Wrong brand", "collection_id": pricing["id"], "brand_id": "summitly"})
 	owner.must(400, "POST", kb+"/items", map[string]any{"title": "x", "visibility": "everyone"})
 	owner.must(400, "POST", kb+"/items", map[string]any{"title": "x", "owner_id": "00000000-0000-0000-0000-000000000000"})
-	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Repocket payouts", "body": "Paid monthly.", "brand_id": "repocket"})
+	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Summitly payouts", "body": "Paid monthly.", "brand_id": "summitly"})
 
 	// Lists: one brand's, no body, filters, word search with prefixes.
 	l := owner.must(200, "GET", kb+"/items", nil)
@@ -59,13 +59,13 @@ func TestKnowledge(t *testing.T) {
 	if l := owner.must(200, "GET", kb+"/items?q=refu", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["id"] != art["id"] {
 		t.Fatalf("search = %v", l)
 	}
-	if l := owner.must(200, "GET", kb+"/items?brand=geonode&q=trial&kind=snippet&visibility=customers_ai", nil)["data"].([]any); len(l) != 1 {
+	if l := owner.must(200, "GET", kb+"/items?brand=northpeak&q=trial&kind=snippet&visibility=customers_ai", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("filtered = %v", l)
 	}
-	if l := owner.must(200, "GET", kb+"/items?brand=geonode", nil)["data"].([]any); len(l) != 1 {
+	if l := owner.must(200, "GET", kb+"/items?brand=northpeak", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("by brand = %v", l)
 	}
-	if l := owner.must(200, "GET", kb+"/items?brand=repocket&collection_id=none", nil)["data"].([]any); len(l) != 1 {
+	if l := owner.must(200, "GET", kb+"/items?brand=summitly&collection_id=none", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("no folder = %v", l)
 	}
 	owner.must(400, "GET", kb+"/items?kind=page", nil)
@@ -108,17 +108,17 @@ func TestKnowledge(t *testing.T) {
 
 	// Deleting a folder moves what it holds up a level.
 	owner.must(204, "DELETE", kb+"/collections/"+product["id"].(string), nil)
-	if c := owner.must(200, "GET", kb+"/collections?brand=geonode", nil)["data"].([]any); len(c) != 1 || c[0].(map[string]any)["parent_id"] != nil {
+	if c := owner.must(200, "GET", kb+"/collections?brand=northpeak", nil)["data"].([]any); len(c) != 1 || c[0].(map[string]any)["parent_id"] != nil {
 		t.Fatalf("after folder delete = %v", c)
 	}
 	if s := owner.must(200, "GET", kb+"/items/"+snip["id"].(string), nil); s["collection_id"] != pricing["id"] {
 		t.Fatalf("snippet moved = %v", s)
 	}
 
-	// A Repocket-only token sees only Repocket's knowledge: another brand's
+	// A Summitly-only token sees only Summitly's knowledge: another brand's
 	// folder isn't there for it.
 	scopes := []string{"workspace.read", "context.manage"}
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": scopes, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly agent", "scopes": scopes, "brand": "summitly"})
 	rp := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	if l := rp.must(200, "GET", kb+"/items", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["brand_id"] != rep {
 		t.Fatalf("brand-limited list = %v", l)

@@ -118,7 +118,7 @@ try {
   });
   await context.addInitScript(() => localStorage.setItem("api-panel", "open"));
   await page.goto(base + `/${ws.slug}/${brand.handle}/crm`);
-  await page.getByRole("heading", { name: "New leads", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "New conversations", exact: true }).waitFor();
   await page
     .getByText(
       "We would like to discuss a plan for our team. Can you share pricing?",
@@ -146,13 +146,46 @@ try {
       .getAttribute("href"),
     "https://social.example/ana",
   );
-  assert.equal(
-    await page
-      .getByRole("button", { name: "Take & open", exact: true })
-      .first()
-      .isDisabled(),
-    true,
-    "taking without email consent must remain blocked",
+  assert.equal(await page.getByRole("button", { name: "Open conversation", exact: true }).count(), 0);
+  const assignment = page.getByRole("combobox", { name: "Assigned to for Ana Example", exact: true });
+  await assignment.waitFor();
+  await page.getByRole("button", { name: "Mark seen", exact: true }).click();
+  await page.getByRole("button", { name: "Seen by you", exact: true }).waitFor();
+  const seen = await call("GET", `${root}/leads/${lead.id}`);
+  assert.equal(seen.lead.owner_id, null, "seen must not assign ownership");
+  assert(seen.lead.viewed_by.some(v => v.user_id === me.user.id));
+  await assignment.selectOption(me.user.id);
+  await page.getByRole("button", { name: "My conversations", exact: true }).click();
+  await page.getByRole("heading", { name: "My conversations", exact: true }).waitFor();
+  await page.getByText("Not started", { exact: true }).last().waitFor();
+  await page.getByRole("button", { name: /Northpeak Example/ }).first().click();
+  await page.getByRole("heading", { name: "Northpeak Example", exact: true }).waitFor();
+  assert(await page.getByRole("button", { name: "Send introduction", exact: true }).isDisabled(), "sending without email consent must remain blocked");
+  const reserved = await call("GET", `${root}/leads/${lead.id}`);
+  assert.equal(reserved.lead.state, "new");
+  assert.equal(reserved.lead.owner_id, me.user.id);
+  assert.equal(reserved.messages.length, 1, "assignment must not send an introduction");
+  await page.getByRole("combobox", { name: "Assigned to for Ana Example", exact: true }).selectOption("");
+  await page.getByRole("button", { name: "New conversations", exact: true }).click();
+  await page.getByRole("heading", { name: "New conversations", exact: true }).waitFor();
+  // Queue cleanup needs no mailbox connection, does not open/take the conversation,
+  // and can be undone without sending an introduction.
+  await page.getByRole("button", { name: "Archive", exact: true }).first().click();
+  await page.getByText("No new conversations yet", { exact: true }).waitFor();
+  await page.getByRole("heading", { name: "New conversations", exact: true }).waitFor();
+  const archived = await call("GET", `${root}/leads/${lead.id}`);
+  assert.equal(archived.lead.state, "archived");
+  assert.equal(archived.lead.owner_id, null);
+  assert.equal(archived.messages.length, 1);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await page.getByRole("button", { name: "Archive", exact: true }).first().waitFor();
+  const restored = await call("GET", `${root}/leads/${lead.id}`);
+  assert.equal(restored.lead.state, "new");
+  assert.equal(restored.messages.length, 1);
+  assert.deepEqual(
+    restored.events.filter((e) => ["lead_archived", "lead_reopened"].includes(e.action)).map((e) => e.action),
+    ["lead_archived", "lead_reopened"],
+    "queue archive and undo must remain in the manager's activity log",
   );
   await page.screenshot({
     path: "/tmp/outflare-sales-ui-new-leads.png",
@@ -164,12 +197,14 @@ try {
   await page
     .getByRole("button", { name: "Sent to AEs", exact: true })
     .waitFor();
-  await page.getByRole("heading", { name: "New leads", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "New conversations", exact: true }).waitFor();
 
   await call("PUT", `${root}/team/${me.user.id}`, { role: "manager" });
-  await page.reload();
-  await page.getByRole("heading", { name: "All leads", exact: true }).waitFor();
-  await page.getByRole("button", { name: "New leads", exact: true }).waitFor();
+  // Enter the default route after a role change, rather than reloading the
+  // explicitly selected New conversations URL from the SDR's previous view.
+  await page.goto(base + `/${ws.slug}/${brand.handle}/crm`);
+  await page.getByRole("heading", { name: "All conversations", exact: true }).waitFor();
+  await page.getByRole("button", { name: "New conversations", exact: true }).waitFor();
   await page
     .getByRole("combobox", { name: "Filter by Sales teammate" })
     .waitFor();
@@ -182,10 +217,10 @@ try {
   );
   await page.getByRole("button", { name: "Active", exact: true }).click();
   await page
-    .getByText("No leads match these filters", { exact: true })
+    .getByText("No conversations match these filters", { exact: true })
     .waitFor();
   await page
-    .getByRole("button", { name: "Show all leads", exact: true })
+    .getByRole("button", { name: "Show all conversations", exact: true })
     .click();
   await page
     .getByText(
@@ -197,17 +232,23 @@ try {
     path: "/tmp/outflare-sales-ui-manager.png",
     fullPage: true,
   });
+  await page.getByRole("button", { name: "Archive", exact: true }).first().click();
+  await page.getByRole("button", { name: "Reopen", exact: true }).first().waitFor();
+  await page.getByRole("button", { name: "Archived", exact: true }).click();
+  await page.getByRole("button", { name: "Reopen", exact: true }).first().click();
+  await page.getByText("No conversations match these filters", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Show all conversations", exact: true }).click();
   await page
-    .getByRole("button", { name: "Open conversation", exact: true })
+    .getByRole("button", { name: /Northpeak Example/ })
     .first()
     .click();
   await page
     .getByRole("heading", { name: "Northpeak Example", exact: true })
     .waitFor();
   await page
-    .getByRole("button", { name: "Back to all leads", exact: true })
+    .getByRole("button", { name: "Back to all conversations", exact: true })
     .click();
-  await page.getByRole("heading", { name: "All leads", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "All conversations", exact: true }).waitFor();
   await page.goto(base + `/${ws.slug}/${brand.handle}/crm/sales%3Aemail`);
   await page
     .getByText("You’re viewing Sales as a manager", { exact: true })
@@ -223,15 +264,15 @@ try {
     "browser title leaked a route key",
   );
   await page
-    .getByRole("button", { name: "Open all leads", exact: true })
+    .getByRole("button", { name: "Open all conversations", exact: true })
     .click();
-  await page.getByRole("heading", { name: "All leads", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "All conversations", exact: true }).waitFor();
 
   await call("PUT", `${root}/team/${me.user.id}`, { role: "ae" });
   await page.goto(base + `/${ws.slug}/${brand.handle}/crm`);
-  await page.getByRole("heading", { name: "New leads", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "New conversations", exact: true }).waitFor();
   await page
-    .getByRole("button", { name: /Ana Example/ })
+    .getByRole("button", { name: /Northpeak Example/ })
     .first()
     .click();
   await page
@@ -258,12 +299,18 @@ try {
   });
   await page.reload();
   await page.getByLabel("Reply message").waitFor();
-  await page.getByLabel("Apply a personal template").selectOption(template.id);
+  await page.getByRole("button", { name: "Browse templates", exact: true }).click();
+  await page.getByRole("button", { name: "Favorite Personal pricing", exact: true }).click();
+  await page.getByRole("button", { name: "Unfavorite Personal pricing", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Apply text", exact: true }).click();
   await page.waitForFunction(
     () =>
       document.querySelector('[aria-label="Reply message"]')?.value ===
       "Hi Ana, here is our team pricing.",
   );
+  await page.getByRole("button", { name: "Personal pricing", exact: true }).waitFor();
+  assert.equal((await call("GET", `${root}/templates`)).data.find(t => t.id === template.id).favorite, true);
+  await page.getByRole("button", { name: "Personalize with AI", exact: true }).waitFor();
   const savedReply = page.waitForResponse(
     (r) =>
       r.url().endsWith(`/sales/leads/${lead.id}/draft`) &&
@@ -301,9 +348,25 @@ try {
     false,
     "mobile content overflows",
   );
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(base + `/${ws.slug}/${brand.handle}/crm/sales%3Amine`);
+  await page.getByRole("button", { name: "Archive", exact: true }).first().click();
+  await page.getByText("No open conversations yet", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Archived", exact: true }).click();
+  await page.getByRole("button", { name: "Reopen", exact: true }).first().click();
+  await page.getByText("No archived conversations here yet", { exact: true }).waitFor();
+  // Ownership was seeded without taking or sending an introduction, so reopen
+  // must keep it Not started even though the fixture temporarily exercised an active draft.
+  await page.getByRole("button", { name: "Not started", exact: true }).click();
+  await page.getByRole("button", { name: "Archive", exact: true }).first().waitFor();
+  const reopenedOwned = await call("GET", `${root}/leads/${lead.id}`);
+  assert.equal(reopenedOwned.lead.state, "new");
+  assert.equal(reopenedOwned.lead.owner_id, me.user.id);
+  assert.equal(reopenedOwned.draft.body, detail.draft.body);
+  assert.equal(reopenedOwned.messages.length, 1);
   assert.deepEqual(errors, []);
   console.log(
-    "Sales browser smoke passed: populated queues, reply/source previews, SDR/AE/manager navigation, manager filters, full conversation, draft persistence, no implicit send, mobile layout.",
+    "Sales browser smoke passed: queue archive/undo/reopen and recorded activity, populated queues, reply/source previews, SDR/AE/manager navigation, manager filters, full conversation, draft persistence, no implicit send, mobile layout.",
   );
 } finally {
   await browser.close();

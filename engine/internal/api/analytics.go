@@ -94,10 +94,53 @@ func (s *Server) analyticsSources(ctx context.Context, ws string, sel brandSel) 
 		if !ok {
 			continue
 		}
+		site := siteOf(i)
+		if one := sel.one(); one != "" {
+			// One brand's page reads the brand's own site, never the
+			// default someone picked for another brand.
+			if site, err = s.brandSite(ctx, i.ID, site, one); err != nil {
+				return nil, err
+			}
+		}
 		out = append(out, analyticsSource{ID: i.ID, Name: i.Name, Connector: i.Connector, ConnectorName: c.Definition().Name,
-			Status: i.Status, LastError: i.LastError, Account: i.Account, Site: siteOf(i), Reports: r.Reports()})
+			Status: i.Status, LastError: i.LastError, Account: i.Account, Site: site, Reports: r.Reports()})
 	}
 	return out, nil
+}
+
+// brandSite is the site of a connection that a brand's pages read: the
+// connection's default when that site is the brand's, else the brand's
+// site that synced last, else one someone placed in the brand; "" when the
+// connection has no site of the brand's. One sign-in sees every site of the
+// account (each brand's), and its single default may be another brand's.
+func (s *Server) brandSite(ctx context.Context, integration, def, brand string) (string, error) {
+	var site string
+	err := s.pool.QueryRow(ctx, `
+		SELECT site FROM (
+			SELECT $3::text AS site, 0 AS rank, NULL::timestamptz AS at
+			WHERE $3 <> '' AND outflare_site_brand_now($1::uuid, $3) = $2::uuid
+			UNION ALL
+			SELECT site, 1, last_ok_at FROM analytics_syncs
+			WHERE integration_id = $1::uuid AND site <> '' AND outflare_site_brand_now($1::uuid, site) = $2::uuid
+			UNION ALL
+			SELECT site, 2, NULL FROM analytics_site_brands WHERE integration_id = $1::uuid AND brand_id = $2::uuid
+		) x ORDER BY rank, at DESC NULLS LAST, site LIMIT 1`, integration, brand, def).Scan(&site)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return site, err
+}
+
+// reportBrand is the brand a live report keeps to: the brand route's, the
+// ?brand= the web app sends, or a brand-limited caller's. "" lets any site
+// through (an API caller naming none, as before brands).
+func (s *Server) reportBrand(w http.ResponseWriter, r *http.Request) (string, bool) {
+	a := accessFrom(r.Context())
+	if a.Brand == "" && r.URL.Query().Get("brand") == "" && a.Brands == nil {
+		return "", true
+	}
+	sel, ok := s.dataBrand(w, r)
+	return sel.one(), ok
 }
 
 func (s *Server) listAnalytics(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +166,7 @@ func (s *Server) siteInBrand(ctx context.Context, ws, integration, site string, 
 		return true, nil
 	}
 	var brand *string
-	err := s.pool.QueryRow(ctx, `SELECT outflare_site_brand_or_first($1, $2)::text`, integration, site).Scan(&brand)
+	err := s.pool.QueryRow(ctx, `SELECT outflare_site_brand_now($1, $2)::text`, integration, site).Scan(&brand)
 	return sel.matches(brand), err
 }
 
@@ -551,13 +594,16 @@ func (s *Server) analyticsFetch(ctx context.Context, o *connectors.Opened, reade
 	if !connectors.Supports(reader, q.Report) {
 		return out, connectors.NotSupported(o.Connector.Definition().Name, q.Report)
 	}
+	if n, ok := reader.(connectors.SearchNarrower); q.Narrowed() && (!ok || !n.NarrowsSearch()) {
+		return out, connectors.Errf(connectors.ErrInvalid, "%s can't narrow a report to one page or search query; Search Console and Bing Webmaster Tools can", o.Connector.Definition().Name)
+	}
 	site, err := s.resolveSite(ctx, o, reader, q.Site)
 	if err != nil {
 		return out, err
 	}
 	q.Site = site
 	q.TestAccounts = filtersTestAccounts(o, reader, site)
-	key := strings.Join([]string{q.Report, q.Site, q.From, q.To, strconv.Itoa(q.Limit), strconv.FormatBool(q.TestAccounts)}, "|")
+	key := strings.Join([]string{q.Report, q.Site, q.From, q.To, strconv.Itoa(q.Limit), strconv.FormatBool(q.TestAccounts), q.Page, q.Keyword}, "|")
 	if !fresh {
 		if at, ok := s.cached(ctx, o, key, cacheTTL(reader), &out.AnalyticsReport); ok {
 			out.Cached, out.FetchedAt = true, at
@@ -586,7 +632,7 @@ func (s *Server) analyticsFetch(ctx context.Context, o *connectors.Opened, reade
 
 func analyticsQuery(r *http.Request, report string) (connectors.AnalyticsQuery, error) {
 	v := r.URL.Query()
-	q := connectors.AnalyticsQuery{Report: report, Site: v.Get("site"), From: v.Get("from"), To: v.Get("to")}
+	q := connectors.AnalyticsQuery{Report: report, Site: v.Get("site"), From: v.Get("from"), To: v.Get("to"), Page: v.Get("page"), Keyword: v.Get("keyword")}
 	if l := v.Get("limit"); l != "" {
 		n, err := strconv.Atoi(l)
 		if err != nil {
@@ -629,6 +675,35 @@ func (s *Server) analyticsReport(w http.ResponseWriter, r *http.Request) {
 	o, reader, ok := s.openAnalytics(w, r)
 	if !ok {
 		return
+	}
+	brand, ok := s.reportBrand(w, r)
+	if !ok {
+		return
+	}
+	if brand != "" {
+		// A brand sees its own sites only: one sign-in reads every brand's.
+		if q.Site != "" {
+			in, err := s.siteInBrand(r.Context(), o.WorkspaceID, o.ID, q.Site, brandSel{id: brand})
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			if !in {
+				writeError(w, r, http.StatusNotFound, "site_not_in_brand", q.Site+" belongs to another brand. Pick one of this brand's sites, or move the site to this brand under Website analytics.")
+				return
+			}
+		} else {
+			site, err := s.brandSite(r.Context(), o.ID, siteOf(o.Integration), brand)
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			if site == "" {
+				writeError(w, r, http.StatusBadRequest, "pick_site", "No site in "+o.Name+" belongs to this brand yet. Pick the brand's site under Website analytics, or PUT .../analytics/"+o.ID+"/site-brand with the site and this brand.")
+				return
+			}
+			q.Site = site
+		}
 	}
 	out, err := s.analyticsFetch(r.Context(), o, reader, q, r.URL.Query().Get("fresh") == "true")
 	switch {

@@ -38,6 +38,7 @@ var sealedColumns = []sealedColumn{
 	{"vendor_syncs", "integration_id", "push_token_sealed"},
 	{"webhook_endpoints", "id", "secret"},
 	{"webhook_endpoints", "id", "previous_secret"},
+	{"event_destinations", "id", "secret"},
 	{"email_providers", "id", "secrets"},
 	{"connection_hooks", "integration_id", "token"},
 	{"connection_hooks", "integration_id", "signing_secrets"},

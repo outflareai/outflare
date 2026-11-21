@@ -47,6 +47,9 @@ type historyFilter struct {
 	report, from, to, integration, host string
 	// brand keeps the rows to sites of a brand, or with none.
 	brand brandSel
+	// everyCopy keeps the rows of every connection that reads a site, also
+	// a second connection to the same site (see countedOnce).
+	everyCopy bool
 }
 
 // historyQuery reads the shared filters. Dates default to the last 28
@@ -103,9 +106,25 @@ func isUUID(s string) bool {
 	return true
 }
 
+// countedOnce keeps a site's rows from one connection when two connections
+// read the same site of the same tool (one account signed in twice, say):
+// the connection whose sync last worked. Without it a brand's totals add
+// the same site up twice. alias names the analytics_daily row.
+func countedOnce(alias string) string {
+	return ` AND NOT EXISTS (
+		SELECT 1 FROM analytics_syncs o JOIN integrations oi ON oi.id = o.integration_id
+		LEFT JOIN analytics_syncs me ON me.integration_id = ` + alias + `.integration_id AND me.site = ` + alias + `.site
+		WHERE o.workspace_id = ` + alias + `.workspace_id AND o.site = ` + alias + `.site AND oi.connector = ` + alias + `.connector
+			AND o.integration_id <> ` + alias + `.integration_id AND o.brand_id IS NOT DISTINCT FROM ` + alias + `.brand_id
+			AND (COALESCE(o.last_ok_at, '-infinity'), o.integration_id::text) > (COALESCE(me.last_ok_at, '-infinity'), ` + alias + `.integration_id::text))`
+}
+
 // where builds the shared WHERE clause; $1 is the workspace.
 func (f historyFilter) where(ws string) (string, []any) {
 	sql := `d.workspace_id = $1 AND d.report = $2 AND d.day BETWEEN $3 AND $4`
+	if !f.everyCopy {
+		sql += countedOnce("d")
+	}
 	args := []any{ws, f.report, f.from, f.to}
 	if f.integration != "" {
 		args = append(args, f.integration)
@@ -216,6 +235,47 @@ type overviewTool struct {
 	FirstDay    *string            `json:"first_day"`
 	LastDay     *string            `json:"last_day"`
 	LastSynced  *time.Time         `json:"last_synced_at"`
+	// CopyOf is set when another connection reads the same site of the
+	// same tool: the one counted (its sync worked last). A copy is left
+	// out of every total.
+	CopyOf *overviewCopy `json:"copy_of"`
+}
+
+type overviewCopy struct {
+	Integration string `json:"integration_id"`
+	Name        string `json:"name"`
+}
+
+// markCopies marks the tools that read a site another connection of the
+// same tool reads too, keeping the one whose sync worked last, as
+// countedOnce does.
+func markCopies(tools []overviewTool) {
+	keep := map[string]int{}
+	newer := func(a, b overviewTool) bool {
+		at, bt := time.Time{}, time.Time{}
+		if a.LastSynced != nil {
+			at = *a.LastSynced
+		}
+		if b.LastSynced != nil {
+			bt = *b.LastSynced
+		}
+		if !at.Equal(bt) {
+			return at.After(bt)
+		}
+		return a.Integration > b.Integration
+	}
+	for i, t := range tools {
+		k := t.Connector + "\x00" + t.Site
+		if j, ok := keep[k]; !ok || newer(t, tools[j]) {
+			keep[k] = i
+		}
+	}
+	for i := range tools {
+		j := keep[tools[i].Connector+"\x00"+tools[i].Site]
+		if j != i {
+			tools[i].CopyOf = &overviewCopy{Integration: tools[j].Integration, Name: tools[j].Name}
+		}
+	}
 }
 
 type overviewSite struct {
@@ -238,6 +298,9 @@ func (s *Server) analyticsOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.report = connectors.ReportTraffic
+	// Every connection shows, so a second copy of a site can be seen and
+	// removed; the copy is marked and left out of the totals.
+	f.everyCopy = true
 	where, args := f.where(ws)
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT d.host, d.integration_id::text, i.name, d.connector, d.site, COALESCE(a.site_name, ''),
@@ -269,9 +332,6 @@ func (s *Server) analyticsOverview(w http.ResponseWriter, r *http.Request) {
 			out = append(out, site)
 		}
 		site.Tools = append(site.Tools, t)
-		if t.Totals.Impressions != nil {
-			site.Search = site.Search.Add(connectors.Metrics{Clicks: t.Totals.Clicks, Impressions: t.Totals.Impressions})
-		}
 	}
 	rows.Close()
 	if rows.Err() != nil {
@@ -279,6 +339,12 @@ func (s *Server) analyticsOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, site := range out {
+		markCopies(site.Tools)
+		for _, t := range site.Tools {
+			if t.Totals.Impressions != nil && t.CopyOf == nil {
+				site.Search = site.Search.Add(connectors.Metrics{Clicks: t.Totals.Clicks, Impressions: t.Totals.Impressions})
+			}
+		}
 		if site.Search.Clicks != nil && site.Search.Impressions != nil && *site.Search.Impressions > 0 {
 			site.Search.CTR = connectors.Num(*site.Search.Clicks / *site.Search.Impressions)
 		}
@@ -513,7 +579,7 @@ func (s *Server) analyticsSyncOne(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
-	res, err := s.analyticsSync.SyncOnce(ctx, i.WorkspaceID, i.ID)
+	res, err := s.analyticsSync.SyncOnce(analyticsync.AskedNow(ctx), i.WorkspaceID, i.ID)
 	if err != nil {
 		connectorError(w, r, err)
 		return

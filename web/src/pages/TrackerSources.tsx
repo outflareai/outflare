@@ -1,5 +1,6 @@
 // Tracker → Traffic sources and Affiliate networks (plans/ad-tracker-ui.md
-// B4). New opens a gallery of the templates (search, category chips, Custom
+// B4). A row opens in the page's own space with a Back button to the list.
+// New opens a gallery of the templates (search, category chips, Custom
 // first, Connected where Outflare already syncs the network). A traffic
 // source's form has its click id, cost and parameters table with a live
 // campaign URL preview, and its postback back to the network with a token
@@ -12,10 +13,11 @@ import type { Schemas } from "@outflare/sdk";
 import { ConnectorLogo } from "@/components/connector-logo";
 import { PickBrand } from "@/components/pick-brand";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { NumberInput } from "@/components/number-input";
+import { CurrencySelect } from "@/components/currency-select";
 import { pickedBrandId, useBrand } from "@/lib/brand";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, confirmAction, CopyButton, Empty, ErrorText, field, Loading, PageHeader, toast } from "../ui";
+import { BackButton, Badge, Button, Card, confirmAction, CopyButton, Empty, ErrorText, field, Loading, PageHeader, toast } from "../ui";
 import type { Tab } from "../App";
 
 type Source = Schemas["TrafficSource"];
@@ -25,6 +27,7 @@ type Send = Schemas["TrafficSourcePostbackSend"];
 type Network = Schemas["PostbackSource"];
 type NetworkTemplate = Schemas["AffiliateNetworkTemplate"];
 type CostDay = Schemas["NetworkCostDay"];
+type TargetRow = Schemas["NetworkTarget"];
 
 // Networks whose spend per campaign and target Outflare reads and shares
 // out over each click (plans/ad-tracker.md, Z2), by traffic-source
@@ -157,6 +160,11 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
   const [error, setError] = useState("");
   const [gallery, setGallery] = useState(false);
   const [open, setOpen] = useState<{ source: Source | null; template: Template | null } | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  // Once nothing is archived the switch is gone, so it goes back off too.
+  useEffect(() => {
+    if (sources && !sources.some((x) => x.status === "archived")) setShowArchived(false);
+  }, [sources]);
   const load = useCallback(async () => {
     const b = pickedBrandId();
     const [s, t, i] = await Promise.all([
@@ -176,6 +184,36 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
   if (error) return <ErrorText>{error}</ErrorText>;
   if (!sources) return <Loading />;
   const templateName = (id: string) => templates.find((t) => t.id === id)?.name ?? "Custom";
+  // Archived sources leave the list; a switch brings them back to restore.
+  const archivedCount = sources.filter((s) => s.status === "archived").length;
+  const shown = sources.filter((s) => (s.status === "archived") === (showArchived && archivedCount > 0));
+  // One source opens in the page's own space, in place of the list.
+  if (open !== null)
+    return (
+      <div data-testid="details">
+        <BackButton to="traffic sources" onClick={() => setOpen(null)} />
+        <PageHeader
+          title={open.source ? open.source.name : open.template ? `New ${open.template.name} source` : "New custom traffic source"}
+          description={open.template?.note || "What the network puts in the campaign URL, and the conversions sent back to it."}
+        />
+        <div className="mt-4 rounded-lg border bg-card">
+          <SourceForm
+            key={open.source?.id ?? `new:${open.template?.id ?? "custom"}`}
+            source={open.source}
+            template={open.template}
+            connected={!!open.template?.connector && connected.has(open.template.connector)}
+            costConnected={!!networkCost[open.source?.template ?? open.template?.id ?? ""] && connected.has(networkCost[open.source?.template ?? open.template?.id ?? ""].connector)}
+            canManage={canManage}
+            go={go}
+            onCancel={() => setOpen(null)}
+            onSaved={() => {
+              setOpen(null);
+              void load();
+            }}
+          />
+        </div>
+      </div>
+    );
   return (
     <div className="space-y-4">
       <PageHeader
@@ -183,10 +221,15 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
         description="The ad networks your campaigns buy clicks from: what each puts in the campaign URL, and the conversions sent back to it."
         action={canManage && <Button variant="primary" onClick={() => setGallery(true)}>New traffic source</Button>}
       />
-      {sources.length === 0 ? (
-        <Empty title="No traffic sources yet">Pick the network you buy clicks from: its click id, cost and parameters come filled in.</Empty>
+      {archivedCount > 0 && (
+        <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Show archived ({archivedCount})
+        </label>
+      )}
+      {shown.length === 0 ? (
+        <Empty title="No traffic sources yet" action={canManage && <Button variant="primary" onClick={() => setGallery(true)}>New traffic source</Button>}>Pick the network you buy clicks from: its click id, cost and parameters come filled in.</Empty>
       ) : (
-        <Card title={`${sources.length} traffic source${sources.length === 1 ? "" : "s"}`}>
+        <Card title={`${shown.length} ${showArchived && archivedCount > 0 ? "archived " : ""}traffic source${shown.length === 1 ? "" : "s"}`}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -199,9 +242,11 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {sources.map((s) => (
+                {shown.map((s) => (
                   <tr key={s.id} className="cursor-pointer border-t hover:bg-muted/40" onClick={() => setOpen({ source: s, template: templates.find((t) => t.id === s.template) ?? null })}>
-                    <td className="py-2 pr-3 font-medium">{s.name}</td>
+                    <td className="py-2 pr-3 font-medium">
+                      <button className="text-left hover:underline" onClick={(e) => { e.stopPropagation(); setOpen({ source: s, template: templates.find((t) => t.id === s.template) ?? null }); }}>{s.name}</button>
+                    </td>
                     <td className="px-3 py-2">{templateName(s.template)}</td>
                     <td className="px-3 py-2"><CostBadge template={s.template} connected={connected} /></td>
                     <td className="px-3 py-2">{s.postback.url ? <Badge tone="green">Postback</Badge> : <span className="text-muted-foreground">None</span>}</td>
@@ -213,6 +258,7 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
           </div>
         </Card>
       )}
+      {sources.some((x) => networkCost[x.template]) && <NetworkTargets canManage={canManage} go={go} />}
       <Gallery
         open={gallery}
         title="New traffic source"
@@ -228,30 +274,222 @@ export function TrackerTrafficSources({ ws, canManage, go }: Props) {
         }}
         onClose={() => setGallery(false)}
       />
-      <Sheet open={open !== null} onOpenChange={(o) => !o && setOpen(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
-          {open !== null && (
-            <SourceForm
-              key={open.source?.id ?? `new:${open.template?.id ?? "custom"}`}
-              source={open.source}
-              template={open.template}
-              connected={!!open.template?.connector && connected.has(open.template.connector)}
-              costConnected={!!networkCost[open.source?.template ?? open.template?.id ?? ""] && connected.has(networkCost[open.source?.template ?? open.template?.id ?? ""].connector)}
-              canManage={canManage}
-              go={go}
-              onSaved={() => {
-                setOpen(null);
-                void load();
-              }}
-            />
-          )}
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }
 
 const blankParam: Schemas["TrafficSourceParam"] = { param: "", token: "" };
+
+const targetRanges: { id: string; label: string; days: number; offset: number }[] = [
+  { id: "today", label: "Today", days: 1, offset: 0 },
+  { id: "yesterday", label: "Yesterday", days: 1, offset: 1 },
+  { id: "7", label: "Last 7 days", days: 7, offset: 0 },
+  { id: "30", label: "Last 30 days", days: 30, offset: 0 },
+];
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// A bid, with the four decimals networks that pay per visit use.
+const bidText = (v: string) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+// BidDialog: a new bid for one target of a network campaign. It goes
+// through the ad change flow, so it shows as queued until it is applied.
+function BidDialog({ target, onClose, onDone }: { target: TargetRow; onClose: () => void; onDone: () => void }) {
+  const network = networkCost[target.network]?.name ?? target.network;
+  const [bid, setBid] = useState(target.bid_queued ?? target.bid ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const value = Number(bid);
+  const tooLow = target.min_bid !== null && value > 0 && value < Number(target.min_bid);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!target.ad_campaign_id || !(value > 0)) return;
+    setBusy(true);
+    const { error } = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/bid", {
+      params: { path: { brand: pickedBrandId(), id: target.ad_campaign_id } },
+      body: { bid_micros: Math.round(value * 1e6), placement: target.target },
+    });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast(`Changing the bid for ${target.target} on ${network}`, "ok");
+    onDone();
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Bid for {target.target}</DialogTitle>
+          <DialogDescription>
+            What {target.campaign_name || "this campaign"} pays {network} for a visit from this target, in {target.currency}.{" "}
+            {target.auto_bid ? `${network} sets it itself now; a bid here replaces that.` : target.bid !== null ? `It is ${bidText(target.bid)} now.` : ""}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={save} className="space-y-3">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">New bid</span>
+            <input aria-label="New bid" autoFocus className={`${field} w-full`} type="number" inputMode="decimal" step="0.0001" min="0.0001" required value={bid} onChange={(e) => setBid(e.target.value)} />
+          </label>
+          {target.min_bid !== null && <p className={`text-xs ${tooLow ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>{network} takes {bidText(target.min_bid)} or more for this target.</p>}
+          <ErrorText>{error}</ErrorText>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={busy || !(value > 0) || tooLow}>Change bid</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// NetworkTargets: what each target of the networks' campaigns did (clicks,
+// cost, conversions, revenue, ROI), most costly first, with its bid and
+// state as the network holds them, a bid change, and Pause and Resume:
+// the target stops or starts again on the network, and the campaign keeps
+// running on its others (plans/ad-tracker.md, B8).
+function NetworkTargets({ canManage, go }: { canManage: boolean; go: (tab: Tab, item?: string) => void }) {
+  const [range, setRange] = useState("7");
+  const [rows, setRows] = useState<TargetRow[] | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  const [bidFor, setBidFor] = useState<TargetRow | null>(null);
+  const seq = useRef(0);
+  const load = useCallback(async () => {
+    const n = ++seq.current;
+    const r = targetRanges.find((x) => x.id === range) ?? targetRanges[2];
+    const to = new Date();
+    to.setDate(to.getDate() - r.offset);
+    const from = new Date(to);
+    from.setDate(from.getDate() - (r.days - 1));
+    const { data, error } = await api.GET("/v1/brands/{brand}/network-targets", { params: { path: { brand: pickedBrandId() }, query: { from: isoDay(from), to: isoDay(to) } } });
+    if (n !== seq.current) return;
+    setError(error ? errorMessage(error) : "");
+    setRows((data?.data ?? []) as TargetRow[]);
+  }, [range]);
+  useEffect(() => {
+    setRows(null);
+    void load();
+  }, [load]);
+  const change = async (t: TargetRow, pause: boolean) => {
+    if (!t.ad_campaign_id) return;
+    const network = networkCost[t.network]?.name ?? t.network;
+    const yes = pause
+      ? await confirmAction(`Pause target ${t.target}?`, `${network} stops sending this campaign's traffic from it. The campaign keeps running on its other targets, and you can resume the target here.`, "Pause target", false)
+      : await confirmAction(`Resume target ${t.target}?`, `${network} sends this campaign's traffic from it again, which spends more.`, "Resume target", false);
+    if (!yes) return;
+    setBusy(t.campaign_ref + t.target);
+    const { error } = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/exclusions", {
+      params: { path: { brand: pickedBrandId(), id: t.ad_campaign_id } },
+      body: { kind: "placement", value: t.target, action: pause ? "add" : "remove" },
+    });
+    setBusy("");
+    if (error) return toast(errorMessage(error), "error");
+    toast(pause ? `Pausing ${t.target} on ${network}` : `Resuming ${t.target} on ${network}`, "ok");
+    void load();
+  };
+  const money = (v: string) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const stateLabel = { active: "", pausing: "Pausing…", paused: "Paused", resuming: "Resuming…", stopped: "Stopped" } as const;
+  // The network's own word for a target it holds back, in plain words.
+  const stopped = (t: TargetRow) => {
+    const d = t.state_detail.replaceAll("_", " ");
+    return d ? d[0].toUpperCase() + d.slice(1) : stateLabel.stopped;
+  };
+  return (
+    <Card
+      title="Targets"
+      description="What each target (placement) of your network campaigns did: the clicks it sent, what they cost and what they brought back. Pause the ones that lose money; the campaign keeps running on the others."
+    >
+      <div className="mb-3">
+        <select aria-label="Target dates" className={field} value={range} onChange={(e) => setRange(e.target.value)}>
+          {targetRanges.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </select>
+      </div>
+      <ErrorText>{error}</ErrorText>
+      {rows === null ? (
+        <Loading />
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No clicks with a target in these days. Keep the target and campaign id parameters in the traffic source, so each click says where it came from.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" data-testid="network-targets">
+            <thead>
+              <tr className="text-left text-xs text-muted-foreground">
+                <th className="py-2 pr-3 font-medium">Target</th>
+                <th className="px-3 py-2 font-medium">Campaign</th>
+                <th className="px-3 py-2 text-right font-medium">Clicks</th>
+                <th className="px-3 py-2 text-right font-medium">Conversions</th>
+                <th className="px-3 py-2 text-right font-medium">Cost</th>
+                <th className="px-3 py-2 text-right font-medium">Revenue</th>
+                <th className="px-3 py-2 text-right font-medium">Profit</th>
+                <th className="px-3 py-2 text-right font-medium">ROI</th>
+                <th className="px-3 py-2 text-right font-medium">Bid</th>
+                <th className="py-2 pl-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((t) => {
+                const profit = Number(t.profit);
+                const tone = profit < 0 ? "text-red-600 dark:text-red-400" : profit > 0 ? "text-green-700 dark:text-green-400" : "";
+                return (
+                  <tr key={t.source_id + t.campaign_ref + t.target} className="border-t">
+                    <td className="max-w-48 truncate py-2 pr-3 font-mono text-xs" title={t.target}>{t.target}</td>
+                    <td className="max-w-40 truncate px-3 py-2 text-xs" title={t.campaign_ref}>{t.campaign_name || t.campaign_ref}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{t.clicks.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{t.conversions.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(t.cost)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(t.revenue)}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${tone}`}>{money(t.profit)}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${tone}`}>{t.roi === null ? "—" : `${Math.round(t.roi * 100)}%`}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                      {(() => {
+                        const shown = t.bid_queued !== null ? (
+                          <>
+                            {t.bid !== null && <span className="text-muted-foreground line-through">{bidText(t.bid)}</span>} {bidText(t.bid_queued)}
+                          </>
+                        ) : t.auto_bid ? "Auto" : t.bid !== null ? bidText(t.bid) : "—";
+                        return canManage && t.ad_campaign_id ? (
+                          <button type="button" className="underline decoration-dotted underline-offset-2 hover:decoration-solid" aria-label={`Change bid for ${t.target}`}
+                            title={t.bid_queued !== null ? "This bid change waits to be applied" : "Change the bid"} onClick={() => setBidFor(t)}>
+                            {shown}
+                          </button>
+                        ) : shown;
+                      })()}
+                    </td>
+                    <td className="whitespace-nowrap py-2 pl-3 text-right">
+                      {t.state !== "active" && (
+                        <Badge tone={t.state === "paused" || t.state === "stopped" ? "amber" : "grey"}>{t.state === "stopped" ? stopped(t) : stateLabel[t.state]}</Badge>
+                      )}{" "}
+                      {!t.ad_campaign_id ? (
+                        <button type="button" className="text-xs underline" title={`Connect ${networkCost[t.network]?.name ?? t.network} under Paid ads to pause targets from here`} onClick={() => go("connectors", networkCost[t.network]?.connector)}>
+                          Connect to pause
+                        </button>
+                      ) : canManage && t.state === "active" ? (
+                        <Button type="button" variant="ghost" disabled={busy === t.campaign_ref + t.target} aria-label={`Pause ${t.target}`} onClick={() => void change(t, true)}>Pause</Button>
+                      ) : canManage && t.state === "paused" ? (
+                        <Button type="button" variant="ghost" disabled={busy === t.campaign_ref + t.target} aria-label={`Resume ${t.target}`} onClick={() => void change(t, false)}>Resume</Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Amounts are in {rows[0].currency}. Each target&apos;s bid and state are as the network last listed them, read about every 15 minutes, with the changes made here since on top.
+          </p>
+        </div>
+      )}
+      {bidFor && (
+        <BidDialog
+          target={bidFor}
+          onClose={() => setBidFor(null)}
+          onDone={() => {
+            setBidFor(null);
+            void load();
+          }}
+        />
+      )}
+    </Card>
+  );
+}
 
 // CostBadge says where a source's cost comes from: exact from the
 // network once its connection reads it, else each click's cost token.
@@ -323,13 +561,14 @@ function NetworkCostSection({ source, templateID, connected, go }: { source: Sou
   );
 }
 
-function SourceForm({ source, template, connected, costConnected, canManage, go, onSaved }: {
+function SourceForm({ source, template, connected, costConnected, canManage, go, onCancel, onSaved }: {
   source: Source | null;
   template: Template | null;
   connected: boolean;
   costConnected: boolean;
   canManage: boolean;
   go: (tab: Tab, item?: string) => void;
+  onCancel: () => void;
   onSaved: () => void;
 }) {
   const from = source ?? template;
@@ -388,6 +627,13 @@ function SourceForm({ source, template, connected, costConnected, canManage, go,
     toast("Traffic source archived", "ok");
     onSaved();
   };
+  const restore = async () => {
+    if (!source) return;
+    const { error } = await api.PATCH("/v1/brands/{brand}/traffic-sources/{id}", { params: { path: { brand: pickedBrandId(), id: source.id } }, body: { status: "active" } });
+    if (error) return toast(errorMessage(error), "error");
+    toast("Traffic source restored", "ok");
+    onSaved();
+  };
   const paramRow = (label: string, v: Schemas["TrafficSourceParam"], set: (p: Schemas["TrafficSourceParam"]) => void) => (
     <div className="grid grid-cols-[110px_1fr_1fr] items-center gap-2 text-sm">
       <span>{label}</span>
@@ -397,10 +643,6 @@ function SourceForm({ source, template, connected, costConnected, canManage, go,
   );
   return (
     <form className="space-y-5 p-4" onSubmit={(e) => { e.preventDefault(); void save(); }}>
-      <SheetHeader className="p-0">
-        <SheetTitle>{source ? source.name : template ? `New ${template.name} source` : "New custom traffic source"}</SheetTitle>
-        <SheetDescription>{template?.note || "What the network puts in the campaign URL, and the conversions sent back to it."}</SheetDescription>
-      </SheetHeader>
       <div className="grid gap-3 sm:grid-cols-[1fr_100px]">
         <label className="text-sm">
           Name
@@ -408,7 +650,7 @@ function SourceForm({ source, template, connected, costConnected, canManage, go,
         </label>
         <label className="text-sm">
           Currency
-          <input aria-label="Currency" className={`${field} mt-1 w-full uppercase`} maxLength={3} value={currency} disabled={!canManage} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+          <CurrencySelect className="mt-1 w-full" value={currency} disabled={!canManage} onChange={setCurrency} />
         </label>
       </div>
       <section className="space-y-2">
@@ -474,11 +716,11 @@ function SourceForm({ source, template, connected, costConnected, canManage, go,
           <div className="grid gap-2 text-sm sm:grid-cols-3">
             <label>
               Payout share %
-              <input aria-label="Payout share" type="number" min={0} max={1000} className={`${field} mt-1 w-full`} value={share} disabled={!canManage} onChange={(e) => setShare(Math.max(0, Math.min(1000, Number(e.target.value) || 0)))} />
+              <NumberInput label="Payout share" min={0} max={1000} className="mt-1 w-full" value={share} disabled={!canManage} onChange={setShare} />
             </label>
             <label>
               Decimals
-              <input aria-label="Decimals" type="number" min={0} max={6} className={`${field} mt-1 w-full`} value={decimals} disabled={!canManage} onChange={(e) => setDecimals(Math.max(0, Math.min(6, Number(e.target.value) || 0)))} />
+              <NumberInput label="Decimals" min={0} max={6} className="mt-1 w-full" value={decimals} disabled={!canManage} onChange={setDecimals} />
             </label>
             <label>
               Smallest payout sent
@@ -523,7 +765,8 @@ function SourceForm({ source, template, connected, costConnected, canManage, go,
       {canManage && (
         <div className="flex flex-wrap gap-2">
           <Button type="submit" variant="primary" disabled={busy || unfilled.length > 0}>{source ? "Save" : "Add traffic source"}</Button>
-          {source && <Button type="button" variant="ghost" onClick={() => void archive()}>Archive</Button>}
+          <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+          {source && (source.status === "archived" ? <Button type="button" variant="ghost" onClick={() => void restore()}>Restore</Button> : <Button type="button" variant="ghost" onClick={() => void archive()}>Archive</Button>)}
         </div>
       )}
     </form>
@@ -544,6 +787,10 @@ export function TrackerNetworks({ ws, canManage }: Props) {
   const [error, setError] = useState("");
   const [gallery, setGallery] = useState(false);
   const [open, setOpen] = useState<{ network: Network | null; template: NetworkTemplate | null } | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  useEffect(() => {
+    if (networks && !networks.some((x) => x.status === "archived")) setShowArchived(false);
+  }, [networks]);
   const load = useCallback(async () => {
     const b = pickedBrandId();
     const [n, t] = await Promise.all([
@@ -563,6 +810,34 @@ export function TrackerNetworks({ ws, canManage }: Props) {
   if (error) return <ErrorText>{error}</ErrorText>;
   if (!networks) return <Loading />;
   const templateName = (id: string) => templates.find((t) => t.id === id)?.name ?? "Custom";
+  const archivedCount = networks.filter((n) => n.status === "archived").length;
+  const shown = networks.filter((n) => (n.status === "archived") === (showArchived && archivedCount > 0));
+  if (open !== null)
+    return (
+      <div data-testid="details">
+        <BackButton to="affiliate networks" onClick={() => setOpen(null)} />
+        <PageHeader
+          title={open.network ? open.network.name : open.template ? `New ${open.template.name} network` : "New custom network"}
+          description={open.template?.note || "Where its conversions come from, and what a repeat does."}
+        />
+        <div className="mt-4 max-w-3xl rounded-lg border bg-card">
+          <NetworkForm
+            key={open.network?.id ?? `new:${open.template?.id ?? "custom"}`}
+            network={open.network}
+            template={open.template}
+            canManage={canManage}
+            onCancel={() => setOpen(null)}
+            onSaved={async (saved, close) => {
+              const list = await load();
+              if (close) return setOpen(null);
+              // A new network stays open with its postback URL, shown once.
+              const fresh = list?.find((n) => n.id === saved.id);
+              if (fresh) setOpen({ network: { ...fresh, postback_url: saved.postback_url }, template: templates.find((t) => t.id === fresh.network) ?? null });
+            }}
+          />
+        </div>
+      </div>
+    );
   return (
     <div className="space-y-4">
       <PageHeader
@@ -570,10 +845,15 @@ export function TrackerNetworks({ ws, canManage }: Props) {
         description="Where your conversions come from: each network gets its own postback URL, in its own macros."
         action={canManage && <Button variant="primary" onClick={() => setGallery(true)}>New affiliate network</Button>}
       />
-      {networks.length === 0 ? (
-        <Empty title="No affiliate networks yet">Add the network that pays you: paste its postback URL into the network, and its conversions come in on the right clicks.</Empty>
+      {archivedCount > 0 && (
+        <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Show archived ({archivedCount})
+        </label>
+      )}
+      {shown.length === 0 ? (
+        <Empty title="No affiliate networks yet" action={canManage && <Button variant="primary" onClick={() => setGallery(true)}>New affiliate network</Button>}>Add the network that pays you: paste its postback URL into the network, and its conversions come in on the right clicks.</Empty>
       ) : (
-        <Card title={`${networks.length} affiliate network${networks.length === 1 ? "" : "s"}`}>
+        <Card title={`${shown.length} ${showArchived && archivedCount > 0 ? "archived " : ""}affiliate network${shown.length === 1 ? "" : "s"}`}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -585,10 +865,10 @@ export function TrackerNetworks({ ws, canManage }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {networks.map((n) => (
+                {shown.map((n) => (
                   <tr key={n.id} className="cursor-pointer border-t hover:bg-muted/40" onClick={() => setOpen({ network: n, template: templates.find((t) => t.id === n.network) ?? null })}>
                     <td className="py-2 pr-3">
-                      <span className="font-medium">{n.name}</span> <span className="font-mono text-xs text-muted-foreground">{n.token_hint}…</span>
+                      <button className="text-left font-medium hover:underline" onClick={(e) => { e.stopPropagation(); setOpen({ network: n, template: templates.find((t) => t.id === n.network) ?? null }); }}>{n.name}</button> <span className="font-mono text-xs text-muted-foreground">{n.token_hint}…</span>
                     </td>
                     <td className="px-3 py-2">{templateName(n.network)}</td>
                     <td className="px-3 py-2">{policies.find((p) => p.id === n.duplicate_policy)?.label}</td>
@@ -614,30 +894,11 @@ export function TrackerNetworks({ ws, canManage }: Props) {
         }}
         onClose={() => setGallery(false)}
       />
-      <Sheet open={open !== null} onOpenChange={(o) => !o && setOpen(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
-          {open !== null && (
-            <NetworkForm
-              key={open.network?.id ?? `new:${open.template?.id ?? "custom"}`}
-              network={open.network}
-              template={open.template}
-              canManage={canManage}
-              onSaved={async (saved, close) => {
-                const list = await load();
-                if (close) return setOpen(null);
-                // A new network stays open with its postback URL, shown once.
-                const fresh = list?.find((n) => n.id === saved.id);
-                if (fresh) setOpen({ network: { ...fresh, postback_url: saved.postback_url }, template: templates.find((t) => t.id === fresh.network) ?? null });
-              }}
-            />
-          )}
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }
 
-function NetworkForm({ network, template, canManage, onSaved }: { network: Network | null; template: NetworkTemplate | null; canManage: boolean; onSaved: (n: Network, close: boolean) => void }) {
+function NetworkForm({ network, template, canManage, onCancel, onSaved }: { network: Network | null; template: NetworkTemplate | null; canManage: boolean; onCancel: () => void; onSaved: (n: Network, close: boolean) => void }) {
   const [name, setName] = useState(network?.name ?? template?.name ?? "");
   const [clickParam, setClickParam] = useState(network?.click_id_param ?? template?.click_id_param ?? "");
   const [policy, setPolicy] = useState<Network["duplicate_policy"]>(network?.duplicate_policy ?? "ignore");
@@ -672,12 +933,15 @@ function NetworkForm({ network, template, canManage, onSaved }: { network: Netwo
     toast("Network archived", "ok");
     onSaved(network, true);
   };
+  const restore = async () => {
+    if (!network) return;
+    const { error } = await api.PATCH("/v1/brands/{brand}/postback-sources/{id}", { params: { path: { brand: pickedBrandId(), id: network.id } }, body: { status: "active" } });
+    if (error) return toast(errorMessage(error), "error");
+    toast("Network restored", "ok");
+    onSaved(network, true);
+  };
   return (
     <form className="space-y-4 p-4" onSubmit={(e) => { e.preventDefault(); void save(); }}>
-      <SheetHeader className="p-0">
-        <SheetTitle>{network ? network.name : template ? `New ${template.name} network` : "New custom network"}</SheetTitle>
-        <SheetDescription>{template?.note || "Where its conversions come from, and what a repeat does."}</SheetDescription>
-      </SheetHeader>
       {network && (
         <div className="space-y-2 text-sm">
           <div>Postback URL to paste into the network</div>
@@ -722,12 +986,12 @@ function NetworkForm({ network, template, canManage, onSaved }: { network: Netwo
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-sm">
           Currency
-          <input aria-label="Currency" className={`${field} mt-1 w-full uppercase`} maxLength={3} value={currency} disabled={!canManage} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+          <CurrencySelect className="mt-1 w-full" value={currency} disabled={!canManage} onChange={setCurrency} />
         </label>
         <label className="text-sm">
           Conversions count for
           <span className="mt-1 flex items-center gap-1">
-            <input aria-label="Click expiry days" type="number" min={1} max={365} className={`${field} w-20`} value={expiry} disabled={!canManage} onChange={(e) => setExpiry(Math.max(1, Math.min(365, Number(e.target.value) || 1)))} /> days after the click
+            <NumberInput label="Click expiry days" min={1} max={365} className="w-20" value={expiry} disabled={!canManage} onChange={setExpiry} /> days after the click
           </span>
         </label>
       </div>
@@ -738,7 +1002,8 @@ function NetworkForm({ network, template, canManage, onSaved }: { network: Netwo
       {canManage && (
         <div className="flex flex-wrap gap-2">
           <Button type="submit" variant="primary" disabled={busy}>{network ? "Save" : "Add network"}</Button>
-          {network && <Button type="button" variant="ghost" onClick={() => void archive()}>Archive</Button>}
+          <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+          {network && (network.status === "archived" ? <Button type="button" variant="ghost" onClick={() => void restore()}>Restore</Button> : <Button type="button" variant="ghost" onClick={() => void archive()}>Archive</Button>)}
         </div>
       )}
     </form>

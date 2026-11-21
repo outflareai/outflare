@@ -189,3 +189,69 @@ func (s *Server) finishAccountSignIn(w http.ResponseWriter, r *http.Request, st 
 	}
 	done(url.Values{"integration": {st.Integration}, "signed_in": {"1"}})
 }
+
+// finishReconnect completes a sign-in started with ?integration=: the new
+// tokens replace the connection's, over whatever else it stores, and the
+// connection keeps its id, name, brand, accounts and history. A
+// connection signed in before a connector asked for a new permission (Google
+// Ads before Data Manager) gets it this way without a second connection
+// that would sync the same accounts twice.
+func (s *Server) finishReconnect(w http.ResponseWriter, r *http.Request, st integrationState, creds connectors.Creds, account connectors.Account, done func(url.Values), fail func(string)) {
+	ctx := r.Context()
+	// Load, not Open: Open renews the old tokens first, and signing in again
+	// is exactly what mends a connection whose tokens can't be renewed.
+	cur, old, err := s.integrations.Load(ctx, s.pool, st.Workspace, st.Reconnect)
+	if err != nil {
+		fail("the connection is no longer there; connect it again")
+		return
+	}
+	if cur.Connector != st.Connector {
+		fail("this sign-in is for a different connector; start again from Connectors")
+		return
+	}
+	merged := connectors.Creds{}
+	for k, v := range old {
+		merged[k] = v
+	}
+	for k, v := range creds {
+		merged[k] = v
+	}
+	actorType := st.ActorType
+	if actorType == "" {
+		actorType = "human"
+	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := s.integrations.SetCreds(ctx, tx, st.Workspace, st.Reconnect, connectors.AuthOAuth2, merged); err != nil {
+			return err
+		}
+		if err := s.integrations.Checked(ctx, tx, st.Workspace, st.Reconnect, &account, nil); err != nil {
+			return err
+		}
+		i, err := s.integrations.Get(ctx, tx, st.Workspace, st.Reconnect)
+		if err != nil {
+			return err
+		}
+		if err := s.integrations.Reconnected(ctx, tx, i); err != nil {
+			return err
+		}
+		return record(ctx, tx, &principal{ActorID: st.Actor, ActorType: actorType}, st.Workspace, "integration.signed_in", "integration", st.Reconnect,
+			map[string]any{"connector": st.Connector, "via": "reconnect"})
+	})
+	if errors.Is(err, connectors.ErrNotFound) {
+		fail("the connection is no longer there; connect it again")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	params := url.Values{"integration": {st.Reconnect}, "signed_in": {"1"}}
+	// One Google sign-in covers Analytics and Search Console: mend the other
+	// connections to the same account too.
+	if def, ok := s.integrations.Registry.Definition(st.Connector); ok {
+		if also := s.connectAlso(r, st, def, creds, actorType); len(also) > 0 {
+			params["also"] = also
+		}
+	}
+	done(params)
+}

@@ -56,6 +56,7 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [aliases, setAliases] = useState("");
+  const [category, setCategory] = useState("");
   const [churnMode, setChurnMode] = useState<"cancellation" | "inactivity">("cancellation");
   const [editing, setEditing] = useState<"stages" | "moves" | null>(null);
   const [changing, setChanging] = useState<Product | null>(null);
@@ -78,7 +79,7 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
 
   async function add() {
     setBusy(true);
-    const body = { name: name.trim(), churn_mode: churnMode, aliases: aliases.split(",").map((a) => a.trim()).filter(Boolean) };
+    const body = { name: name.trim(), category: category.trim().toLowerCase(), churn_mode: churnMode, aliases: aliases.split(",").map((a) => a.trim()).filter(Boolean) };
     const { error } = await api.POST("/v1/brands/{brand}/products", { params: { path: { brand } }, body });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
@@ -86,6 +87,7 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
     setAdding(false);
     setName("");
     setAliases("");
+    setCategory("");
     void load();
   }
 
@@ -215,6 +217,7 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
           <div className="mb-4 flex flex-wrap items-end gap-2 rounded-md border p-3">
             <input aria-label="Name" className={`${field} w-56`} placeholder="Name, such as Residential proxies" value={name} onChange={(e) => setName(e.target.value)} />
             <input aria-label="Aliases" className={`${field} w-72`} placeholder="Aliases: resi, billing:prod_123" value={aliases} onChange={(e) => setAliases(e.target.value)} />
+            <input aria-label="Category" list="product-categories" className={`${field} w-44`} placeholder="Category, such as proxies" value={category} onChange={(e) => setCategory(e.target.value)} />
             <select aria-label="Churn" className={field} value={churnMode} onChange={(e) => setChurnMode(e.target.value as "cancellation" | "inactivity")}>
               <option value="cancellation">Churned when they cancel</option>
               <option value="inactivity">Churned after no usage</option>
@@ -228,10 +231,13 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
           </p>
         ) : (
           <ul className="divide-y">
+            <datalist id="product-categories">
+              {[...new Set(products.map((x) => x.category).filter(Boolean))].map((c) => <option key={c} value={c} />)}
+            </datalist>
             {products.map((p) => (
               <li key={p.id} className="flex flex-wrap items-center gap-3 py-2">
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium">{p.name} <span className="ml-1 font-mono text-[12px] text-muted-foreground">{p.key}</span></div>
+                  <div className="text-[13px] font-medium">{p.name} <span className="ml-1 font-mono text-[12px] text-muted-foreground">{p.key}</span>{p.category && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{p.category}</span>}</div>
                   <div className="text-[12px] text-muted-foreground">
                     {p.churn_mode === "inactivity" ? `Churned after ${p.churn_days} days without usage` : "Churned when they cancel"} · at risk after {p.at_risk_days} days without usage
                     {p.aliases.length > 0 && <> · {p.aliases.join(", ")}</>}
@@ -255,6 +261,7 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
 function ProductEditor({ brand, product, onClose, onSaved }: { brand: string; product: Product; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(product.name);
   const [aliases, setAliases] = useState(product.aliases.join(", "));
+  const [category, setCategory] = useState(product.category);
   const [churnMode, setChurnMode] = useState(product.churn_mode);
   const [atRisk, setAtRisk] = useState(String(product.at_risk_days));
   const [churn, setChurn] = useState(String(product.churn_days));
@@ -268,6 +275,7 @@ function ProductEditor({ brand, product, onClose, onSaved }: { brand: string; pr
       body: {
         name: name.trim(),
         aliases: aliases.split(",").map((a) => a.trim()).filter(Boolean),
+        category: category.trim().toLowerCase(),
         churn_mode: churnMode,
         at_risk_days: Number(atRisk),
         churn_days: Number(churn),
@@ -285,6 +293,7 @@ function ProductEditor({ brand, product, onClose, onSaved }: { brand: string; pr
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-[12px] text-muted-foreground">Name<input className={`${field} mt-1 block w-56`} value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label className="text-[12px] text-muted-foreground">Aliases, separated by commas<input className={`${field} mt-1 block w-72`} placeholder="resi, billing:prod_123" value={aliases} onChange={(e) => setAliases(e.target.value)} /></label>
+        <label className="text-[12px] text-muted-foreground">Category<input list="product-categories" className={`${field} mt-1 block w-44`} placeholder="proxies" value={category} onChange={(e) => setCategory(e.target.value)} /></label>
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-[12px] text-muted-foreground">Churned

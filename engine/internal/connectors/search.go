@@ -87,3 +87,46 @@ type SearchDetails struct {
 	Impressions float64
 	Segments    []SearchSegment
 }
+
+// SearchAnalyticsFilter narrows a Search Analytics query to rows whose
+// dimension (query, page, country, device or searchAppearance) matches:
+// operator is equals, notEquals, contains, notContains, includingRegex or
+// excludingRegex (RE2), as in Search Console's own filters.
+type SearchAnalyticsFilter struct {
+	Dimension  string `json:"dimension"`
+	Operator   string `json:"operator"`
+	Expression string `json:"expression"`
+}
+
+// SearchAnalyticsQuery is one Search Analytics request, as Search
+// Console's Performance report asks it: a search type (web, image, video,
+// news, discover, googleNews), the dimensions to group by (none for the
+// totals), filters that all apply, and how many rows.
+type SearchAnalyticsQuery struct {
+	Site       string
+	From, To   string
+	Type       string
+	Dimensions []string
+	Filters    []SearchAnalyticsFilter
+	Limit      int
+	// Hourly asks for hourly data (dataState hourly_all), which the hour
+	// dimension needs; Search Console keeps it for the last few days.
+	Hourly bool
+}
+
+// SearchAnalyticsRow is one row: the dimension values in the order asked,
+// and the metrics for them.
+type SearchAnalyticsRow struct {
+	Keys        []string `json:"keys"`
+	Clicks      float64  `json:"clicks"`
+	Impressions float64  `json:"impressions"`
+	CTR         float64  `json:"ctr"`
+	Position    float64  `json:"position"`
+}
+
+// SearchAnalyticsReader answers any Search Analytics query live, so a
+// page can show exactly what the search console's own report shows for
+// any mix of filters.
+type SearchAnalyticsReader interface {
+	SearchAnalytics(ctx context.Context, cl *Client, creds Creds, q SearchAnalyticsQuery) ([]SearchAnalyticsRow, error)
+}

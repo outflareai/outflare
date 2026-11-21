@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, errorMessage } from "../../api";
 import { Badge, Button, ErrorText, field, toast } from "../../ui";
+import { pbnSignals } from "./pbnSignals";
+import { qualityLine, verdictLabel, verdictTone } from "./quality";
 import { dash, day, durationLabel, idemp, metricFields, moneyList, siteAgeLabel, type LinkOrderDonor } from "./shared";
 
 export function DonorSheet({ donor, onClose, brand, canManage, onSaved }: {
@@ -39,6 +41,22 @@ export function DonorSheet({ donor, onClose, brand, canManage, onSaved }: {
     onSaved?.(data);
   };
 
+  const toggle = async (field: "best_link" | "pbn") => {
+    if (!brand) return;
+    setBusy(true);
+    const on = !donor[field];
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/link-orders/catalog/items/{id}", {
+      params: { path: { brand, id: donor.id }, header: idemp() },
+      body: field === "pbn" ? { pbn: on } : { best_link: on },
+    });
+    setBusy(false);
+    if (error || !data) return setErr(errorMessage(error));
+    const what = field === "pbn" ? "flagged as a PBN" : "marked as a best link";
+    toast(on ? `${donor.domain} is ${what}.` : `${donor.domain} is no longer ${what}.`);
+    onSaved?.(data);
+  };
+
+  const hints = pbnSignals(donor);
   const metrics = metricFields.filter((m) => donor.metrics?.[m.key] != null);
   const groups = [...new Set(metrics.map((m) => m.group))];
   const show = (v: string | number | null | undefined) => (v == null ? dash : typeof v === "number" ? v.toLocaleString() : v);
@@ -49,10 +67,37 @@ export function DonorSheet({ donor, onClose, brand, canManage, onSaved }: {
         <SheetHeader>
           <SheetTitle className="flex flex-wrap items-center gap-2">
             {donor.domain}
+            {donor.best_link ? <Badge tone="blue">Best link</Badge> : null}
             {donor.pbn ? <Badge tone="amber">PBN</Badge> : null}
+            {!donor.pbn && hints.likely ? <Badge tone="red">Likely PBN?</Badge> : null}
           </SheetTitle>
-          <SheetDescription>Catalog donor. Prices are what we pay the donor — there is no commission or client price. PBN is a manual flag.</SheetDescription>
+          <SheetDescription>Catalog donor. Prices are what we pay the donor — there is no commission or client price. PBN and Best link are manual labels.</SheetDescription>
         </SheetHeader>
+        {donor.quality ? (
+          <div className="rounded-md border p-2 text-[12px]">
+            <p className="flex items-center gap-2 font-medium">
+              Traffic and links <Badge tone={verdictTone[donor.quality.verdict]}>{verdictLabel[donor.quality.verdict]}</Badge>
+            </p>
+            {qualityLine(donor) ? <p className="mt-1 text-muted-foreground">{qualityLine(donor)}</p> : null}
+            {donor.quality.reasons.length ? <ul className="mt-1 list-disc pl-4 text-muted-foreground">{donor.quality.reasons.map((r) => <li key={r}>{r}</li>)}</ul> : null}
+            {donor.metrics?.top_page_url ? <p className="mt-1 truncate text-muted-foreground">Top page: <a className="underline" href={donor.metrics.top_page_url} target="_blank" rel="noreferrer">{donor.metrics.top_page_url}</a></p> : null}
+            <p className="mt-1 text-muted-foreground">{donor.ahrefs_check ? `Ahrefs check: ${donor.ahrefs_check.status}, ${new Date(donor.ahrefs_check.at).toLocaleDateString()}` : "Not checked in Ahrefs yet: where the traffic sits is unknown."}</p>
+          </div>
+        ) : null}
+        {hints.reasons.length ? (
+          <div className="rounded-md border p-2 text-[12px]">
+            <p className="font-medium">{hints.likely ? "Signs of a PBN" : "Weak signs of a PBN"} (a suggestion; the flag is yours to set)</p>
+            <ul className="mt-1 list-disc pl-4 text-muted-foreground">
+              {hints.reasons.map((r) => <li key={r}>{r}</li>)}
+            </ul>
+          </div>
+        ) : null}
+        {brand && canManage && onSaved ? (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" disabled={busy} onClick={() => void toggle("best_link")}>{donor.best_link ? "Remove the Best link label" : "Mark as best link"}</Button>
+            <Button variant="ghost" disabled={busy} onClick={() => void toggle("pbn")}>{donor.pbn ? "Remove the PBN flag" : "Flag as PBN"}</Button>
+          </div>
+        ) : null}
         {editing ? (
           <div className="flex flex-col gap-2">
             <label className="flex flex-col gap-1 text-[12px] text-muted-foreground">Intermediary

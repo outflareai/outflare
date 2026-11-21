@@ -13,11 +13,11 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})["id"].(string)
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})["id"].(string)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})
 	ctx := context.Background()
 	first := brandOf(t, e, `SELECT outflare_first_brand($1)::text`, ws)
-	mine := addMailbox(t, e, ws, "ana@geonode.example")
+	mine := addMailbox(t, e, ws, "ana@northpeak.example")
 	addMailbox(t, e, ws, "bo@unassigned.example")
 	addMailbox(t, e, ws, "cy@unassigned.example")
 	if _, err := e.pool.Exec(ctx, `UPDATE mailboxes SET lifecycle_stage = 'ready', brand_id = $2 WHERE id = $1`, mine, geo); err != nil {
@@ -30,16 +30,16 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 		t.Helper()
 		return owner.must(200, "GET", base+"/infrastructure"+q, nil)["mailboxes"].(map[string]any)["ready"].(float64)
 	}
-	if ready("") != 3 || ready("?brand=geonode") != 1 || ready("?brand=repocket") != 0 || ready("?brand=none") != 0 || ready("?brand="+first) != 2 {
-		t.Fatalf("ready: %v %v %v %v %v", ready(""), ready("?brand=geonode"), ready("?brand=repocket"), ready("?brand=none"), ready("?brand="+first))
+	if ready("") != 3 || ready("?brand=northpeak") != 1 || ready("?brand=summitly") != 0 || ready("?brand=none") != 0 || ready("?brand="+first) != 2 {
+		t.Fatalf("ready: %v %v %v %v %v", ready(""), ready("?brand=northpeak"), ready("?brand=summitly"), ready("?brand=none"), ready("?brand="+first))
 	}
-	if n := len(owner.must(200, "GET", base+"/mailbox-health?brand=repocket", nil)["data"].([]any)); n != 0 {
-		t.Fatalf("repocket health: %d", n)
+	if n := len(owner.must(200, "GET", base+"/mailbox-health?brand=summitly", nil)["data"].([]any)); n != 0 {
+		t.Fatalf("summitly health: %d", n)
 	}
-	if n := len(owner.must(200, "GET", base+"/mailbox-health?brand=geonode", nil)["data"].([]any)); n != 1 {
-		t.Fatalf("geonode health: %d", n)
+	if n := len(owner.must(200, "GET", base+"/mailbox-health?brand=northpeak", nil)["data"].([]any)); n != 1 {
+		t.Fatalf("northpeak health: %d", n)
 	}
-	// Home: Repocket has no mailboxes, whatever the others have.
+	// Home: Summitly has no mailboxes, whatever the others have.
 	codes := func(q string) map[string]bool {
 		t.Helper()
 		out := map[string]bool{}
@@ -48,8 +48,8 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 		}
 		return out
 	}
-	if !codes("?brand=repocket")["no_mailboxes"] || codes("?brand=geonode")["no_mailboxes"] || codes("")["no_mailboxes"] {
-		t.Fatal("no_mailboxes should show for Repocket only")
+	if !codes("?brand=summitly")["no_mailboxes"] || codes("?brand=northpeak")["no_mailboxes"] || codes("")["no_mailboxes"] {
+		t.Fatal("no_mailboxes should show for Summitly only")
 	}
 	owner.must(404, "GET", base+"/status?brand=nope", nil)
 	// No mailbox is in no brand, so Home has nothing to place; the first
@@ -64,15 +64,15 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 	if len(loose) != 2 {
 		t.Fatalf("first brand's mailboxes: %v", loose)
 	}
-	owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"mailbox_ids": loose})
-	if ready("?brand=repocket") != 2 || ready("?brand="+first) != 0 {
+	owner.must(200, "POST", base+"/brands/summitly/add", map[string]any{"mailbox_ids": loose})
+	if ready("?brand=summitly") != 2 || ready("?brand="+first) != 0 {
 		t.Fatal("moved mailboxes stayed in the first brand")
 	}
 
 	// A lead belongs to one brand (brands step 5): one made without a
 	// brand is the workspace's first brand's.
 	var list, lead string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO lead_lists (workspace_id, name, brand_id) VALUES ($1, 'Geonode list', $2) RETURNING id::text`, ws, geo).Scan(&list); err != nil {
+	if err := e.pool.QueryRow(ctx, `INSERT INTO lead_lists (workspace_id, name, brand_id) VALUES ($1, 'Northpeak list', $2) RETURNING id::text`, ws, geo).Scan(&list); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.pool.QueryRow(ctx, `INSERT INTO leads (workspace_id, email, brand_id) VALUES ($1, 'dee@acme.example', $2) RETURNING id::text`, ws, geo).Scan(&lead); err != nil {
@@ -88,13 +88,13 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 		t.Helper()
 		return owner.must(200, "GET", base+"/leads"+q, nil)["total"].(float64)
 	}
-	if leads("?brand=geonode") != 1 || leads("?brand=repocket") != 0 {
-		t.Fatalf("leads: %v %v", leads("?brand=geonode"), leads("?brand=repocket"))
+	if leads("?brand=northpeak") != 1 || leads("?brand=summitly") != 0 {
+		t.Fatalf("leads: %v %v", leads("?brand=northpeak"), leads("?brand=summitly"))
 	}
-	owner.must(200, "GET", base+"/allocation/attention?brand=geonode", nil)
-	owner.must(200, "GET", base+"/infra-plans?brand=geonode", nil)
-	owner.must(200, "GET", base+"/meetings?brand=geonode", nil)
+	owner.must(200, "GET", base+"/allocation/attention?brand=northpeak", nil)
+	owner.must(200, "GET", base+"/infra-plans?brand=northpeak", nil)
+	owner.must(200, "GET", base+"/meetings?brand=northpeak", nil)
 	owner.must(200, "GET", base+"/deals?brand=none", nil)
-	owner.must(200, "GET", base+"/allocation/suggestions?brand=geonode", nil)
-	owner.must(200, "GET", base+"/allocation/changes?brand=geonode", nil)
+	owner.must(200, "GET", base+"/allocation/suggestions?brand=northpeak", nil)
+	owner.must(200, "GET", base+"/allocation/changes?brand=northpeak", nil)
 }

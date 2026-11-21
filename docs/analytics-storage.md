@@ -5,7 +5,7 @@ Product events (`customer_events`: site visits, tracked events, your server's ow
 | Piece | Setting | What it does |
 | --- | --- | --- |
 | ClickHouse | `OUTFLARE_CLICKHOUSE_URL` | Keeps a copy of every product event for fast reports over large volumes. |
-| Object storage | `OUTFLARE_S3_*` | Holds archived events and, later, session recordings. Cloudflare R2, Amazon S3, MinIO or anything S3-compatible. |
+| Object storage | `OUTFLARE_S3_*` | Holds archived events and [session recordings](session-recordings.md). Cloudflare R2, Amazon S3, MinIO or anything S3-compatible. |
 | Retention | `OUTFLARE_EVENT_RETENTION_DAYS` | How long events stay in Postgres. |
 
 None of these are workspace features: they run your server, like Postgres does, so the operator sets them in the environment.

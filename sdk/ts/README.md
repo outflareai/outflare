@@ -58,6 +58,24 @@ const { data: replies } = ok(await gtm.GET("/v1/brands/{brand}/inbox", { params:
 
 Every call sends `Outflare-Client: sdk-ts/<version>`, so the server's product analytics can tell your integration's calls apart. Pass `clientName: "my-app/1.0"` to name it yourself (letters, digits and `._/@+-`, up to 64 characters).
 
+## Send product events
+
+`Tracker` sends what people do in your product from your server. It needs an API token with `customers.manage`, so keep it on your servers; in the browser use the website script.
+
+```ts
+import { Tracker } from "@outflare/sdk";
+
+const tracker = new Tracker({ token: process.env.OUTFLARE_TOKEN!, brand: "northpeak" });
+
+tracker.identify({ userId: "u_123", traits: { email: "ana@acme.example", plan: "pro" } });
+tracker.track({ userId: "u_123", event: "Order Completed", properties: { total: 42, currency: "USD" } });
+tracker.group({ userId: "u_123", groupId: "org_7", traits: { name: "Acme" } });
+
+await tracker.close(); // before the process exits
+```
+
+Events are queued in memory and sent in batches (20 at a time, or every 10 seconds) to `POST /v1/brands/{brand}/events`. A batch the server can't take is tried again three times with a growing wait; a refusal such as a bad token is not. Every call returns the event's message id, which the server uses to store a retried event once. There are also `page`, `screen` and `alias`; `flush()` sends now; `onError(error, lost)` hears about batches that were given up on. It uses only `fetch`, so it runs on Node 18+, Bun, Deno and workers.
+
 ## Errors
 
 Each call returns `{ data, error, response }`, as [openapi-fetch](https://openapi-ts.dev/openapi-fetch/) does. Check `error`, or wrap the call in `ok()`. It returns the data, or throws an `OutflareError` that carries `status`, `code` (such as `conflict` or `invalid_request`) and `requestId`.
@@ -115,6 +133,30 @@ const anonymousId = cookies.get("of_aid") ?? crypto.randomUUID();
 const { data } = await gtm.POST("/v1/brands/{brand}/flags/evaluate", { params: { path: { brand } }, body: { anonymous_id: anonymousId, url } });
 html = html.replace("</head>", flagsBootstrapTag(data!, anonymousId) + "</head>");
 ```
+
+## Flags decided in your server's memory
+
+`LocalFlags` reads a brand's flag definitions once, then again every 30 seconds in the background, and decides each visitor's flags in your process. A page costs no request to Outflare, and deciding carries on with the last definitions when Outflare can't be reached. The answers match the website script's and the evaluate API's:
+
+```ts
+import { createClient, LocalFlags, flagsBootstrapTag } from "@outflare/sdk";
+
+const flags = new LocalFlags(createClient({ baseUrl, token }), { brand }); // one per process
+
+const anonymousId = cookies.get("of_aid") ?? crypto.randomUUID();
+const decisions = await flags.decide({ anonymousId, url: request.url, userAgent });
+html = html.replace("</head>", flagsBootstrapTag(decisions, anonymousId) + "</head>");
+```
+
+Only the first `decide()` waits; `await flags.refresh()` at start-up moves that wait out of the first page. For flags limited to people, pass what your server knows about the visitor: `lists` (ids of the People lists they are in) and `person` (their fields); in memory nobody is looked up. `refreshSeconds` changes how often it asks (at least 5) and `onError` hears about a failed refresh. `decideFlags(definitions, visitor)` decides from definitions you hold yourself, and `flagBucket(salt, subject)` is the hash. The token needs `analytics.read` and stays on your server.
+
+For one flag, `await flags.variant(key, visitor)` gives the version's key or `false`, `flags.isEnabled(key, visitor)` whether it is on, and `flags.payload(key, visitor)` the version's content. When your server shows a version itself, `tracker.exposed(key, variant, { anonymousId })` sends Experiment Viewed so the flag's A/B test counts the visitor; it sends nothing when the variant is `false`.
+
+## Errors
+
+`tracker.captureException(err, { userId, properties })` sends an error your server caught as `Error Caught`, which the Errors page groups into issues. It reads the type, message and stack from the error, takes email addresses and key-shaped strings out, and adds a fingerprint that ignores numbers, ids and line numbers. Without a `userId` or `anonymousId` the error is filed under the anonymous id `server`. `describeError(err)` returns the same properties without sending them.
+
+`tracker.crawlerVisit({ userAgent, host })` counts requests from AI crawlers (GPTBot, ClaudeBot, PerplexityBot and others) for a site that isn't behind Cloudflare. Call it for every request from a middleware: it returns at once, counts in memory only when the user agent looks like a crawler, and sends the counts with the next flush. Outflare keeps only how often each AI crawler came per host and day, shown under AI visibility, Traffic.
 
 ## Webhooks
 

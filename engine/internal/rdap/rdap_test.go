@@ -34,3 +34,32 @@ func TestRegistered(t *testing.T) {
 		t.Fatalf("domain: %s", d)
 	}
 }
+
+func TestExpires(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/domain/acme.example":
+			_, _ = w.Write([]byte(`{"events":[{"eventAction":"registration","eventDate":"2011-05-09T14:00:00Z"},{"eventAction":"expiration","eventDate":"2027-05-09T14:00:00Z"}]}`))
+		case "/domain/nodate.example":
+			_, _ = w.Write([]byte(`{"events":[{"eventAction":"registration","eventDate":"2011-05-09T14:00:00Z"}]}`))
+		case "/domain/down.example":
+			w.WriteHeader(http.StatusBadGateway)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL}
+	got, err := c.Expires(context.Background(), "go.Acme.example")
+	if err != nil || got.Format("2006-01-02") != "2027-05-09" {
+		t.Fatalf("expires: %v %v", got, err)
+	}
+	for _, host := range []string{"nodate.example", "missing.example"} {
+		if _, err := c.Expires(context.Background(), host); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s: %v", host, err)
+		}
+	}
+	if _, err := c.Expires(context.Background(), "down.example"); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("a registry that is down: %v", err)
+	}
+}

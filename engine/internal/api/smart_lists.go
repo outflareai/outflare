@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -226,24 +228,26 @@ func (s *Server) applySmartList(r *http.Request, a *access, f smartListFields, v
 	if f.Match != nil {
 		v.Match = *f.Match
 	}
-	return s.checkSmartRulesFor(r, a, v.RecordType, v.Rules, v.Match)
+	return s.checkSmartRulesFor(r, a, v.RecordType, v.Rules, v.Match, v.BrandID, v.ID)
 }
 
-// checkSmartRules checks rules and that the lead lists they name are the
-// workspace's.
-func (s *Server) checkSmartRules(r *http.Request, a *access, rules []smartlists.Rule, match string) error {
-	return s.checkSmartRulesFor(r, a, smartlists.People, rules, match)
+// checkSmartRulesFor checks the rules of a list of recordType in brand
+// (nil: every brand): that the lead lists, news searches and lists they
+// name are the workspace's, and that a list they name is of the same
+// brand and kind of record and doesn't, through its own rules, name self
+// (the list being saved; "" for a new one).
+func (s *Server) checkSmartRulesFor(r *http.Request, a *access, recordType string, rules []smartlists.Rule, match string, brand *string, self string) error {
+	return s.checkListRules(r.Context(), a.WorkspaceID, recordType, rules, match, brand, self)
 }
 
-// checkSmartRulesFor is checkSmartRules for a list of recordType.
-func (s *Server) checkSmartRulesFor(r *http.Request, a *access, recordType string, rules []smartlists.Rule, match string) error {
+func (s *Server) checkListRules(ctx context.Context, ws, recordType string, rules []smartlists.Rule, match string, brand *string, self string) error {
 	if msg := smartlists.CheckFor(recordType, rules, match); msg != "" {
 		return errInvalid(msg)
 	}
 	if ids := smartlists.InLists(rules); len(ids) > 0 {
 		var n int
-		if err := s.pool.QueryRow(r.Context(), `SELECT count(DISTINCT id)::int FROM lead_lists WHERE workspace_id = $1 AND id = ANY($2::uuid[])`,
-			a.WorkspaceID, ids).Scan(&n); err != nil {
+		if err := s.pool.QueryRow(ctx, `SELECT count(DISTINCT id)::int FROM lead_lists WHERE workspace_id = $1 AND id = ANY($2::uuid[])`,
+			ws, ids).Scan(&n); err != nil {
 			return err
 		}
 		if n != len(uniq(ids)) {
@@ -252,15 +256,72 @@ func (s *Server) checkSmartRulesFor(r *http.Request, a *access, recordType strin
 	}
 	if ids := smartlists.NewsSearches(rules); len(ids) > 0 {
 		var n int
-		if err := s.pool.QueryRow(r.Context(), `SELECT count(DISTINCT id)::int FROM news_searches WHERE workspace_id = $1 AND id = ANY($2::uuid[])`,
-			a.WorkspaceID, ids).Scan(&n); err != nil {
+		if err := s.pool.QueryRow(ctx, `SELECT count(DISTINCT id)::int FROM news_searches WHERE workspace_id = $1 AND id = ANY($2::uuid[])`,
+			ws, ids).Scan(&n); err != nil {
 			return err
 		}
 		if n != len(uniq(ids)) {
 			return errInvalid("news_search names a news search that isn't in this workspace")
 		}
 	}
+	if ids := uniq(smartlists.SmartLists(rules)); len(ids) > 0 {
+		var n int
+		if err := s.pool.QueryRow(ctx, `SELECT count(*)::int FROM smart_lists WHERE workspace_id = $1 AND id = ANY($2::uuid[])
+			AND brand_id IS NOT DISTINCT FROM $3::uuid AND record_type = $4`, ws, ids, brand, recordType).Scan(&n); err != nil {
+			return err
+		}
+		if n != len(ids) {
+			return errInvalid("in_smart_list names a list that isn't one of this brand's lists of the same kind (people or companies)")
+		}
+		if self != "" {
+			loop, err := s.smartListLoop(ctx, ws, self, ids)
+			if err != nil {
+				return err
+			}
+			if loop {
+				return errInvalid("in_smart_list can't name this list, or a list whose rules depend on it: that would go round in a circle")
+			}
+		}
+	}
 	return nil
+}
+
+// smartListLoop reports whether any of the lists ids depends on self
+// through in_smart_list rules, directly or through other lists.
+func (s *Server) smartListLoop(ctx context.Context, ws, self string, ids []string) (bool, error) {
+	seen := map[string]bool{}
+	next := ids
+	for len(next) > 0 {
+		var todo []string
+		for _, id := range next {
+			if id == self {
+				return true, nil
+			}
+			if !seen[id] {
+				seen[id] = true
+				todo = append(todo, id)
+			}
+		}
+		if len(todo) == 0 {
+			break
+		}
+		rows, err := s.pool.Query(ctx, `SELECT rules FROM smart_lists WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND kind = 'smart'`, ws, todo)
+		if err != nil {
+			return false, err
+		}
+		next = nil
+		var raw []byte
+		if _, err := pgx.ForEachRow(rows, []any{&raw}, func() error {
+			var rules []smartlists.Rule
+			if json.Unmarshal(raw, &rules) == nil {
+				next = append(next, smartlists.SmartLists(rules)...)
+			}
+			return nil
+		}); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 func uniq(in []string) []string {
@@ -444,7 +505,21 @@ func (s *Server) deleteSmartList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	// A list another list's rules name stays until those rules change, so
+	// the other list never quietly loses everyone.
+	var user string
+	err := s.pool.QueryRow(ctx, `SELECT name FROM smart_lists WHERE workspace_id = $1 AND id <> $2
+		AND jsonb_path_exists(rules, '$.** ? (@.in_smart_list == $id)', jsonb_build_object('id', $2::text)) ORDER BY name LIMIT 1`,
+		a.WorkspaceID, v.ID).Scan(&user)
+	if err == nil {
+		writeError(w, r, http.StatusConflict, "conflict", fmt.Sprintf("the list %q uses this list in its rules: change that list's rules first", user))
+		return
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		s.internal(w, r, err)
+		return
+	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM smart_lists WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, v.ID); err != nil {
 			return err
 		}
@@ -512,7 +587,7 @@ func (s *Server) previewSmartList(w http.ResponseWriter, r *http.Request) {
 	if in.RecordType != nil {
 		recordType = *in.RecordType
 	}
-	if !s.smartListApplied(w, r, s.checkSmartRulesFor(r, a, recordType, in.Rules, match)) {
+	if !s.smartListApplied(w, r, s.checkSmartRulesFor(r, a, recordType, in.Rules, match, brand, "")) {
 		return
 	}
 	n, sample, err := s.smartPreview(r, a, recordType, in.Rules, match, brand)

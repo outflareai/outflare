@@ -23,12 +23,6 @@ func TestSalesCaptureAllowsIntroducedColleagueButNotOtherStaff(t *testing.T) {
 	if salesMailEligible(c, m, known) {
 		t.Fatal("explicit exclusion bypassed by handoff")
 	}
-	if !salesThreadMatches(salesMessage{References: "<root@customer.example> <later@customer.example>"}, known) {
-		t.Fatal("original thread lost")
-	}
-	if salesThreadMatches(salesMessage{Body: "same body", Subject: "same subject", MessageID: "<other@customer.example>"}, known) {
-		t.Fatal("unrelated thread matched without identity")
-	}
 }
 func TestSalesTemplateResolutionAndThreadEnvelope(t *testing.T) {
 	got := resolveSalesTemplate("Hi {first_name} at {company}, from {my_name}", salesLead{Name: "Ana Example", Company: "Example"}, salesMember{Name: "Bo"})

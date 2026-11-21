@@ -122,8 +122,8 @@ func TestExtensionBrandRoutes(t *testing.T) {
 	})
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})["id"].(string)
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
 
 	out := owner.must(200, "GET", "/v1/brands/"+rp+"/finder/where", nil)
 	if out["brand"] != rp || out["workspace"] != ws {
@@ -133,8 +133,8 @@ func TestExtensionBrandRoutes(t *testing.T) {
 	owner.must(404, "GET", "/v1/brands/nope/finder/where", nil)
 	(&client{t: t, h: e.h}).must(401, "GET", "/v1/brands/"+rp+"/finder/where", nil)
 
-	// A token kept to Geonode doesn't find Repocket, and scopes hold.
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Geonode agent", "scopes": []string{"leads.read"}, "brand": "geonode"})["token"].(string)
+	// A token kept to Northpeak doesn't find Summitly, and scopes hold.
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Northpeak agent", "scopes": []string{"leads.read"}, "brand": "northpeak"})["token"].(string)
 	agent := &client{t: t, h: e.h, bearer: tok}
 	if out := agent.must(200, "GET", "/v1/brands/"+geo+"/finder/where", nil); out["brand"] != geo {
 		t.Fatalf("agent = %v", out)

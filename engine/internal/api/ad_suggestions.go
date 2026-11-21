@@ -85,12 +85,21 @@ type adSuggestionOut struct {
 	RevertChangeID *string    `json:"revert_change_id"`
 	Rule           string     `json:"rule"`
 	RuleVersion    int        `json:"rule_version"`
+	// What a person said about the advice: good, bad or "" when nobody
+	// has, with their reason.
+	// TestFirst is set on an open finding that is better tested inside
+	// the network than made outright (adsuggest.ProposeTest).
+	TestFirst    *adsuggest.TestFirst `json:"test_first"`
+	Feedback     string               `json:"feedback"`
+	FeedbackNote string               `json:"feedback_note"`
+	FeedbackAt   *time.Time           `json:"feedback_at"`
 }
 
 const adSuggestionCols = `x.id, e.id, e.name, a.id, a.name, a.connector, a.currency, x.brand_id, x.kind, x.status, x.reason, x.evidence, x.proposed, x.change_id, x.test_id,
 	x.decided_by, x.decided_at, to_char(x.measure_from, 'YYYY-MM-DD'), to_char(x.measure_until, 'YYYY-MM-DD'), x.window_note, x.verdict, x.verdict_note, x.result,
 	x.judged_at, x.created_at, x.updated_at,
-	x.autonomy, x.unit, x.impact_micros, x.shadow, x.applied_auto, x.reverted_at, x.revert_change_id, x.rule, x.rule_version`
+	x.autonomy, x.unit, x.impact_micros, x.shadow, x.applied_auto, x.reverted_at, x.revert_change_id, x.rule, x.rule_version,
+	x.feedback, x.feedback_note, x.feedback_at`
 
 const adSuggestionFrom = `FROM ad_suggestions x JOIN ad_entities e ON e.id = x.ad_entity_id JOIN ad_accounts a ON a.id = e.ad_account_id`
 
@@ -100,7 +109,8 @@ func scanAdSuggestion(row pgx.Row) (adSuggestionOut, error) {
 	err := row.Scan(&v.ID, &v.CampaignID, &v.CampaignName, &v.AccountID, &v.AccountName, &v.Connector, &v.Currency, &v.BrandID, &v.Kind, &v.Status,
 		&v.Reason, &ev, &pr, &v.ChangeID, &v.TestID, &v.DecidedBy, &v.DecidedAt, &v.MeasureFrom, &v.MeasureUntil, &v.WindowNote, &v.Verdict, &v.VerdictNote, &res,
 		&v.JudgedAt, &v.CreatedAt, &v.UpdatedAt,
-		&v.Autonomy, &v.Unit, &v.ImpactMicros, &v.Shadow, &v.AppliedAuto, &v.RevertedAt, &v.RevertChangeID, &v.Rule, &v.RuleVersion)
+		&v.Autonomy, &v.Unit, &v.ImpactMicros, &v.Shadow, &v.AppliedAuto, &v.RevertedAt, &v.RevertChangeID, &v.Rule, &v.RuleVersion,
+		&v.Feedback, &v.FeedbackNote, &v.FeedbackAt)
 	if err != nil {
 		return v, err
 	}
@@ -108,6 +118,9 @@ func scanAdSuggestion(row pgx.Row) (adSuggestionOut, error) {
 	_ = json.Unmarshal(ev, &v.Evidence)
 	_ = json.Unmarshal(pr, &v.Proposed)
 	_ = json.Unmarshal(res, &v.Result)
+	if v.Status == "open" && !v.Shadow {
+		v.TestFirst = adsuggest.ProposeTest(v.Kind, v.Connector, v.Evidence)
+	}
 	return v, nil
 }
 
@@ -225,6 +238,12 @@ func (s *Server) approveCampaignChange(w http.ResponseWriter, r *http.Request, a
 			writeError(w, r, http.StatusConflict, "not_active", "the campaign is already "+after.Status)
 			return
 		}
+		if v.Kind == adsuggest.Resume && c.budget != nil {
+			over, _ := r.Context().Value(overCeilingKey{}).(bool)
+			if !s.adCeilingAllows(w, r, a, c, *c.budget, over, true) {
+				return
+			}
+		}
 	case adsuggest.KeywordAdd, adsuggest.NegativeAdd, adsuggest.KeywordSplit:
 		kind = v.Kind
 		str := func(k string) string { x, _ := v.Proposed[k].(string); return x }
@@ -257,6 +276,10 @@ func (s *Server) approveCampaignChange(w http.ResponseWriter, r *http.Request, a
 		}
 		nb := int64(b)
 		after.DailyBudgetMicros = &nb
+		over, _ := r.Context().Value(overCeilingKey{}).(bool)
+		if !s.underAdCeiling(w, r, a, c, nb, over) {
+			return
+		}
 	}
 	if s.adChangeQueued(w, r, c.id, kind) || !s.adsManagerFor(w, r, a.WorkspaceID, c.integrationID) {
 		return

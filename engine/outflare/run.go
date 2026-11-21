@@ -13,6 +13,7 @@
 package outflare
 
 import (
+	"github.com/outflareai/outflare/engine/internal/videofx"
 	_ "time/tzdata"
 
 	"context"
@@ -23,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -48,11 +50,13 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/cheapinboxes"
 	"github.com/outflareai/outflare/engine/internal/connectors/verifiers"
 	"github.com/outflareai/outflare/engine/internal/cookies"
+	"github.com/outflareai/outflare/engine/internal/coverage/linkorders"
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/datanetwork"
 	"github.com/outflareai/outflare/engine/internal/db"
 	"github.com/outflareai/outflare/engine/internal/deploys"
+	"github.com/outflareai/outflare/engine/internal/destinations"
 	"github.com/outflareai/outflare/engine/internal/digests"
 	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/emails"
@@ -61,6 +65,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/fixauto"
 	"github.com/outflareai/outflare/engine/internal/fxrates"
 	"github.com/outflareai/outflare/engine/internal/geoip"
+	"github.com/outflareai/outflare/engine/internal/guardsync"
 	"github.com/outflareai/outflare/engine/internal/health"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbound"
@@ -119,7 +124,9 @@ import (
 // exits non-zero on failure. serve, migrate and version run the engine;
 // anything else is the command line client (package cli).
 func Main(exts ...Extension) {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// Lines at warning level or above that no event covers become events
+	// themselves (track.LogEvents), so every error is counted in one place.
+	log := slog.New(track.LogEvents(slog.NewJSONHandler(os.Stdout, nil)))
 	// With no command, a configured server serves; anywhere else it is the
 	// client, which prints help.
 	cmd := "help"
@@ -270,7 +277,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	lister.Register(queue)
 	// Email finding: learns each domain's address shape from the workspace's
 	// own leads and their outcomes, and runs the find/verify waterfall.
-	emailFinder := &emailfind.Service{Pool: pool, Verify: verifier, Resolver: net.DefaultResolver, Log: log}
+	emailFinder := &emailfind.Service{Pool: pool, Verify: verifier, Resolver: net.DefaultResolver, Log: log, Store: integrations}
 	emailFinder.Register(queue)
 	// The data network, when an extension registers one (Host.SetDataNetwork).
 	dataNet := &datanetwork.Service{Pool: pool, Log: log}
@@ -294,6 +301,10 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	integrations.OnDisconnect = append(integrations.OnDisconnect, liveUpdates.Disconnect)
 	plat := &platforms.Service{Pool: pool, Store: integrations, Log: log}
 	plat.Register(queue)
+	// Contact guards' whole lists (an account feed, a blocklist's exports)
+	// copied into the opt-out list on a schedule.
+	guardLists := &guardsync.Service{Pool: pool, Store: integrations, Log: log}
+	guardLists.Register(queue)
 	importer := &imports.Service{Pool: pool, Store: integrations, Log: log}
 	importer.Register(queue)
 	results := &outcomes.Syncer{Pool: pool, Store: integrations, Log: log, PublicURL: cfg.PublicURL}
@@ -315,7 +326,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	seoSync.Register(queue)
 	rankChecks := &ranks.Service{Pool: pool, Store: integrations, Log: log}
 	rankChecks.Register(queue)
-	adSync := &adsync.Syncer{Pool: pool, Store: integrations, Log: log}
+	adSync := &adsync.Syncer{Pool: pool, Store: integrations, Log: log, Default: cfg.AdsSyncInterval}
 	adSync.Register(queue)
 	(&adsuggest.Runner{Pool: pool, Store: integrations, Log: log}).Register(queue)
 	contentPublish := &cmspublish.Publisher{Pool: pool, Store: integrations, Log: log}
@@ -358,6 +369,9 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	linker.Register(queue)
 	(&customers.LeadFields{Pool: pool}).Register(queue)
 	hooks := &webhooks.Service{Pool: pool, Box: box, Log: log, AllowPrivate: cfg.WebhooksAllowPrivate}
+	// Destinations forward customer events to each brand's own tools.
+	eventDest := &destinations.Sender{Pool: pool, Store: integrations, Box: box, Hooks: hooks, Log: log}
+	eventDest.Register(queue)
 	hooks.Register(queue)
 	crawler := &crawl.Service{Pool: pool, Log: log, Resolver: net.DefaultResolver, RDAP: &rdap.Client{}, AllowPrivate: cfg.CrawlAllowPrivate,
 		Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool, Ledger: pool}, AfterAudit: seointel.AfterAudit,
@@ -369,6 +383,10 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// Link building: OutflareBot's checks of link prospects' pages.
 	linkChecker := &linkbuild.Service{Pool: pool, Log: log, Crawl: crawler, Emails: emailFinder}
 	linkChecker.Register(queue)
+	// Link orders: OutflareBot's searches of donor sites for who to write to.
+	(&linkorders.Finder{Pool: pool, Log: log, Crawl: crawler}).Register(queue)
+	// Link orders: Ahrefs checks of catalog sites, on the brand's own Ahrefs.
+	(&linkorders.Checker{Pool: pool, Store: integrations, Log: log}).Register(queue)
 	// The news watch: OutflareBot reads each new article for its byline.
 	(&news.Reader{Pool: pool, Log: log, Crawl: crawler, Emails: emailFinder}).Register(queue)
 	// Production deploys of the websites a workspace watches on GitHub or
@@ -392,11 +410,20 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	lifecycle := &emails.Service{Pool: pool, Store: integrations, Box: box, PublicURL: cfg.PublicURL, Log: log}
 	lifecycle.Attach(integrations)
 	lifecycle.Register(queue)
-	queue.Skip = emails.SendKinds
+	queue.Skip = append(slices.Clone(emails.SendKinds), verify.JobVerify)
 	sendQueue := jobs.New(pool, log)
 	sendQueue.ShutdownGrace = cfg.ShutdownGrace
 	sendQueue.Only = emails.SendKinds
 	lifecycle.Register(sendQueue)
+	// Bulk email verification runs on a few workers of its own. A batch
+	// waits on the workspace's verifier for every address, so with a slow
+	// verifier it takes many minutes, and a bulk run queues dozens of
+	// batches at once: on the main queue they held every worker and all
+	// other background work waited behind them.
+	verifyQueue := jobs.New(pool, log)
+	verifyQueue.ShutdownGrace = cfg.ShutdownGrace
+	verifyQueue.Only = []string{verify.JobVerify}
+	verifier.Register(verifyQueue)
 	// Journeys start runs from customer events and move them through their
 	// steps, sending with the lifecycle service.
 	journeyRuns := &journeys.Service{Pool: pool, Emails: lifecycle, Log: log, Store: integrations, Box: box, AllowPrivate: cfg.WebhooksAllowPrivate, Router: routing.Router{}}
@@ -447,6 +474,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// Options.AdAutoApprove below) all ask the extension's hook. Without
 	// one, every change waits for a person.
 	paidads.SetAutoApprove(host.adAutoApprove)
+	adSync.Interval = host.adSyncInterval
 	// The hosted MCP server, when the build ships one (the Docker image does).
 	var mcpHost *mcphost.Host
 	var mcpUpstream *api.MCPUpstream
@@ -467,12 +495,20 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			archive = api.ClickHouseArchive{CH: ch}
 		}
 	}
+	// Session recordings are files in the server's bucket; without one
+	// recordings stay off. The bucket is checked where it is first used.
+	var recordings api.BlobStore
+	if cfg.S3.On() {
+		if b, err := blobs.New(blobs.Config{Endpoint: cfg.S3.Endpoint, Region: cfg.S3.Region, Bucket: cfg.S3.Bucket, AccessKey: cfg.S3.AccessKey, SecretKey: cfg.S3.SecretKey}); err == nil {
+			recordings = b
+		}
+	}
 	apiServer := api.NewServer(pool, log, api.Options{
 		WebDir: cfg.WebDir, PublicURL: cfg.PublicURL, Mailboxes: mail, Sending: send, Inbox: syncer, OAuth: tokens, Allocation: alloc,
 		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: emailFinder, DataNetwork: dataNet, InboundEmail: inboundMail, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
 		TrackingTarget: cfg.TrackingTarget, PartnersDomain: cfg.PartnersDomain, TrackingCerts: host.trackingCerts, Quota: host.quota, EdgeSecret: cfg.EdgeSecret,
 		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, CommunityBuilderURL: cfg.CommunityBuilderURL, SignedInCookieDomain: cfg.SignedInCookieDomain, EventArchive: archive,
-		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
+		SiteInbox: true, Recordings: recordings, Files: recordings, Video: videoTool(log), QueryConnections: queryConnections(cfg.QueryConnections),
 		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, MenuBadges: host.menuBadges, AITools: host.aiTools, SupportAuto: host.supportAuto, AdAutoApprove: host.adAutoApprove,
 	})
 	// Smart lists from a saved query run it through Query's own role.
@@ -540,7 +576,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	errc := make(chan error, 3)
 	metrics.SetVersion(api.Version, string(cfg.Role))
 	if cfg.Role.Works() {
-		metrics.SetWorkers(cfg.Workers + sendWorkers)
+		metrics.SetWorkers(cfg.Workers + sendWorkers + verifyWorkers)
 	}
 	if cfg.MetricsAddr != "" {
 		metrics.Registry.MustRegister(&metrics.Postgres{Pool: pool, Log: log, PageReaders: pageReaders(registry)})
@@ -617,6 +653,13 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			if err := sendQueue.Run(ctx, sendWorkers); err != nil {
+				errc <- err
+			}
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := verifyQueue.Run(ctx, verifyWorkers); err != nil {
 				errc <- err
 			}
 		}()
@@ -704,12 +747,38 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			plat.Loop(ctx, time.Minute)
 		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			guardLists.Loop(ctx, time.Minute)
+		}()
 		// Networks' spend per campaign and target, shared out over the
 		// tracker's clicks (Z2).
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			apiServer.RunNetworkCosts(ctx, 15*time.Minute)
+		}()
+		// When each tracking domain's registration runs out, from its
+		// public registration record, so its brand hears in time (B8).
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunTrackingDomainExpiry(ctx, 10*time.Minute)
+		}()
+		// Whether each lander and offer in use still answers, so its
+		// brand hears when clicks are being sent to a dead page (B8).
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunPageChecks(ctx, 2*time.Minute)
+		}()
+		// The Slack channels brands chose as Sales channels: due reads
+		// are queued, one job per channel.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunSalesFeeds(ctx, time.Minute)
 		}()
 		// Tracker clicks' IP reputation lookups, on each brand's own
 		// connection (B7c).
@@ -747,6 +816,13 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			apiServer.RunHandEditExpiry(ctx, 5*time.Minute)
+		}()
+		// Each brand's forecast is read once a day, so the forecast page can
+		// show how it moved week by week (docs/revenue.md).
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunForecastHistory(ctx, time.Hour)
 		}()
 		// Transactions saved before their day's exchange rate was known get
 		// their amount in the brand's currency.
@@ -811,6 +887,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			apiServer.RunWebsiteRechecks(ctx, time.Hour)
+		}()
+		// Conversations copied from support tools (Intercom), kept in step.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunSupportImports(ctx, time.Minute)
 		}()
 		// Meaning-based search's vectors, kept current.
 		wg.Add(1)
@@ -925,6 +1007,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			apiServer.RunEventInbox(ctx)
 		}()
+		// Recordings past their keep, or deleted, lose their files.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunReplaySweep(ctx)
+		}()
 		// Privacy exports lose their file after 7 days.
 		wg.Add(1)
 		go func() {
@@ -977,6 +1065,11 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			adConv.Run(ctx)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			eventDest.Run(ctx)
 		}()
 		wg.Add(1)
 		go func() {
@@ -1056,6 +1149,10 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 
 // sendWorkers is how many workers run the send queue, beside WORKERS.
 const sendWorkers = 4
+
+// verifyWorkers is how many workers run the email verification queue,
+// beside WORKERS. Each one checks a few addresses of its batch at a time.
+const verifyWorkers = 4
 
 // housekeeping deletes what the API keeps only for a while, once an hour.
 func housekeeping(ctx context.Context, log *slog.Logger, s *api.Server, logRetention time.Duration) {
@@ -1169,4 +1266,15 @@ func pageReaders(r *connectors.Registry) []string {
 		}
 	}
 	return ids
+}
+
+// videoTool finds ffmpeg, which finishes and edits talking videos. A
+// server without it still makes them, without those steps.
+func videoTool(log *slog.Logger) api.VideoTool {
+	tool, why := videofx.Find()
+	if tool == nil {
+		log.Info("talking videos are made without the finish and without edits", "reason", why)
+		return nil
+	}
+	return tool
 }

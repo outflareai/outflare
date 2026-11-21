@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -167,6 +168,9 @@ func (s *Server) adsManagerFor(w http.ResponseWriter, r *http.Request, ws, integ
 // audit event, and queues the job that makes it.
 func (s *Server) changeAdCampaign(ctx context.Context, tx pgx.Tx, a *access, c adCampaignRow, kind string, after adsync.ChangeState, batch *string) (adChangeOut, error) {
 	before := adsync.ChangeState{Status: c.status, DailyBudgetMicros: c.budget}
+	if kind == adsync.ChangeRename {
+		before.Name = c.name
+	}
 	beforeJSON, _ := json.Marshal(before)
 	afterJSON, _ := json.Marshal(after)
 	var actor, action *string
@@ -188,7 +192,8 @@ func (s *Server) changeAdCampaign(ctx context.Context, tx pgx.Tx, a *access, c a
 	actionName := map[string]string{adsync.ChangePause: "ad_campaign.paused", adsync.ChangeResume: "ad_campaign.resumed", adsync.ChangeBudget: "ad_campaign.budget_changed",
 		adsync.ChangeKeywordAdd: "ad_campaign.keyword_added", adsync.ChangeNegativeAdd: "ad_campaign.negative_added", adsync.ChangeKeywordSplit: "ad_campaign.keyword_split",
 		adsync.ChangeBidding: "ad_campaign.bidding_changed", adsync.ChangeAudienceAdd: "ad_campaign.audience_added", adsync.ChangeAudienceRemove: "ad_campaign.audience_removed",
-		adsync.ChangeCountryAdd: "ad_campaign.country_added", adsync.ChangeCountryRemove: "ad_campaign.country_removed"}[kind]
+		adsync.ChangeCountryAdd: "ad_campaign.country_added", adsync.ChangeCountryRemove: "ad_campaign.country_removed",
+		adsync.ChangeLocations: "ad_campaign.locations_changed", adsync.ChangeRename: "ad_campaign.renamed"}[kind]
 	data := map[string]any{"change_id": id, "campaign_id": c.id, "external_id": c.externalID, "connector": c.connector, "brand_id": c.brand,
 		"before": before, "after": after}
 	props := map[string]any{"connector": c.connector, "kind": kind}
@@ -203,6 +208,10 @@ func (s *Server) changeAdCampaign(ctx context.Context, tx pgx.Tx, a *access, c a
 	}
 	if after.Country != "" {
 		props["country"] = after.Country
+	}
+	if l := after.Locations; l != nil {
+		props["target_all_locations"], props["added"], props["removed"] = l.TargetAllLocations, len(l.AddIncluded)+len(l.AddExcluded), len(l.RemoveIncluded)+len(l.RemoveExcluded)
+		props["reaches_more"] = l.ReachesMore()
 	}
 	if batch != nil {
 		data["batch_id"], props["batch"] = *batch, true
@@ -239,6 +248,21 @@ func (s *Server) setAdCampaignStatus(w http.ResponseWriter, r *http.Request, act
 		writeError(w, r, http.StatusConflict, "not_active", "the campaign is already "+want)
 		return
 	}
+	// A resume brings the campaign's whole budget back, so it is checked
+	// against the brand's ceiling like a raise.
+	if active {
+		var in struct {
+			OverCeiling bool `json:"over_ceiling"`
+			// An agent's own note on why, kept by the action layer.
+			Reason string `json:"reason"`
+		}
+		if r.ContentLength != 0 && !decode(w, r, &in) {
+			return
+		}
+		if c.budget != nil && !s.adCeilingAllows(w, r, a, c, *c.budget, in.OverCeiling, true) {
+			return
+		}
+	}
 	if s.adChangeQueued(w, r, c.id, kind) || !s.adsManagerFor(w, r, a.WorkspaceID, c.integrationID) {
 		return
 	}
@@ -263,6 +287,7 @@ func (s *Server) updateAdCampaign(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var in struct {
 		DailyBudgetMicros *int64 `json:"daily_budget_micros"`
+		OverCeiling       bool   `json:"over_ceiling"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -281,6 +306,9 @@ func (s *Server) updateAdCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.status == connectors.AdRemoved {
 		writeError(w, r, http.StatusConflict, "not_active", "the campaign was removed on the platform")
+		return
+	}
+	if !s.underAdCeiling(w, r, a, c, *in.DailyBudgetMicros, in.OverCeiling) {
 		return
 	}
 	if s.adChangeQueued(w, r, c.id, adsync.ChangeBudget) || !s.adsManagerFor(w, r, a.WorkspaceID, c.integrationID) {
@@ -433,3 +461,46 @@ func (s *Server) listAdChanges(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_cursor": nextCursor(pageBefore, next)})
 }
+
+// underAdCeiling checks a campaign's new daily budget against the brand's
+// ceiling on its total daily ad budget (ad_brand_economics). A raise that
+// would take the active campaigns' budgets over it is refused with 409
+// ad_budget_ceiling, unless a signed-in person sent over (they were told
+// and said yes). A cut, a campaign that isn't active, and a brand with no
+// ceiling always pass.
+func (s *Server) underAdCeiling(w http.ResponseWriter, r *http.Request, a *access, c adCampaignRow, budget int64, over bool) bool {
+	return s.adCeilingAllows(w, r, a, c, budget, over, false)
+}
+
+// adCeilingAllows is underAdCeiling, and with resuming also the check for
+// a paused campaign about to run again: its whole daily budget joins the
+// active ones, so a resume that takes them over the ceiling is refused
+// the same way.
+func (s *Server) adCeilingAllows(w http.ResponseWriter, r *http.Request, a *access, c adCampaignRow, budget int64, over, resuming bool) bool {
+	if !resuming && (c.status != connectors.AdActive || (c.budget != nil && budget <= *c.budget)) {
+		return true
+	}
+	var ceiling *int64
+	var others int64
+	err := s.pool.QueryRow(r.Context(), `SELECT (SELECT x.daily_budget_ceiling_micros FROM ad_brand_economics x WHERE x.workspace_id = $1 AND x.brand_id = $2),
+			COALESCE((SELECT sum(e.daily_budget_micros) FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
+				WHERE e.workspace_id = $1 AND e.level = 'campaign' AND e.status = 'active' AND e.id <> $3 AND COALESCE(e.brand_id, a.brand_id) = $2), 0)::bigint`,
+		a.WorkspaceID, c.brand, c.id).Scan(&ceiling, &others)
+	if err != nil {
+		s.internal(w, r, err)
+		return false
+	}
+	if ceiling == nil || others+budget <= *ceiling {
+		return true
+	}
+	if over && a.ActorType == "human" && a.TokenID == "" && a.ViewID == "" {
+		return true
+	}
+	writeError(w, r, http.StatusConflict, "ad_budget_ceiling", fmt.Sprintf("this would take the brand's active daily budgets to %.2f, over its ceiling of %.2f: a signed-in person can repeat it with over_ceiling: true, or raise the ceiling under Paid ads, Settings, Limits",
+		float64(others+budget)/1e6, float64(*ceiling)/1e6))
+	return false
+}
+
+// overCeilingKey marks a request whose body said over_ceiling: true, for
+// handlers that reach underAdCeiling through shared code.
+type overCeilingKey struct{}

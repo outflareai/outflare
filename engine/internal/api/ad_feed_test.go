@@ -207,10 +207,19 @@ func TestAdFeed(t *testing.T) {
 		t.Fatal("an email left in the clear")
 	}
 	sends := owner.must(200, "GET", base+"/ads/conversion-sends?rule_id="+firstRule, nil)["data"].([]any)
+	owner.must(404, "GET", brandBase+"/ads/conversion-sends/00000000-0000-0000-0000-000000000000/status", nil)
 	for _, s := range sends {
 		s := s.(map[string]any)
 		if s["status"] == "sent" && (s["transport"] != "data_manager" || s["request_id"] == "") {
 			t.Fatalf("send: %v", s)
+		}
+		// What Google did with it afterwards is asked live.
+		st := owner.must(200, "GET", brandBase+"/ads/conversion-sends/"+s["id"].(string)+"/status", nil)
+		if s["status"] == "sent" && (st["state"] != "processed" || st["records"] != float64(1) || st["request_id"] != s["request_id"]) {
+			t.Fatalf("status of a sent conversion: %v", st)
+		}
+		if s["status"] != "sent" && st["state"] != "unknown" {
+			t.Fatalf("status of an unsent conversion: %v", st)
 		}
 	}
 
@@ -384,5 +393,71 @@ func TestAdConversionCustomerTypeAuto(t *testing.T) {
 	googleSuffix.Unlock()
 	if !strings.Contains(up, `"customerType":"NEW"`) || !strings.Contains(up, `"customerType":"RETURNING"`) {
 		t.Fatalf("auto customer type:\n%s", up)
+	}
+}
+
+// A payment sent from a server carries no click id, and the person may
+// have no visit the site script tied to them; the click id their own
+// sign-up event carried goes with it.
+func TestAdConversionClickIDFromEarlierEvent(t *testing.T) {
+	e := freshEnv(t)
+	ctx := context.Background()
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	googleSuffix.Lock()
+	googleSuffix.uploads, googleSuffix.refuseFeed = nil, ""
+	googleSuffix.Unlock()
+	var integ string
+	if err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
+		i, err := e.integrations.Insert(ctx, tx, ws, "google_ads", connectors.AuthOAuth2, "Google Ads", connectors.Creds{"access_token": "gt"}, connectors.Account{}, "")
+		integ = i.ID
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.ads.SyncOnce(ctx, ws, integ); err != nil {
+		t.Fatal(err)
+	}
+	acct := owner.must(200, "GET", base+"/ads/accounts?connector=google_ads", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+	rule := owner.must(201, "POST", base+"/ads/conversion-rules", map[string]any{"account_id": acct, "event_name": "payment.succeeded", "target_id": "42"})
+	person := func(name string) string {
+		return owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": name,
+			"identities": []any{map[string]any{"namespace": "email", "value": strings.ToLower(name) + "@acme.example"}}})["id"].(string)
+	}
+	ana, ben := person("Ana"), person("Ben")
+	for _, id := range []string{ana, ben} {
+		owner.must(201, "POST", base+"/records/"+id+"/consents", map[string]any{"channel": "ads", "purpose": "ad_user_data", "status": "granted"})
+	}
+	insert := func(record, name, props, msg, ago string) {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, properties, message_id, occurred_at)
+			VALUES ($1, outflare_first_brand($1), $2, 'track', $3, $4::jsonb, $5, now() - $6::interval)`, ws, record, name, props, msg, ago); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Ana signed up from an ad a day before paying; Ben's click was too
+	// long ago to count.
+	insert(ana, "signed_up", `{"click_ids": {"gclid": "g-ana"}}`, "signup-ana", "25 hours")
+	insert(ben, "signed_up", `{"click_ids": {"gclid": "g-ben"}}`, "signup-ben", "100 days")
+	insert(ana, "payment.succeeded", `{"amount_minor": 100}`, "pay-ana", "1 hour")
+	insert(ben, "payment.succeeded", `{"amount_minor": 100}`, "pay-ben", "1 hour")
+	sender := &adconv.Sender{Pool: e.pool, Store: e.integrations, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if n, err := adconv.Match(ctx, e.pool, ws); err != nil || n != 2 {
+		t.Fatalf("match: %d %v", n, err)
+	}
+	if res, err := sender.SendRule(ctx, ws, rule["id"].(string)); err != nil || res.Sent != 2 {
+		t.Fatalf("send: %+v %v", res, err)
+	}
+	googleSuffix.Lock()
+	up := strings.Join(googleSuffix.uploads, "\n")
+	googleSuffix.Unlock()
+	if !strings.Contains(up, `"gclid":"g-ana"`) || strings.Contains(up, "g-ben") {
+		t.Fatalf("click ids from earlier events:\n%s", up)
+	}
+	var keys []string
+	if err := e.pool.QueryRow(ctx, `SELECT match_keys FROM ad_conversion_sends WHERE rule_id = $1 AND event_id LIKE '%pay-ana%'`, rule["id"]).Scan(&keys); err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) == 0 || keys[0] != "gclid" {
+		t.Fatalf("match keys: %v", keys)
 	}
 }

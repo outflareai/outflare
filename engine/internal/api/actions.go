@@ -50,6 +50,7 @@ func (s *Server) routesActions(mux *http.ServeMux) {
 		mux.HandleFunc("GET "+b.base+"/{id}", b.on(read, s.getAction))
 		mux.HandleFunc("POST "+b.base+"/{id}/approve", b.on(approve, s.approveAction))
 		mux.HandleFunc("POST "+b.base+"/{id}/reject", b.on(approve, s.rejectAction))
+		mux.HandleFunc("POST "+b.base+"/{id}/cancel", b.on(read, s.cancelAction))
 	}
 	grants := "/v1/workspaces/{ws}/action-grants"
 	mux.HandleFunc("GET "+grants, s.inBrand(read, s.listActionGrants))
@@ -150,22 +151,32 @@ type actionGrantView struct {
 	MonthlySpendCents *int64 `json:"monthly_spend_cents"`
 	TotalSpendCents   *int64 `json:"total_spend_cents"`
 	// A template: fields every matching change's body must contain.
-	Match     map[string]any `json:"match"`
-	Note      string         `json:"note"`
-	CreatedBy *string        `json:"created_by"`
-	CreatedAt time.Time      `json:"created_at"`
-	RevokedAt *time.Time     `json:"revoked_at"`
+	Match map[string]any `json:"match"`
+	// A removal grant's limits: paused_campaign_only, disapproved_only,
+	// max_spend_micros (last 30 days). Null for none.
+	Conditions *removalConditions `json:"conditions"`
+	// The named permission a removal grant is (ads.remove_ad,
+	// ads.remove_keyword, ads.remove_campaign); null for other grants.
+	Permission *string    `json:"permission"`
+	Note       string     `json:"note"`
+	CreatedBy  *string    `json:"created_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
 }
 
-const grantColumns = `g.id, g.token_id::text, t.name, g.brand_id::text, g.method, g.path, g.mode, g.daily_limit, g.daily_spend_cents, g.monthly_spend_cents, g.total_spend_cents, g.body_match, g.note,
+const grantColumns = `g.id, g.token_id::text, t.name, g.brand_id::text, g.method, g.path, g.mode, g.daily_limit, g.daily_spend_cents, g.monthly_spend_cents, g.total_spend_cents, g.body_match, g.conditions, g.note,
 	g.created_by::text, g.created_at, g.revoked_at`
 
 const grantFrom = `FROM action_grants g LEFT JOIN api_tokens t ON t.id = g.token_id`
 
 func scanGrant(row pgx.Row) (actionGrantView, error) {
 	var v actionGrantView
-	err := row.Scan(&v.ID, &v.TokenID, &v.TokenName, &v.BrandID, &v.Method, &v.Path, &v.Mode, &v.DailyLimit, &v.DailySpendCents, &v.MonthlySpendCents, &v.TotalSpendCents, &v.Match, &v.Note,
+	err := row.Scan(&v.ID, &v.TokenID, &v.TokenName, &v.BrandID, &v.Method, &v.Path, &v.Mode, &v.DailyLimit, &v.DailySpendCents, &v.MonthlySpendCents, &v.TotalSpendCents, &v.Match, &v.Conditions, &v.Note,
 		&v.CreatedBy, &v.CreatedAt, &v.RevokedAt)
+	if k, ok := removalGrantPath(v.Path); ok {
+		p := adRemovePermission[k]
+		v.Permission = &p
+	}
 	return v, err
 }
 
@@ -236,6 +247,8 @@ type grantRule struct {
 	monthSpend *int64
 	totalSpend *int64
 	match      map[string]any
+	// conditions keep a removal grant to some removals.
+	conditions *removalConditions
 }
 
 // bodyMatches reports whether a change's body holds every field of match
@@ -333,9 +346,19 @@ func (s *Server) createActionGrant(w http.ResponseWriter, r *http.Request) {
 		MonthSpend *int64         `json:"monthly_spend_cents"`
 		TotalSpend *int64         `json:"total_spend_cents"`
 		Match      map[string]any `json:"match"`
+		Conditions map[string]any `json:"conditions"`
 		Note       string         `json:"note"`
 	}
 	if !decode(w, r, &req) {
+		return
+	}
+	conds, msg := parseRemovalConditions(req.Conditions)
+	if msg != "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
+		return
+	}
+	if _, removal := removalGrantPath(strings.Trim(strings.TrimSpace(req.Path), "/")); conds != nil && !removal {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "conditions only applies to a grant that removes: ads/campaigns/*/remove, ads/items/*/remove or ads/keywords/*/remove")
 		return
 	}
 	for name, v := range map[string]*int64{"daily_spend_cents": req.DailySpend, "monthly_spend_cents": req.MonthSpend, "total_spend_cents": req.TotalSpend} {
@@ -396,7 +419,7 @@ func (s *Server) createActionGrant(w http.ResponseWriter, r *http.Request) {
 		brand = &id
 	}
 	v, err := s.insertGrant(ctx, a, grantInput{tokenID: req.TokenID, brand: brand, method: req.Method, path: req.Path, mode: req.Mode,
-		dailyLimit: req.DailyLimit, dailySpend: req.DailySpend, monthSpend: req.MonthSpend, totalSpend: req.TotalSpend, match: req.Match, note: strings.TrimSpace(req.Note)})
+		dailyLimit: req.DailyLimit, dailySpend: req.DailySpend, monthSpend: req.MonthSpend, totalSpend: req.TotalSpend, match: req.Match, conditions: conds, note: strings.TrimSpace(req.Note)})
 	if errors.Is(err, errNotFound) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "token_id names no active API token in this workspace")
 		return
@@ -423,6 +446,7 @@ type grantInput struct {
 	monthSpend *int64
 	totalSpend *int64
 	match      map[string]any
+	conditions *removalConditions
 	note       string
 	fromAction string
 }
@@ -495,9 +519,9 @@ func insertGrantTx(ctx context.Context, tx pgx.Tx, a *access, in grantInput) (ac
 			return err
 		}
 		var id string
-		if err := tx.QueryRow(ctx, `INSERT INTO action_grants (workspace_id, brand_id, token_id, method, path, mode, daily_limit, daily_spend_cents, monthly_spend_cents, total_spend_cents, body_match, note, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
-			a.WorkspaceID, in.brand, in.tokenID, in.method, in.path, in.mode, in.dailyLimit, in.dailySpend, in.monthSpend, in.totalSpend, match, in.note, a.ActorID).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO action_grants (workspace_id, brand_id, token_id, method, path, mode, daily_limit, daily_spend_cents, monthly_spend_cents, total_spend_cents, body_match, conditions, note, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+			a.WorkspaceID, in.brand, in.tokenID, in.method, in.path, in.mode, in.dailyLimit, in.dailySpend, in.monthSpend, in.totalSpend, match, in.conditions, in.note, a.ActorID).Scan(&id); err != nil {
 			return err
 		}
 		var err error
@@ -505,7 +529,10 @@ func insertGrantTx(ctx context.Context, tx pgx.Tx, a *access, in grantInput) (ac
 			return err
 		}
 		data := map[string]any{"token_id": in.tokenID, "brand_id": in.brand, "method": in.method, "path": in.path, "mode": in.mode, "daily_limit": in.dailyLimit,
-			"daily_spend_cents": in.dailySpend, "monthly_spend_cents": in.monthSpend, "total_spend_cents": in.totalSpend, "match": in.match}
+			"daily_spend_cents": in.dailySpend, "monthly_spend_cents": in.monthSpend, "total_spend_cents": in.totalSpend, "match": in.match, "conditions": in.conditions}
+		if k, ok := removalGrantPath(in.path); ok {
+			data["permission"] = adRemovePermission[k]
+		}
 		if in.fromAction != "" {
 			data["action_id"] = in.fromAction
 		}
@@ -628,12 +655,7 @@ func (s *Server) actionGate(w http.ResponseWriter, r *http.Request, a *access, n
 	}
 	path := actionPath(r)
 
-	// Removing a campaign, an ad or a keyword can't be undone: no grant and
-	// no approval lets an agent do it.
-	if adRemoval.MatchString(strings.TrimSuffix(r.URL.Path, "/")) {
-		writeError(w, r, http.StatusForbidden, "person_only", "removing a campaign, an ad or a keyword can't be undone, so only a person, signed in, removes one: ask them to do it in Outflare under Paid ads")
-		return
-	}
+	removal := adRemoval.FindStringSubmatch(strings.TrimSuffix(r.URL.Path, "/"))
 
 	why, err := s.alwaysPerson(ctx, a.WorkspaceID, r, head)
 	if err != nil {
@@ -646,7 +668,7 @@ func (s *Server) actionGate(w http.ResponseWriter, r *http.Request, a *access, n
 	}
 	var parsed map[string]any
 	_ = json.Unmarshal(body, &parsed)
-	rows, err := s.pool.Query(ctx, `SELECT id, method, path, mode, daily_limit, daily_spend_cents, monthly_spend_cents, total_spend_cents, body_match FROM action_grants
+	rows, err := s.pool.Query(ctx, `SELECT id, method, path, mode, daily_limit, daily_spend_cents, monthly_spend_cents, total_spend_cents, body_match, conditions FROM action_grants
 		WHERE token_id = $1 AND workspace_id = $2 AND revoked_at IS NULL AND (brand_id IS NULL OR brand_id = $3)`, a.TokenID, a.WorkspaceID, tokenBrand)
 	if err != nil {
 		s.internal(w, r, err)
@@ -654,7 +676,7 @@ func (s *Server) actionGate(w http.ResponseWriter, r *http.Request, a *access, n
 	}
 	grants, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (grantRule, error) {
 		var g grantRule
-		err := row.Scan(&g.id, &g.method, &g.path, &g.mode, &g.dailyLimit, &g.dailySpend, &g.monthSpend, &g.totalSpend, &g.match)
+		err := row.Scan(&g.id, &g.method, &g.path, &g.mode, &g.dailyLimit, &g.dailySpend, &g.monthSpend, &g.totalSpend, &g.match, &g.conditions)
 		return g, err
 	})
 	if err != nil {
@@ -667,6 +689,14 @@ func (s *Server) actionGate(w http.ResponseWriter, r *http.Request, a *access, n
 	g, found := pickGrant(grants, r.Method, brandRelative(path), parsed)
 	if !found {
 		g, found = pickGrant(grants, r.Method, path, parsed)
+	}
+	// Removing a campaign, an ad or a keyword can't be undone: only a
+	// grant that names the removal decides it, and with none it is refused
+	// (ad_remove_permission.go). A broad grant never covers one.
+	if removal != nil {
+		if g, found = s.removalGate(w, r, a, grants, removal[1], removal[2]); !found {
+			return
+		}
 	}
 
 	status, rule, holdWhy := actionHeld, ruleNoGrant, "no grant lets this agent make this change on its own"
@@ -816,10 +846,20 @@ func (s *Server) actionGate(w http.ResponseWriter, r *http.Request, a *access, n
 			s.internal(w, r, err)
 			return
 		}
+		brandID := ""
+		if v.BrandID != nil {
+			brandID = *v.BrandID
+		}
+		// The answer says what happened in one word, where a person
+		// decides, and what the agent does meanwhile.
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"action":            v,
 			"approval_required": true,
-			"message":           "Held for approval: " + holdWhy + ". Nothing changed yet. Read the action to see the decision and result.",
+			"outcome":           "approval_required",
+			"approval_url":      s.publicURL + s.brandAppPath(ctx, a.WorkspaceID, brandID, "agents"),
+			"next_step": "A person approves or rejects it on the approvals page. Read the action by its id for the decision and the result. " +
+				"If this request goes out of date before then, cancel it and name the request that replaces it.",
+			"message": "Held for approval: " + holdWhy + ". Nothing changed yet. Read the action to see the decision and result.",
 		})
 		return
 	}
@@ -955,15 +995,18 @@ type actionView struct {
 	// When a held change counts as expired if nobody decides it.
 	ExpiresAt *time.Time `json:"expires_at"`
 	// What the change spent on the workspace's own accounts, in cents.
-	SpendCents  int64 `json:"spend_cents"`
-	contentType string
-	rawBody     string
+	SpendCents int64 `json:"spend_cents"`
+	// The later change that replaces this one, when its agent cancelled it
+	// for that.
+	SupersededBy *string `json:"superseded_by"`
+	contentType  string
+	rawBody      string
 }
 
 const actionViewColumns = `x.id, x.actor_id::text, ac.display_name, x.token_id::text, x.brand_id::text, x.grant_id::text, x.method, x.path,
 	x.query, x.body, x.content_type, x.body_hash, x.reason, ` + actionStatusSQL + `, x.decided_by_rule, x.hold_reason, x.decided_by::text, dc.display_name,
 	x.decided_at, x.decision_note, x.result_status, x.result, x.request_id, x.created_at, x.expires_at,
-	(SELECT coalesce(sum(e.amount_cents), 0) FROM spend_entries e WHERE e.action_id = x.id)`
+	(SELECT coalesce(sum(e.amount_cents), 0) FROM spend_entries e WHERE e.action_id = x.id), x.superseded_by::text`
 
 const actionViewFrom = `FROM actions x LEFT JOIN actors ac ON ac.id = x.actor_id LEFT JOIN actors dc ON dc.id = x.decided_by`
 
@@ -972,7 +1015,7 @@ func scanActionView(row pgx.Row) (actionView, error) {
 	var result []byte
 	err := row.Scan(&v.ID, &v.ActorID, &v.ActorName, &v.TokenID, &v.BrandID, &v.GrantID, &v.Method, &v.Path,
 		&v.Query, &v.rawBody, &v.contentType, &v.BodyHash, &v.Reason, &v.Status, &v.DecidedByRule, &v.HoldReason, &v.DecidedBy, &v.DecidedName,
-		&v.DecidedAt, &v.DecisionNote, &v.ResultStatus, &result, &v.RequestID, &v.CreatedAt, &v.ExpiresAt, &v.SpendCents)
+		&v.DecidedAt, &v.DecisionNote, &v.ResultStatus, &result, &v.RequestID, &v.CreatedAt, &v.ExpiresAt, &v.SpendCents, &v.SupersededBy)
 	if err != nil {
 		return v, err
 	}
@@ -1368,6 +1411,75 @@ func (s *Server) rejectAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, v)
 }
 
+// cancelAction takes back a change that still waits for a person. Only
+// whoever made it can: the same token, or the same actor. A person who
+// didn't make it rejects it instead. superseded_by names the later change
+// that replaces it, which must be the same caller's too.
+func (s *Server) cancelAction(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	var in struct {
+		Note         string `json:"note"`
+		SupersededBy string `json:"superseded_by"`
+	}
+	if r.ContentLength != 0 && !decode(w, r, &in) {
+		return
+	}
+	id := r.PathValue("id")
+	if len(in.Note) > 50000 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "note is up to 50,000 characters")
+		return
+	}
+	if in.SupersededBy != "" && (!isUUID(in.SupersededBy) || in.SupersededBy == id) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "superseded_by is the id of the later change that replaces this one")
+		return
+	}
+	mine := func(v actionView) bool {
+		return (a.TokenID != "" && v.TokenID != nil && *v.TokenID == a.TokenID) || (a.TokenID == "" && v.ActorID != nil && *v.ActorID == a.ActorID)
+	}
+	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		act, err := scanActionView(tx.QueryRow(r.Context(), `SELECT `+actionViewColumns+` `+actionViewFrom+`
+			WHERE x.id = $1 AND x.workspace_id = $2 FOR UPDATE OF x`, id, a.WorkspaceID))
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !onRouteAction(a, act)) {
+			return errNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !mine(act) {
+			return errDenied("only whoever made a change cancels it; to stop someone else's, reject it")
+		}
+		if act.Status != actionHeld {
+			return errActionState("this action is already " + act.Status)
+		}
+		var by *string
+		if in.SupersededBy != "" {
+			next, err := scanActionView(tx.QueryRow(r.Context(), `SELECT `+actionViewColumns+` `+actionViewFrom+` WHERE x.id = $1 AND x.workspace_id = $2`, in.SupersededBy, a.WorkspaceID))
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !mine(next)) {
+				return errActionState("superseded_by is not a change of yours")
+			}
+			if err != nil {
+				return err
+			}
+			by = &in.SupersededBy
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE actions SET status = 'cancelled', decided_by = $2, decided_at = now(), decision_note = $3, superseded_by = $4 WHERE id = $1`,
+			id, a.ActorID, in.Note, by); err != nil {
+			return err
+		}
+		return recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "action.cancelled", "action", id,
+			map[string]any{"method": act.Method, "path": act.Path, "note": in.Note, "superseded_by": by}, map[string]any{"rule": act.DecidedByRule, "superseded": by != nil})
+	})
+	if s.actionError(w, r, err) {
+		return
+	}
+	metrics.ActionFinished(actionCancelled)
+	v, err := s.findGateAction(r.Context(), a, id)
+	if s.actionError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
 // decideActions approves and rejects held actions in one request: a batch.
 // Each is decided on its own, so one that can't be decided doesn't stop
 // the rest; the answer says what happened to each.
@@ -1438,9 +1550,27 @@ func (s *Server) decideActions(w http.ResponseWriter, r *http.Request) {
 
 var (
 	adCampaignChange = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/campaigns/([0-9a-fA-F-]{36})(/resume)?/?$`)
-	// adTargetingChange is a change to a campaign's bidding, audiences or
-	// countries: an agent's always waits for a person.
-	adTargetingChange = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/campaigns/[0-9a-fA-F-]{36}/(bidding|audiences|countries)$`)
+	// adTargetingChange is a change to a campaign's bidding, audiences,
+	// countries or places: an agent's always waits for a person.
+	adTargetingChange = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/campaigns/[0-9a-fA-F-]{36}/(bidding|audiences|countries|locations)$`)
+	// adExclusionChange adds or takes out an exclusion on a campaign (POST
+	// /v1/brands/{brand}/ads/campaigns/{id}/exclusions). Adding one can
+	// only spend less and follows the grant; taking one out spends there
+	// again, so an agent's always waits for a person.
+	adExclusionChange = regexp.MustCompile(`^/v1/brands/[^/]+/ads/campaigns/[0-9a-fA-F-]{36}/exclusions$`)
+	// adBidChange sets a campaign's bid or one placement's (POST
+	// /v1/brands/{brand}/ads/campaigns/{id}/bid), or an ad group's or a
+	// keyword's (.../ads/items/{id}/bid, .../ads/keywords/{id}/bid). A bid
+	// may rise, which
+	// spends more, so an agent's always waits for a person, unless it says
+	// only_lower: the job then refuses anything but a lower bid.
+	adBidChange = regexp.MustCompile(`^/v1/brands/[^/]+/ads/(campaigns|items|keywords)/[0-9a-fA-F-]{36}/bid$`)
+	// adItemChange is a change to one ad group or ad (POST
+	// /v1/brands/{brand}/ads/items/{id}/pause or /resume, PATCH
+	// .../ads/items/{id} with a daily budget). A pause, and a lower
+	// budget, can only spend less and follow the grant; a resume and a
+	// raise spend more, so an agent's always wait for a person.
+	adItemChange = regexp.MustCompile(`^/v1/brands/[^/]+/ads/items/([0-9a-fA-F-]{36})(/pause|/resume)?$`)
 	// adFeedChange is the new customer acquisition goal on an account
 	// (PUT /v1/brands/{brand}/ads/accounts/{id}/feed): it changes how every
 	// campaign bids, so an agent's always waits for a person.
@@ -1461,9 +1591,10 @@ var (
 	// others change what the whole account shows or counts.
 	adAccountChange = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/accounts/[0-9a-fA-F-]{36}/(conversion-actions|callouts|bidding-strategies)(/[^/]+)?$`)
 	// adRemoval removes a campaign, an ad or a keyword, which can't be
-	// undone on the platform: the action layer refuses an agent's outright
-	// (403 person_only), and the handler takes a person's own session.
-	adRemoval = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/(campaigns|items|keywords)/[0-9a-fA-F-]{36}/remove$`)
+	// undone on the platform: the action layer decides an agent's only by
+	// a grant naming the removal, and refuses it without one
+	// (permission_required, ad_remove_permission.go).
+	adRemoval = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/(campaigns|items|keywords)/([0-9a-fA-F-]{36})/remove$`)
 	// adBudgetRaiseMax is the largest raise of a campaign's daily budget
 	// an agent makes on its own: a fifth. More always needs a person.
 	adBudgetRaiseMax = 0.2
@@ -1477,7 +1608,45 @@ var (
 // their accounts' currencies.
 func (s *Server) adsHold(ctx context.Context, ws string, r *http.Request, body map[string]any, g grantRule) (string, string, error) {
 	if r.Method == http.MethodPost && adTargetingChange.MatchString(strings.TrimSuffix(r.URL.Path, "/")) {
-		return ruleAlwaysPerson, "changing how a campaign bids, its audiences or its countries can change what it spends and whom it reaches, so a person always approves it", nil
+		return ruleAlwaysPerson, "changing how a campaign bids, its audiences or the places it shows in can change what it spends and whom it reaches, so a person always approves it", nil
+	}
+	if r.Method == http.MethodPost && adExclusionChange.MatchString(strings.TrimSuffix(r.URL.Path, "/")) {
+		if action, _ := body["action"].(string); action != "add" {
+			return ruleAlwaysPerson, "taking an exclusion out lets the campaign spend there again, so a person always approves it", nil
+		}
+		return "", "", nil
+	}
+	if r.Method == http.MethodPost && adBidChange.MatchString(strings.TrimSuffix(r.URL.Path, "/")) {
+		if only, _ := body["only_lower"].(bool); !only {
+			return ruleAlwaysPerson, "a bid can go up, which spends more, so a person always approves it; with only_lower it may only go down", nil
+		}
+		return "", "", nil
+	}
+	if m := adItemChange.FindStringSubmatch(strings.TrimSuffix(r.URL.Path, "/")); m != nil && r.Method != http.MethodGet {
+		switch {
+		case m[2] == "/pause":
+			return "", "", nil
+		case m[2] == "/resume":
+			return ruleAlwaysPerson, "resuming an ad group or an ad lets it spend again, so a person always approves it", nil
+		case r.Method != http.MethodPatch:
+			return "", "", nil
+		}
+		v, ok := body["daily_budget_micros"].(float64)
+		if !ok {
+			return "", "", nil // the handler answers the missing budget
+		}
+		var current *int64
+		err := s.pool.QueryRow(ctx, `SELECT daily_budget_micros FROM ad_entities WHERE workspace_id = $1 AND id = $2 AND level = 'ad_group'`, ws, m[1]).Scan(&current)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", nil // the handler answers the missing ad group
+		}
+		if err != nil {
+			return "", "", err
+		}
+		if current == nil || int64(v) > *current {
+			return ruleAlwaysPerson, "raising an ad group's daily budget spends more, so a person always approves it", nil
+		}
+		return "", "", nil
 	}
 	if m := adAccountChange.FindStringSubmatch(strings.TrimSuffix(r.URL.Path, "/")); m != nil && r.Method != http.MethodGet {
 		switch m[1] {

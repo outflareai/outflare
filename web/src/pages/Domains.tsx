@@ -9,6 +9,7 @@ import type { Tab } from "../App";
 import { DataTable } from "@/components/data-table";
 import { health as sharedHealth, mailboxStatus } from "@/lib/status";
 import { track } from "@/lib/analytics";
+import { registrationNote } from "@/lib/registration";
 import { dnsHelp, DNSWays, heldByMission, takeDNSFocus, type DNSRow } from "@/components/dns-one-click";
 import { takeConnectOutcome } from "./Connectors";
 import { Icon } from "../icons";
@@ -278,27 +279,35 @@ function trackingReady(t: TrackingDomain) {
 }
 
 function trackingToast(t: TrackingDomain) {
-  if (trackingReady(t)) return `${t.domain} is ready. New emails use it.`;
-  if (t.status === "verified") return `${t.domain} points here. Setting up HTTPS: new emails use it once that's done, usually in a few minutes.`;
+  if (trackingReady(t)) return `${t.domain} is ready. New links use it.`;
+  if (t.status === "verified") return `${t.domain} points here. Setting up HTTPS: new links use it once that's done, usually in a few minutes.`;
   return "";
 }
 
-// Tracking domains belong to one brand, and each brand's emails use only
+// One tracking domain per brand serves every link the brand makes: email
+// click and unsubscribe links, the Ads tracker's campaign URLs, postbacks
+// and landers, campaign links and partner short links. The same card shows
+// on Domains and on Tracker → Setup, so it is added once and found from
+// either place.
+const trackingDescription = "Optional. Your own domain, instead of this server's address, on every link this brand makes: click and unsubscribe links in emails, and the Ads tracker's campaign URLs, postbacks and landers. One list per brand, shared by email and the tracker.";
+
+// Tracking domains belong to one brand, and each brand's links use only
 // its own: with all brands picked the card asks for one, and switching
-// brands opens it afresh.
-function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) {
+// brands opens it afresh. onChange runs after each load, so a page that
+// shows the card (Tracker → Setup) can tick its own checklist.
+export function TrackingDomains({ ws, canManage, onChange }: { ws: string; canManage: boolean; onChange?: (list: TrackingDomain[]) => void }) {
   const { brand, active } = useBrand(ws);
   if (!brand) {
     return (
-      <Card title="Tracking domain" description="Optional. Unsubscribe links, and click links on sequences that track clicks, use your own domain instead of this server's address.">
-        <p className="text-sm text-muted-foreground">Each brand's emails use its own tracking domain. Pick {active.length > 1 ? `one of your ${active.length} brands` : "your brand"} in the brand switcher to see or add one.</p>
+      <Card title="Tracking domain" description={trackingDescription}>
+        <p className="text-sm text-muted-foreground">Each brand uses its own tracking domain. Pick {active.length > 1 ? `one of your ${active.length} brands` : "your brand"} in the brand switcher to see or add one.</p>
       </Card>
     );
   }
-  return <BrandTrackingDomains key={brand.id} ws={ws} canManage={canManage} brand={brand.id} brands={active} />;
+  return <BrandTrackingDomains key={brand.id} ws={ws} canManage={canManage} brand={brand.id} brands={active} onChange={onChange} />;
 }
 
-function BrandTrackingDomains({ ws, canManage, brand, brands }: { ws: string; canManage: boolean; brand: string; brands: { id: string; name: string }[] }) {
+function BrandTrackingDomains({ ws, canManage, brand, brands, onChange }: { ws: string; canManage: boolean; brand: string; brands: { id: string; name: string }[]; onChange?: (list: TrackingDomain[]) => void }) {
   const [list, setList] = useState<TrackingDomain[]>();
   const [target, setTarget] = useState("");
   const fallback = window.location.host;
@@ -311,8 +320,9 @@ function BrandTrackingDomains({ ws, canManage, brand, brands }: { ws: string; ca
     if (data) {
       setList(data.data);
       setTarget(data.target);
+      onChange?.(data.data);
     }
-  }, [brand]);
+  }, [brand, onChange]);
   // Outflare re-checks DNS and the certificate on its own; keep the page
   // current while a domain is on its way.
   const settling = list?.some((t) => !trackingReady(t) && t.https_status !== "failed");
@@ -367,12 +377,12 @@ function BrandTrackingDomains({ ws, canManage, brand, brands }: { ws: string; ca
     const { error } = await api.PATCH("/v1/workspaces/{ws}/tracking-domains/{id}", { params: { path: { ws, id: t.id } }, body: { brand_id: to } });
     setBusy("");
     if (error) return toast(errorMessage(error), "error");
-    toast(`Moved ${t.domain} to ${name}. ${name}'s emails use it now; pick ${name} in the brand switcher to see it.`);
+    toast(`Moved ${t.domain} to ${name}. ${name}'s links use it now; pick ${name} in the brand switcher to see it.`);
     load();
   }
 
   return (
-    <Card title="Tracking domain" description="Optional. Unsubscribe links, and click links on sequences that track clicks, use your own domain instead of this server's address. Each brand's emails use its own.">
+    <Card title="Tracking domain" description={trackingDescription}>
       {list === undefined ? <Loading /> : (
         <div className="space-y-3 text-sm">
           {list.length === 0 && <p className="text-muted-foreground">None yet. Links use {fallback}.</p>}
@@ -382,6 +392,13 @@ function BrandTrackingDomains({ ws, canManage, brand, brands }: { ws: string; ca
                 <span className="font-mono text-[13px] font-medium">{t.domain}</span>
                 <Badge tone={trackingBadge(t).tone}>{trackingBadge(t).label}</Badge>
                 {t.last_checked_at && <span className="text-xs text-muted-foreground">checked {ago(t.last_checked_at)}</span>}
+                {(() => {
+                  const note = registrationNote(t.registration_expires_at);
+                  if (!note) return null;
+                  return note.tone === "grey"
+                    ? <span className="text-xs text-muted-foreground">{note.label}</span>
+                    : <Badge tone={note.tone} title="Renew the domain at your registrar, or the links on it stop working">{note.label}</Badge>;
+                })()}
                 {canManage && (
                   <span className="ml-auto flex flex-wrap items-center gap-2">
                     {brands.length > 1 && (
@@ -412,7 +429,7 @@ function BrandTrackingDomains({ ws, canManage, brand, brands }: { ws: string; ca
                 <input className={`${field} min-w-0 flex-1 sm:max-w-xs`} placeholder="links.acme-com.example" aria-label="Tracking domain" value={domain} onChange={(e) => { setDomain(e.target.value); setError(""); }} required />
                 <Button disabled={busy === "add" || !domain.trim()}>{busy === "add" ? "Adding…" : "Add tracking domain"}</Button>
               </div>
-              <p className="text-xs text-muted-foreground">Use a subdomain of your sending domain, such as links.yourdomain-com.example, and point it at {target} with a CNAME record. Changes can take up to an hour to show.</p>
+              <p className="text-xs text-muted-foreground">Use a subdomain of a domain you own, such as links.yourdomain-com.example, and point it at {target} with a CNAME record. Changes can take up to an hour to show.</p>
               <ErrorText>{error}</ErrorText>
             </form>
           )}

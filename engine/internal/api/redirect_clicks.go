@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/outflareai/outflare/engine/internal/fraud"
 	"github.com/outflareai/outflare/engine/internal/metrics"
@@ -277,7 +280,9 @@ func (s *Server) RunClicks(ctx context.Context) {
 }
 
 // FlushClicks writes every buffered click now. A batch that fails goes
-// back to wait for the next flush.
+// back to wait for the next flush, unless the database refused it for
+// what a click holds: then waiting changes nothing, so the batch is
+// written in halves and only the click at fault is dropped.
 func (s *Server) FlushClicks(ctx context.Context) error {
 	s.clicks.flushing.Lock()
 	defer s.clicks.flushing.Unlock()
@@ -289,7 +294,13 @@ func (s *Server) FlushClicks(ctx context.Context) error {
 		}
 		start := time.Now()
 		err := s.writeClicks(ctx, batch)
+		if err != nil && ctx.Err() == nil && clickDataError(err) {
+			err = s.writeClicksApart(ctx, batch, err)
+		}
 		metrics.RedirectClickFlush(time.Since(start))
+		if errors.Is(err, errClicksDropped) {
+			continue
+		}
 		if err != nil {
 			metrics.RedirectClickWrites("failed", len(batch))
 			if n := s.clicks.putBack(batch); n > 0 {
@@ -302,6 +313,56 @@ func (s *Server) FlushClicks(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// errClicksDropped says a batch was written apart from the clicks the
+// database refused, which were dropped: nothing is left to retry.
+var errClicksDropped = errors.New("clicks the database refused were dropped")
+
+// clickDataError reports whether the database refused a batch for its
+// values (a data or constraint error), not because it couldn't be reached.
+func clickDataError(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && (strings.HasPrefix(pg.Code, "22") || strings.HasPrefix(pg.Code, "23"))
+}
+
+// writeClicksApart writes a batch the database refused in halves, down to
+// the single click at fault, which is dropped and counted: one click that
+// can't be stored must never hold up everyone else's. A half that fails
+// for another reason (the database went away) is put back to wait.
+func (s *Server) writeClicksApart(ctx context.Context, batch []bufferedClick, cause error) error {
+	if len(batch) == 1 {
+		metrics.RedirectClickWrites("dropped_invalid", 1)
+		track.Fail(ctx, s.log, track.Event{Name: "tracking_link.click_dropped", Surface: "system", WorkspaceID: batch[0].ws, Props: map[string]any{"clicks": 1}}, "invalid_request", cause)
+		return errClicksDropped
+	}
+	half := len(batch) / 2
+	for _, part := range [][]bufferedClick{batch[:half], batch[half:]} {
+		err := s.writeClicks(ctx, part)
+		if err != nil && ctx.Err() == nil && clickDataError(err) {
+			err = s.writeClicksApart(ctx, part, err)
+		}
+		if err != nil && !errors.Is(err, errClicksDropped) {
+			metrics.RedirectClickWrites("failed", len(part))
+			if n := s.clicks.putBack(slices.Clone(part)); n > 0 {
+				metrics.RedirectClickWrites("dropped_full", n)
+			}
+		}
+	}
+	return errClicksDropped
+}
+
+// storable makes a value from a request safe to store: Postgres takes
+// neither a NUL byte nor broken UTF-8 in text, and one such value would
+// fail the whole batch it is written in.
+func storable(v string) string {
+	if !utf8.ValidString(v) {
+		v = strings.ToValidUTF8(v, "\uFFFD")
+	}
+	if strings.IndexByte(v, 0) >= 0 {
+		v = strings.ReplaceAll(v, "\x00", "")
+	}
+	return v
 }
 
 // writeClicks writes one batch: each workspace's clicks once its quota
@@ -346,21 +407,27 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 		if refused[c.ws] {
 			continue
 		}
+		// Everything a visitor or an ad network can put in the request is
+		// made storable first.
 		d := c.detail
 		ws, brand, link, key, ipHash = append(ws, c.ws), append(brand, c.brand), append(link, c.linkID), append(key, c.key), append(ipHash, c.ipHash)
 		bot, at = append(bot, c.bot), append(at, c.at)
-		country, region, city = append(country, d.place.Country), append(region, cutUTF8(d.place.Region, 200)), append(city, cutUTF8(d.place.City, 200))
-		asn, isp = append(asn, int64(d.place.ASN)), append(isp, cutUTF8(d.place.Org, 200))
-		device, deviceBrand, deviceModel = append(device, d.device), append(deviceBrand, d.detail.brand), append(deviceModel, d.detail.model)
-		os, osVersion = append(os, d.os), append(osVersion, cutUTF8(d.detail.osVersion, 20))
-		browser, browserVersion = append(browser, d.browser), append(browserVersion, cutUTF8(d.detail.browserVersion, 20))
-		language = append(language, d.language)
-		membership, subID, referrer = append(membership, c.membershipID), append(subID, c.subID), append(referrer, c.referrerHost)
-		f, err := json.Marshal(c.fields)
-		if err != nil || c.fields == nil {
+		country, region, city = append(country, storable(d.place.Country)), append(region, cutUTF8(storable(d.place.Region), 200)), append(city, cutUTF8(storable(d.place.City), 200))
+		asn, isp = append(asn, int64(d.place.ASN)), append(isp, cutUTF8(storable(d.place.Org), 200))
+		device, deviceBrand, deviceModel = append(device, d.device), append(deviceBrand, storable(d.detail.brand)), append(deviceModel, storable(d.detail.model))
+		os, osVersion = append(os, d.os), append(osVersion, cutUTF8(storable(d.detail.osVersion), 20))
+		browser, browserVersion = append(browser, d.browser), append(browserVersion, cutUTF8(storable(d.detail.browserVersion), 20))
+		language = append(language, storable(d.language))
+		membership, subID, referrer = append(membership, c.membershipID), append(subID, storable(c.subID)), append(referrer, storable(c.referrerHost))
+		clean := make(map[string]string, len(c.fields))
+		for k, v := range c.fields {
+			clean[storable(k)] = storable(v)
+		}
+		f, err := json.Marshal(clean)
+		if err != nil {
 			f = []byte("{}")
 		}
-		fields, sourceClickID, cost = append(fields, string(f)), append(sourceClickID, c.sourceClickID), append(cost, c.costMicros)
+		fields, sourceClickID, cost = append(fields, string(f)), append(sourceClickID, storable(c.sourceClickID)), append(cost, c.costMicros)
 		destination, path, offer = append(destination, c.destinationID), append(path, c.pathID), append(offer, c.offerID)
 		lander, fr = append(lander, c.landerID), append(fr, strings.Join(c.fraud, ","))
 	}

@@ -15,14 +15,17 @@ ws, user = sys.argv[1], sys.argv[2]
 rnd = random.Random(7)
 out = []
 q = lambda s: "'" + s.replace("'", "''") + "'"
+# Everything belongs to the workspace's first brand (Northpeak), so each page
+# shows it with that brand picked. Tables that need a brand get it as rows go in.
+brand = f"(SELECT id FROM brands WHERE workspace_id = '{ws}' ORDER BY created_at LIMIT 1)"
 
 domains = [("northpeak.example", "pass"), ("northpeakmail.example", "pass"), ("trynorthpeak.example", "none_policy")]
 senders = ["alex", "casey", "jordan", "riley", "sam", "taylor"]
 limits = {"northpeak.example": 50, "northpeakmail.example": 30, "trynorthpeak.example": 40}
 
 for d, dmarc in domains:
-    out.append(f"""INSERT INTO sending_domains (workspace_id, domain, mx_provider, spf, spf_record, dkim, dkim_selector, dmarc, dmarc_record, dmarc_policy, checked_at, status, mx_hosts)
-VALUES ('{ws}', {q(d)}, 'google', 'pass', 'v=spf1 include:_spf.google.com ~all', 'pass', 'google', {q(dmarc)},
+    out.append(f"""INSERT INTO sending_domains (workspace_id, brand_id, domain, mx_provider, spf, spf_record, dkim, dkim_selector, dmarc, dmarc_record, dmarc_policy, checked_at, status, mx_hosts)
+VALUES ('{ws}', {brand}, {q(d)}, 'google', 'pass', 'v=spf1 include:_spf.google.com ~all', 'pass', 'google', {q(dmarc)},
  {q('v=DMARC1; p=none' if dmarc == 'none_policy' else 'v=DMARC1; p=quarantine; rua=mailto:dmarc@' + d)}, {q('none' if dmarc == 'none_policy' else 'quarantine')},
  now() - interval '2 hours', 'active', ARRAY['aspmx.l.google.com']);""")
 
@@ -33,9 +36,9 @@ for d, _ in domains:
         status = "paused" if (d == "northpeak.example" and s == "casey") else "active"
         mailboxes.append((mid, f"{s}@{d}", d, status))
         name = {"alex": "Alex Moreno", "casey": "Casey Okoro", "jordan": "Jordan Pike", "riley": "Riley Haas", "sam": "Sam Ferreira", "taylor": "Taylor Brandt"}[s]
-        out.append(f"""INSERT INTO mailboxes (id, workspace_id, email, display_name, provider, auth_method, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials,
+        out.append(f"""INSERT INTO mailboxes (id, workspace_id, brand_id, email, display_name, provider, auth_method, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials,
  status, daily_limit, smtp_ok, imap_ok, last_verified_at, last_synced_at, warmup_enabled, warmup_started_at, created_at)
-VALUES ('{mid}', '{ws}', {q(s + '@' + d)}, {q(name)}, 'google', 'password', 'smtp.gmail.com', 587, {q(s + '@' + d)}, 'imap.gmail.com', 993, {q(s + '@' + d)}, '\\x00',
+VALUES ('{mid}', '{ws}', {brand}, {q(s + '@' + d)}, {q(name)}, 'google', 'password', 'smtp.gmail.com', 587, {q(s + '@' + d)}, 'imap.gmail.com', 993, {q(s + '@' + d)}, '\\x00',
  '{status}', {limits[d]}, true, true, now() - interval '1 hour', now() - interval '2 minutes', true, now() - interval '{30 + i} days', now() - interval '40 days');""")
 
 firsts = ["Zoe", "Theo", "Ivy", "Ava", "Owen", "Liam", "Mia", "Noah", "Ella", "Leo", "Nina", "Omar", "Priya", "Ravi", "Sara", "Tom", "Uma", "Vik", "Wren", "Yara"]
@@ -52,8 +55,8 @@ for n in range(240):
 
 seq = str(uuid.UUID(int=rnd.getrandbits(128)))
 seq2 = str(uuid.UUID(int=rnd.getrandbits(128)))
-out.append(f"INSERT INTO sequences (id, workspace_id, name, status, timezone, send_start, send_end, created_at) VALUES ('{seq}', '{ws}', 'Series A founders, Q4', 'active', 'America/New_York', '09:00', '17:00', now() - interval '20 days');")
-out.append(f"INSERT INTO sequences (id, workspace_id, name, status, timezone, created_at) VALUES ('{seq2}', '{ws}', 'Agency partners', 'active', 'Europe/London', now() - interval '9 days');")
+out.append(f"INSERT INTO sequences (id, workspace_id, brand_id, name, status, timezone, send_start, send_end, created_at) VALUES ('{seq}', '{ws}', {brand}, 'Series A founders, Q4', 'active', 'America/New_York', '09:00', '17:00', now() - interval '20 days');")
+out.append(f"INSERT INTO sequences (id, workspace_id, brand_id, name, status, timezone, created_at) VALUES ('{seq2}', '{ws}', {brand}, 'Agency partners', 'active', 'Europe/London', now() - interval '9 days');")
 steps = [
     (0, "{{first_name}}, quick question about {{company}}", "Hi {{first_name}},\n\nSaw {{company}} just raised. Most teams at your stage spend a week wiring up outbound. Northpeak runs it from one prompt, with your own mailboxes and tools.\n\nWorth a look?\n\n{{sender_first_name}}"),
     (3, "", "Hi {{first_name}}, bumping this in case it got buried. Happy to send a 2-minute walkthrough.\n\n{{sender_first_name}}"),

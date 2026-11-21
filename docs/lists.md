@@ -17,9 +17,11 @@ Paste an API key in Connectors (or from the Lead lists page). Each provider says
 | Apollo | yes | yes | Search is free; revealing an email costs one credit |
 | People Data Labs | yes | yes | One credit per record returned |
 | MoltSets | yes | yes | Flat monthly plans with fair-use limits (free tier: 1,000 tokens); a lookup that finds nothing is free |
+| Blitz | yes | yes | Flat monthly plans counted in records: one for each person or email found, nothing for a miss. People are searched one company at a time, by company domain; emails are found from a LinkedIn profile only ([email-finding.md](email-finding.md#blitz)) |
 | Prospeo | | yes | One credit per email found |
 | LeadMagic | | yes | One credit per email found |
 | Findymail | | yes | One credit per verified email found |
+| Treg | | yes | Pay per call from your Treg balance. It asks up to four providers in order for one person ([email-finding.md](email-finding.md#treg)), at most $0.06 in all; each billed call counts as one credit here. The same token also verifies emails |
 | Hunter | | yes | One request per lookup; the same key also verifies emails |
 
 `GET /v1/workspaces/{ws}/data-providers` lists them with the filters each search understands and the accounts you have connected. Prices are the providers' and change; check your plan.
@@ -99,7 +101,7 @@ Only people count: not companies, merged or archived records, or, for a brand's 
 
 ## Lists from a saved query
 
-A list can take its members from a saved [Query](query.md) instead of rules: `POST .../smart-lists` with `"kind": "query"` and `"saved_query_id"` (in the app: New smart list, then "A saved query"). Its members are the records in the query's `record_id` column, or its `id` column when it has none, for example:
+A list can take its members from a saved [Query](query.md) instead of rules: `POST .../smart-lists` with `"kind": "query"` and `"saved_query_id"` (in the app: New smart list, then "Use a saved query"). Its members are the records in the query's `record_id` column, or its `id` column when it has none, for example:
 
 ```sql
 SELECT id AS record_id FROM people WHERE attributes->>'plan' = 'pro'
@@ -123,14 +125,42 @@ A smart list is a group of people on your [customer records](customers.md) that 
 
 Each rule tests one thing about a person:
 
-- **A field** on their record, such as `billing_plan` or `country`: is, is not, is more than, is less than, contains, is set or is not set. Numbers compare as numbers, text ignoring case, and dates as text (so `2026-01-01` style dates sort). For a field that holds a list, contains checks its items.
-- **An event** they did, such as `payment_succeeded`: did or didn't, ever or in the last N days. Events from the website tracker don't count, because anyone with the site key can send them.
+- **A field** on their record, such as `billing_plan` or `country`: is, is not, is one of (`in`, a list), is none of (`not_in`), is more than, is less than, contains, starts with, is set or is not set, and for dates, in the last N days (`in_last_days`) or more than N days ago (`more_than_days_ago`). Numbers compare as numbers, text ignoring case, and dates as text (so `2026-01-01` style dates sort); a value that isn't a date never matches a date test. For a field that holds a list, contains checks its items.
+- **An event** they did, such as `payment_succeeded`: did or didn't, ever, in the last N days (`within_days`) or more than N days ago (`before_days`), and at least N times (`min_count`; with didn't, fewer than N times). **Where** tests the event's own properties, up to five, such as `{"property": "amount_minor", "op": "gt", "value": 10000}` for payments over $100 (amounts are in cents). Events from the website tracker don't count, because anyone with the site key can send them.
+- **A page they viewed** (`page`) on one of the brand's sites: a site (`host`; `www.` is the same site), a path that is, starts with or contains something, or both, with the same time and count options as events. Only views from a browser tied to the person by something they did count: signing in to your product, clicking a tracked link in an email Outflare sent, or a [visitor link](website-visitors.md). So visitors who never gave their email or signed in are in no list, and nobody can put someone in a list by sending page views. `{"page": {"host": "app.example.com"}, "op": "not_exists"}` is people who never opened the app.
+- **Another list** they are in, or aren't (`in_smart_list`): a smart, static or query list of the same brand and kind, as it stood at its last refresh. A list can't depend on itself, even through other lists, and a list another list names can't be deleted until that list's rules change.
+- **Marketing email** (`marketing_email`): whether they may get marketing email, as the People list's Marketing email column shows it.
 - **A lead list** they are in, or aren't: a fixed list can feed a smart list.
 - **A news search** they wrote an article for, or didn't, ever or in the last so many days: a media list of the [journalists](news-watch.md#journalists) who cover a topic.
 - **A company field** on a company they are on (`company_attribute`), such as a journalist's outlet tier: `{"company_attribute": "outlet_tier", "op": "eq", "value": "national"}`. It passes when any of their companies passes; is not and is not set pass when none of them has the value.
 - **A lifecycle stage** for a product (`product_stage`, [products and lifecycle stages](product-lifecycle.md)): `{"product_stage": "churned", "product": "residential", "op": "eq"}` holds people in that stage, `neq` people who aren't. `level` picks billing (`company`) or usage (`person`) stages; by default a people list reads usage stages and a company list billing stages.
 
-A person must pass all the rules, or any of them (`match`). With no rules a list holds everyone.
+A person must pass all the rules, or any of them (`match`). With no rules a list holds everyone. In the app, the rule builder starts with what kind of rule you want (Visited a page, Did something, Has a field, Is in a list, Their company, Lifecycle stage, Can be emailed), offers the brand's events, properties, sites and pages in searchable pickers (`GET /v1/brands/{brand}/smart-lists/choices`, MCP `get_smart_list_choices`), and reads the rules back as one sentence above the live count. An event's filters offer the properties its recent events carry, also ones nobody has described in the catalog, and take money in whole units for a property whose name ends in `_minor` (100 for $100; rules store cents). Time windows and counts take any number, beside the common ones. When the rules that decide who is in only leave people out ("didn't", "isn't"), every rule when all must match or any one of them when any may, it warns that the list will hold nearly everyone.
+
+### Describe it in words
+
+**Describe who should be in it** writes the rules for you from a sentence, such as "people who paid in the last 90 days but never opened the app". The workspace's own AI model (AI tool **Smart list rules**, on the workspace's own key; with none connected the box says so and links to Connectors) reads the brand's field, event, page, list and product names with their labels and descriptions, never a person or their values, and writes rules, which Outflare checks like any list's. They open in the builder with a sentence on who they pick, for you to check, change and save. Nothing is saved until you save it. When the description can't be written as rules (it needs an event the brand doesn't send, say), it says what is missing.
+
+```sh
+# Ask for rules; read the draft until it is ready or failed
+curl -X POST "localhost:8080/v1/brands/$BRAND/smart-list-drafts" \
+  -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"description": "People who paid in the last 90 days but never opened the app"}'
+curl "localhost:8080/v1/brands/$BRAND/smart-list-drafts/$DRAFT" -H "Authorization: Bearer $OUTFLARE_TOKEN"
+```
+
+### Groups: mixing "and", "or" and "not"
+
+A rule can be a **group** of rules with its own match: all of them, any of them, or **none** of them (in the app, the builder shows this as two parts: **Include people who**, with "and" or "or" between conditions and either/or sets, and **But leave out people who**, which is stored as a "none" group). A group can hold groups, two levels below the list's own rules at most, with up to 20 rules in a group and 50 in a list. For example, people who signed up and have neither paid nor been refunded:
+
+```json
+{"match": "all", "rules": [
+  {"event": "signed_up", "op": "exists"},
+  {"match": "none", "rules": [{"event": "payment.succeeded", "op": "exists"}, {"event": "payment.refunded", "op": "exists"}]}
+]}
+```
+
+A group sets only `rules` and `match`; every other rule needs its `op`. Groups work wherever smart list rules do: smart lists, their preview, and audiences in review requests and playbooks.
 
 A list holds people unless it is a [list of companies](#lists-of-companies); merged and archived records never count. A list is one brand's and holds only that brand's people.
 
@@ -152,13 +182,17 @@ curl -X POST "localhost:8080/v1/brands/$BRAND/smart-lists" \
 curl "localhost:8080/v1/brands/$BRAND/smart-lists/$LIST/members" -H "Authorization: Bearer $OUTFLARE_TOKEN"
 ```
 
+**Edit name and description** on a list's page renames it and says what it is for, for any kind of list (`PATCH` with `name` and `description`); a name another list already has is refused.
+
+A list's page shows who is in it. Each name opens that person's record, and beside it are their email, lifetime value (everything they have paid, less refunds), the day they signed up (their first `signed_up` event) and when they joined the list. **Columns** picks which of these show, with the day the record was first seen as one more; **Save as my default** keeps your pick for every list with your account, so it is the same on every device you sign in on (`GET /v1/me/table-views`), and **Back to standard columns** drops it. The members API returns the same values as `lifetime_revenue`, `signed_up_at` and `created_at`. Lifetime value is the record's Lifetime revenue field when a billing connection keeps one, and otherwise their `payment.succeeded` events less `payment.refunded`, in the currency they paid most in.
+
 Reading smart lists needs `customers.read`; making, changing, refreshing and deleting them needs `customers.manage`. A token or member limited to some brands sees lists for its brands and those for every brand, but only its brands' people in them, and can only change its brands' lists. Deleting a list never deletes the people.
 
-MCP tools: `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `list_smart_list_changes`, `preview_smart_list`, `create_smart_list`, `update_smart_list`, `refresh_smart_list`, `delete_smart_list`.
+MCP tools: `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `list_smart_list_changes`, `preview_smart_list`, `get_smart_list_choices`, `draft_smart_list`, `get_smart_list_draft`, `create_smart_list`, `update_smart_list`, `refresh_smart_list`, `delete_smart_list`.
 
 ### Lists of companies
 
-A smart list can hold companies instead of people: make it with `"record_type": "account"`. Its rules test the company: a company field (`attribute`), an event (the company's own events and those of its people), and a lifecycle stage per product (`product_stage`, billing stages by default). Preview it with `"record_type": "account"` too. A list of companies can't be static, and its kind of record never changes.
+A smart list can hold companies instead of people: make it with `"record_type": "account"`. Its rules test the company: a company field (`attribute`), an event (the company's own events and those of its people), a lifecycle stage per product (`product_stage`, billing stages by default) and another list of companies (`in_smart_list`). Preview it with `"record_type": "account"` too. A list of companies can't be static, and its kind of record never changes.
 
 - **Excluding a list of companies leaves out everyone at those companies.** An exclusion on a journey, broadcast or sequence that names a company list skips each person whose company is in it.
 - **Rules on joining and leaving** work for companies: an [audience rule](rules.md) with `record_type: account` on a company list fires for the company.

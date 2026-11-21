@@ -42,6 +42,21 @@ type Economics struct {
 	GrossMarginPercent *int `json:"gross_margin_percent"`
 	// Rules only record what they would do until this is off.
 	ShadowMode bool `json:"shadow_mode"`
+	// The most the daily budgets of the brand's active campaigns may add
+	// up to, micros of Currency. Nil: no ceiling.
+	DailyBudgetCeilingMicros *int64 `json:"daily_budget_ceiling_micros"`
+	// What the brand aims for in a month of ads: new paying customers, the
+	// most it may spend, the revenue the ads should bring (micros of
+	// Currency) and revenue over spend. Nil: not set. The Overview judges
+	// its numbers against them, the monthly ones by the share of a month
+	// (30 days) the range covers.
+	TargetNewPayersMonthly     *int     `json:"target_new_payers_monthly"`
+	MonthlyBudgetMicros        *int64   `json:"monthly_budget_micros"`
+	TargetRevenueMonthlyMicros *int64   `json:"target_revenue_monthly_micros"`
+	TargetROAS                 *float64 `json:"target_roas"`
+	// OverviewNumbers are the numbers the Overview shows, in order
+	// (OverviewNumberIDs); empty shows the usual six.
+	OverviewNumbers []string `json:"overview_numbers"`
 	// Set reports whether the brand has saved its economics; a brand that
 	// hasn't reads the defaults.
 	Set       bool      `json:"set"`
@@ -58,7 +73,7 @@ func Defaults(ws, brand, currency string) Economics {
 	}
 	now := time.Now().UTC()
 	return Economics{BrandID: brand, WorkspaceID: ws, Currency: currency, AcquisitionWindowDays: DefaultWindowDays,
-		PaybackMonths: DefaultPaybackMonths, ShadowMode: true, CreatedAt: now, UpdatedAt: now}
+		PaybackMonths: DefaultPaybackMonths, ShadowMode: true, OverviewNumbers: []string{}, CreatedAt: now, UpdatedAt: now}
 }
 
 // Load reads a brand's economics, or its defaults (Set false) when it has
@@ -71,11 +86,14 @@ func Load(ctx context.Context, q Querier, ws, brand string) (Economics, error) {
 	err := q.QueryRow(ctx, `
 		SELECT b.currency, x.brand_id IS NOT NULL, COALESCE(x.currency, b.currency), x.target_cost_per_payer_micros, x.target_cost_per_signup_micros,
 			COALESCE(x.acquisition_window_days, $3), COALESCE(x.payback_months, $4), x.gross_margin_percent,
-			COALESCE(x.shadow_mode, true), x.updated_by::text, COALESCE(x.created_at, b.created_at), COALESCE(x.updated_at, b.created_at)
+			COALESCE(x.shadow_mode, true), x.daily_budget_ceiling_micros,
+			x.target_new_payers_monthly, x.monthly_budget_micros, x.target_revenue_monthly_micros, x.target_roas::float8, COALESCE(x.overview_numbers, '{}'),
+			x.updated_by::text, COALESCE(x.created_at, b.created_at), COALESCE(x.updated_at, b.created_at)
 		FROM brands b LEFT JOIN ad_brand_economics x ON x.brand_id = b.id
 		WHERE b.workspace_id = $1 AND b.id = $2`, ws, brand, DefaultWindowDays, DefaultPaybackMonths).
 		Scan(&brandCurrency, &set, &currency, &e.TargetCostPerPayerMicros, &e.TargetCostPerSignupMicros, &e.AcquisitionWindowDays, &e.PaybackMonths,
-			&e.GrossMarginPercent, &e.ShadowMode, &e.UpdatedBy, &e.CreatedAt, &e.UpdatedAt)
+			&e.GrossMarginPercent, &e.ShadowMode, &e.DailyBudgetCeilingMicros,
+			&e.TargetNewPayersMonthly, &e.MonthlyBudgetMicros, &e.TargetRevenueMonthlyMicros, &e.TargetROAS, &e.OverviewNumbers, &e.UpdatedBy, &e.CreatedAt, &e.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return e, ErrNoBrand
 	}
@@ -88,6 +106,11 @@ func Load(ctx context.Context, q Querier, ws, brand string) (Economics, error) {
 	}
 	return e, nil
 }
+
+// OverviewNumberIDs are the numbers the Paid ads Overview can show. The
+// first six are what it shows until a brand chooses.
+var OverviewNumberIDs = []string{"cost_per_payer", "cost_per_signup", "new_payers", "spend", "revenue", "roas",
+	"signups", "clicks", "cost_per_click", "signup_rate", "platform_conversions"}
 
 // ErrNoBrand is Load's answer for a brand the workspace doesn't have.
 var ErrNoBrand = errors.New("brand not found")
@@ -104,17 +127,25 @@ func Save(ctx context.Context, q Querier, e Economics, updatedBy *string) (Econo
 	if e.Currency == "" {
 		e.Currency = "USD"
 	}
+	if e.OverviewNumbers == nil {
+		e.OverviewNumbers = []string{}
+	}
 	_, err := q.Exec(ctx, `
 		INSERT INTO ad_brand_economics (brand_id, workspace_id, currency, target_cost_per_payer_micros, target_cost_per_signup_micros,
-			acquisition_window_days, payback_months, gross_margin_percent, shadow_mode, updated_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			acquisition_window_days, payback_months, gross_margin_percent, shadow_mode, updated_by, daily_budget_ceiling_micros,
+			target_new_payers_monthly, monthly_budget_micros, target_revenue_monthly_micros, target_roas, overview_numbers)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (brand_id) DO UPDATE SET currency = EXCLUDED.currency, target_cost_per_payer_micros = EXCLUDED.target_cost_per_payer_micros,
 			target_cost_per_signup_micros = EXCLUDED.target_cost_per_signup_micros, acquisition_window_days = EXCLUDED.acquisition_window_days,
 			payback_months = EXCLUDED.payback_months, gross_margin_percent = EXCLUDED.gross_margin_percent,
-			shadow_mode = EXCLUDED.shadow_mode, updated_by = EXCLUDED.updated_by, updated_at = now()
+			shadow_mode = EXCLUDED.shadow_mode, updated_by = EXCLUDED.updated_by, daily_budget_ceiling_micros = EXCLUDED.daily_budget_ceiling_micros,
+			target_new_payers_monthly = EXCLUDED.target_new_payers_monthly, monthly_budget_micros = EXCLUDED.monthly_budget_micros,
+			target_revenue_monthly_micros = EXCLUDED.target_revenue_monthly_micros, target_roas = EXCLUDED.target_roas,
+			overview_numbers = EXCLUDED.overview_numbers, updated_at = now()
 		WHERE ad_brand_economics.workspace_id = EXCLUDED.workspace_id`,
 		e.BrandID, e.WorkspaceID, e.Currency, e.TargetCostPerPayerMicros, e.TargetCostPerSignupMicros, e.AcquisitionWindowDays, e.PaybackMonths,
-		e.GrossMarginPercent, e.ShadowMode, updatedBy)
+		e.GrossMarginPercent, e.ShadowMode, updatedBy, e.DailyBudgetCeilingMicros,
+		e.TargetNewPayersMonthly, e.MonthlyBudgetMicros, e.TargetRevenueMonthlyMicros, e.TargetROAS, e.OverviewNumbers)
 	if err != nil {
 		return e, err
 	}

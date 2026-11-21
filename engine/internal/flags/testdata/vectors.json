@@ -1,0 +1,10520 @@
+[
+ {
+  "name": "split visitor-000",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-000",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-000",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-000",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-000",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-000",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-001",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-001",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-001",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-002",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-002",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-002",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-003",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-003",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-003",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-003",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-003",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-003",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-004",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-004",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-004",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-004",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-004",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-004",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-005",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-005",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-005",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-005",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-005",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-005",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-006",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-006",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-006",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-006",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-006",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-006",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-007",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-007",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-007",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-007",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-007",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-007",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-008",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-008",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-008",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-008",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-008",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-008",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-009",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-009",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-009",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-009",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-009",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-009",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-010",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-010",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-010",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-010",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-010",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-010",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-011",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-011",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-011",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-011",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-011",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-011",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-012",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-012",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-012",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-012",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-012",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-012",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-013",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-013",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-013",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-013",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-013",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-013",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-014",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-014",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-014",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-014",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-014",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-014",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-015",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-015",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-015",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-015",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-015",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-015",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-016",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-016",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-016",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-016",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-016",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-016",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-017",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-017",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-017",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-017",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-017",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-017",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-018",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-018",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-018",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-018",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-018",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-018",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-019",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-019",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-019",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-019",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-019",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-019",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-020",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-020",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-020",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-020",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-020",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-020",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-021",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-021",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-021",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-021",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-021",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-021",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-022",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-022",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-022",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-022",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-022",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-022",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-023",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-023",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-023",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-023",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-023",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-023",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-024",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-024",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-024",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-024",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-024",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-024",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-025",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-025",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-025",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-025",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-025",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-025",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-026",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-026",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-026",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-026",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-026",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-026",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-027",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-027",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-027",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-027",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-027",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-027",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-028",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-028",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-028",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-028",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-028",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-028",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-029",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-029",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-029",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-029",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-029",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-029",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-030",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-030",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-030",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-030",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-030",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-030",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-031",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-031",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-031",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-031",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-031",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-031",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-032",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-032",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-032",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-032",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-032",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-032",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-033",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-033",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-033",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-033",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-033",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-033",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-034",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-034",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-034",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-034",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-034",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-034",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-035",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-035",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-035",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-035",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-035",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-035",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-036",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-036",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-036",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-036",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-036",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-036",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-037",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-037",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-037",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-037",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-037",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-037",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-038",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-038",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-038",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-038",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-038",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-038",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-039",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-039",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-039",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-039",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-039",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-039",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-040",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-040",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-040",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-040",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-040",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-040",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-041",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-041",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-041",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-041",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-041",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-041",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-042",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-042",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-042",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-042",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-042",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-042",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-043",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-043",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-043",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-043",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-043",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-043",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-044",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-044",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-044",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-044",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-044",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-044",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-045",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-045",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-045",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-045",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-045",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-045",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-046",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-046",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-046",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-046",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-046",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-046",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-047",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-047",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-047",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-047",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-047",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-047",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-048",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-048",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-048",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-048",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-048",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-048",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-049",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-049",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-049",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-049",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-049",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-049",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-050",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-050",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-050",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-050",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-050",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-050",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "calmer",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-051",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-051",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-051",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-051",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-051",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-051",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-052",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-052",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-052",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-052",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-052",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-052",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-053",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-053",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-053",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-053",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-053",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-053",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-054",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-054",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-054",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-054",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-054",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-054",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-055",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-055",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-055",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-055",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-055",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-055",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-056",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-056",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-056",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-056",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "group visitor-056",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-056",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-057",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-057",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-057",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-057",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-057",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-057",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "group"
+ },
+ {
+  "name": "split visitor-058",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-058",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-058",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-058",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-058",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-058",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "split visitor-059",
+  "flag": {
+   "key": "pricing-headline",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-a",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-059",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "rollout visitor-059",
+  "flag": {
+   "key": "new-nav",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 35,
+   "rules": [],
+   "salt": "s4lt-b",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-059",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rollout"
+ },
+ {
+  "name": "group visitor-059",
+  "flag": {
+   "key": "hero-test",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s4lt-c",
+   "group": "homepage",
+   "group_from": 2500,
+   "group_to": 7500
+  },
+  "visitor": {
+   "subject": "visitor-059",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "control",
+  "reason": "match"
+ },
+ {
+  "name": "uneven weights",
+  "flag": {
+   "key": "w",
+   "variants": [
+    {
+     "key": "a",
+     "weight": 1,
+     "payload": null
+    },
+    {
+     "key": "b",
+     "weight": 2,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "7f0c9a52-9d1e-4c58-8a53-0d4f6f1c2b11",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "a",
+  "reason": "match"
+ },
+ {
+  "name": "no weight",
+  "flag": {
+   "key": "w0",
+   "variants": [
+    {
+     "key": "a",
+     "weight": 0,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "off"
+ },
+ {
+  "name": "no subject",
+  "flag": {
+   "key": "n",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "no_subject"
+ },
+ {
+  "name": "unicode subject",
+  "flag": {
+   "key": "u",
+   "variants": [
+    {
+     "key": "control",
+     "weight": 50,
+     "payload": null
+    },
+    {
+     "key": "faster",
+     "weight": 30,
+     "payload": {
+      "headline": "Ship faster"
+     }
+    },
+    {
+     "key": "calmer",
+     "weight": 20,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "usuário-ñ-日本",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "faster",
+  "reason": "match"
+ },
+ {
+  "name": "rule host without www",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "host",
+     "op": "is",
+     "values": [
+      "northpeak.example"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule host is_not",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "host",
+     "op": "is_not",
+     "values": [
+      "northpeak.example"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule path keeps escapes and case",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "is",
+     "values": [
+      "/pricing/team%20plan"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule path starts_with",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "starts_with",
+     "values": [
+      "/docs",
+      "/pricing"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule path ends_with miss",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "ends_with",
+     "values": [
+      "/team"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule url contains",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "url",
+     "op": "contains",
+     "values": [
+      "UTM_SOURCE=news"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule url not_contains",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "url",
+     "op": "not_contains",
+     "values": [
+      "checkout"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule query is",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.utm_source",
+     "op": "is",
+     "values": [
+      "news",
+      "ads"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule query exists empty",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.empty",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule query not_exists",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.missing",
+     "op": "not_exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule query missing is",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.missing",
+     "op": "is",
+     "values": [
+      ""
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule query missing is_not",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.missing",
+     "op": "is_not",
+     "values": [
+      "x"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule referrer contains",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "referrer",
+     "op": "contains",
+     "values": [
+      "search.example"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule device is",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "device",
+     "op": "is",
+     "values": [
+      "mobile",
+      "tablet"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule device miss",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "device",
+     "op": "is",
+     "values": [
+      "desktop"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule language starts_with",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "language",
+     "op": "starts_with",
+     "values": [
+      "en"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule signed_in false",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "signed_in",
+     "op": "is",
+     "values": [
+      "true"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule signed_in true",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "signed_in",
+     "op": "is",
+     "values": [
+      "true"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": true,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule signed_in exists",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "signed_in",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule property is",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "property.plan",
+     "op": "is",
+     "values": [
+      "pro"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule property missing exists",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "property.team",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule property missing not_contains",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "property.team",
+     "op": "not_contains",
+     "values": [
+      "x"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule property ends_with",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "property.seats",
+     "op": "ends_with",
+     "values": [
+      "2"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule no url host exists",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "host",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule no url path not_exists",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "not_exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule empty referrer exists",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "referrer",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule root path",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "is",
+     "values": [
+      "/"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule no path",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule host with port",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "host",
+     "op": "is",
+     "values": [
+      "localhost"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "http://localhost:3000/a",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule repeated query takes first",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.a",
+     "op": "is",
+     "values": [
+      "1"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/?a=1\u0026a=2",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule query plus is space",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.q",
+     "op": "is",
+     "values": [
+      "a b"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/?q=a+b",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule path with a space and letters outside ASCII",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "is",
+     "values": [
+      "/a%20b/%C3%BC"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/a b/ü",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule path re-encoded loses an escaped slash",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "is",
+     "values": [
+      "/a/b%20c"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/a%2fb c",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule path bad escape",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/a%zz",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule relative url has a path",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "path",
+     "op": "is",
+     "values": [
+      "/pricing"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "/pricing?x=1",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule relative url has no host",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "host",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "/pricing?x=1",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule host with sign-in and port",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "host",
+     "op": "is",
+     "values": [
+      "northpeak.example"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://ana:pw@WWW.northpeak.example:8443/x#frag?not=query",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule fragment is not query",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.not",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/x#frag?not=query",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule ipv6 host",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "host",
+     "op": "is",
+     "values": [
+      "::1"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "http://[::1]:8080/",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule query bad escape is dropped",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.a",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/?a=%zz\u0026b=1",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule query semicolon pair is dropped",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.b",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/?a=1;b=2",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule query key is decoded",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.a b",
+     "op": "is",
+     "values": [
+      "é"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/?a%20b=%C3%A9",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule query without value",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "query.flag",
+     "op": "is",
+     "values": [
+      ""
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "v",
+   "signed_in": false,
+   "url": "https://northpeak.example/?flag",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "two rules, second fails",
+  "flag": {
+   "key": "r2",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "device",
+     "op": "is",
+     "values": [
+      "mobile"
+     ]
+    },
+    {
+     "attribute": "language",
+     "op": "is",
+     "values": [
+      "de"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "https://www.Northpeak.example/Pricing/Team%20plan?utm_source=News\u0026plan=pro\u0026empty=",
+   "referrer": "https://search.example/results",
+   "device": "mobile",
+   "language": "en-GB",
+   "properties": {
+    "plan": "Pro",
+    "seats": "12"
+   },
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule list is known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "list",
+     "op": "is",
+     "values": [
+      "0b9f6c1e-5a55-4f0e-9d6f-0d2c7a1b3e44"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule list is any of known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "list",
+     "op": "is",
+     "values": [
+      "6d1a2f3b-7c88-4e21-b5a0-9f3e2d1c0b77",
+      "0b9f6c1e-5a55-4f0e-9d6f-0d2c7a1b3e44"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule list is another known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "list",
+     "op": "is",
+     "values": [
+      "6d1a2f3b-7c88-4e21-b5a0-9f3e2d1c0b77"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule list is_not known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "list",
+     "op": "is_not",
+     "values": [
+      "0b9f6c1e-5a55-4f0e-9d6f-0d2c7a1b3e44"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule user_id is known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "user_id",
+     "op": "is",
+     "values": [
+      "u-7",
+      "u-42"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule user_id is_not known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "user_id",
+     "op": "is_not",
+     "values": [
+      "u-42"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule user_id exists known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "user_id",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule person is known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.plan",
+     "op": "is",
+     "values": [
+      "pro"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule person is_not known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.plan",
+     "op": "is_not",
+     "values": [
+      "free"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule person starts_with known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.seats",
+     "op": "starts_with",
+     "values": [
+      "1"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule person exists known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.plan",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule person empty exists known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.note",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule person not_exists known",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.team",
+     "op": "not_exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-001",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "U-42",
+   "lists": [
+    "0B9F6C1E-5A55-4F0E-9D6F-0D2C7A1B3E44"
+   ],
+   "person": {
+    "note": "",
+    "plan": "Pro",
+    "seats": "12"
+   }
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule list is stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "list",
+     "op": "is",
+     "values": [
+      "0b9f6c1e-5a55-4f0e-9d6f-0d2c7a1b3e44"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule list is any of stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "list",
+     "op": "is",
+     "values": [
+      "6d1a2f3b-7c88-4e21-b5a0-9f3e2d1c0b77",
+      "0b9f6c1e-5a55-4f0e-9d6f-0d2c7a1b3e44"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule list is another stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "list",
+     "op": "is",
+     "values": [
+      "6d1a2f3b-7c88-4e21-b5a0-9f3e2d1c0b77"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule list is_not stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "list",
+     "op": "is_not",
+     "values": [
+      "0b9f6c1e-5a55-4f0e-9d6f-0d2c7a1b3e44"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule user_id is stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "user_id",
+     "op": "is",
+     "values": [
+      "u-7",
+      "u-42"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule user_id is_not stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "user_id",
+     "op": "is_not",
+     "values": [
+      "u-42"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule user_id exists stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "user_id",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule person is stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.plan",
+     "op": "is",
+     "values": [
+      "pro"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule person is_not stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.plan",
+     "op": "is_not",
+     "values": [
+      "free"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ },
+ {
+  "name": "rule person starts_with stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.seats",
+     "op": "starts_with",
+     "values": [
+      "1"
+     ]
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule person exists stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.plan",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule person empty exists stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.note",
+     "op": "exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "",
+  "reason": "rules"
+ },
+ {
+  "name": "rule person not_exists stranger",
+  "flag": {
+   "key": "r",
+   "variants": [
+    {
+     "key": "on",
+     "weight": 100,
+     "payload": null
+    }
+   ],
+   "rollout": 100,
+   "rules": [
+    {
+     "attribute": "person.team",
+     "op": "not_exists",
+     "values": null
+    }
+   ],
+   "salt": "s",
+   "group": "",
+   "group_from": 0,
+   "group_to": 0
+  },
+  "visitor": {
+   "subject": "visitor-002",
+   "signed_in": false,
+   "url": "",
+   "referrer": "",
+   "device": "",
+   "language": "",
+   "properties": {},
+   "user_id": "",
+   "lists": [],
+   "person": {}
+  },
+  "variant": "on",
+  "reason": "match"
+ }
+]

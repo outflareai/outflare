@@ -20,7 +20,7 @@ func TestUnmerge(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	acme := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
 	brand := "/v1/brands/" + acme
 	count := func(sql string, args ...any) int {
 		t.Helper()
@@ -79,7 +79,7 @@ func TestUnmerge(t *testing.T) {
 	// Only the brand's managers can undo it.
 	reader := agentToken(t, owner, base, "Reader", "customers.read")
 	reader.must(403, "POST", brand+"/merges/"+mergeID+"/undo", nil)
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "summitly"})
 	other := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	other.must(404, "POST", brand+"/merges/"+mergeID+"/undo", nil)
 	owner.must(404, "POST", "/v1/brands/"+rp+"/merges/"+mergeID+"/undo", nil)
@@ -183,7 +183,7 @@ func TestUndoBatch(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	acme := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})
 	brand := "/v1/brands/" + acme
 	e.integrations.Client.BaseURLs["attio"] = fakeAttioCRM(t).URL
 	e.runCRMImports(t)
@@ -255,7 +255,7 @@ func TestUndoBatch(t *testing.T) {
 	}
 
 	// Another brand's token sees nothing of it.
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "summitly"})
 	other := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	other.must(404, "GET", brand+"/batches/"+batch, nil)
 	other.must(404, "POST", brand+"/batches/"+batch+"/undo", map[string]any{"mode": "everything"})

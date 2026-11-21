@@ -358,7 +358,7 @@ type Ref struct{ Table, Column string }
 // when a column points at records and is neither here nor in Owned, so a
 // new link is never left behind on a merged record.
 var Follows = []Ref{
-	{"sales_leads", "record_id"}, {"sales_drafts", "record_id"}, {"sales_messages", "record_id"}, {"sales_events", "record_id"},
+	{"sales_leads", "record_id"}, {"sales_drafts", "record_id"}, {"sales_draft_assists", "record_id"}, {"sales_feed_items", "record_id"}, {"sales_messages", "record_id"}, {"sales_events", "record_id"},
 	// Money they paid or got back moves with them to the record kept.
 	{"transactions", "record_id"},
 	// Tracker conversions are revenue to the brand, like transactions.
@@ -421,6 +421,9 @@ var Owned = []Ref{
 	// The next refresh drops the merged record and adds the one kept, if
 	// it matches.
 	{"smart_list_members", "record_id"},
+	// The next sync takes the merged record out of the ad audience and
+	// adds the one kept, if it is in the list.
+	{"ad_audience_members", "record_id"},
 	// Where the merged record stood with each rule stays its own: the
 	// record kept has its own state, so it neither fires again nor misses
 	// its own timers.

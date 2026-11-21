@@ -12,9 +12,10 @@ import (
 
 // Click harvest (plans/paid-ads/plan.md, sync and alerts): a network that
 // reports its clicks one by one (Google's click_view) has each click's id
-// and the campaign, ad group, ad, keyword and device it came from. Once a
-// day the sync reads yesterday's clicks for every account into ad_clicks,
-// and on a connection's first sync the last 90 days, one day per query,
+// and the campaign, ad group, ad, keyword and device it came from. Every
+// run reads today's clicks so far for every account into ad_clicks, and
+// each finished day once more in full; on a connection's first sync it
+// reads the last 90 days, one day per query,
 // so a landing page that carried only a gclid can be tied to its ad group,
 // ad and keyword later (the ledger). Google keeps 90 days, so the harvest
 // never asks for more; ad_syncs.last_clicks_day is the watermark, and a
@@ -61,7 +62,8 @@ func (s *Syncer) harvestClicks(ctx context.Context, o *connectors.Opened, r conn
 			start = oldest
 		}
 	}
-	if yesterday.Sub(start) >= maxClickDays*24*time.Hour {
+	capped := yesterday.Sub(start) >= maxClickDays*24*time.Hour
+	if capped {
 		yesterday = start.AddDate(0, 0, maxClickDays-1)
 	}
 	connector := o.Connector.Definition().ID
@@ -84,6 +86,29 @@ func (s *Syncer) harvestClicks(ctx context.Context, o *connectors.Opened, r conn
 		done = &d
 	}
 	metrics.AdClicksHarvested(connector, stored)
+	if capped {
+		return done, stored, nil
+	}
+	// Caught up: read today's clicks so far as well, on every run. The
+	// network has a click in its report a few hours after it happens, so a
+	// new customer is tied to their campaign, ad and keyword the same day
+	// instead of the next morning. The watermark stays at yesterday, so the
+	// day is read again in full once it has ended; a click read twice is
+	// stored once.
+	for _, a := range on {
+		for day := yesterday.AddDate(0, 0, 1); !day.After(today(now, a.timeZone)); day = day.AddDate(0, 0, 1) {
+			clicks, err := r.AdClicks(ctx, o.Client, o.Creds, a.ad(), day.Format(time.DateOnly))
+			if err != nil {
+				metrics.AdClickHarvestFailed(connector, "connector_"+connectors.KindOf(err))
+				return done, stored, err
+			}
+			n, err := s.saveClicks(ctx, o.WorkspaceID, a, day, clicks)
+			if err != nil {
+				return done, stored, dbError{err}
+			}
+			stored += n
+		}
+	}
 	return done, stored, nil
 }
 

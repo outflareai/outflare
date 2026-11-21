@@ -283,7 +283,7 @@ func (s *Server) getSEOSite(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// siteAddress turns what someone typed (geonode.com, https://www.geonode.com/pricing)
+// siteAddress turns what someone typed (northpeak.example, https://www.northpeak.example/pricing)
 // into the site's start URL and host. The start URL keeps the path, so a
 // site can be a section such as /docs/.
 func (s *Server) siteAddress(raw string) (startURL, host string, err error) {

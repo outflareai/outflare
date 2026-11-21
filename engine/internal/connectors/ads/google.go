@@ -3,6 +3,8 @@ package ads
 import (
 	"context"
 	"fmt"
+	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -106,6 +108,10 @@ type gaqlRow struct {
 		Status                 string  `json:"status"`
 		AdvertisingChannelType string  `json:"advertisingChannelType"`
 		CampaignBudget         string  `json:"campaignBudget"`
+		// Whether it is really serving and why, and Google's score.
+		PrimaryStatus        string   `json:"primaryStatus"`
+		PrimaryStatusReasons []string `json:"primaryStatusReasons"`
+		OptimizationScore    *float64 `json:"optimizationScore"`
 		// How Google bids, and the target it bids to when it has one.
 		BiddingStrategyType string `json:"biddingStrategyType"`
 		TargetCpa           struct {
@@ -120,6 +126,10 @@ type gaqlRow struct {
 		MaximizeConversionValue struct {
 			TargetRoas float64 `json:"targetRoas"`
 		} `json:"maximizeConversionValue"`
+		TargetImpressionShare googleShare `json:"targetImpressionShare"`
+		TargetSpend           struct {
+			CpcBidCeilingMicros flexInt `json:"cpcBidCeilingMicros"`
+		} `json:"targetSpend"`
 		googleTracking
 		// The findings queue's reads (google_findings.go): the networks
 		// the campaign is on, and a portfolio bidding strategy, if any.
@@ -127,7 +137,12 @@ type gaqlRow struct {
 			TargetSearchNetwork  bool `json:"targetSearchNetwork"`
 			TargetContentNetwork bool `json:"targetContentNetwork"`
 		} `json:"networkSettings"`
-		BiddingStrategy string `json:"biddingStrategy"`
+		BiddingStrategy      string `json:"biddingStrategy"`
+		ResourceName         string `json:"resourceName"`
+		GeoTargetTypeSetting struct {
+			PositiveGeoTargetType string `json:"positiveGeoTargetType"`
+			NegativeGeoTargetType string `json:"negativeGeoTargetType"`
+		} `json:"geoTargetTypeSetting"`
 	} `json:"campaign"`
 	ConversionAction struct {
 		ID     flexInt `json:"id"`
@@ -182,6 +197,10 @@ type gaqlRow struct {
 		MaximizeConversionValue struct {
 			TargetRoas float64 `json:"targetRoas"`
 		} `json:"maximizeConversionValue"`
+		TargetImpressionShare googleShare `json:"targetImpressionShare"`
+		TargetSpend           struct {
+			CpcBidCeilingMicros flexInt `json:"cpcBidCeilingMicros"`
+		} `json:"targetSpend"`
 	} `json:"biddingStrategy"`
 	// The conversion feed's goal rows (google_feed.go).
 	Goal struct {
@@ -197,15 +216,28 @@ type gaqlRow struct {
 		CustomerTypeCategory string `json:"customerTypeCategory"`
 	} `json:"userListCustomerType"`
 	AdGroup struct {
-		ID     flexInt `json:"id"`
-		Name   string  `json:"name"`
-		Status string  `json:"status"`
+		ID                   flexInt  `json:"id"`
+		Name                 string   `json:"name"`
+		Status               string   `json:"status"`
+		PrimaryStatus        string   `json:"primaryStatus"`
+		PrimaryStatusReasons []string `json:"primaryStatusReasons"`
+		// The ad group's default bid for a click, used where its campaign
+		// bids by hand.
+		CpcBidMicros flexInt `json:"cpcBidMicros"`
 		googleTracking
 	} `json:"adGroup"`
 	AdGroupAd struct {
-		Status        string `json:"status"`
-		PolicySummary struct {
+		Status               string   `json:"status"`
+		PrimaryStatus        string   `json:"primaryStatus"`
+		PrimaryStatusReasons []string `json:"primaryStatusReasons"`
+		PolicySummary        struct {
 			ApprovalStatus string `json:"approvalStatus"`
+			// Why the network limited or refused the ad, in its own
+			// topic names (DESTINATION_NOT_WORKING).
+			PolicyTopicEntries []struct {
+				Topic string `json:"topic"`
+				Type  string `json:"type"`
+			} `json:"policyTopicEntries"`
 		} `json:"policySummary"`
 		Ad struct {
 			ID        flexInt  `json:"id"`
@@ -226,8 +258,11 @@ type gaqlRow struct {
 		} `json:"ad"`
 	} `json:"adGroupAd"`
 	UserList struct {
-		ID   flexInt `json:"id"`
-		Name string  `json:"name"`
+		ID                  flexInt  `json:"id"`
+		Name                string   `json:"name"`
+		SizeForSearch       *flexInt `json:"sizeForSearch"`
+		SizeForDisplay      *flexInt `json:"sizeForDisplay"`
+		MatchRatePercentage *flexInt `json:"matchRatePercentage"`
 	} `json:"userList"`
 	CampaignBudget struct {
 		AmountMicros flexInt `json:"amountMicros"`
@@ -241,6 +276,10 @@ type gaqlRow struct {
 		} `json:"keyword"`
 		ResourceName string `json:"resourceName"`
 		Negative     bool   `json:"negative"`
+		// The keyword's own bid for a click (0 when it takes its ad
+		// group's), and the bid in effect.
+		CpcBidMicros          flexInt `json:"cpcBidMicros"`
+		EffectiveCpcBidMicros flexInt `json:"effectiveCpcBidMicros"`
 		// What Google estimates the keyword must bid, and its quality
 		// score (RMF R.50).
 		PositionEstimates struct {
@@ -279,6 +318,15 @@ type gaqlRow struct {
 		Location struct {
 			GeoTargetConstant string `json:"geoTargetConstant"`
 		} `json:"location"`
+		CriterionID flexInt `json:"criterionId"`
+		Proximity   struct {
+			Radius      float64 `json:"radius"`
+			RadiusUnits string  `json:"radiusUnits"`
+			Address     struct {
+				CityName    string `json:"cityName"`
+				CountryCode string `json:"countryCode"`
+			} `json:"address"`
+		} `json:"proximity"`
 		// The findings queue's exclusions and negatives (google_findings.go).
 		Status      string  `json:"status"`
 		BidModifier float64 `json:"bidModifier"`
@@ -332,6 +380,10 @@ type gaqlRow struct {
 		ResourceName string `json:"resourceName"`
 		CountryCode  string `json:"countryCode"`
 		TargetType   string `json:"targetType"`
+		// The place in words, for a campaign's exclusions.
+		ID            flexInt `json:"id"`
+		Name          string  `json:"name"`
+		CanonicalName string  `json:"canonicalName"`
 	} `json:"geoTargetConstant"`
 	// The paid ads intelligence layer's reads (google_clicks.go,
 	// google_changes.go).
@@ -468,7 +520,8 @@ func (g GoogleAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds,
 	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
 		"SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.amount_micros, "+
 			"campaign.bidding_strategy_type, campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros, "+
-			"campaign.target_roas.target_roas, campaign.maximize_conversion_value.target_roas FROM campaign")
+			"campaign.target_roas.target_roas, campaign.maximize_conversion_value.target_roas, "+
+			"campaign.primary_status, campaign.primary_status_reasons, campaign.optimization_score FROM campaign")
 	if err != nil {
 		return nil, err
 	}
@@ -479,10 +532,68 @@ func (g GoogleAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds,
 		if b := int64(r.CampaignBudget.AmountMicros); b > 0 {
 			cp.DailyBudgetMicros = ptrI(b)
 		}
+		cp.PrimaryStatus, cp.PrimaryStatusReasons = googlePrimary(r.Campaign.PrimaryStatus, r.Campaign.PrimaryStatusReasons)
+		cp.OptimizationScore = r.Campaign.OptimizationScore
 		googleBidding(&cp, r)
 		out = append(out, cp)
 	}
+	g.lostShare(ctx, cl, creds, acct, out)
 	return out, nil
+}
+
+// lostShare fills in, for each enabled campaign, the share of searches it
+// missed over the last 7 days to its budget and to rank. Only search
+// campaigns have it; a failed read leaves the campaigns without it rather
+// than failing the sync.
+func (g GoogleAds) lostShare(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, camps []c.AdCampaign) {
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
+		"SELECT campaign.id, metrics.impressions, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share "+
+			"FROM campaign WHERE segments.date DURING LAST_7_DAYS AND campaign.status = 'ENABLED' AND campaign.advertising_channel_type = 'SEARCH'")
+	if err != nil {
+		return
+	}
+	byID := map[string]gaqlRow{}
+	for _, r := range rows {
+		byID[fmt.Sprint(int64(r.Campaign.ID))] = r
+	}
+	for i := range camps {
+		r, ok := byID[camps[i].ID]
+		if !ok || r.Metrics.Impressions == 0 {
+			continue
+		}
+		b, k := float64(r.Metrics.SearchBudgetLostImpressionShare), float64(r.Metrics.SearchRankLostImpressionShare)
+		camps[i].BudgetLostShare, camps[i].RankLostShare = &b, &k
+	}
+}
+
+// googleShare is a target impression share as Google writes it: the
+// share in micros of the whole (900000 is 90%).
+type googleShare struct {
+	Location               string  `json:"location"`
+	LocationFractionMicros flexInt `json:"locationFractionMicros"`
+	CpcBidCeilingMicros    flexInt `json:"cpcBidCeilingMicros"`
+}
+
+// read gives the share as a place, a fraction and a most per click; the
+// place is empty when the strategy isn't a target impression share.
+func (s googleShare) read() (string, *float64, *int64) {
+	if s.Location == "" || s.Location == "UNSPECIFIED" || s.Location == "UNKNOWN" {
+		return "", nil, nil
+	}
+	var cpc *int64
+	if s.CpcBidCeilingMicros > 0 {
+		cpc = ptrI(int64(s.CpcBidCeilingMicros))
+	}
+	return strings.ToLower(s.Location), ptrF(float64(s.LocationFractionMicros) / 1e6), cpc
+}
+
+// googleShareBody is a target impression share as Google's mutate takes it.
+func googleShareBody(location string, share *float64, maxCPC *int64) (map[string]any, error) {
+	if err := c.CheckImpressionShare(location, share, maxCPC); err != nil {
+		return nil, err
+	}
+	return map[string]any{"location": strings.ToUpper(location), "locationFractionMicros": strconv.FormatInt(int64(math.Round(*share*1e6)), 10),
+		"cpcBidCeilingMicros": strconv.FormatInt(*maxCPC, 10)}, nil
 }
 
 // googleBidding reads a campaign's bid strategy and the cost per
@@ -644,14 +755,16 @@ func (g GoogleAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acc
 	var q string
 	switch level {
 	case c.AdLevelGroup:
-		q = "SELECT ad_group.id, ad_group.name, ad_group.status, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED'"
+		q = "SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.primary_status, ad_group.primary_status_reasons, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED'"
 	case c.AdLevelAd:
 		q = "SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status, ad_group.id, ad_group_ad.ad.type, ad_group_ad.ad.final_urls, " +
 			"ad_group_ad.ad.final_url_suffix, ad_group_ad.ad.tracking_url_template, ad_group.final_url_suffix, ad_group.tracking_url_template, " +
 			"campaign.final_url_suffix, campaign.tracking_url_template, customer.final_url_suffix, customer.tracking_url_template, " +
 			"ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, " +
+			"ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, " +
 			"ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.ad.responsive_display_ad.descriptions, " +
-			"ad_group_ad.policy_summary.approval_status FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'"
+			"ad_group_ad.policy_summary.approval_status, ad_group_ad.policy_summary.policy_topic_entries, " +
+			"ad_group_ad.primary_status, ad_group_ad.primary_status_reasons FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'"
 	default:
 		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
 	}
@@ -662,8 +775,12 @@ func (g GoogleAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acc
 	out := make([]c.AdItem, 0, len(rows))
 	for _, r := range rows {
 		if level == c.AdLevelGroup {
-			out = append(out, c.AdItem{ID: fmt.Sprint(int64(r.AdGroup.ID)), ParentID: fmt.Sprint(int64(r.Campaign.ID)), Name: r.AdGroup.Name,
-				Status: status(r.AdGroup.Status), ProviderStatus: r.AdGroup.Status})
+			it := c.AdItem{ID: fmt.Sprint(int64(r.AdGroup.ID)), ParentID: fmt.Sprint(int64(r.Campaign.ID)), Name: r.AdGroup.Name,
+				Status: status(r.AdGroup.Status), ProviderStatus: r.AdGroup.Status}
+			if ps, why := googlePrimary(r.AdGroup.PrimaryStatus, r.AdGroup.PrimaryStatusReasons); ps != "" {
+				it.Details = map[string]string{c.AdDetailPrimaryStatus: ps, c.AdDetailPrimaryReasons: strings.Join(why, ",")}
+			}
+			out = append(out, it)
 			continue
 		}
 		ad := r.AdGroupAd.Ad
@@ -675,6 +792,15 @@ func (g GoogleAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acc
 			}
 			return ""
 		}
+		lines := func(l []struct{ Text string }) string {
+			var out []string
+			for _, t := range l {
+				if v := strings.TrimSpace(t.Text); v != "" {
+					out = append(out, v)
+				}
+			}
+			return strings.Join(out, "\n")
+		}
 		link := ""
 		if len(ad.FinalURLs) > 0 {
 			link = ad.FinalURLs[0]
@@ -682,16 +808,31 @@ func (g GoogleAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acc
 		headline := text(ad.ResponsiveSearchAd.Headlines, ad.ResponsiveDisplayAd.Headlines)
 		suffix := firstText(ad.FinalURLSuffix, r.AdGroup.FinalURLSuffix, r.Campaign.FinalURLSuffix, r.Customer.FinalURLSuffix)
 		template := firstText(ad.TrackingURLTemplate, r.AdGroup.TrackingURLTemplate, r.Campaign.TrackingURLTemplate, r.Customer.TrackingURLTemplate)
+		// The topics that block or limit the ad, each once, in words.
+		var reasons []string
+		for _, e := range r.AdGroupAd.PolicySummary.PolicyTopicEntries {
+			if w := policyTopic(e.Topic); w != "" && !slices.Contains(reasons, w) && len(reasons) < 5 {
+				reasons = append(reasons, w)
+			}
+		}
+		primary, primaryWhy := googlePrimary(r.AdGroupAd.PrimaryStatus, r.AdGroupAd.PrimaryStatusReasons)
 		it := c.AdItem{ID: fmt.Sprint(int64(ad.ID)), ParentID: fmt.Sprint(int64(r.AdGroup.ID)), Name: firstText(ad.Name, headline),
 			Status: status(r.AdGroupAd.Status), ProviderStatus: r.AdGroupAd.Status,
 			Details: adDetails(map[string]string{
 				c.AdDetailType:             strings.ToLower(ad.Type),
 				c.AdDetailHeadline:         headline,
 				c.AdDetailText:             text(ad.ResponsiveSearchAd.Descriptions, ad.ResponsiveDisplayAd.Descriptions),
+				c.AdDetailHeadlines:        lines(ad.ResponsiveSearchAd.Headlines),
+				c.AdDetailDescriptions:     lines(ad.ResponsiveSearchAd.Descriptions),
+				c.AdDetailPath1:            ad.ResponsiveSearchAd.Path1,
+				c.AdDetailPath2:            ad.ResponsiveSearchAd.Path2,
 				c.AdDetailURL:              link,
 				c.AdDetailURLTags:          suffix,
 				c.AdDetailTrackingTemplate: template,
 				c.AdDetailPolicy:           strings.ToLower(r.AdGroupAd.PolicySummary.ApprovalStatus),
+				c.AdDetailPolicyReasons:    strings.Join(reasons, "; "),
+				c.AdDetailPrimaryStatus:    primary,
+				c.AdDetailPrimaryReasons:   strings.Join(primaryWhy, ","),
 			})}
 		// Ads without a link of their own (Performance Max assets, app
 		// ads) say nothing either way.
@@ -1030,4 +1171,40 @@ func (g GoogleAds) AdjustConversions(ctx context.Context, cl *c.Client, creds c.
 		results[i].OK = true
 	}
 	return results, nil
+}
+
+// policyTopic puts one of the network's policy topic names in words:
+// DESTINATION_NOT_WORKING becomes "Destination not working". Anything that
+// isn't a plain topic name is dropped, so no free text gets through.
+func policyTopic(t string) string {
+	t = strings.TrimSpace(t)
+	if t == "" || len(t) > 80 {
+		return ""
+	}
+	for _, r := range t {
+		if !(r == '_' || r == ' ' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return ""
+		}
+	}
+	w := strings.ToLower(strings.ReplaceAll(t, "_", " "))
+	return strings.ToUpper(w[:1]) + w[1:]
+}
+
+// googlePrimary is a primary status and its reasons in lowercase, without
+// Google's placeholders (UNSPECIFIED, UNKNOWN).
+func googlePrimary(status string, reasons []string) (string, []string) {
+	clean := func(v string) string {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if v == "unspecified" || v == "unknown" {
+			return ""
+		}
+		return v
+	}
+	var why []string
+	for _, r := range reasons {
+		if r = clean(r); r != "" {
+			why = append(why, r)
+		}
+	}
+	return clean(status), why
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -82,6 +83,58 @@ type rankConnection struct {
 	IntegrationID string `json:"integration_id"`
 	Name          string `json:"name"`
 	Connector     string `json:"connector"`
+	// LastImport is what the last import of this site from the
+	// connection did; only on a site's imports, nil before the first.
+	LastImport *rankImport `json:"last_import,omitempty"`
+}
+
+// rankImport is the outcome of one import of tracked keywords.
+type rankImport struct {
+	RanAt time.Time `json:"ran_at"`
+	// Outcome is imported, no_project or failed.
+	Outcome      string   `json:"outcome"`
+	Project      string   `json:"project"`
+	Keywords     int      `json:"keywords"`
+	Added        int      `json:"added"`
+	Skipped      []string `json:"skipped"`
+	ProjectsSeen []string `json:"projects_seen"`
+	ErrorCode    string   `json:"error_code"`
+	Error        string   `json:"error"`
+}
+
+// withLastImports adds each import connection's last import of the site.
+func (s *Server) withLastImports(r *http.Request, siteID string, imports []rankConnection) error {
+	if len(imports) == 0 {
+		return nil
+	}
+	rows, err := s.pool.Query(r.Context(), `SELECT integration_id::text, ran_at, outcome, project, keywords, added, skipped, projects_seen, error_code, error
+		FROM rank_imports WHERE workspace_id = $1 AND site_id = $2`, accessFrom(r.Context()).WorkspaceID, siteID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var sk, sn []byte
+		m := &rankImport{}
+		if err := rows.Scan(&id, &m.RanAt, &m.Outcome, &m.Project, &m.Keywords, &m.Added, &sk, &sn, &m.ErrorCode, &m.Error); err != nil {
+			return err
+		}
+		_ = json.Unmarshal(sk, &m.Skipped)
+		_ = json.Unmarshal(sn, &m.ProjectsSeen)
+		if m.Skipped == nil {
+			m.Skipped = []string{}
+		}
+		if m.ProjectsSeen == nil {
+			m.ProjectsSeen = []string{}
+		}
+		for i := range imports {
+			if imports[i].IntegrationID == id {
+				imports[i].LastImport = m
+			}
+		}
+	}
+	return rows.Err()
 }
 
 // rankConnections are the workspace's connected SERP connections, the one
@@ -149,6 +202,9 @@ func (s *Server) listRankings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	imports, err := s.rankImports(r)
+	if err == nil {
+		err = s.withLastImports(r, site.ID, imports)
+	}
 	if err != nil {
 		s.internal(w, r, err)
 		return

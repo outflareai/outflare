@@ -68,12 +68,27 @@ type oaResponse struct {
 
 func str(s string) *string { return &s }
 
+// cachesOnRequest reports whether model, on provider, caches a prompt's
+// prefix only where the request marks it (cache_control): Anthropic's
+// models through OpenRouter. The other models a router or OpenAI-style
+// provider serves cache a repeated prefix by themselves, or not at all.
+func cachesOnRequest(p Provider, model string) bool {
+	return p.ID == OpenRouter.ID && strings.HasPrefix(strings.TrimPrefix(model, "~"), "anthropic/")
+}
+
 func (m *openAIModel) Chat(ctx context.Context, req Request) (Response, error) {
 	system := req.System
 	if req.Reference != "" {
 		system += "\n\n" + req.Reference
 	}
 	msgs := []any{oaMessage{Role: "system", Content: str(system)}}
+	if cachesOnRequest(m.c.Provider, m.c.Model) {
+		// Mark the stable prefix (the system prompt and the reference)
+		// for caching, as the Claude adapter does: a model behind a router
+		// that caches only where asked bills a cached read at a tenth.
+		msgs[0] = map[string]any{"role": "system", "content": []map[string]any{
+			{"type": "text", "text": system, "cache_control": map[string]any{"type": "ephemeral"}}}}
+	}
 	for _, msg := range req.Messages {
 		if msg.Role == "assistant" {
 			am := oaMessage{Role: "assistant", Content: str(msg.Text)}

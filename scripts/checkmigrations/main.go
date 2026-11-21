@@ -17,6 +17,11 @@
 //     which is the contract step of an expand/contract change.
 //
 //     go run ./scripts/checkmigrations -base origin/main -dir engine/internal/db/migrations
+//
+// With -additive it prints whether every added migration only adds to the
+// schema, in ways the previous version of the code cannot notice. CI runs
+// the previous version's tests on the new schema (the rollback check) only
+// when this says false.
 package main
 
 import (
@@ -34,6 +39,7 @@ import (
 func main() {
 	base := flag.String("base", "origin/main", "git ref the branch will merge into")
 	dir := flag.String("dir", "engine/internal/db/migrations", "migrations directory, relative to the repository root")
+	onlyAdds := flag.Bool("additive", false, "print true when every added migration only adds to the schema (see additive), false otherwise, and check nothing else")
 	flag.Parse()
 
 	changes, err := changed(*base, *dir)
@@ -59,7 +65,7 @@ func main() {
 				}
 				mergeBase = strings.TrimSpace(string(mb))
 			}
-			was, err := exec.Command("git", "show", mergeBase+":"+c.path).Output()
+			was, err := exec.Command("git", "show", mergeBase+":./"+c.path).Output()
 			now, err2 := os.ReadFile(c.path)
 			if err == nil && err2 == nil && sameStatements(was, now) {
 				commentOnly[c.path] = true
@@ -73,6 +79,16 @@ func main() {
 			}
 			added[c.path] = b
 		}
+	}
+	if *onlyAdds {
+		// Anything but new files (an edit, a comment reworded) gets the full
+		// rollback check: this answers only for migrations that are added.
+		ok := len(added) > 0 && len(added) == len(changes)
+		for _, sql := range added {
+			ok = ok && additive(sql)
+		}
+		fmt.Println(ok)
+		return
 	}
 	problems := check(changes, files, added, commentOnly)
 	for _, p := range problems {
@@ -88,8 +104,11 @@ func main() {
 type change struct{ status, path string }
 
 // changed lists the files under dir that differ from the merge base with base.
+// Paths are relative to the working directory (--relative, and ":./" in git
+// show above), so the check also works where the engine is a folder of a
+// larger repository and is run from that folder.
 func changed(base, dir string) ([]change, error) {
-	out, err := exec.Command("git", "diff", "--name-status", "--no-renames", base+"...HEAD", "--", dir).Output()
+	out, err := exec.Command("git", "diff", "--name-status", "--no-renames", "--relative", base+"...HEAD", "--", dir).Output()
 	if err != nil {
 		var stderr string
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -258,4 +277,81 @@ func unsafe(sql []byte) []string {
 		}
 	}
 	return found
+}
+
+// The statements a migration may hold and still count as only adding. Each
+// is matched against one whole statement, comments and string contents
+// removed, so anything else (a trigger, a function, a DO block, UPDATE, a
+// constraint on a table that already exists) is not on the list.
+var (
+	createTable  = regexp.MustCompile(`(?is)^create\s+table\s+(?:if\s+not\s+exists\s+)?([a-z0-9_."]+)\s*\(.*\)$`)
+	createIndex  = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+(?:concurrently\s+)?(?:if\s+not\s+exists\s+)?[a-z0-9_"]+\s+on\s+(?:only\s+)?([a-z0-9_."]+)\b`)
+	alterTable   = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([a-z0-9_."]+)\s+(.*)$`)
+	commentOn    = regexp.MustCompile(`(?is)^comment\s+on\s+`)
+	references   = regexp.MustCompile(`(?i)\breferences\b`)
+	gentleDelete = regexp.MustCompile(`(?i)\bon\s+delete\s+(cascade|set\s+null)\b`)
+)
+
+// additive reports whether a migration only adds things the previous
+// version of the code cannot notice, so that version's tests on the new
+// schema would show nothing: new tables and plain indexes. It is deliberately strict, and says false
+// whenever it cannot tell:
+//
+//   - CREATE TABLE, when every foreign key in it deletes or clears its rows
+//     with the row it points at (ON DELETE CASCADE or SET NULL). Any other
+//     foreign key would stop the old code deleting that row after a
+//     rollback, once the new code has written to the table;
+//   - CREATE INDEX on any table; CREATE UNIQUE INDEX only on a table this
+//     migration creates (on an existing table it can refuse the old code's
+//     writes);
+//   - any ALTER TABLE on a table this migration creates, and COMMENT ON.
+//
+// A new column on an existing table is not on the list, however harmless it
+// looks: the old code's queries can stop working when a join gains a second
+// column of the same name.
+//
+// A migration-safety note marks a contract step, which is never additive.
+func additive(sql []byte) bool {
+	if safetyNote.Match(sql) {
+		return false
+	}
+	code := blockComment.ReplaceAll(sql, nil)
+	code = lineComment.ReplaceAll(code, nil)
+	code = stringLit.ReplaceAll(code, []byte("''"))
+	gentle := func(s string) bool {
+		return len(references.FindAllString(s, -1)) == len(gentleDelete.FindAllString(s, -1))
+	}
+	created := map[string]bool{}
+	seen := false
+	for _, raw := range bytes.Split(code, []byte(";")) {
+		stmt := strings.TrimSpace(string(raw))
+		if stmt == "" {
+			continue
+		}
+		seen = true
+		if m := createTable.FindStringSubmatch(stmt); m != nil {
+			if !gentle(stmt) {
+				return false
+			}
+			created[strings.ToLower(m[1])] = true
+			continue
+		}
+		if m := createIndex.FindStringSubmatch(stmt); m != nil {
+			if m[1] != "" && !created[strings.ToLower(m[2])] {
+				return false
+			}
+			continue
+		}
+		if commentOn.MatchString(stmt) {
+			continue
+		}
+		// ALTER TABLE only on a table this migration creates. Even a nullable
+		// column added to an existing table can break the old code: a query
+		// that joins the table and names a column of the other side without
+		// its table then finds two columns of that name.
+		if m := alterTable.FindStringSubmatch(stmt); m == nil || !created[strings.ToLower(m[1])] {
+			return false
+		}
+	}
+	return seen
 }

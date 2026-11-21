@@ -86,6 +86,9 @@ type TrackedRanks struct {
 	// Skipped says what could not be mapped, such as an engine whose
 	// country is unknown.
 	Skipped []string
+	// Seen lists the sites the account's projects are for (at most 50),
+	// so an import that matched none can say what the account does have.
+	Seen []string
 }
 
 // TrackedRankReader reads positions an account already checks in its own

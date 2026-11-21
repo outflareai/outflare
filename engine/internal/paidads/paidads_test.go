@@ -178,6 +178,32 @@ func TestLedgerSignupPaymentRepeatRefund(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The same campaigns per day add up to the rows.
+	days, err := PerformanceDaily(ctx, f.pool, PerformanceQuery{WorkspaceID: f.ws, BrandID: f.brand, Level: LevelCampaign, From: from, To: to, Econ: econ})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var daySpend, rowSpend int64
+	var daySignups, dayPayers, rowSignups, rowPayers int
+	var dayClicks, rowClicks, dayRevenue, rowRevenue int64
+	for _, d := range days {
+		daySpend, daySignups, dayPayers = daySpend+d.SpendMicros, daySignups+d.Signups, dayPayers+d.NewPayers
+		dayClicks, dayRevenue = dayClicks+d.Clicks, dayRevenue+d.RevenueMicros
+	}
+	for _, r := range rows2 {
+		rowSpend, rowSignups, rowPayers = rowSpend+r.SpendMicros, rowSignups+r.Signups, rowPayers+r.NewPayers
+		rowClicks += r.Clicks
+		for _, m := range append(append([]Money{}, r.NewRevenue...), r.ReturningRevenue...) {
+			rowRevenue += m.AmountMinor * 10_000
+		}
+	}
+	// Clicks and revenue per day add up to the rows too.
+	if dayClicks != rowClicks || dayClicks == 0 || dayRevenue != rowRevenue || rowRevenue == 0 {
+		t.Fatalf("days clicks %d revenue %d against rows %d and %d: %+v", dayClicks, dayRevenue, rowClicks, rowRevenue, days)
+	}
+	if len(days) == 0 || daySpend != rowSpend || daySignups != rowSignups || dayPayers != rowPayers || rowSignups+rowPayers == 0 {
+		t.Fatalf("days %d/%d/%d against rows %d/%d/%d: %+v", daySpend, daySignups, dayPayers, rowSpend, rowSignups, rowPayers, days)
+	}
 	by := map[string]PerformanceRow{}
 	for _, r := range rows2 {
 		by[r.ID] = r
@@ -188,7 +214,11 @@ func TestLedgerSignupPaymentRepeatRefund(t *testing.T) {
 		len(s.LifetimeRevenue) != 1 || s.LifetimeRevenue[0].AmountMinor != 7800 || s.PaybackMonths == nil || s.Trend != "new" || s.PlatformConversions == nil {
 		t.Fatalf("spring: %+v", s)
 	}
-	if b := by[f.brandCamp]; b.Signups != 0 || b.NewPayers != 0 || b.TargetStatus != "no_spend" {
+	// Return on ad spend: $29 new and $49 returning revenue over $50 spent.
+	if s.ROAS == nil || *s.ROAS < 1.5599 || *s.ROAS > 1.5601 {
+		t.Fatalf("spring ROAS: %v", s.ROAS)
+	}
+	if b := by[f.brandCamp]; b.Signups != 0 || b.NewPayers != 0 || b.TargetStatus != "no_spend" || b.ROAS != nil {
 		t.Fatalf("brand campaign: %+v", b)
 	}
 	groups, err := Performance(ctx, f.pool, PerformanceQuery{WorkspaceID: f.ws, BrandID: f.brand, Level: LevelAdGroup, From: from, To: to, CampaignID: f.spring, Econ: econ})
@@ -315,6 +345,49 @@ func TestLedgerWindowAnonymousAndReturningByClick(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A customer who came another way and clicks an ad before a later payment
+// adds no revenue to the campaign: only people an ad brought in count.
+func TestReturningRevenueOnlyFromAcquiredCustomers(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	day := 24 * time.Hour
+	ed := f.person("Ed")
+	f.event(ed, nil, "payment.succeeded", f.now.Add(-6*day), `{"amount_minor": 5000, "currency": "USD", "payment_id": "ed_1"}`)
+	f.visit(&ed, "anon-ed", f.now.Add(-2*day), "222", "", "")
+	f.event(ed, nil, "payment.succeeded", f.now.Add(-1*day), `{"amount_minor": 5000, "currency": "USD", "payment_id": "ed_2"}`)
+	if _, err := f.ledger().RunWorkspace(ctx, f.ws); err != nil {
+		t.Fatal(err)
+	}
+	var acquired bool
+	var touch *string
+	if err := f.pool.QueryRow(ctx, `SELECT r.acquisition_id IS NOT NULL, r.touch_campaign_entity_id::text FROM ad_revenue r JOIN customer_events e ON e.id = r.event_id
+		WHERE r.brand_id = $1 AND e.properties->>'payment_id' = 'ed_2'`, f.brand).Scan(&acquired, &touch); err != nil {
+		t.Fatal(err)
+	}
+	if acquired || touch == nil || *touch != f.brandCamp {
+		t.Fatalf("Ed's second payment: acquired %v, touch %v", acquired, touch)
+	}
+	econ, err := Load(ctx, f.pool, f.ws, f.brand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.exec(`INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros, clicks, conversions, brand_id) VALUES ($1, current_date - 1, $2, 'USD', 50000000, 40, 2, $3)`, f.brandCamp, f.ws, f.brand)
+	rows, err := Performance(ctx, f.pool, PerformanceQuery{WorkspaceID: f.ws, BrandID: f.brand, Level: LevelCampaign, From: f.now.Add(-7 * day), To: f.now, Econ: econ})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.ID != f.brandCamp {
+			continue
+		}
+		if len(r.NewRevenue) != 0 || len(r.ReturningRevenue) != 0 || len(r.LifetimeRevenue) != 0 || r.NewPayers != 0 || r.ROAS == nil || *r.ROAS != 0 {
+			t.Fatalf("brand campaign counts a customer ads didn't bring: %+v", r)
+		}
+		return
+	}
+	t.Fatal("no brand campaign row")
 }
 
 func TestAutonomyAndLevers(t *testing.T) {

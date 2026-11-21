@@ -14,7 +14,7 @@ import type { Tab } from "../App";
 import { parsePath } from "@/lib/paths";
 
 // Brands: the businesses one company markets from a single workspace, such
-// as Geonode and Repocket. Connectors and the team stay shared, so nothing is
+// as Northpeak and Summitly. Connectors and the team stay shared, so nothing is
 // reconnected or re-invited; each brand has its own people, leads, context,
 // memories, lists, sequences, mailboxes and sending setup, and the sidebar
 // narrows every page to one brand.
@@ -141,8 +141,8 @@ export function Brands({ ws, canManage, canEdit, canDelete, open, setOpen, go, l
       )}
       <Card title="Ask your agent" description="In any MCP client connected to Outflare:">
         <ul className="space-y-1.5 text-sm text-muted-foreground">
-          <li>“Add Repocket as a brand and move its domains into it.”</li>
-          <li>“Read repocket.com and fill in what Repocket is, who it's for and how it sounds.”</li>
+          <li>“Add Summitly as a brand and move its domains into it.”</li>
+          <li>“Read summitly.example and fill in what Summitly is, who it's for and how it sounds.”</li>
           <li>“How did each of our brands do last month?”</li>
         </ul>
       </Card>
@@ -304,8 +304,8 @@ export function AddBrand({ ws, onClose, onAdded }: { ws: string; onClose: () => 
           <SheetDescription>A business you market with its own website. Connectors and the team are shared, so there is nothing to reconnect.</SheetDescription>
         </SheetHeader>
         <form onSubmit={submit} className="space-y-5 px-4 pb-6">
-          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required autoFocus placeholder="Repocket" />
-          <Input label="Website" hint="Its point of truth. Analytics for this domain count as the brand's." value={website} onChange={(e) => setWebsite(e.target.value)} maxLength={253} placeholder="repocket.com" />
+          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required autoFocus placeholder="Summitly" />
+          <Input label="Website" hint="Its point of truth. Analytics for this domain count as the brand's." value={website} onChange={(e) => setWebsite(e.target.value)} maxLength={253} placeholder="summitly.example" />
           <PlatformPicker value={picked} onChange={setPicked} />
           <ErrorText>{error}</ErrorText>
           <div className="flex gap-2">
@@ -771,14 +771,14 @@ function DetailsCard({ ws, brand: b, canManage, onSaved, go }: { ws: string; bra
   }
 
   return (
-    <Card title="Details" description="Its name, website, other domains and links. The handle names the brand in links (/acme/repocket/seo) and API calls (?brand=).">
+    <Card title="Details" description="Its name, website, other domains and links. The handle names the brand in links (/acme/summitly/seo) and API calls (?brand=).">
       <form onSubmit={save} className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
           <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={100} readOnly={ro} required />
           <Input label="Handle" value={form.handle} onChange={(e) => setForm({ ...form, handle: e.target.value.toLowerCase() })} maxLength={40} readOnly={ro} required />
         </div>
-        <Input label="Website" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} maxLength={253} readOnly={ro} placeholder="repocket.com" />
-        <Input label="Other domains" hint="Separated by commas, such as its app and help sites." value={form.domains} onChange={(e) => setForm({ ...form, domains: e.target.value })} readOnly={ro} placeholder="repocket.co, help.repocket.com" />
+        <Input label="Website" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} maxLength={253} readOnly={ro} placeholder="summitly.example" />
+        <Input label="Other domains" hint="Separated by commas, such as its app and help sites." value={form.domains} onChange={(e) => setForm({ ...form, domains: e.target.value })} readOnly={ro} placeholder="summitly.co, help.summitly.example" />
         <PlatformPicker value={form.platforms} onChange={(platforms) => setForm({ ...form, platforms })} readOnly={ro} />
         <LinksEditor value={form.links} onChange={(links) => setForm({ ...form, links })} readOnly={ro} />
         <LinkSuggestions

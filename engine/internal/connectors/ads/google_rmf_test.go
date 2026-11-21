@@ -237,6 +237,35 @@ func TestGooglePortfolios(t *testing.T) {
 	if err := g.SetBidding(ctx, cl, creds, acct, "7", c.AdBidding{Strategy: c.BidPortfolio}); c.KindOf(err) != c.ErrInvalid {
 		t.Fatalf("no strategy: %v", err)
 	}
+	// A target impression share strategy: all of the absolute top, at
+	// most 5.00 a click, on a portfolio and on a campaign itself.
+	share, cpc := 1.0, int64(5_000_000)
+	spec := c.AdPortfolioSpec{Name: "Top", Type: c.PortfolioImpressionShare, ImpressionShareLocation: c.ShareAbsoluteTop, ImpressionShare: &share, MaxCPCMicros: &cpc}
+	if _, err := g.CreatePortfolio(ctx, cl, creds, acct, spec); err != nil {
+		t.Fatal(err)
+	}
+	tis := firstOp(t, bodyOf(t, *reqs, "/v23/customers/111/biddingStrategies:mutate"))["create"].(map[string]any)["targetImpressionShare"].(map[string]any)
+	if tis["location"] != "ABSOLUTE_TOP_OF_PAGE" || tis["locationFractionMicros"] != "1000000" || tis["cpcBidCeilingMicros"] != "5000000" {
+		t.Fatalf("share strategy %v", tis)
+	}
+	spec.MaxCPCMicros = nil
+	if _, err := g.CreatePortfolio(ctx, cl, creds, acct, spec); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("no most per click: %v", err)
+	}
+	if err := g.SetBidding(ctx, cl, creds, acct, "7", c.AdBidding{Strategy: c.BidImpressionShare, ImpressionShareLocation: c.ShareAbsoluteTop, ImpressionShare: &share, MaxCPCMicros: &cpc}); err != nil {
+		t.Fatal(err)
+	}
+	upd = firstOp(t, bodyOf(t, *reqs, "/v23/customers/111/campaigns:mutate"))
+	if !strings.Contains(upd["updateMask"].(string), "target_impression_share.location_fraction_micros") ||
+		upd["update"].(map[string]any)["targetImpressionShare"].(map[string]any)["cpcBidCeilingMicros"] != "5000000" {
+		t.Fatalf("share campaign %v", upd)
+	}
+	if err := g.SetBidding(ctx, cl, creds, acct, "7", c.AdBidding{Strategy: c.BidMaxClicks, MaxCPCMicros: &cpc}); err != nil {
+		t.Fatal(err)
+	}
+	if upd = firstOp(t, bodyOf(t, *reqs, "/v23/customers/111/campaigns:mutate")); upd["updateMask"] != "target_spend.cpc_bid_ceiling_micros" {
+		t.Fatalf("max clicks %v", upd)
+	}
 	rep, err := g.AdPortfolioReport(ctx, cl, creds, acct, "2026-10-01", "2026-10-28")
 	if err != nil || len(rep) != 2 {
 		t.Fatalf("report %+v %v", rep, err)
@@ -376,5 +405,39 @@ func TestGoogleRMFReportFields(t *testing.T) {
 		if !strings.Contains(all, f) {
 			t.Fatalf("no %s in the queries", f)
 		}
+	}
+}
+
+// A disapproved ad carries the network's reasons in words, each once, and
+// nothing that isn't a plain topic name.
+func TestGoogleAdPolicyReasons(t *testing.T) {
+	cl, _ := googleFake(t, func(q string) any {
+		if !strings.Contains(q, "policy_summary.policy_topic_entries") {
+			t.Errorf("the ads query doesn't ask for the policy topics: %s", q)
+		}
+		return map[string]any{"results": []any{map[string]any{
+			"adGroup": map[string]any{"id": "5"},
+			"adGroupAd": map[string]any{"status": "ENABLED", "ad": map[string]any{"id": "9", "name": "Desk lamps",
+				"responsiveSearchAd": map[string]any{"path1": "lamps", "headlines": []any{map[string]any{"text": "Desk lamps"}, map[string]any{"text": " Free delivery "}},
+					"descriptions": []any{map[string]any{"text": "Lamps for every desk."}}}},
+				"policySummary": map[string]any{"approvalStatus": "DISAPPROVED", "policyTopicEntries": []any{
+					map[string]any{"topic": "DESTINATION_NOT_WORKING", "type": "PROHIBITED"},
+					map[string]any{"topic": "DESTINATION_NOT_WORKING", "type": "PROHIBITED"},
+					map[string]any{"topic": "TRADEMARKS_IN_AD_TEXT", "type": "LIMITED"},
+					map[string]any{"topic": "<b>not a topic</b>", "type": "PROHIBITED"},
+				}}},
+		}}}
+	}, nil)
+	items, err := GoogleAds{}.AdItems(ctx, cl, c.Creds{"access_token": "tok"}, c.AdAccount{ID: "111"}, c.AdLevelAd)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("%v %v", items, err)
+	}
+	d := items[0].Details
+	if d[c.AdDetailPolicy] != "disapproved" || d[c.AdDetailPolicyReasons] != "Destination not working; Trademarks in ad text" {
+		t.Fatalf("details %v", d)
+	}
+	// The whole text of a search ad, for its preview.
+	if d[c.AdDetailHeadlines] != "Desk lamps\nFree delivery" || d[c.AdDetailDescriptions] != "Lamps for every desk." || d[c.AdDetailPath1] != "lamps" || d[c.AdDetailPath2] != "" {
+		t.Fatalf("text %q", d)
 	}
 }

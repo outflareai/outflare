@@ -43,7 +43,7 @@ func Daily(ctx context.Context, q Querier, brandID string, entityIDs []string, f
 			WHERE a.brand_id = $1 AND a.campaign_entity_id = ANY($2::uuid[]) AND r.currency = $5 AND r.occurred_at >= $3::date AND r.occurred_at < $4::date + 1
 			UNION ALL
 			SELECT r.touch_campaign_entity_id, (r.occurred_at AT TIME ZONE 'UTC')::date, 0, 0, 0, r.value_minor, 0
-			FROM ad_revenue r WHERE r.brand_id = $1 AND r.bucket = 'returning' AND r.touch_campaign_entity_id = ANY($2::uuid[]) AND r.currency = $5
+			FROM ad_revenue r WHERE r.brand_id = $1 AND r.bucket = 'returning' AND r.acquisition_id IS NOT NULL AND r.touch_campaign_entity_id = ANY($2::uuid[]) AND r.currency = $5
 			  AND r.occurred_at >= $3::date AND r.occurred_at < $4::date + 1
 		) x GROUP BY 1, 2`, brandID, entityIDs, f, t, currency)
 	if err != nil {

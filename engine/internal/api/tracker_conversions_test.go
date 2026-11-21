@@ -100,6 +100,22 @@ func TestTrackerConversions(t *testing.T) {
 	if len(got) != 1 || got[0].(map[string]any)["status"] != "declined" || got[0].(map[string]any)["payout"] != "20" || got[0].(map[string]any)["postbacks"] != float64(4) {
 		t.Fatalf("after updates: %v", got)
 	}
+	// An update changes only what it names: a status with no payout keeps
+	// the payout, a payout with no status keeps the status, and neither
+	// touches the type or drops the parameters.
+	call(host, "GET", token+"?cid="+k1+"&txid=T-1&status=approved", nil, "")
+	call(host, "GET", token+"?cid="+k1+"&txid=T-1&status=pending&p2=late", nil, "")
+	got = owner.must(200, "GET", base+"/tracker-conversions?source="+sid, nil)["data"].([]any)
+	kept := got[0].(map[string]any)
+	if kept["status"] != "pending" || kept["payout"] != "20" || kept["currency"] != "EUR" || kept["type"] != "sale" ||
+		kept["params"].(map[string]any)["1"] != "zone-9" || kept["params"].(map[string]any)["2"] != "late" || kept["postbacks"] != float64(6) {
+		t.Fatalf("a status-only update: %v", kept)
+	}
+	call(host, "GET", token+"?cid="+k1+"&txid=T-1&payout=21.5", nil, "")
+	got = owner.must(200, "GET", base+"/tracker-conversions?source="+sid, nil)["data"].([]any)
+	if kept = got[0].(map[string]any); kept["status"] != "pending" || kept["payout"] != "21.5" || kept["type"] != "sale" {
+		t.Fatalf("a payout-only update: %v", kept)
+	}
 	// "new" records each one.
 	owner.must(200, "PATCH", base+"/postback-sources/"+sid, map[string]any{"duplicate_policy": "new"})
 	call(host, "GET", token+"?cid="+k1+"&payout=1&txid=T-1", nil, "")
@@ -122,6 +138,17 @@ func TestTrackerConversions(t *testing.T) {
 	}
 	if rec := call(host, "GET", token+"?cid="+k2+"&payout=3&txid=T-2&type=lead", nil, ""); rec.Code != 200 {
 		t.Fatalf("person's postback: %d %s", rec.Code, rec.Body)
+	}
+	// A postback that carries the network's own click id as cid and the
+	// click key as ofclk credits the click: ofclk wins when it is a key.
+	if rec := call(host, "GET", token+"?cid=net-click-778899&ofclk="+k2+"&txid=T-2", nil, ""); rec.Code != 200 {
+		t.Fatalf("cid and ofclk: %d %s", rec.Code, rec.Body)
+	}
+	// No campaign of these has a traffic source, and each one says so.
+	for _, c := range owner.must(200, "GET", base+"/tracker-conversions", nil)["data"].([]any) {
+		if np := c.(map[string]any)["network_postback"]; np != "no_traffic_source" {
+			t.Errorf("network_postback: %v, want no_traffic_source", np)
+		}
 	}
 	var onTimeline int
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM customer_events WHERE workspace_id = $1 AND record_id = $2 AND name = 'tracker.converted'
@@ -170,7 +197,7 @@ func TestTrackerConversions(t *testing.T) {
 	if rec := call(host, "GET", newToken+"?cid="+k2+"&txid=T-4", nil, "203.0.113.9:4000"); rec.Code != 200 {
 		t.Fatalf("new secret: %d %s", rec.Code, rec.Body)
 	}
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	if n := len(owner.must(200, "GET", "/v1/brands/"+other["id"].(string)+"/tracker-conversions", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("another brand sees %d conversions", n)
 	}

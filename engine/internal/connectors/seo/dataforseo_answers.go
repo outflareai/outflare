@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"strings"
+	"time"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
@@ -43,6 +44,11 @@ func (DataForSEO) EstimateAnswer(string) c.SEOCost {
 // at most 500 characters.
 const maxAnswerPrompt = 500
 
+// answerWait is how long the live LLM Scraper may take to answer: the
+// assistant searches the web and writes, which takes a minute or more,
+// well over the client's usual timeout.
+const answerWait = 3 * time.Minute
+
 // Answer asks one assistant one question with the live LLM Scraper.
 func (d DataForSEO) Answer(ctx context.Context, cl *c.Client, creds c.Creds, engine string, q c.AnswerQuery) (c.AnswerResult, error) {
 	out := c.AnswerResult{Engine: engine, Brands: []string{}, Cited: []c.AnswerPage{}, Read: []c.AnswerPage{}, Searches: []string{}}
@@ -77,7 +83,10 @@ func (d DataForSEO) Answer(ctx context.Context, cl *c.Client, creds c.Creds, eng
 	}
 	task := map[string]any{"keyword": prompt, "location_code": loc.code, "language_code": lang, "force_web_search": q.WebSearch}
 	var resp dfsResponse[map[string]any]
-	if err := d.call(ctx, cl, creds, "/v3/ai_optimization/"+se+"/llm_scraper/live/advanced", task, &resp, &out.Cost); err != nil {
+	err := postWithin(ctx, cl, "DataForSEO", cl.Base("dataforseo", dataForSEOAPI)+"/v3/ai_optimization/"+se+"/llm_scraper/live/advanced",
+		d.header(creds), []map[string]any{task}, &resp, answerWait)
+	out.Cost.USD += resp.Cost
+	if err != nil {
 		return out, err
 	}
 	result, err := resp.first("DataForSEO")

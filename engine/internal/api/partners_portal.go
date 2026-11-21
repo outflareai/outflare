@@ -386,6 +386,7 @@ func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	// Unknown portal paths must never reach the dashboard SPA fallback.
 	mux.HandleFunc("/p/", http.NotFound)
 	s.routesPartnerProposals(mux)
+	s.routesPartnerOfferSettings(mux)
 	s.routesPartnerTasks(mux)
 	s.routesPartnerFlags(mux)
 	s.routesPartnerPostbacks(mux)

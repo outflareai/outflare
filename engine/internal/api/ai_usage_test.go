@@ -31,17 +31,24 @@ func TestAIUsage(t *testing.T) {
 
 	// Before any call every tool is listed, with nothing spent.
 	u := owner.must(200, "GET", base+"/ai-usage", nil)
-	if u["month"] != time.Now().UTC().Format("2006-01") || u["total"].(map[string]any)["calls"].(float64) != 0 || len(u["tools"].([]any)) != 27 {
+	if u["month"] != time.Now().UTC().Format("2006-01") || u["total"].(map[string]any)["calls"].(float64) != 0 || len(u["tools"].([]any)) != 33 {
 		t.Fatalf("empty usage = %v", u)
 	}
-	coverageFound := false
+	coverageFound, salesDraftFound := false, false
 	for _, entry := range u["tools"].([]any) {
-		if tool := entry.(map[string]any); tool["task"] == "coverage_review" {
+		tool := entry.(map[string]any)
+		if tool["task"] == "coverage_review" {
 			coverageFound = tool["calls"] == 0.0 && tool["cost_cents"] == 0.0
+		}
+		if tool["task"] == "sales_reply_draft" {
+			salesDraftFound = tool["name"] == "Sales reply drafts" && tool["calls"] == 0.0 && tool["cost_cents"] == 0.0
 		}
 	}
 	if !coverageFound {
 		t.Fatal("Coverage assistance must be independently visible in usage before its first call")
+	}
+	if !salesDraftFound {
+		t.Fatal("Sales reply drafts must be independently visible in usage before their first call")
 	}
 	owner.must(400, "GET", base+"/ai-usage?month=2026-13", nil)
 
@@ -233,7 +240,7 @@ func TestAIUsageExtensionTool(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	u := owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"lead_finder": 300}})
 	tools := u["tools"].([]any)
-	if len(tools) != 28 {
+	if len(tools) != 34 {
 		t.Fatalf("tools = %v", tools)
 	}
 	var found bool

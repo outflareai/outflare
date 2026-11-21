@@ -22,9 +22,11 @@ func TestEmailFinderEndpoints(t *testing.T) {
 	}
 
 	// Find proposes an address for a person and echoes the caller's ref.
+	// An item may carry the person's LinkedIn profile.
 	find := owner.must(200, "POST", base+"/find", map[string]any{
 		"items": []map[string]any{
-			{"ref": "a1", "first_name": "Alice", "last_name": "Nguyen", "domain": "acme.example"},
+			{"ref": "a1", "first_name": "Alice", "last_name": "Nguyen", "domain": "acme.example",
+				"linkedin_url": "https://www.linkedin.com/in/alice-nguyen-example"},
 		},
 	})
 	items, _ := find["data"].(map[string]any)["items"].([]any)

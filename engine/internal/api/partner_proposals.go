@@ -49,6 +49,9 @@ type proposalConfig struct {
 	CommissionTerms    string                `json:"commission_terms"`
 	Deliverables       []proposalDeliverable `json:"deliverables"`
 	Milestones         []proposalMilestone   `json:"milestones"`
+	// Removal is the brand's rule for a paid link removed after payment,
+	// copied in when the offer is sent; what a client sends is ignored.
+	Removal *linkRule `json:"removal,omitempty"`
 }
 type proposalDeliveryProgress struct {
 	URL         string     `json:"url"`
@@ -61,7 +64,34 @@ type proposalMilestoneProgress struct {
 	Note       string     `json:"note"`
 	RewardIDs  []string   `json:"reward_ids"`
 }
+
+// proposalCounterChange is what a recipient may change on one deliverable in a
+// counter-offer: which of their pages, the link text and the publish date. The
+// link's destination, its type and how long it stays up are never theirs to
+// change.
+type proposalCounterChange struct {
+	PlacementURL string `json:"placement_url,omitempty"`
+	LinkText     string `json:"link_text,omitempty"`
+	Deadline     string `json:"deadline,omitempty"`
+}
+
+// proposalCounter is one counter-offer from the recipient. AmountCents is the
+// total price they ask for (0 keeps the offered price).
+type proposalCounter struct {
+	Round       int                              `json:"round"`
+	AmountCents int64                            `json:"amount_cents"`
+	Changes     map[string]proposalCounterChange `json:"changes"`
+	Note        string                           `json:"note"`
+	At          time.Time                        `json:"at"`
+	AcceptedAt  *time.Time                       `json:"accepted_at,omitempty"`
+}
+
+// maxCounterRounds is how many counter-offers a recipient may send on one
+// proposal before they have to accept, decline or write to the brand.
+const maxCounterRounds = 3
+
 type proposalProgress struct {
+	Counters     []proposalCounter                    `json:"counters"`
 	Deliverables map[string]proposalDeliveryProgress  `json:"deliverables"`
 	Milestones   map[string]proposalMilestoneProgress `json:"milestones"`
 	InvoiceNote  string                               `json:"invoice_note"`
@@ -150,6 +180,9 @@ func scanProposal(row pgx.Row) (proposalView, error) {
 	}
 	if v.Progress.Milestones == nil {
 		v.Progress.Milestones = map[string]proposalMilestoneProgress{}
+	}
+	if v.Progress.Counters == nil {
+		v.Progress.Counters = []proposalCounter{}
 	}
 	return v, err
 }
@@ -242,6 +275,7 @@ func (s *Server) createPartnerProposal(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		in.Config.Removal = nil
 		raw, _ := json.Marshal(in.Config)
 		if err := tx.QueryRow(ctx, `INSERT INTO partner_proposals(workspace_id,brand_id,program_id,membership_id,record_id,config) VALUES($1,$2,$3,$4,$5,$6) RETURNING id::text`, a.WorkspaceID, p.BrandID, p.ID, member, rec, raw).Scan(&id); err != nil {
 			return err
@@ -259,14 +293,15 @@ func (s *Server) createPartnerProposal(w http.ResponseWriter, r *http.Request) {
 }
 
 type proposalAction struct {
-	Action        string          `json:"action"`
-	Version       int             `json:"version"`
-	Config        *proposalConfig `json:"config"`
-	DeliverableID string          `json:"deliverable_id"`
-	MilestoneID   string          `json:"milestone_id"`
-	URL           string          `json:"url"`
-	Note          string          `json:"note"`
-	Amount        int64           `json:"amount_cents"`
+	Action        string                           `json:"action"`
+	Version       int                              `json:"version"`
+	Config        *proposalConfig                  `json:"config"`
+	DeliverableID string                           `json:"deliverable_id"`
+	MilestoneID   string                           `json:"milestone_id"`
+	URL           string                           `json:"url"`
+	Note          string                           `json:"note"`
+	Amount        int64                            `json:"amount_cents"`
+	Changes       map[string]proposalCounterChange `json:"changes"`
 }
 
 func (s *Server) updatePartnerProposal(w http.ResponseWriter, r *http.Request) {
@@ -284,6 +319,109 @@ func (s *Server) portalProposalAction(w http.ResponseWriter, r *http.Request, c 
 	}
 	s.changeProposal(w, r, c.program.id, c.program.ws, c.program.brandID, c.partner.ID, nil, true)
 }
+
+// checkCounter validates a counter-offer against the offer it answers. Only the
+// price and, per deliverable, the recipient's page, the link text and the
+// publish date can change.
+func checkCounter(cfg proposalConfig, in proposalAction) (proposalCounter, error) {
+	c := proposalCounter{AmountCents: in.Amount, Note: strings.TrimSpace(in.Note), Changes: map[string]proposalCounterChange{}}
+	if c.AmountCents < 0 || c.AmountCents > 1e8 {
+		return c, errInvalid("the price must be between 0 and 1,000,000")
+	}
+	if c.AmountCents > 0 && fixedFeeTotal(cfg) == 0 {
+		return c, errInvalid("this offer has no price to change; write to the brand instead")
+	}
+	known := map[string]proposalDeliverable{}
+	for _, d := range cfg.Deliverables {
+		known[d.ID] = d
+	}
+	for id, ch := range in.Changes {
+		d, ok := known[id]
+		if !ok {
+			return c, errInvalid("choose a deliverable from this offer")
+		}
+		ch.PlacementURL = strings.TrimSpace(ch.PlacementURL)
+		ch.LinkText = strings.TrimSpace(ch.LinkText)
+		ch.Deadline = strings.TrimSpace(ch.Deadline)
+		if ch.PlacementURL != "" {
+			if _, err := utm.Destination(ch.PlacementURL); err != nil || len(ch.PlacementURL) > 2000 {
+				return c, errInvalid("your page must be a full http or https address")
+			}
+		}
+		if len(ch.LinkText) > 500 || len(ch.Deadline) > 200 {
+			return c, errInvalid("link text is at most 500 characters and the publish date at most 200")
+		}
+		if ch.PlacementURL == d.PlacementURL {
+			ch.PlacementURL = ""
+		}
+		if ch.LinkText == d.LinkText {
+			ch.LinkText = ""
+		}
+		if ch.Deadline == d.Deadline {
+			ch.Deadline = ""
+		}
+		if ch != (proposalCounterChange{}) {
+			c.Changes[id] = ch
+		}
+	}
+	if c.AmountCents == fixedFeeTotal(cfg) {
+		c.AmountCents = 0
+	}
+	if c.AmountCents == 0 && len(c.Changes) == 0 {
+		return c, errInvalid("change the price, your page, the link text or the publish date, or accept the offer as it is")
+	}
+	return c, nil
+}
+
+// fixedFeeTotal is the offer's price: the sum of its milestone fees.
+func fixedFeeTotal(cfg proposalConfig) int64 {
+	var t int64
+	for _, m := range cfg.Milestones {
+		t += m.Amount
+	}
+	return t
+}
+
+// applyCounter writes an accepted counter-offer into the offer's terms. A new
+// price is spread over the paid milestones in their current proportions, with
+// any rounding left on the last one.
+func applyCounter(cfg *proposalConfig, c proposalCounter) error {
+	for i := range cfg.Deliverables {
+		ch, ok := c.Changes[cfg.Deliverables[i].ID]
+		if !ok {
+			continue
+		}
+		if ch.PlacementURL != "" {
+			cfg.Deliverables[i].PlacementURL = ch.PlacementURL
+		}
+		if ch.LinkText != "" {
+			cfg.Deliverables[i].LinkText = ch.LinkText
+		}
+		if ch.Deadline != "" {
+			cfg.Deliverables[i].Deadline = ch.Deadline
+		}
+	}
+	if c.AmountCents <= 0 {
+		return nil
+	}
+	old := fixedFeeTotal(*cfg)
+	if old == 0 {
+		return errInvalid("this offer has no price to change")
+	}
+	last := -1
+	var spread int64
+	for i := range cfg.Milestones {
+		if cfg.Milestones[i].Amount == 0 {
+			continue
+		}
+		last = i
+		cfg.Milestones[i].Amount = cfg.Milestones[i].Amount * c.AmountCents / old
+		spread += cfg.Milestones[i].Amount
+	}
+	cfg.Milestones[last].Amount += c.AmountCents - spread
+	return nil
+}
+
 func (s *Server) changeProposal(w http.ResponseWriter, r *http.Request, program, ws string, brand *string, member string, actor *principal, partner bool) {
 	var in proposalAction
 	if !decode(w, r, &in) {
@@ -322,6 +460,25 @@ func (s *Server) changeProposal(w http.ResponseWriter, r *http.Request, program,
 				} else {
 					v.Status = "declined"
 				}
+			case "counter":
+				if v.Status != "offered" {
+					return errInvalid("only a current offer can be countered")
+				}
+				if len(v.Progress.Counters) >= maxCounterRounds {
+					return errInvalid("this offer has had 3 rounds of changes; accept it, decline it or write to the brand")
+				}
+				c, err := checkCounter(v.Config, in)
+				if err != nil {
+					return err
+				}
+				c.Round = len(v.Progress.Counters) + 1
+				c.At = now
+				v.Progress.Counters = append(v.Progress.Counters, c)
+				if c.AmountCents > 0 {
+					v.Progress.QuotedCents = c.AmountCents
+				}
+				v.Progress.QuoteNote = c.Note
+				v.Status = "quote_received"
 			case "quote":
 				if v.Status != "quote_requested" || in.Amount <= 0 || in.Amount > 1e8 {
 					return errInvalid("submit a positive quote for a quote request")
@@ -356,7 +513,7 @@ func (s *Server) changeProposal(w http.ResponseWriter, r *http.Request, program,
 				}
 				v.Progress.Deliverables[in.DeliverableID] = proposalDeliveryProgress{URL: in.URL, Note: in.Note, SubmittedAt: &now}
 			default:
-				return errInvalid("choose accept, decline, quote, submit or billing")
+				return errInvalid("choose accept, decline, counter, quote, submit or billing")
 			}
 		} else {
 			switch in.Action {
@@ -371,10 +528,25 @@ func (s *Server) changeProposal(w http.ResponseWriter, r *http.Request, program,
 					return err
 				}
 				v.Config = *in.Config
+				v.Config.Removal = nil
 				v.Version++
 				v.Status = "draft"
 				v.Progress.Deliverables = map[string]proposalDeliveryProgress{}
 				v.Progress.Milestones = map[string]proposalMilestoneProgress{}
+				clearInvite = true
+			case "accept_counter":
+				n := len(v.Progress.Counters)
+				if v.Status != "quote_received" || n == 0 || v.Progress.Counters[n-1].AcceptedAt != nil {
+					return errInvalid("there is no counter-offer waiting for you")
+				}
+				c := &v.Progress.Counters[n-1]
+				if err := applyCounter(&v.Config, *c); err != nil {
+					return err
+				}
+				c.AcceptedAt = &now
+				v.Version++
+				v.Status = "accepted"
+				v.AcceptedAt = &now
 				clearInvite = true
 			case "invite":
 				if v.Status != "draft" && v.Status != "offered" && v.Status != "quote_requested" {
@@ -387,6 +559,13 @@ func (s *Server) changeProposal(w http.ResponseWriter, r *http.Request, program,
 				if !enabled {
 					return errInvalid("open the partner portal before inviting this recipient")
 				}
+				rule := defaultLinkRule()
+				if brand != nil {
+					if rule, err = brandLinkRule(ctx, tx, ws, *brand); err != nil {
+						return err
+					}
+				}
+				v.Config.Removal = &rule
 				v.Status = "offered"
 				if v.Config.RequestQuote {
 					v.Status = "quote_requested"
@@ -468,7 +647,7 @@ func (s *Server) changeProposal(w http.ResponseWriter, r *http.Request, program,
 				}
 				v.Status = "completed"
 			default:
-				return errInvalid("choose revise, invite, verify, approve or complete")
+				return errInvalid("choose revise, invite, accept_counter, verify, approve or complete")
 			}
 		}
 		config, _ := json.Marshal(v.Config)

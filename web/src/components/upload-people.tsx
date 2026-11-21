@@ -9,12 +9,19 @@ import type { SmartList } from "@outflare/sdk";
 import { api, errorMessage } from "@/api";
 import { plural } from "@/format";
 import { parseCSV } from "@/pages/brand-coverage/client";
-import { Button, ErrorText, Input } from "@/ui";
+import { Button, ErrorText, field, Input } from "@/ui";
+import { SubSourcePicker } from "@/components/sub-source-picker";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Origin = "first_party" | "prospect" | "import";
 type Person = { email?: string; user_id?: string; name?: string };
 type Read = { file: string; people: Person[]; rows: number; columns: { email?: string; user_id?: string; name?: string } };
+
+type Source = "cold" | "inbound" | "event" | "signup" | "invited" | "customer" | "other";
+const sources: [Source, string][] = [
+  ["event", "Events and conferences"], ["inbound", "Inbound"], ["cold", "Cold"], ["signup", "Sign-up"],
+  ["customer", "Customer"], ["invited", "Invited"], ["other", "Other"],
+];
 
 const example = "email,user_id,name\nana@acme.example,u_1001,Ana Silva\nben@northpeak.example,u_1002,Ben Okafor\n";
 const most = 10000;
@@ -44,6 +51,8 @@ export function UploadPeople({ brand, onClose, onDone }: { brand: string; onClos
   const [got, setGot] = useState<Read | null>(null);
   const [name, setName] = useState("");
   const [origin, setOrigin] = useState<Origin | "">("");
+  const [source, setSource] = useState("");
+  const [subSource, setSubSource] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -75,7 +84,7 @@ export function UploadPeople({ brand, onClose, onDone }: { brand: string; onClos
       setBusy(false);
       return setError(errorMessage(made.error));
     }
-    const res = await api.POST("/v1/brands/{brand}/records/import", { params: { path: { brand } }, body: { people: got.people, origin, list_id: made.data.id } });
+    const res = await api.POST("/v1/brands/{brand}/records/import", { params: { path: { brand } }, body: { people: got.people, origin, list_id: made.data.id, ...(source ? { source: source as Source } : {}), ...(source && subSource ? { sub_source: subSource } : {}) } });
     setBusy(false);
     if (res.error || !res.data) return setError(errorMessage(res.error));
     const r = res.data;
@@ -173,7 +182,18 @@ export function UploadPeople({ brand, onClose, onDone }: { brand: string; onClos
                   </div>
                 </section>
                 <section className="space-y-2">
-                  <h3 className="font-medium">4. Name the list</h3>
+                  <h3 className="font-medium">4. Where are they from? <span className="font-normal text-muted-foreground">(optional)</span></h3>
+                  <p className="text-muted-foreground">Their Source on People. New people get it, and people already here who have none yet.</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <select aria-label="Source" className={`${field} w-full`} value={source} onChange={(e) => { setSource(e.target.value); setSubSource(null); }}>
+                      <option value="">Don't set a Source</option>
+                      {sources.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                    </select>
+                    {source && <SubSourcePicker brand={brand} source={source} value={subSource} onChange={(k) => setSubSource(k)} />}
+                  </div>
+                </section>
+                <section className="space-y-2">
+                  <h3 className="font-medium">5. Name the list</h3>
                   <Input label="List name" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} hint="People already in Outflare are matched by user id, then email, so nobody is added twice." />
                 </section>
               </>

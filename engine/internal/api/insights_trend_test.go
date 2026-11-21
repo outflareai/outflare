@@ -90,6 +90,19 @@ func TestTrendsAndDashboards(t *testing.T) {
 		"formula": "A / C",
 		"compare": true,
 	}
+	// Revenue by where the payer first came from: both people's first
+	// visit was a paid ad on the home page, so all of it is paid_ads.
+	firstTouch := owner.must(200, "POST", base+"/insights/trend", map[string]any{
+		"date_range": map[string]any{"preset": "last_30_days"}, "interval": "week",
+		"series": []map[string]any{
+			{"kind": "payment", "measure": "sum", "filters": []map[string]any{{"property": "first_channel", "op": "eq", "value": "paid_ads"}}},
+			{"kind": "payment", "measure": "sum", "filters": []map[string]any{{"property": "first_channel", "op": "eq", "value": "seo"}}},
+			{"kind": "payment", "measure": "sum", "filters": []map[string]any{{"property": "first_landing_path", "op": "eq", "value": "/"}}},
+		},
+	})["series"].([]any)
+	if a, b, c := firstTouch[0].(map[string]any)["total"], firstTouch[1].(map[string]any)["total"], firstTouch[2].(map[string]any)["total"]; a != 107.0 || (b != nil && b != 0.0) || c != 107.0 {
+		t.Fatalf("revenue by first touch: paid_ads %v, seo %v, landing / %v", a, b, c)
+	}
 	res := owner.must(200, "POST", base+"/insights/trend", trend)
 	series := res["series"].([]any)
 	total := func(i int) float64 {
@@ -135,6 +148,34 @@ func TestTrendsAndDashboards(t *testing.T) {
 	if len(groups) != 2 || groups[0].(map[string]any)["value"] != "competitors" || groups[0].(map[string]any)["series"].([]any)[0].(map[string]any)["total"] != 3.0 {
 		t.Fatalf("breakdown: %v", groups)
 	}
+	// Split and filtered by the person's or their company's own fields:
+	// Ana is in Portugal at a software company, Bo has neither.
+	acme := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Acme"})["id"].(string)
+	exec(`UPDATE records SET attributes = attributes || '{"country": "PT"}' WHERE id = $1`, ana)
+	exec(`UPDATE records SET attributes = attributes || '{"industry": "software"}' WHERE id = $1`, acme)
+	exec(`INSERT INTO record_relationships (workspace_id, from_id, to_id, kind) VALUES ($1, $2, $3, 'companies')`, ws, ana, acme)
+	byRecord := map[string]any{"date_range": map[string]any{"from": from, "to": to}, "interval": "week",
+		"series": []map[string]any{{"kind": "payment", "measure": "sum"}, {"kind": "event", "event": "signed_up"}}, "breakdown": "person:country"}
+	res = owner.must(200, "POST", base+"/insights/trend", byRecord)
+	groups = res["breakdown"].([]any)
+	if len(groups) != 2 || groups[0].(map[string]any)["value"] != "PT" || groups[0].(map[string]any)["series"].([]any)[0].(map[string]any)["total"] != 98.0 {
+		t.Fatalf("split by the person's country: %v", groups)
+	}
+	byRecord["breakdown"] = "company:industry"
+	groups = owner.must(200, "POST", base+"/insights/trend", byRecord)["breakdown"].([]any)
+	if len(groups) != 2 || groups[0].(map[string]any)["value"] != "software" || groups[0].(map[string]any)["series"].([]any)[1].(map[string]any)["total"] != 1.0 {
+		t.Fatalf("split by the company's industry: %v", groups)
+	}
+	delete(byRecord, "breakdown")
+	byRecord["series"] = []map[string]any{{"kind": "payment", "measure": "sum", "filters": []map[string]any{{"property": "company:industry", "op": "eq", "value": "software"}}}}
+	if v := owner.must(200, "POST", base+"/insights/trend", byRecord)["series"].([]any)[0].(map[string]any)["total"]; v != 98.0 {
+		t.Fatalf("filtered by the company's industry: %v", v)
+	}
+	// Names are no field to split by, and a key must be a field.
+	for _, f := range []string{"person:first_name", "company:no_such_field", "person:Bad Key"} {
+		owner.must(400, "POST", base+"/insights/trend", map[string]any{"series": []map[string]any{{"kind": "visit"}}, "breakdown": f})
+	}
+
 	// Weeks and months are accepted and the default interval follows the range.
 	trend["interval"] = "month"
 	delete(trend, "breakdown")
@@ -150,7 +191,7 @@ func TestTrendsAndDashboards(t *testing.T) {
 		{"series": []map[string]any{{"kind": "ad", "measure": "people"}}},
 		{"series": []map[string]any{{"kind": "ad"}}, "breakdown": "device"},
 		{"series": []map[string]any{{"kind": "visit"}}, "interval": "hour"},
-		{"series": []map[string]any{{"kind": "visit"}}, "display": "pie"},
+		{"series": []map[string]any{{"kind": "visit"}}, "display": "radar"},
 	} {
 		owner.must(400, "POST", base+"/insights/trend", bad)
 	}

@@ -56,6 +56,15 @@ func TestSalesWorkflowRecordingAndIsolation(t *testing.T) {
 		t.Fatalf("direct AE claim: %v", lead)
 	}
 	owner.must(409, "POST", leadPath+"/actions", map[string]any{"action": "take", "version": 1})
+	// Whoever takes the conversation owns the person in the CRM too, and the
+	// person's own history says who changed it.
+	var crmOwner string
+	var ownerHistory int
+	e.pool.QueryRow(context.Background(), `SELECT COALESCE(attributes->>'owner','') FROM records WHERE id=$1`, person["id"]).Scan(&crmOwner)
+	e.pool.QueryRow(context.Background(), `SELECT count(*) FROM attribute_changes WHERE record_id=$1 AND field_key='owner'`, person["id"]).Scan(&ownerHistory)
+	if crmOwner != user || ownerHistory != 1 {
+		t.Fatalf("taking a conversation must set the person's owner once in their history: owner %q, changes %d", crmOwner, ownerHistory)
+	}
 	var count int
 	e.pool.QueryRow(context.Background(), `SELECT count(*) FROM sales_messages WHERE lead_id=$1 AND kind='introduction'`, id).Scan(&count)
 	if count != 1 {
@@ -85,6 +94,13 @@ func TestSalesWorkflowRecordingAndIsolation(t *testing.T) {
 	lead = owner.must(200, "POST", leadPath+"/actions", map[string]any{"action": "confirm_customer", "version": lead["version"]})
 	if lead["state"] != "customer" || lead["amount_minor"] != nil {
 		t.Fatal("confirmation required money", lead)
+	}
+	// A confirmed customer has a won deal in the CRM.
+	var won int
+	e.pool.QueryRow(context.Background(), `SELECT count(*) FROM records d JOIN record_relationships rr ON rr.from_id=d.id AND rr.valid_to IS NULL
+		WHERE d.workspace_id=$1 AND d.record_type='deal' AND d.attributes->>'stage'='won' AND rr.to_id=$2`, ws, person["id"]).Scan(&won)
+	if won != 1 {
+		t.Fatalf("confirming a customer must win one deal for the person, got %d", won)
 	}
 	lead = owner.must(200, "POST", leadPath+"/actions", map[string]any{"action": "reopen", "version": lead["version"]})
 	lead = owner.must(200, "POST", leadPath+"/actions", map[string]any{"action": "archive", "version": lead["version"]})
@@ -263,6 +279,9 @@ func TestSalesWorkflowRecordingAndIsolation(t *testing.T) {
 	mu.Lock()
 	returnReceipt = true
 	mu.Unlock()
+	// The company's outreach blocklist must not prevent an explicitly
+	// connected AE from receiving the handoff on CC.
+	owner.must(200, "POST", base+"/suppressions", map[string]any{"values": []string{"acme.example"}, "reason": "blocklist", "all_brands": true})
 	detail = owner.must(200, "GET", leadPath, nil)
 	lead = owner.must(200, "POST", leadPath+"/actions", map[string]any{"action": "handoff", "version": detail["lead"].(map[string]any)["version"], "assignee_id": otherID})
 	if lead["owner_id"] != user || lead["sdr_id"] != user {
@@ -278,6 +297,10 @@ func TestSalesWorkflowRecordingAndIsolation(t *testing.T) {
 	lead = detail["lead"].(map[string]any)
 	if lead["owner_id"] != otherID || lead["ae_id"] != otherID || lead["sdr_id"] != user || lead["note"] != "Shared across the handoff" {
 		t.Fatal("handoff lost ownership or shared notes", lead)
+	}
+	var handoffs int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM sales_events WHERE workspace_id=$1 AND brand_id=$2 AND lead_id=$3 AND actor_id=$4 AND actor_role='sdr' AND action='handoff_completed'`, ws, brand, id, user).Scan(&handoffs); err != nil || handoffs != 1 {
+		t.Fatal("successful transfer must record exactly one action for the SDR", handoffs, err)
 	}
 	if len(detail["messages"].([]any)) != 4 || detail["draft"] != nil {
 		t.Fatal("handoff lost conversation or exposed a personal draft", detail)

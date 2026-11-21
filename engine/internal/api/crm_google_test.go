@@ -55,6 +55,9 @@ func TestCRMGoogleConsentAndCapture(t *testing.T) {
 			defer mu.Unlock()
 			tokenCalls++
 			if r.Form.Get("grant_type") == "authorization_code" {
+				if !strings.HasSuffix(r.Form.Get("redirect_uri"), "/v1/auth/google/callback") {
+					t.Error("code exchange used a redirect URI the Google client doesn't register", r.Form.Get("redirect_uri"))
+				}
 				hash := sha256.Sum256([]byte(r.Form.Get("code_verifier")))
 				if base64.RawURLEncoding.EncodeToString(hash[:]) != challenge {
 					t.Error("missing PKCE binding")
@@ -147,7 +150,7 @@ func TestCRMGoogleConsentAndCapture(t *testing.T) {
 	nonce, challenge = wrongURL.Query().Get("nonce"), wrongURL.Query().Get("code_challenge")
 	googleEmail = "other@unrelated.example"
 	mu.Unlock()
-	owner.must(302, "GET", "/v1/crm-mail/google/callback?state="+url.QueryEscape(wrongURL.Query().Get("state"))+"&code=test-code-not-real", nil)
+	owner.must(302, "GET", "/v1/auth/google/callback?state="+url.QueryEscape(wrongURL.Query().Get("state"))+"&code=test-code-not-real", nil)
 	if owner.must(200, "GET", root+"/connection", nil)["connected"] != false {
 		t.Fatal("wrong Google account was connected")
 	}
@@ -162,10 +165,15 @@ func TestCRMGoogleConsentAndCapture(t *testing.T) {
 	if authURL.Query().Get("scope") != "openid email "+oauth.GoogleReadMailScope || authURL.Query().Get("include_granted_scopes") != "false" {
 		t.Fatal("personal grant requested broad access", authURL.Query().Get("scope"))
 	}
+	// Consent returns to the sign-in callback, the one redirect URI the
+	// Google OAuth client registers.
+	if !strings.HasSuffix(authURL.Query().Get("redirect_uri"), "/v1/auth/google/callback") {
+		t.Fatal("consent uses an unregistered redirect URI", authURL.Query().Get("redirect_uri"))
+	}
 	mu.Lock()
 	nonce, challenge = authURL.Query().Get("nonce"), authURL.Query().Get("code_challenge")
 	mu.Unlock()
-	callback := "/v1/crm-mail/google/callback?state=" + url.QueryEscape(authURL.Query().Get("state")) + "&code=test-code-not-real"
+	callback := "/v1/auth/google/callback?state=" + url.QueryEscape(authURL.Query().Get("state")) + "&code=test-code-not-real"
 	finance.must(400, "GET", callback, nil) // wrong person cannot consume the flow
 	owner.must(302, "GET", callback, nil)
 	owner.must(400, "GET", callback, nil)

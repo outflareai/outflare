@@ -52,10 +52,27 @@ export function csvRecords(text: string): string[] {
   return out;
 }
 
+/** A CSV cell, quoted when it holds a comma, quote or line break. */
+export function csvCell(v: string): string {
+  return /[",\n\r]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v;
+}
+
+/**
+ * Adds a column with the same value on every row, such as the intermediary
+ * a whole broker export came from. The server reads the first column for a
+ * field, so a file that already has that column keeps its own values.
+ */
+export function withColumn(records: string[], header: string, value: string): string[] {
+  if (!records.length || !header) return records;
+  const cell = csvCell(value);
+  return records.map((r, i) => `${r},${i === 0 ? csvCell(header) : cell}`);
+}
+
 /** Splits a CSV into batches of at most maxBytes (unless one row is larger) and maxRows rows, each with the header. */
-export function csvBatches(text: string, maxBytes = BATCH_BYTES, maxRows = BATCH_ROWS): CSVBatch[] {
-  const records = csvRecords(text.replace(/^\ufeff/, ""));
+export function csvBatches(text: string, maxBytes = BATCH_BYTES, maxRows = BATCH_ROWS, extra?: { header: string; value: string }): CSVBatch[] {
+  let records = csvRecords(text.replace(/^\ufeff/, ""));
   if (records.length === 0) return [];
+  if (extra && extra.value.trim()) records = withColumn(records, extra.header, extra.value.trim());
   const header = records[0];
   const headerBytes = utf8Length(header) + 1;
   const batches: CSVBatch[] = [];

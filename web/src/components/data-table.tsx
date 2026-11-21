@@ -2,7 +2,10 @@
 // visibility, clickable rows, a card list on phones, and a CSV download of
 // the rows and columns shown. Built on TanStack Table and the shadcn Table.
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { toast } from "@/ui";
+import { track } from "@/lib/analytics";
+import { dropTableView, savedView, saveTableView, syncTableViews } from "@/lib/table-views";
 import {
   flexRender,
   getCoreRowModel,
@@ -16,8 +19,8 @@ import {
 import { ArrowDown, ArrowUp, ChevronsUpDown, Columns3, Download, Search } from "lucide-react";
 import { downloadCsv, toCsv, type CsvValue } from "@/lib/csv";
 import { cn } from "@/lib/utils";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 
 export type { ColumnDef };
@@ -26,6 +29,9 @@ export type { ColumnDef };
 export type ColumnMeta<T> = { align?: "right"; mono?: boolean; pin?: "right"; csv?: ((row: T) => CsvValue) | false; csvHeader?: string };
 
 /** What a "Download CSV" button saves: the file's name and what to record when it is pressed (rows is how many). */
+/** A total row under the table: its label sits in the first named column, and `cells` holds what shows under each column, by column id. */
+export type TableFooterRow = { label: string; testId?: string; cells: Record<string, ReactNode> };
+
 export type TableDownload = { file: string; label?: string; onDownload?: (rows: number) => void };
 
 // Opaque versions of the row's colors, so cells scrolled under a pinned column don't show through.
@@ -52,17 +58,70 @@ type Props<T> = {
   hidden?: string[];
   /** Offer the "Columns" menu when there are more than three columns to hide. */
   columnsMenu?: boolean;
+  /**
+   * Names this table's column view, so the viewer can save the columns they
+   * picked as their default for every table with the same name (kept
+   * with their account, so it follows them to every device). The Columns menu then always shows, with "Save as my
+   * default" and "Back to standard columns".
+   */
+  view?: string;
   /** Shows a "Download CSV" button that saves exactly the rows and columns shown, in their order. */
   download?: TableDownload;
+  /** Total rows under the table, worked out from the rows the search leaves. */
+  footer?: (rows: T[]) => TableFooterRow[];
+  /** Ticks on each row and a "select all" in the header, for bulk actions: the ids ticked and what changes them. "Select all" ticks the rows the search and filters leave. */
+  selection?: { ids: string[]; onChange: (ids: string[]) => void; label?: (row: T) => string };
   className?: string;
 };
 
-export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlaceholder, search, toolbar, mobile, empty = "Nothing here yet.", initialSort = [], hidden = [], columnsMenu = true, download, className }: Props<T>) {
+// selectColumn is the column of ticks a table with bulk actions starts with.
+function selectColumn<T>(sel: NonNullable<Props<T>["selection"]>, rowId: (row: T) => string): ColumnDef<T, unknown> {
+  const picked = new Set(sel.ids);
+  return {
+    id: "_select",
+    enableSorting: false,
+    enableHiding: false,
+    meta: { csv: false },
+    header: ({ table }) => {
+      const shown = table.getFilteredRowModel().rows.map((r) => rowId(r.original));
+      const all = shown.length > 0 && shown.every((id) => picked.has(id));
+      const some = !all && shown.some((id) => picked.has(id));
+      return (
+        <input type="checkbox" aria-label="Select all shown" className="size-3.5 align-middle" checked={all} ref={(el) => { if (el) el.indeterminate = some; }}
+          onClick={(e) => e.stopPropagation()} onChange={() => sel.onChange(all ? sel.ids.filter((id) => !shown.includes(id)) : [...new Set([...sel.ids, ...shown])])} />
+      );
+    },
+    cell: ({ row }) => {
+      const id = rowId(row.original);
+      return (
+        <input type="checkbox" aria-label={sel.label ? `Select ${sel.label(row.original)}` : "Select"} className="size-3.5 align-middle" checked={picked.has(id)}
+          onClick={(e) => e.stopPropagation()} onChange={(e) => sel.onChange(e.target.checked ? [...sel.ids, id] : sel.ids.filter((x) => x !== id))} />
+      );
+    },
+  };
+}
+
+export function DataTable<T>({ columns: given, data, rowId, onRowClick, searchPlaceholder, search, toolbar, mobile, empty = "Nothing here yet.", initialSort = [], hidden = [], columnsMenu = true, view, download, footer, selection, className }: Props<T>) {
+  const columns = selection ? [selectColumn(selection, rowId), ...given] : given;
   const [sorting, setSorting] = useState<SortingState>(initialSort);
   const [localFilter, setLocalFilter] = useState("");
   const filter = search ? search.value : localFilter;
   const setFilter = search ? search.onChange : setLocalFilter;
-  const [visibility, setVisibility] = useState<VisibilityState>(() => Object.fromEntries(hidden.map((h) => [h, false])));
+  const [visibility, setVisibility] = useState<VisibilityState>(() => Object.fromEntries((savedView(view) ?? hidden).map((h) => [h, false])));
+  const [hasDefault, setHasDefault] = useState(() => savedView(view) !== null);
+  // The view saved with the account may arrive after the table first
+  // draws (a new browser): take it once it is here.
+  useEffect(() => {
+    if (!view) return;
+    let live = true;
+    void syncTableViews().then(() => {
+      const saved = savedView(view);
+      if (!live || saved === null) return;
+      setVisibility(Object.fromEntries(saved.map((h) => [h, false])));
+      setHasDefault(true);
+    });
+    return () => { live = false; };
+  }, [view]);
   const table = useReactTable({
     data,
     columns,
@@ -80,7 +139,28 @@ export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlacehold
   });
   const rows = table.getRowModel().rows;
   const hideable = !columnsMenu ? [] : table.getAllLeafColumns().filter((c) => c.getCanHide() && typeof c.columnDef.header === "string");
-  const showToolbar = searchPlaceholder || toolbar || hideable.length > 3 || download;
+  const showColumns = hideable.length > (view ? 0 : 3);
+  const showToolbar = searchPlaceholder || toolbar || showColumns || download;
+  const saveView = async () => {
+    if (!view) return;
+    const off = hideable.filter((c) => !c.getIsVisible()).map((c) => c.id);
+    if (await saveTableView(view, off)) {
+      setHasDefault(true);
+      toast("Saved. These columns are your default, on every device you sign in on.");
+      track("ui.table_view_saved", { view, shown: hideable.length - off.length, hidden: off.length });
+    } else {
+      toast("Couldn't save your columns. Try again.", "error");
+      track("ui.table_view_saved", { view, outcome: "error", error_code: "save_failed" });
+    }
+  };
+  const resetView = () => {
+    if (!view) return;
+    void dropTableView(view);
+    setHasDefault(false);
+    setVisibility(Object.fromEntries(hidden.map((h) => [h, false])));
+    toast("Back to the standard columns.");
+    track("ui.table_view_reset", { view });
+  };
   // The download is what the table shows: its visible columns with a text
   // header, and its rows as filtered and sorted.
   const save = () => {
@@ -121,12 +201,12 @@ export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlacehold
           )}
           {toolbar}
           {download && (
-            <Button variant="outline" size="sm" className={cn("text-[13px]", hideable.length <= 3 && "ml-auto")} onClick={save} disabled={rows.length === 0} title={`Save these ${rows.length} rows as a CSV file`}>
+            <Button variant="outline" size="sm" className={cn("text-[13px]", !showColumns && "ml-auto")} onClick={save} disabled={rows.length === 0} title={`Save these ${rows.length} rows as a CSV file`}>
               <Download className="size-3.5" />
               {download.label ?? "Download CSV"}
             </Button>
           )}
-          {hideable.length > 3 && (
+          {showColumns && (
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="ml-auto hidden text-[13px] sm:inline-flex">
@@ -141,6 +221,13 @@ export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlacehold
                     {c.columnDef.header as string}
                   </DropdownMenuCheckboxItem>
                 ))}
+                {view && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="text-[13px]" onSelect={saveView}>Save as my default</DropdownMenuItem>
+                    <DropdownMenuItem className="text-[13px]" onSelect={resetView} disabled={!hasDefault && hideable.every((c) => c.getIsVisible() !== hidden.includes(c.id))}>Back to standard columns</DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -209,6 +296,26 @@ export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlacehold
               </TableRow>
             ))}
           </TableBody>
+          {footer && rows.length > 0 && (
+            <TableFooter className="bg-muted/40 font-normal">
+              {footer(rows.map((r) => r.original)).map((f) => {
+                const cols = table.getVisibleLeafColumns();
+                const labelAt = cols.findIndex((c) => typeof c.columnDef.header === "string" && c.columnDef.header !== "");
+                return (
+                  <TableRow key={f.label} className="hover:bg-transparent" data-testid={f.testId}>
+                    {cols.map((c, i) => {
+                      const meta = c.columnDef.meta as { align?: "right"; pin?: "right" } | undefined;
+                      return (
+                        <TableCell key={c.id} className={cn("px-3 py-2.5 whitespace-nowrap first:pl-4 last:pr-4", meta?.align === "right" && "text-right", meta?.pin && pinCell)}>
+                          {i === labelAt ? <span className="font-medium">{f.label}</span> : f.cells[c.id] ?? null}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                );
+              })}
+            </TableFooter>
+          )}
         </Table>
       </div>
     </div>

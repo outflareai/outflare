@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -205,6 +206,11 @@ type trackerPostbackInput struct {
 	hasType bool
 }
 
+// unfilledMacroRe matches a parameter value that is still a network's
+// placeholder: {status}, {{status}}, ${status}, #STATUS#, [status],
+// %status%, <status> or __STATUS__.
+var unfilledMacroRe = regexp.MustCompile(`^(\{\{?[\w.\- ]+\}?\}|\$\{[\w.\-]+\}|#[\w.\-]+#|\[[\w.\- ]+\]|%[\w.\-]+%|<[\w.\-]+>|__[\w.\-]+__)$`)
+
 // readTrackerPostback reads a postback, accepting the names Voluum,
 // RedTrack and ClickFlare postbacks use.
 func readTrackerPostback(v url.Values, currency string) (trackerPostbackInput, error) {
@@ -215,25 +221,44 @@ func readTrackerPostback(v url.Values, currency string) (trackerPostbackInput, e
 // click id when its transaction id names a conversion already recorded
 // (orphan).
 func readConversion(v url.Values, currency string, orphan bool) (trackerPostbackInput, error) {
+	// A network leaves a placeholder it has no value for as it is
+	// (status={status}); that is a parameter left out, not a bad value.
+	var unfilled string
 	get := func(names ...string) string {
 		for _, n := range names {
-			if x := strings.TrimSpace(v.Get(n)); x != "" {
+			x := strings.TrimSpace(v.Get(n))
+			if unfilledMacroRe.MatchString(x) {
+				unfilled = x
+				continue
+			}
+			if x != "" {
 				return x
 			}
 		}
 		return ""
 	}
+	// The click id goes by many names. One named ofclk that is a click
+	// key wins over the others, so a postback that also carries the
+	// network's own click id as cid still credits its click.
+	key := strings.ToLower(strings.TrimSpace(v.Get("ofclk")))
+	if !clickKeyRe.MatchString(key) {
+		key = strings.ToLower(get("cid", "clickid", "click_id", "ofclk", "subid", "sub_id"))
+	}
 	in := trackerPostbackInput{
-		clickKey: strings.ToLower(get("cid", "clickid", "click_id", "ofclk", "subid", "sub_id")),
-		txid:     get("txid", "transaction_id", "orderid", "order_id", "tid"),
-		typ:      strings.ToLower(get("type", "et", "ct", "event")),
-		status:   strings.ToLower(get("status")),
-		currency: strings.ToUpper(get("currency", "payout_currency", "cur")),
+		clickKey: key,
 		params:   map[string]string{},
 		at:       time.Now().UTC(),
 	}
+	// The click id is read first, so a placeholder seen so far is its own.
+	clickPlaceholder := unfilled
+	in.txid = get("txid", "transaction_id", "orderid", "order_id", "tid")
+	in.typ = strings.ToLower(get("type", "et", "ct", "event"))
+	in.status = strings.ToLower(get("status"))
+	in.currency = strings.ToUpper(get("currency", "payout_currency", "cur"))
 	switch {
 	case in.clickKey == "" && orphan && in.txid != "":
+	case in.clickKey == "" && clickPlaceholder != "":
+		return in, errInvalid("cid arrived as " + clickPlaceholder + ", unfilled: the network didn't put the click id in. Check the name of its click id placeholder, and that the offer's URL passes {click_id} to it")
 	case in.clickKey == "":
 		return in, errInvalid("cid is the click id: the ofclk the redirect added, passed on as the network's sub id")
 	case !clickKeyRe.MatchString(in.clickKey):
@@ -351,6 +376,16 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 	if click.brand != src.brand {
 		return res, errUnknownClick
 	}
+	// A conversion can't come before its click. A day-only date (midnight)
+	// or a clock a little behind is moved up to the click; anything
+	// earlier is a wrong date, and would put revenue in a week the
+	// campaign had no click.
+	if in.at.Before(click.at) {
+		if click.at.Sub(in.at) > 24*time.Hour {
+			return res, errInvalid("converted_at is before the click it credits (" + click.at.UTC().Format(time.RFC3339) + ")")
+		}
+		in.at = click.at
+	}
 	if in.at.Sub(click.at) > time.Duration(src.expiryDays)*24*time.Hour {
 		return res, errExpiredClick
 	}
@@ -394,8 +429,16 @@ func (s *Server) recordTrackerConversion(ctx context.Context, p *principal, src 
 				_, err := tx.Exec(ctx, `UPDATE tracker_conversions SET postbacks = postbacks + 1 WHERE id = $1`, prev)
 				return err
 			case "update":
-				_, err = tx.Exec(ctx, `UPDATE tracker_conversions SET status = $2, payout_micros = $3, currency = $4, params = $5, type = $6,
-					postbacks = postbacks + 1, updated_at = now() WHERE id = $1`, prev, in.status, in.payoutMicros, in.currency, params, in.typ)
+				// A repeat changes only what it names: an approval that
+				// carries no payout keeps the payout the network first
+				// reported (never the offer's own, never 0), and one with
+				// no status keeps the status. Its parameters add to the
+				// ones recorded.
+				err = tx.QueryRow(ctx, `UPDATE tracker_conversions SET status = CASE WHEN $2 THEN $3 ELSE status END,
+						payout_micros = CASE WHEN $4 THEN $5 ELSE payout_micros END, currency = CASE WHEN $4 THEN $6 ELSE currency END,
+						params = params || $7::jsonb, type = CASE WHEN $8 THEN $9 ELSE type END,
+						postbacks = postbacks + 1, updated_at = now() WHERE id = $1 RETURNING status, type`,
+					prev, in.hasStatus, in.status, in.hasPayout, in.payoutMicros, in.currency, params, in.hasType, in.typ).Scan(&in.status, &in.typ)
 			case "add":
 				_, err = tx.Exec(ctx, `UPDATE tracker_conversions SET payout_micros = payout_micros + $2, postbacks = postbacks + 1, updated_at = now()
 					WHERE id = $1`, prev, in.payoutMicros)
@@ -857,6 +900,10 @@ type trackerConversionView struct {
 	Postbacks     int               `json:"postbacks"`
 	ConvertedAt   time.Time         `json:"converted_at"`
 	UpdatedAt     time.Time         `json:"updated_at"`
+	// NetworkPostback is what became of telling its campaign's traffic
+	// source: sent, queued or failed (its latest send), or why none was
+	// made: no_traffic_source, or a reason of sourcePostbackSkip.
+	NetworkPostback string `json:"network_postback"`
 }
 
 // listTrackerConversions lists the ledger, newest first, 100 a page.
@@ -881,8 +928,14 @@ func (s *Server) listTrackerConversions(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is approved, pending or declined")
 		return
 	}
-	var cursor *time.Time
-	if before != "" {
+	// ?cursor= pages by time and id, so conversions that share a
+	// converted_at (an upload's) are all reached; ?before= is the older
+	// way, by time alone.
+	cursor, cursorID, ok := beforeTimeID(w, r)
+	if !ok {
+		return
+	}
+	if cursor == nil && before != "" {
 		t, err := time.Parse(time.RFC3339Nano, before)
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "before is a time such as 2026-11-10T09:00:00Z, the converted_at of the last one you have")
@@ -890,24 +943,45 @@ func (s *Server) listTrackerConversions(w http.ResponseWriter, r *http.Request) 
 		}
 		cursor = &t
 	}
-	rows, err := s.pool.Query(r.Context(), `SELECT id::text, source_id::text, click_key, campaign_id::text, link_id::text, offer_id::text, fraud_reasons, clicked_at,
-			transaction_id, type, status, payout_micros, currency, params, record_id::text, postbacks, converted_at, updated_at
-		FROM tracker_conversions WHERE workspace_id = $1 AND brand_id = $2
-		  AND ($3 = '' OR source_id = $3::uuid) AND ($4 = '' OR campaign_id = $4::uuid) AND ($5 = '' OR status = $5)
-		  AND ($6::timestamptz IS NULL OR converted_at < $6) AND ($7 = '' OR offer_id = $7::uuid)
-		  AND ($8 = '' OR (cardinality(fraud_reasons) > 0) = ($8 = 'true'))
-		ORDER BY converted_at DESC LIMIT 100`, a.WorkspaceID, a.Brand, source, campaign, status, cursor, offer, suspect)
+	rows, err := s.pool.Query(r.Context(), `SELECT c.id::text, c.source_id::text, c.click_key, c.campaign_id::text, c.link_id::text, c.offer_id::text, c.fraud_reasons, c.clicked_at,
+			c.transaction_id, c.type, c.status, c.payout_micros, c.currency, c.params, c.record_id::text, c.postbacks, c.converted_at, c.updated_at,
+			COALESCE((SELECT p.status FROM tracker_source_postbacks p WHERE p.conversion_id = c.id ORDER BY p.created_at DESC, p.id DESC LIMIT 1), ''),
+			ts.id IS NOT NULL, COALESCE(ts.postback_url, ''), COALESCE(ts.postback_share, 100), COALESCE(ts.postback_decimals, 2), COALESCE(ts.postback_min_micros, 0),
+			COALESCE(ts.postback_types, '{}'), COALESCE(ts.postback_statuses, '{}'),
+			c.fraud_reasons || COALESCE((SELECT x.fraud_reasons FROM tracking_link_clicks x WHERE x.id = c.click_id), '{}'),
+			EXISTS (SELECT 1 FROM tracker_click_addresses a WHERE a.click_key = c.click_key AND a.workspace_id = c.workspace_id AND a.look_up)
+		FROM tracker_conversions c
+		LEFT JOIN tracking_campaigns k ON k.id = c.campaign_id
+		LEFT JOIN tracker_traffic_sources ts ON ts.id = k.traffic_source_id AND ts.workspace_id = c.workspace_id AND ts.status = 'active'
+		WHERE c.workspace_id = $1 AND c.brand_id = $2
+		  AND ($3 = '' OR c.source_id = $3::uuid) AND ($4 = '' OR c.campaign_id = $4::uuid) AND ($5 = '' OR c.status = $5)
+		  AND ($6::timestamptz IS NULL OR (c.converted_at, c.id) < ($6, $9::uuid)) AND ($7 = '' OR c.offer_id = $7::uuid)
+		  AND ($8 = '' OR (cardinality(c.fraud_reasons) > 0) = ($8 = 'true'))
+		ORDER BY c.converted_at DESC, c.id DESC LIMIT 101`, a.WorkspaceID, a.Brand, source, campaign, status, cursor, offer, suspect, cmp.Or(cursorID, firstUUID))
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (trackerConversionView, error) {
 		var v trackerConversionView
-		var micros int64
+		var micros, minMicros int64
 		var params []byte
+		var hasSource, awaiting bool
+		var url string
+		var share, decimals int
+		var types, statuses, fraud []string
 		err := row.Scan(&v.ID, &v.SourceID, &v.ClickKey, &v.CampaignID, &v.LinkID, &v.OfferID, &v.FraudReasons, &v.ClickedAt, &v.TransactionID, &v.Type, &v.Status,
-			&micros, &v.Currency, &params, &v.RecordID, &v.Postbacks, &v.ConvertedAt, &v.UpdatedAt)
+			&micros, &v.Currency, &params, &v.RecordID, &v.Postbacks, &v.ConvertedAt, &v.UpdatedAt,
+			&v.NetworkPostback, &hasSource, &url, &share, &decimals, &minMicros, &types, &statuses, &fraud, &awaiting)
 		v.Payout = strconv.FormatFloat(float64(micros)/1e6, 'f', -1, 64)
+		// A send, once made, is the answer; without one, why there is none.
+		switch {
+		case v.NetworkPostback != "":
+		case !hasSource:
+			v.NetworkPostback = "no_traffic_source"
+		default:
+			v.NetworkPostback = cmp.Or(sourcePostbackSkip(url, fraud, awaiting, statuses, types, v.Status, v.Type, sentPayout(micros, share, decimals), minMicros), "queued")
+		}
 		if err == nil {
 			err = json.Unmarshal(params, &v.Params)
 		}
@@ -917,8 +991,12 @@ func (s *Server) listTrackerConversions(w http.ResponseWriter, r *http.Request) 
 		s.internal(w, r, err)
 		return
 	}
+	var next any
+	if len(list) > 100 {
+		next, list = timeIDCursor(list[99].ConvertedAt, list[99].ID), list[:100]
+	}
 	if list == nil {
 		list = []trackerConversionView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": next})
 }

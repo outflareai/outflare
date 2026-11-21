@@ -159,6 +159,10 @@ func TestAIDesktop(t *testing.T) {
 	var names []string
 	for _, ev := range events() {
 		names = append(names, ev.Name)
+		// Not being signed in to a tool is the person's to fix, not broken.
+		if ev.Name == "ai_device.read_failed" && (ev.ErrorCode != "not_signed_in" || ev.Outcome != track.Failure) {
+			t.Errorf("read_failed: %s %s, want not_signed_in failure", ev.ErrorCode, ev.Outcome)
+		}
 	}
 	for _, want := range []string{"ai_device.linked", "ai_device.unlinked", "ai_device.read_failed", "ai_account.created"} {
 		found := false

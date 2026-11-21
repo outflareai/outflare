@@ -288,8 +288,17 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 		}
 		from = t
 	}
-	if to.Before(from) || to.Sub(from) > 3*366*24*time.Hour {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "from must be on or before to, and at most three years before it")
+	// With no to, the range ends on the report's own today, which is only
+	// known once its time zone is (below): east of UTC that is already
+	// tomorrow for part of the day, and from=today must not be refused.
+	badRange := func() bool {
+		if to.Before(from) || to.Sub(from) > 3*366*24*time.Hour {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "from must be on or before to, and at most three years before it")
+			return true
+		}
+		return false
+	}
+	if q.Get("to") != "" && badRange() {
 		return attributionFilter{}, false
 	}
 	match := q.Get("match")
@@ -338,6 +347,9 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 		to = civilDay(time.Now(), loc)
 		if q.Get("from") == "" {
 			from = to.AddDate(0, 0, -27)
+		}
+		if badRange() {
+			return attributionFilter{}, false
 		}
 	}
 	f := attributionFilter{from: from.Format(time.DateOnly), to: to.Format(time.DateOnly), ref: ref, settings: settings, brand: brand,

@@ -16,7 +16,7 @@ export const pipelines = [
     kit: "partnerships-seo",
     type: "link_partnership",
     label: "SEO links",
-    blurb: "Guest posts, link inserts, resource pages and mentions, from first pitch to a live link.",
+    blurb: "Guest posts, link inserts, resource pages and mentions, from a site you are researching to a live link.",
   },
   {
     kit: "partnerships-sponsorships",

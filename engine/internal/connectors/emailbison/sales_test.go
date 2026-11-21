@@ -17,7 +17,7 @@ func TestSalesThreadReceiptAndExplicitCC(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == "GET" {
-			w.Write([]byte(`{"data":{"current_reply":{"id":2,"parent_id":1,"sender_email_id":7,"raw_message_id":"<reply@customer.example>","from_email_address":"ana@customer.example","to":[{"address":"sender@company.example"}],"cc":[{"address":"colleague@company.example"}],"date_received":"2026-11-11T20:00:00Z","folder":"Inbox"},"older_messages":[{"id":1,"raw_message_id":"<root@company.example>","folder":"Sent"}],"newer_messages":[]}}`))
+			w.Write([]byte(`{"data":{"current_reply":{"id":2,"parent_id":1,"sender_email_id":7,"campaign_id":44,"raw_message_id":"<reply@customer.example>","from_email_address":"ana@customer.example","to":[{"address":"sender@company.example"}],"cc":[{"address":"colleague@company.example"}],"date_received":"2026-11-11T20:00:00Z","folder":"Inbox"},"older_messages":[{"id":1,"campaign_id":null,"raw_message_id":"<root@company.example>","folder":"Sent"}],"newer_messages":[]}}`))
 			return
 		}
 		calls++
@@ -47,6 +47,9 @@ func TestSalesThreadReceiptAndExplicitCC(t *testing.T) {
 	}
 	if len(thread) != 2 || thread[0].Direction != "outgoing" || thread[1].InReplyTo != "<root@company.example>" || !slices.Equal(thread[1].CC, []string{"colleague@company.example"}) {
 		t.Fatalf("lost thread evidence: %+v", thread)
+	}
+	if thread[1].CampaignExternalID != "44" || thread[0].CampaignExternalID != "" {
+		t.Fatalf("the reply's campaign: %+v", thread)
 	}
 	receipt, err := eb.SendReplyReceipt(context.Background(), cl, creds, c.ReplyOut{ReplyExternalID: "2", MailboxExternalID: "7", ToEmail: "ana@customer.example", CC: []string{"colleague@company.example", "ae@company.example"}, Body: "Introducing your account manager"})
 	if err != nil || receipt.ExternalID != "3" || receipt.MessageID != "intro@company.example" || calls != 1 {

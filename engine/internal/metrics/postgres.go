@@ -125,6 +125,7 @@ type rowser interface {
 func (p *Postgres) Describe(ch chan<- *prometheus.Desc) {
 	ch <- salesAttention
 	ch <- salesAttentionAge
+	ch <- salesDraftAge
 	for _, d := range allDescs {
 		ch <- d
 	}
@@ -197,6 +198,17 @@ func (p *Postgres) query() []prometheus.Metric {
 			}
 			add(salesAttention, gauge, float64(count), status)
 			add(salesAttentionAge, gauge, max(age, 0), status)
+		}
+		return nil
+	})
+	run("sales_draft_assists", `SELECT states.status,coalesce(extract(epoch FROM now()-min(d.updated_at)),0)::float8 FROM (VALUES ('queued'),('running')) states(status) LEFT JOIN sales_draft_assists d ON d.status=states.status AND d.status IN ('queued','running') GROUP BY states.status`, func(r rowser) error {
+		for r.Next() {
+			var status string
+			var age float64
+			if err := r.Scan(&status, &age); err != nil {
+				return err
+			}
+			add(salesDraftAge, gauge, max(age, 0), status)
 		}
 		return nil
 	})

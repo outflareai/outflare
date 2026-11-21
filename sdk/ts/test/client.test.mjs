@@ -134,3 +134,8 @@ test("flagsBootstrapTag hands decisions to the page, escaped", async () => {
     payloads: { hero: { headline: "</script><b>Ship & go</b>" } },
   });
 });
+
+test("identifySignature signs a user id for outflare.identify", async () => {
+  const { identifySignature } = await import("../dist/index.js");
+  assert.equal(await identifySignature("ofid_test_not_a_real_secret", "u-ana"), "7df1355d27af7ca41cfa82daf55981e57222ef17f006829f2da8bf8df8501bbc");
+});

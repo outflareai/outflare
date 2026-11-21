@@ -105,7 +105,7 @@ export function ResultsGrowth({
                 disabled={now === null}
                 onClick={() => onOpen(stage)}
               >
-                View leads →
+                View companies →
               </button>
             </article>
           );
@@ -161,7 +161,7 @@ export function ResultsGrowth({
       <p className="text-xs text-muted-foreground">
         Growth compares recorded activity, not conversion rates between the same
         leads. Older unimported records can affect the baseline. Currencies stay
-        separate; archived leads are not counted as lost deals.
+        separate; archived conversations are not counted as lost deals.
       </p>
     </section>
   );

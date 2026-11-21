@@ -20,6 +20,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -120,6 +121,7 @@ type Server struct {
 	middleware      []func(http.Handler) http.Handler
 	capabilities    []string
 	posthog         *posthogProxy
+	keepsEvents     atomic.Bool // a workspace keeps the server's events (ProductEventSink)
 	alloc           *allocation.Service
 	platforms       *platforms.Service
 	telemetry       *telemetry.Reporter
@@ -171,6 +173,17 @@ type Server struct {
 	siteFlagLimit *rateLimiter
 	// siteConsentLimit caps the consent banner's requests per key.
 	siteConsentLimit *rateLimiter
+	// siteReplayLimit caps the parts of recordings a key's sites send.
+	siteReplayLimit *rateLimiter
+	// recordings keeps session recordings' files; nil without a bucket.
+	recordings BlobStore
+	// files keeps brands' files; nil without a bucket.
+	files BlobStore
+	// video finishes and edits videos with ffmpeg; nil without it.
+	video       VideoTool
+	replayCache replayCache
+	// pixelCache remembers each brand's ad pixel for the website script.
+	pixelCache sitePixelCache
 	// cookieReports takes what browsers see of a site's cookies.
 	cookieReports *cookies.Reporter
 	flagCache     flagCache
@@ -297,6 +310,15 @@ type Options struct {
 	// site_event_inbox and answer; RunSiteInbox, on a server that works,
 	// stores them. Off stores them during the request.
 	SiteInbox bool
+	// Recordings is the bucket session recordings are kept in
+	// (OUTFLARE_S3_*). Nil leaves recordings off; heatmaps need none.
+	Recordings BlobStore
+	// Files is the bucket brands' files are kept in (logos, fonts,
+	// product shots; OUTFLARE_S3_*). Nil leaves uploads off.
+	Files BlobStore
+	// Video finishes and edits talking videos on the server (ffmpeg).
+	// Nil leaves those steps out: videos are made without them.
+	Video VideoTool
 
 	// Extension points for builds that add to the open-source engine, such
 	// as the hosted Cloud. See the outflare package.
@@ -422,6 +444,10 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		siteFlagLimit:    &rateLimiter{name: "site_flags", limit: 6000, window: time.Minute},
 		siteConsentLimit: &rateLimiter{name: "site_consent", limit: 6000, window: time.Minute},
 		cookieReports:    &cookies.Reporter{Pool: pool},
+		siteReplayLimit:  &rateLimiter{name: "site_replay", limit: 6000, window: time.Minute},
+		recordings:       opts.Recordings,
+		files:            opts.Files,
+		video:            opts.Video,
 		siteInbox:        opts.SiteInbox,
 		inboxWake:        make(chan struct{}, 1),
 		clicks:           clickBuffer{wake: make(chan struct{}, 1)},
@@ -481,6 +507,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		s.send.OnStep = append(s.send.OnStep, s.quoteApprovalStepped)
 	}
 	s.watchSocialConnections()
+	s.watchSupportConnections()
 	s.watchPageReaders()
 	if s.crawler != nil && s.crawler.Owns == nil && s.integrations != nil {
 		s.crawler.Owns = s.searchConsoleOwns
@@ -489,7 +516,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		s.seoSyncer.Watch()
 	}
 	// AI receipts: only members forward them, to one readable address per
-	// workspace (geonode-receipts@...), made as soon as anyone looks, and
+	// workspace (northpeak-receipts@...), made as soon as anyone looks, and
 	// only where AI Accounts is on.
 	s.inboundEmail.Register(inboundemail.PurposeAIReceipts, inboundemail.Purpose{
 		Handler: s.handleAIReceipt, Suffix: "receipts", Workspace: true, Auto: true,
@@ -529,6 +556,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesPasskeys(mux)
 	s.routesMailboxes(mux)
 	s.routesWebhooks(mux)
+	s.routesDestinations(mux)
+	s.routesReplay(mux)
 	s.routesJobs(mux)
 	s.routesLogs(mux)
 	s.routesBrands(mux)
@@ -542,11 +571,13 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesQueryEndpoints(mux)
 	s.routesCatalog(mux)
 	s.routesRecords(mux)
+	s.subSourceRoutes(mux)
 	s.routesCRM(mux)
 	s.routesCustomerEvents(mux)
 	s.routesMenuBadges(mux)
 	s.routesMerges(mux)
 	s.routesQuery(mux)
+	s.routesDataCatalog(mux)
 	s.routesSavedQueries(mux)
 	s.routesSearch(mux)
 	s.routesSemanticSearch(mux)
@@ -556,24 +587,34 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAdChanges(mux)
 	s.routesAdSuggestions(mux)
 	s.routesAdFindings(mux)
+	s.routesAdAudiences(mux)
 	s.routesAdPlatformChanges(mux)
 	s.routesAdTests(mux)
 	s.routesAdTargeting(mux)
+	s.routesAdExclusions(mux)
+	s.routesAdNegativeKeywords(mux)
+	s.routesAdSendStatus(mux)
+	s.routesAdSignals(mux)
+	s.routesAdItemChanges(mux)
 	s.routesAdDrafts(mux)
 	s.routesAdTargets(mux)
 	s.routesAdTrackingFix(mux)
 	s.routesFindings(mux)
+	s.routesBrandProfile(mux)
 	s.routesContent(mux)
 	s.routesAccounts(mux)
 	s.routesChannels(mux)
 	s.routesAdTracking(mux)
 	s.routesAdConversions(mux)
 	s.routesPaidAds(mux)
+	s.routesAdHoldouts(mux)
 	s.routesAdFeed(mux)
 	s.routesAdRMF(mux)
 	s.routesContext(mux)
 	s.routesOnboarding(mux)
 	s.routesCommunity(mux)
+	s.routesTableViews(mux)
+	s.routesMenuItems(mux)
 	s.routesSupportAccess(mux)
 	s.routesSetup(mux)
 	s.routesBrandDNS(mux)
@@ -588,6 +629,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesLeads(mux)
 	s.routesLists(mux)
 	s.routesSmartLists(mux)
+	s.routesSmartListDrafts(mux)
 	s.routesTransactions(mux)
 	s.routesDeveloperSetup(mux)
 	s.routesInsights(mux)
@@ -596,6 +638,13 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesInsightAlerts(mux)
 	s.routesRules(mux)
 	s.routesProducts(mux)
+	s.routesBrandAssets(mux)
+	s.routesBrandGenerations(mux)
+	s.routesBrandVideos(mux)
+	s.routesCreativeWorkflows(mux)
+	s.routesCreativeSkills(mux)
+	s.routesCreativeSkillDrafts(mux)
+	s.routesCreatives(mux)
 	s.routesLifecycle(mux)
 	s.routesRecordMetrics(mux)
 	s.routesScores(mux)
@@ -604,6 +653,10 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesRevenueTeam(mux)
 	s.routesSequences(mux)
 	s.routesInbox(mux)
+	s.routesSavedReplies(mux)
+	s.routesInboxPresence(mux)
+	s.routesInboxLoopIns(mux)
+	s.routesInboxViewing(mux)
 	s.routesInboxTags(mux)
 	s.routesReplyRules(mux)
 	s.routesAlerts(mux)
@@ -656,6 +709,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAIVisibilityClaims(mux)
 	s.routesAIVisibilityShares(mux)
 	s.routesSocial(mux)
+	s.routesMentions(mux)
 	s.routesSocialAccounts(mux)
 	s.routesSocialPublish(mux)
 	s.routesRedditCampaigns(mux)
@@ -678,6 +732,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesConnectionHooks(mux)
 	s.routesSiteKeys(mux)
 	s.routesConsentBanner(mux)
+	s.routesPeopleSetup(mux)
 	s.routesCookiePolicy(mux)
 	s.routesFlags(mux)
 	s.routesABTests(mux)
@@ -686,6 +741,14 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesVisitorBrowsers(mux)
 	s.routesSiteAnalytics(mux)
 	s.routesSiteVitals(mux)
+	s.routesSiteErrors(mux)
+	s.routesErrorRules(mux)
+	s.routesClickActions(mux)
+	s.routesSiteIdentify(mux)
+	s.routesSourceMaps(mux)
+	s.routesAIBotReports(mux)
+	s.routesBillingSubscriptions(mux)
+	s.routesInternalPeople(mux)
 	s.routesSiteLive(mux)
 	s.routesHealth(mux)
 	s.routesReports(mux)
@@ -703,12 +766,14 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesTrackerIPLookups(mux)
 	s.routesNetworkCosts(mux)
 	s.routesTrackerOffers(mux)
+	s.routesTrackerPreview(mux)
 	s.routesTrackerLanders(mux)
 	s.routesTrackerFlows(mux)
 	s.routesTrackerWeights(mux)
 	s.routesDrilldown(mux)
 	s.routesReportViews(mux)
 	s.routesSourcePostbacks(mux)
+	s.routesCostUpdates(mux)
 	s.routesPartners(mux)
 	s.routesAttribution(mux)
 	s.routesAttributionModels(mux)
@@ -716,12 +781,14 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAIReceipts(mux)
 	s.routesAIAccounts(mux)
 	s.routesAIDesktop(mux)
+	s.routesUIEvents(mux)
 	s.routesCustomerProfiles(mux)
 	s.routesKnowledge(mux)
 	s.routesWebsiteImport(mux)
 	s.routesLearnReplies(mux)
 	s.routesKnowledgeRetrieval(mux)
 	s.routesSupport(mux)
+	s.routesSupportImports(mux)
 	s.routesSupportTopics(mux)
 	s.routesKnowledgeInsights(mux)
 	s.routesHelpCentres(mux)
@@ -813,6 +880,10 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.posthog != nil {
 		m["product_analytics"] = s.posthog.meta()
+	}
+	if s.posthog != nil || s.keepsEvents.Load() {
+		// Events are kept somewhere, so the web app sends its own.
+		m["ui_events"] = true
 	}
 	if s.mcp != nil {
 		m["mcp_url"] = s.mcpURL()

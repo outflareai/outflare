@@ -65,6 +65,7 @@ connection_limit_alerts
 connection_limits
 emailbison_compat_calls
 emailbison_compat_ids
+guard_list_syncs
 oauth_connections
 outcome_links
 outcome_syncs

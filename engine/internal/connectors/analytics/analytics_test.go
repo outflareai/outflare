@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,10 +19,13 @@ import (
 func fake(t *testing.T, routes map[string]any) (*c.Client, *[]string) {
 	t.Helper()
 	var bodies []string
+	var mu sync.Mutex // some connectors ask in parallel
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(b))
+		mu.Lock()
 		bodies = append(bodies, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery+" "+string(b))
+		mu.Unlock()
 		if r.Header.Get("Authorization") == "Bearer bad" {
 			w.WriteHeader(401)
 			return
@@ -162,6 +166,82 @@ func TestBingSumsWeeksInRange(t *testing.T) {
 	rep, err := Bing{}.Report(ctx, cl, c.Creds{"api_key": "k"}, q)
 	if err != nil || len(rep.Rows) != 2 || rep.Rows[0].Key != "outflare" || val(rep.Rows[1].Clicks) != 3 || val(rep.Rows[1].Position) != 6 || val(rep.Totals.Clicks) != 8 {
 		t.Fatalf("bing: %+v %v", rep, err)
+	}
+}
+
+// A page's searches, and a search's pages: Search Console filters every
+// call by the exact page and query asked for.
+func TestSearchConsoleNarrowsToPageAndQuery(t *testing.T) {
+	cl, bodies := fake(t, map[string]any{
+		"POST /webmasters/v3/sites/sc-domain:acme-com.example/searchAnalytics/query": map[string]any{"rows": []any{
+			map[string]any{"keys": []string{"https://acme-com.example/pricing"}, "clicks": 4, "impressions": 40, "ctr": 0.1, "position": 3.2}}},
+	})
+	creds := c.Creds{"access_token": "tok"}
+	q := query(c.ReportPages)
+	q.Site, q.Keyword = "sc-domain:acme-com.example", "acme pricing"
+	rep, err := SearchConsole{}.Report(ctx, cl, creds, q)
+	if err != nil || len(rep.Rows) != 1 || rep.Rows[0].Key != "https://acme-com.example/pricing" {
+		t.Fatalf("pages of a query: %+v %v", rep, err)
+	}
+	for _, b := range *bodies {
+		if !strings.Contains(b, `"dimensionFilterGroups":[{"filters":[{"dimension":"query","expression":"acme pricing","operator":"equals"}],"groupType":"and"}]`) {
+			t.Fatalf("every call filters by the query: %s", b)
+		}
+	}
+	*bodies = nil
+	q = query(c.ReportSearchQueries)
+	q.Site, q.Page = "sc-domain:acme-com.example", "https://acme-com.example/pricing"
+	if _, err := (SearchConsole{}).Report(ctx, cl, creds, q); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range *bodies {
+		if !strings.Contains(b, `"dimension":"page","expression":"https://acme-com.example/pricing","operator":"equals"`) {
+			t.Fatalf("every call filters by the page: %s", b)
+		}
+	}
+	if _, ok := any(SearchConsole{}).(c.SearchNarrower); !ok {
+		t.Fatal("Search Console narrows")
+	}
+	if _, err := c.CheckAnalyticsQuery(c.AnalyticsQuery{Report: c.ReportEvents, Page: "/x"}, time.Now()); err == nil {
+		t.Fatal("events can't be narrowed")
+	}
+}
+
+// Bing lists one page's queries and one query's pages by week.
+func TestBingNarrowsToPageAndQuery(t *testing.T) {
+	cl, bodies := fake(t, map[string]any{
+		"GET /GetPageQueryStats": map[string]any{"d": []any{
+			map[string]any{"Query": "cold email", "Date": "/Date(1790899200000)/", "Clicks": 2, "Impressions": 10, "AvgImpressionPosition": 8}, // 2026-10-02
+			map[string]any{"Query": "cold email", "Date": "/Date(1790985600000)/", "Clicks": 1, "Impressions": 10, "AvgImpressionPosition": 4}, // 2026-10-03
+			map[string]any{"Query": "outflare", "Date": "/Date(1790899200000)/", "Clicks": 5, "Impressions": 20, "AvgImpressionPosition": 1},
+		}},
+		"GET /GetQueryPageStats": map[string]any{"d": []any{
+			map[string]any{"Query": "https://acme-com.example/a", "Date": "/Date(1790899200000)/", "Clicks": 3, "Impressions": 9, "AvgImpressionPosition": 2},
+			map[string]any{"Query": "https://acme-com.example/b", "Date": "/Date(1790899200000)/", "Clicks": 1, "Impressions": 9, "AvgImpressionPosition": 6},
+		}},
+	})
+	creds := c.Creds{"api_key": "k"}
+	q := query(c.ReportSearchQueries)
+	q.Site, q.Page = "https://acme-com.example/", "https://acme-com.example/a"
+	rep, err := Bing{}.Report(ctx, cl, creds, q)
+	if err != nil || len(rep.Rows) != 2 || rep.Rows[0].Key != "outflare" || val(rep.Rows[1].Clicks) != 3 || val(rep.Rows[1].Position) != 6 {
+		t.Fatalf("queries of a page: %+v %v", rep, err)
+	}
+	if !strings.Contains((*bodies)[0], "page=https%3A%2F%2Facme-com.example%2Fa") {
+		t.Fatalf("asks for the page: %s", (*bodies)[0])
+	}
+	q = query(c.ReportPages)
+	q.Site, q.Keyword = "https://acme-com.example/", "cold email"
+	rep, err = Bing{}.Report(ctx, cl, creds, q)
+	if err != nil || len(rep.Rows) != 2 || rep.Rows[0].Key != "https://acme-com.example/a" || val(rep.Totals.Clicks) != 4 {
+		t.Fatalf("pages of a query: %+v %v", rep, err)
+	}
+	// One page and one query: the days that page showed for that query.
+	q = query(c.ReportTraffic)
+	q.Site, q.Page, q.Keyword = "https://acme-com.example/", "https://acme-com.example/a", "cold email"
+	rep, err = Bing{}.Report(ctx, cl, creds, q)
+	if err != nil || len(rep.Series) != 3 || val(rep.Series[1].Clicks) != 2 || val(rep.Series[2].Clicks) != 1 || val(rep.Totals.Clicks) != 3 {
+		t.Fatalf("days of a page and query: %+v %v", rep, err)
 	}
 }
 
@@ -437,5 +517,45 @@ func TestCloudflareSignInFindsAccount(t *testing.T) {
 	acct, err := Cloudflare{}.Test(ctx, cl, creds)
 	if err != nil || creds["account_id"] != strings.Repeat("b", 32) || acct.Details["sites"] != "1" {
 		t.Fatalf("account: %+v %v %v", acct, err, creds)
+	}
+}
+
+// The Performance report asks Search Analytics live: the search type, the
+// dimensions, every filter with its operator, and a row page at a time.
+func TestSearchConsoleSearchAnalytics(t *testing.T) {
+	calls := 0
+	cl, bodies := fake(t, map[string]any{
+		"POST /webmasters/v3/sites/sc-domain:acme-com.example/searchAnalytics/query": func(r *http.Request) any {
+			calls++
+			return map[string]any{"rows": []any{
+				map[string]any{"keys": []string{"acme proxy"}, "clicks": 7, "impressions": 70, "ctr": 0.1, "position": 2.5}}}
+		},
+	})
+	var _ c.SearchAnalyticsReader = SearchConsole{}
+	rows, err := SearchConsole{}.SearchAnalytics(ctx, cl, c.Creds{"access_token": "tok"}, c.SearchAnalyticsQuery{
+		Site: "sc-domain:acme-com.example", From: "2026-10-01", To: "2026-10-28", Type: "image",
+		Dimensions: []string{"query"}, Limit: 10,
+		Filters: []c.SearchAnalyticsFilter{
+			{Dimension: "query", Operator: "excludingRegex", Expression: "acme|northpeak"},
+			{Dimension: "country", Operator: "equals", Expression: "deu"},
+		},
+	})
+	if err != nil || len(rows) != 1 || rows[0].Keys[0] != "acme proxy" || rows[0].Clicks != 7 {
+		t.Fatalf("rows: %+v %v", rows, err)
+	}
+	b := (*bodies)[0]
+	for _, want := range []string{`"type":"image"`, `"dimensions":["query"]`, `"rowLimit":10`, `"startRow":0`, `"dataState":"all"`,
+		`{"dimension":"query","expression":"acme|northpeak","operator":"excludingRegex"}`, `{"dimension":"country","expression":"deu","operator":"equals"}`} {
+		if !strings.Contains(b, want) {
+			t.Fatalf("request lacks %s: %s", want, b)
+		}
+	}
+	// The totals are one row: one call, no dimensions.
+	calls = 0
+	if _, err := (SearchConsole{}).SearchAnalytics(ctx, cl, c.Creds{"access_token": "tok"}, c.SearchAnalyticsQuery{Site: "sc-domain:acme-com.example", From: "2026-10-01", To: "2026-10-28", Limit: 1}); err != nil || calls != 1 {
+		t.Fatalf("totals: %d calls, %v", calls, err)
+	}
+	if strings.Contains((*bodies)[len(*bodies)-1], `"dimensions"`) {
+		t.Fatal("totals ask no dimension")
 	}
 }

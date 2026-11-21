@@ -27,6 +27,7 @@ type OrganicSignupRow struct {
 	Path         string
 	Signups      int
 	SignupPeople int
+	Country      string // the person's first country, ISO alpha-2, or ""
 }
 
 // OrganicPaymentEvent is one payment event used to build paid revenue
@@ -42,11 +43,23 @@ type OrganicPaymentEvent struct {
 	Trial    bool
 	Wallet   bool
 	TxID     string
+	Country  string // the person's first country, ISO alpha-2, or ""
 }
 
 // OrganicConversionResult is the three PostHog reads for one site and window.
+// OrganicCountrySessionRow is organic sessions from one country on one
+// host on one day, with their time on the site added up.
+type OrganicCountrySessionRow struct {
+	Day      string
+	Host     string
+	Country  string // ISO alpha-2, or ""
+	Sessions int
+	Seconds  float64
+}
+
 type OrganicConversionResult struct {
 	Sessions             []OrganicSessionRow
+	CountrySessions      []OrganicCountrySessionRow // empty when the tool can't say
 	Signups              []OrganicSignupRow
 	Payments             []OrganicPaymentEvent
 	PaymentSucceededFrom string // YYYY-MM-DD of the earliest payment_succeeded, if any

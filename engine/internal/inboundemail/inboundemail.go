@@ -60,7 +60,7 @@ type Purpose struct {
 	Suffix string
 	// Workspace keeps a readable purpose (one with Suffix) to one address
 	// per workspace, named after the workspace's slug, such as
-	// geonode-receipts.
+	// northpeak-receipts.
 	Workspace bool
 	// Auto makes the workspace's address as soon as someone looks for it
 	// (the addresses list), so nobody has to press a button first.
@@ -260,7 +260,7 @@ func (s *Service) List(ctx context.Context, q Querier, workspaceID string) ([]Ad
 var notSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
 // newLocalPart is the workspace's slug, shortened, then random letters,
-// such as geonode-7q4m2x9k: easy to recognise, impossible to guess.
+// such as northpeak-7q4m2x9k: easy to recognise, impossible to guess.
 func newLocalPart(slug string) string {
 	base := strings.Trim(notSlug.ReplaceAllString(strings.ToLower(slug), "-"), "-")
 	if len(base) > 24 {

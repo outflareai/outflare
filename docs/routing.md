@@ -29,6 +29,16 @@ PUT /v1/brands/{brand}/routing
 
 Send a rule with its `id` to keep it (and its count of records routed); a rule left out is removed.
 
+## Hours and capacity
+
+Under the rules, **Hours and capacity** lists your teammates. For each one you can set:
+
+- **Working days and hours**, in their own time zone. While someone in a rule's pool is at work, a new record goes to them and not to a teammate who is off. If nobody in the pool is at work, the record still goes to the next person, so nothing waits without an owner. Hours that end before they start run past midnight.
+- **Capacity**: the most people and companies of the brand they own at once. Someone at that number gets no more until some of theirs are archived or given to someone else. When everyone in a pool is full, the record stays without an owner and shows in the count at the top of the page.
+- **Away**: on leave. Routing gives them nothing until it is switched off. What they already own stays theirs.
+
+Someone with nothing set is always at work and has no limit. Among the people who can take a record, the one who owns the fewest still gets it. Saving looks at every record with no owner again. Over the API this is `PUT /v1/brands/{brand}/routing/people` (`set_routing_people` over MCP), and `people` in the routing response shows what is set, how many each person owns and whether they are at work now.
+
 ## When records are routed
 
 - **By themselves.** About once a minute Outflare looks at the people and companies with no owner that arrived or changed since it last looked, and routes each one a rule matches. A record that matches no rule stays without an owner until it changes or the rules do.

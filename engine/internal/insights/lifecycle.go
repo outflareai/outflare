@@ -84,6 +84,9 @@ func CompileLifecycle(ctx context.Context, q Querier, ws, brand string, l Lifecy
 	}
 	c := &CompiledLifecycle{l: l}
 	a := &c.args
+	if err := a.leaveOutInternal(ctx, q, ws, brand); err != nil {
+		return nil, err
+	}
 	pWS, pBrand := a.add(ws), a.add(brand)
 	conv, err := loadConversion(ctx, q, ws, brand, l.Step.Kind, l.Step.Conversion, "step")
 	if err != nil {

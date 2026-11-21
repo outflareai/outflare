@@ -18,7 +18,7 @@ Screenshots and demos of Outflare come only from this workspace, never from app.
    python3 scripts/demo/seed.py "$ws" "$user" 2> ids | psql -q "$DATABASE_URL"
    ```
 
-   For the People page, add customer records through the API, with a token that has `customers.read` and `customers.manage` (Settings → API tokens):
+   For the People page, add customer records through the API, with a token that has `workspace.read`, `customers.read` and `customers.manage` (Settings → API tokens):
 
    ```sh
    python3 scripts/demo/records.py "$ws" "$token"

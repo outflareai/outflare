@@ -44,7 +44,7 @@ func scanMetric(row pgx.CollectableRow) (metricView, error) {
 	var v metricView
 	d := &v.Definition
 	err := row.Scan(&d.ID, &d.Key, &d.Name, &d.Description, &d.Levels, &d.Aggregate, &d.Events, &d.Usage, &d.Property, &d.WindowDays, &d.OffsetDays,
-		&d.PerProduct, &d.Version, &v.Status, &v.Backfilling, &v.BackfilledAt, &v.CreatedAt, &v.UpdatedAt)
+		&d.PerProduct, &d.Version, &d.ProductCategory, &v.Status, &v.Backfilling, &v.BackfilledAt, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
 }
 
@@ -196,6 +196,8 @@ type metricFields struct {
 	WindowDays  *int      `json:"window_days"`
 	OffsetDays  *int      `json:"offset_days"`
 	PerProduct  *bool     `json:"per_product"`
+	// ProductCategory counts only events about products in this category.
+	ProductCategory *string `json:"product_category"`
 }
 
 // apply sets f on d and reports whether what it counts changed.
@@ -221,6 +223,7 @@ func (f metricFields) apply(d *recmetrics.Definition) (bool, error) {
 	set(f.WindowDays != nil, func() { d.WindowDays = *f.WindowDays })
 	set(f.OffsetDays != nil, func() { d.OffsetDays = *f.OffsetDays })
 	set(f.PerProduct != nil, func() { d.PerProduct = *f.PerProduct })
+	set(f.ProductCategory != nil, func() { d.ProductCategory = strings.ToLower(strings.TrimSpace(*f.ProductCategory)) })
 	if msg := recmetrics.Check(*d); msg != "" {
 		return false, errInvalid(msg)
 	}
@@ -276,7 +279,7 @@ func (s *Server) createMetric(w http.ResponseWriter, r *http.Request) {
 
 func metricData(v metricView) map[string]any {
 	return map[string]any{"metric_id": v.ID, "aggregate": v.Aggregate, "window_days": v.WindowDays, "offset_days": v.OffsetDays,
-		"per_product": v.PerProduct, "events": len(v.Events), "usage": v.Usage, "version": v.Version}
+		"per_product": v.PerProduct, "by_category": v.ProductCategory != "", "events": len(v.Events), "usage": v.Usage, "version": v.Version}
 }
 
 // updateMetric changes a metric. A change to what it counts makes a new
@@ -312,9 +315,9 @@ func (s *Server) updateMetric(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := tx.Exec(ctx, `UPDATE metric_definitions SET name = $2, description = $3, levels = $4, aggregate = $5, events = $6, usage = $7,
 				property = NULLIF($8, ''), window_days = $9, offset_days = $10, per_product = $11, version = $12, backfilling = backfilling OR $13,
-				updated_at = now()
+				product_category = $14, updated_at = now()
 			WHERE id = $1`, cur.ID, d.Name, d.Description, d.Levels, d.Aggregate, d.Events, d.Usage, d.Property, d.WindowDays, d.OffsetDays,
-			d.PerProduct, version, changed); err != nil {
+			d.PerProduct, version, changed, d.ProductCategory); err != nil {
 			return err
 		}
 		if changed {

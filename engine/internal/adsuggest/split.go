@@ -111,3 +111,56 @@ func SplitOverTarget(cumulative []Arm, target *int64) bool {
 	}
 	return true
 }
+
+// TestFirst is the advice to test a finding inside the network before
+// making it: the kind of test, how long it would run and why.
+type TestFirst struct {
+	Kind string `json:"kind"`
+	Days int    `json:"days"`
+	Note string `json:"note"`
+}
+
+// testOf is the test each network can run for a finding's kind: Google a
+// trial bid target, Meta a trial budget.
+var testOf = map[string]map[string]string{
+	"google_ads": {BiddingTarget: "bidding"},
+	"meta_ads":   {BudgetUp: "budget"},
+}
+
+// ProposeTest says whether a finding that can spend more is better tested
+// first: the network can test that kind of change, and the campaign
+// converts often enough for an even split to reach an answer inside the
+// longest window. Changes that only save money are made, not tested.
+func ProposeTest(kind, connector string, evidence map[string]any) *TestFirst {
+	test := testOf[connector][kind]
+	if test == "" {
+		return nil
+	}
+	num := func(k string) float64 {
+		switch v := evidence[k].(type) {
+		case float64:
+			return v
+		case int64:
+			return float64(v)
+		case int:
+			return float64(v)
+		}
+		return 0
+	}
+	// The network compares its own conversions, so the rate is theirs.
+	conv := num("platform_conversions")
+	if conv == 0 && evidence["unit"] == UnitPlatform {
+		conv = num("conversions")
+	}
+	days := num("days")
+	if conv <= 0 || days <= 0 {
+		return nil
+	}
+	settle, run, _ := SplitWindow(test, conv/days, 50)
+	if conv/days*0.5*float64(maxWindow-settle) < wantConv {
+		return nil
+	}
+	what := map[string]string{"bidding": "the new bid target", "budget": "the new budget"}[test]
+	return &TestFirst{Kind: test, Days: run, Note: fmt.Sprintf(
+		"This can spend more, and the campaign converts often enough to prove it first: the network tries %s on half of the campaign for %d days beside the campaign as it is, and you keep it only if it wins.", what, run)}
+}

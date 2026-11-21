@@ -116,6 +116,220 @@ again, so the domains that worked cost nothing more.
   snapshot before. `GET /analytics/overview` includes the same figures under
   `seo` for each website.
 
+## The SEO dashboard
+
+The SEO overview opens on a dashboard (`GET /v1/brands/{brand}/seo/board`):
+five tiles, each set against the period it is usually compared with, with a
+green or red change.
+
+| Tile | Dates (brand's time zone) | Compared with |
+| --- | --- | --- |
+| Today | today | the same weekday a week before |
+| Yesterday | yesterday | the same weekday a week before |
+| Month to date | the 1st to today | the same days of last month |
+| This month (forecast) | the whole month | the whole of last month |
+| Last month | last month | the month before |
+
+Each tile shows first-touch Organic Search revenue (USD), payments and
+sign-ups from stored PostHog conversions, and Search Console clicks; "More
+numbers" adds organic sessions, impressions, CTR and position. The forecast
+scales the month so far to the whole month by the days each number has:
+conversions through yesterday, clicks through the last Search Console day.
+Search Console runs two or three days behind, so today and yesterday usually
+show conversions but no clicks; a number no stored day has shows as a dash,
+never as 0.
+
+Picking a tile lists the pages behind it (Search Console clicks by page from
+the page, country and device segments, joined to organic conversions by
+landing page; at most 200, most revenue first), sortable and downloadable as
+CSV, and a map by country. The map shades countries by revenue, payments,
+clicks, clicks that brought no payment, impressions, revenue per click,
+organic sessions, average time on site or sign-ups; hovering a country
+shows all of them, and the table under it sorts by any. Clicks and
+impressions are Search Console's; sessions, time on site, sign-ups,
+payments and revenue come from PostHog (first-touch Organic Search, by the
+visitor's first country, payments counted once and USD only, stored in
+`organic_countries` and readable as `query.seo_organic_countries`). Very
+small countries (Singapore, Hong Kong, Malta) have no shape on the map and
+are listed under it and in the table. Like the rest of the overview it reads
+only what is stored, so it costs nothing.
+
+## Target keywords and their rankings
+
+SEO overview, Targets (`GET /v1/brands/{brand}/seo/targets`) lists every page
+of the brand's SEO sites that has a target keyword (set on Keywords, Targets),
+with how it ranks:
+
+- **Position** in Search Console for the exact keyword on that page:
+  impression-weighted over the 28 days to the newest stored day, its change
+  from the 28 days before and from the week before, and a 12-week line.
+  Clicks and impressions are for the same keyword and page.
+- **Tracked rank** from the rank tracker, for the keywords it checks, by
+  country and device, with the change from the check before and whether the
+  ranking URL is the target page. "Track every target keyword" on Keywords,
+  Rankings adds the missing ones.
+- **Competing pages**: other pages of the site with at least 10 impressions
+  for the keyword in the same 28 days.
+- **On the page**: whether the keyword is in the title, H1 and description in
+  the latest crawl.
+
+Each target gets a band from the newest tracked rank, else Search Console's
+position: top 3, top 10, 11–20 (striking distance), 21+ or no data. The tiles
+at the top count each band, improved and declined targets, competing ones,
+ones missing the keyword in the title or H1, and untracked ones, and filter
+the table. Opening a row shows the secondary keywords with their own
+positions, every tracked rank, and the competing pages. It reads only what is
+stored, so it costs nothing.
+
+### The page passport and a keyword map
+
+Each target can also say what the page is for and what it holds:
+
+- **Intent**: informational, commercial, transactional or navigational.
+- **Page type**: homepage, product, pricing, use-case, comparison, blog,
+  location, tool, docs or other.
+- **Summary**: Markdown, up to 20,000 characters, of what the page holds:
+  its headings, plans and prices, features, calls to action and the
+  questions it answers.
+
+Edit them when you open a row on SEO overview, Targets, or set them with the
+API (`PUT` or `PATCH` on a target) and the MCP tools `set_page_target` and
+`update_page_target`. A whole keyword map imports from a CSV file (Import
+CSV on the Targets view) or through `POST
+/v1/brands/{brand}/seo-sites/{site}/targets/import` and the MCP tool
+`import_page_targets`, 1000 pages per request. The CSV has a header row with
+`url`, `primary_keyword`, `secondary_keywords` (split with `|`), `intent`,
+`page_type` and `summary`. A page that already has a target keeps whatever a
+row leaves empty; a new page needs a keyword. Wrong rows are skipped and
+listed. A site lists up to 10,000 targets.
+
+Each target then gets a status, the first that applies:
+
+| Status | When |
+| --- | --- |
+| Cannibalized | Another page of the site gets more impressions for the keyword in Search Console, or the rank tracker finds another page. The page that ranks instead is shown. |
+| Wrong intent | The page type rarely answers the intent: informational on a product or pricing page, transactional on a blog or docs page, navigational on a blog or comparison page. |
+| Missing content | The keyword is not in the title or H1, or the summary doesn't mention a secondary keyword. |
+| No data | No impressions, tracked rank or crawl yet. |
+| On target | None of the above. |
+
+A row also lists suggested fixes: where to put the keyword, which pages to
+link from (with the keyword as the anchor), when to retarget, what the summary
+leaves out, and when a page in striking distance is worth links. These are
+plain rules from stored data; they cost nothing.
+
+### Money left on the table
+
+Under the dashboard's pages and map, Money left on the table
+(`GET /v1/brands/{brand}/seo/money`) puts search gaps in dollars, over the 28
+days to the newest Search Console day stored:
+
+- **Positions 4–20**: query and page pairs with at least 100 impressions in
+  positions 4 to 20, with the clicks they would get at position 3 by the
+  expected CTR curve, less the clicks they get now.
+- **Low CTR**: pairs with at least 1,000 impressions whose CTR is under 70%
+  of the expected CTR for their position.
+- **Losing pages**: pages with at least 10 fewer clicks than in the 28 days
+  before, with the modeled loss and, beside it, the page's own first-touch
+  revenue change (never added in).
+
+Every dollar is extra clicks times **revenue per organic click**: the
+brand's first-touch organic revenue over its Search Console clicks in the
+same 28 days. You can type your own rate. Queries that name the brand are left
+out unless you tick Brand searches. Each row shows the link orders of the last
+90 days (not lost) that already point at its page. How it's counted shows the
+formula, the rate and the expected CTR curve (1: 28%, 2: 15%, 3: 10%, 4: 7%,
+5: 5%, falling to under 1% past 10). These are estimates to rank work by, not
+revenue earned or lost.
+
+### Declining pages
+
+SEO overview, Declining (`GET /v1/brands/{brand}/seo/declining`) lists the
+pages whose Search Console clicks fell over the last 7 or 28 days to the
+newest stored day against the same length before. Periods are whole, so a
+partial week is never set against a full one.
+
+A page is declining when it lost at least 30% of its clicks with at least 50
+in the period before, or 100 clicks or more whatever the share. The period
+before that sorts it:
+
+- **New**: it was not declining the period before.
+- **Still declining**: it was.
+- **Recovering**: it was declining and now gained clicks; it is not counted
+  in the loss.
+
+Each page shows its clicks, impressions, position and CTR against before and
+what moved most (impressions, position or CTR); the countries, device and
+query that lost most; its first-touch sign-ups and revenue; a modeled loss
+(clicks lost times revenue per organic click over the last 28 days); a flag
+when the latest crawl found it erroring, redirecting or noindex; and how many
+other pages of the site now show for its biggest losing query. Site audits'
+regression fixes keep watching week against the four weeks before; this view
+is for looking into a drop now.
+
+### Cannibalization across a brand
+
+SEO overview, Cannibalization (`GET /v1/brands/{brand}/seo/cannibalisation`)
+lists every search two or more of the brand's pages compete for, over all its
+SEO sites, with the same rule as Keywords, Cannibalisation: over the 28 days
+to the newest Search Console day, at least 100 impressions, and two or more
+pages each with a tenth of them (at least 10) at position 30 or better.
+Searches naming the brand are left out.
+
+Against the 28 days before, each search is **new**, **ongoing** or has
+**gained a page**; searches that competed before and no longer do are listed
+as **resolved**. Each one shows:
+
+- the page to keep: the one you chose (Keep this one, or
+  `PUT /v1/brands/{brand}/seo-sites/{site}/cannibalisation/primary`), else
+  the one that targets the search, else the one with the most clicks;
+- whether its pages share a language: searches across languages (such as
+  `/` and `/de/`) are in their own list, as they usually need hreflang or
+  targeting rather than consolidation;
+- the split clicks (what the other pages got) and an estimated gain (the
+  clicks if the page to keep got every impression at its own CTR, less the
+  clicks now);
+- its fix on the fixes list, when there is one.
+
+### Country pages
+
+SEO overview, Country pages (`GET /v1/brands/{brand}/seo/country-pages`)
+shows how pages made for a country, city or network rank in that country.
+Pick a template (a path such as `/proxies/`; templates with three or more
+pages are offered).
+
+Each page's **target country** is the country its target keyword is tracked
+in (the one it shows in most, when tracked in several), else the country
+Search Console shows it in most. Its clicks, impressions, CTR and position
+are Search Console's for that country only, over the 28 days to the newest
+stored day against the 28 before, beside the tracked rank there; a band uses
+the tracked rank, else that position. A page is **not tracked** when it has
+no target keyword, or its keyword is not tracked in its target country.
+
+Templates (the path without its last part) show the pages' median position
+now and before, so a template or translation change that lifts or sinks a
+whole group shows as one move.
+
+## Technical SEO at a glance
+
+The **Technical** view of SEO overview (`GET /v1/brands/{brand}/seo/technical`, MCP `get_seo_technical`) is the quick read of a brand's technical health; Site audits keeps every page and fix. It reads only what is stored:
+
+- **Issues by rule** from the latest finished crawl of each of the brand's sites, against the crawl before. Each rule counts **unique pages**, not occurrences, and **templates** with the language part of the path taken out, so one template error across ten languages is one template. **New** pages have the issue now and did not before; **fixed** pages had it and no longer do. A page only one of the two crawls reached is neither, so a crawl that stopped at its page limit does not look like a wave of fixes.
+- **Clicks at stake**: the Search Console clicks of the pages an issue touches over the last 28 days stored. Rules are sorted by them, then errors before warnings, then pages. Notices are hidden until you ask for them.
+- **Per site**: the latest crawl and the one it is compared with, pages fetched, indexed and not indexed from the indexing snapshots (with the change since the snapshot before), and whether robots.txt changed between the two crawls.
+- **Core Web Vitals** from real visits recorded by the Outflare tag: the 75th percentile LCP, INP and CLS per page and device over 28 days, for pages with at least 20 visits, worst first. Poor means past Google's lines: LCP 4 s, INP 500 ms, CLS 0.25.
+- **Sitemaps** as Search Console reports them: submitted, indexed, errors and warnings.
+
+## Links at a glance
+
+The **Links** view of SEO overview (`GET /v1/brands/{brand}/seo/links`, MCP `get_seo_links`) answers whether a brand's link footprint is growing and whether its bought links still hold; Backlinks and Link orders keep every record. It reads only what is stored, so it costs no API units:
+
+- **Referring domains** a week over 13 weeks from the weekly SEO snapshots (Ahrefs when it has any for a domain in the window, else the other connection; the last snapshot of each week), for the brand's domains and the 8 tracked competitors with the most, with the change against one and four weeks before.
+- **Velocity**: new, lost and regained links a week over 12 weeks, and the linking domains behind the new and lost ones, from backlink events. The connections read the strongest links per domain, so this is a trend, not a full count.
+- **Lost links** in the last 30 days, bought ones first: a lost link is bought when a link order was published on the same page.
+- **Bought links that need a look**: published, paid, verified or lost link orders whose last live check did not find the link, found it pointing at another page or with a different anchor than ordered, or has not run for 3 days. Each opens its order in Link orders.
+- **Anchors** of live links: branded (the brand's name or domain), URL, generic (click here, website), exact (a target keyword of one of the brand's pages), partial (most words of one), other, or no text.
+
 ## Is each brand growing?
 
 `GET /seo/overview` (the SEO overview page, MCP `get_seo_overview`) answers that
@@ -126,8 +340,8 @@ for each brand from what is already stored, so it is free:
   with search totals but no query rows leaves branded and non-branded
   unknown: missing query history is not read as zero.
 - **Branded search:** search console queries that contain one of the brand's
-  `terms` (its name, handle and the names of its domains, such as `repocket`
-  for repocket.com), added up by week. Consoles hide rare queries, so this is
+  `terms` (its name, handle and the names of its domains, such as `summitly`
+  for summitly.example), added up by week. Consoles hide rare queries, so this is
   a floor, not a total.
 - **Search conversions:** conversions on visits that landed from a search
   engine, from stored product analytics (PostHog page conversions).
@@ -665,7 +879,7 @@ The events that start them:
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo"
 
 # Is each brand growing in search: free
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo/overview?brand=repocket"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo/overview?brand=summitly"
 
 # Stored snapshots: free, never calls the provider
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo/history?report=overview&host=example.com"

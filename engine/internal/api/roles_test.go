@@ -159,7 +159,7 @@ func TestRoleBrandsAndTokens(t *testing.T) {
 	h := freshServer(t)
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
-	brand := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com"})["id"].(string)
+	brand := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "https://summitly.example"})["id"].(string)
 
 	role := owner.must(201, "POST", base+"/roles", map[string]any{"name": "Brand helper", "scopes": []string{"workspace.read", "leads.read", "leads.manage"}})
 	id := role["id"].(string)

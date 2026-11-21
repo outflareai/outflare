@@ -1,4 +1,5 @@
 packages:
   - web
   - sdk/ts
+  - sdk/react-native
   - mcp

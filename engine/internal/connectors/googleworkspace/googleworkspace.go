@@ -120,7 +120,8 @@ func (Connector) Definition() c.Definition {
 			"authorize the service account's numeric client ID for exactly the Directory customer.readonly and domain.readonly scopes. " +
 			"Then connect with the service account's email and your OAuth client, and sign in. No key is downloaded. " +
 			"With profile changes allowed (and the Directory user and Gmail settings basic and sharing scopes authorized too), it can change existing users' names, photos, signatures, recovery email and forwarding. " +
-			"It cannot create or delete users, enroll two-factor authentication or retrieve passwords or login codes.",
+			"With creating users allowed (and the Directory user scope authorized), it can create new users, each taking one of your own licences. " +
+			"It cannot delete users, buy licences, enroll two-factor authentication or retrieve passwords or login codes.",
 		Website: "https://workspace.google.com", DocsURL: "https://developers.google.com/workspace/admin/directory/v1/guides/manage-domains",
 		KeyURL: "https://console.cloud.google.com/iam-admin/serviceaccounts",
 		Fields: []c.Field{
@@ -133,9 +134,11 @@ func (Connector) Definition() c.Definition {
 			{Name: "oauth_client_secret", Label: "Your OAuth client secret", Secret: true, Optional: true},
 			{Name: "manage_users", Label: "Allow profile changes", Optional: true, Placeholder: "yes",
 				Help: "Type yes to let Outflare change existing users' names, photos and Gmail signatures. Also authorize the service account for the Directory user and Gmail settings (basic) scopes. It never creates or deletes users or sees passwords."},
+			{Name: "create_users", Label: "Allow creating users", Optional: true, Placeholder: "yes",
+				Help: "Type yes to let Outflare create new users in this tenant. Each one takes one of your own licences. Also authorize the service account for the Directory user scope. It never deletes users or buys licences."},
 			keyField,
 		},
-		Capabilities: []string{c.CapWorkspaceInspect, c.CapWorkspaceManageUsers}, Pricing: "Uses your Google Workspace account"}
+		Capabilities: []string{c.CapWorkspaceInspect, c.CapWorkspaceManageUsers, c.CapWorkspaceCreateUsers}, Pricing: "Uses your Google Workspace account"}
 }
 
 // keyless reports whether creds use the sign-in path instead of a key.
@@ -154,6 +157,9 @@ func checkCreds(cr c.Creds) (string, error) {
 	}
 	if m := strings.TrimSpace(cr["manage_users"]); m != "" && m != "yes" {
 		return "", c.Errf(c.ErrInvalid, "leave profile changes empty, or type yes to allow them")
+	}
+	if m := strings.TrimSpace(cr["create_users"]); m != "" && m != "yes" {
+		return "", c.Errf(c.ErrInvalid, "leave creating users empty, or type yes to allow it")
 	}
 	signIn := cr["service_account_email"] != "" || cr["oauth_client_id"] != "" || cr["oauth_client_secret"] != ""
 	if !keyless(cr) {

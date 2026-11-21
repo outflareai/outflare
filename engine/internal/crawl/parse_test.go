@@ -3,6 +3,7 @@ package crawl
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -117,6 +118,7 @@ func TestParsePageAndNormalize(t *testing.T) {
 <a href="/a#top">A</a> <a href="b">B</a> <a href="/a">A again</a>
 <a href="mailto:x@example.com">mail</a> <a href="javascript:void(0)">js</a> <a href="#x">frag</a>
 <a href="https://other.example:443/x">other</a> <a href="//cdn.example.com">cdn</a>
+<a href="/cdn-cgi/l/email-protection#96fcf9d6f3eef7fbe6faf3b8f5f9fb">Email Jo</a>
 </body></html>`))
 	if !p.Noindex || !p.Nofollow || p.Meta["outflare-site-verification"] != "tok" {
 		t.Fatalf("meta: %+v", p)
@@ -129,6 +131,26 @@ func TestParsePageAndNormalize(t *testing.T) {
 	p = ParsePage(base, []byte(`<base href="https://example.com/docs/"><a href="x">x</a>`))
 	if !slices.Equal(linkURLs(p), []string{"https://example.com/docs/x"}) {
 		t.Fatalf("base: %v", p.Links)
+	}
+}
+
+// A mailto: link that Cloudflare obfuscated decodes to its address.
+func TestCloudflareEmail(t *testing.T) {
+	// "jo@example.com?subject=Hi" with the key 0x96.
+	enc := "96"
+	for _, c := range []byte("jo@example.com?subject=Hi") {
+		enc += fmt.Sprintf("%02x", c^0x96)
+	}
+	if e, ok := cloudflareEmail(enc); !ok || e != "jo@example.com" {
+		t.Fatalf("decoded %q %v", e, ok)
+	}
+	for _, bad := range []string{"", "96", "xyz", "abc"} {
+		if _, ok := cloudflareEmail(bad); ok {
+			t.Fatalf("%q decoded", bad)
+		}
+	}
+	if !cfMailto.MatchString(`<a href="/cdn-cgi/l/email-protection#96fcf9">`) || !cfMailto.MatchString(`<span data-cfemail="96fcf9">`) {
+		t.Fatal("obfuscated addresses not found")
 	}
 }
 

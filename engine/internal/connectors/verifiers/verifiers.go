@@ -62,7 +62,7 @@ func getJSON(ctx context.Context, cl *c.Client, name string, req *http.Request, 
 		return resp.StatusCode, c.Errf(c.ErrUnavailable, "reading the %s response: %v", name, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return resp.StatusCode, c.HTTPError(name, resp.StatusCode, string(body))
+		return resp.StatusCode, c.HTTPErrorFor(name, resp, string(body))
 	}
 	if v != nil {
 		if err := json.Unmarshal(body, v); err != nil {
@@ -230,7 +230,7 @@ func (s nbStatus) err() error {
 	case "auth_failure":
 		return c.Errf(c.ErrAuth, "NeverBounce refused the API key: %s", s.Message)
 	case "throttle_triggered":
-		return c.Errf(c.ErrQuota, "NeverBounce rate limit: %s", s.Message)
+		return c.Throttledf(0, "NeverBounce rate limit: %s", s.Message)
 	}
 	return c.Errf(c.ErrInvalid, "NeverBounce: %s %s", s.Status, s.Message)
 }
@@ -417,7 +417,7 @@ func (e Emailable) Verify(ctx context.Context, cl *c.Client, cr c.Creds, email s
 		Disposable bool     `json:"disposable"`
 		Role       bool     `json:"role"`
 		Free       bool     `json:"free"`
-		AcceptAll  bool     `json:"accept_all"`
+		AcceptAll  *bool    `json:"accept_all"`
 		DidYouMean *string  `json:"did_you_mean"`
 	}
 	q := url.Values{"api_key": {cr["api_key"]}, "email": {email}, "timeout": {"20"}}
@@ -430,7 +430,7 @@ func (e Emailable) Verify(ctx context.Context, cl *c.Client, cr c.Creds, email s
 		return c.Verification{}, c.Errf(c.ErrUnavailable, "Emailable is still verifying %s", email)
 	}
 	v := c.Verification{Email: email, Reason: r.Reason, Disposable: r.Disposable, Role: r.Role, Free: r.Free,
-		CatchAll: r.AcceptAll, ProviderStatus: r.State}
+		CatchAll: r.AcceptAll != nil && *r.AcceptAll, NotCatchAll: r.AcceptAll != nil && !*r.AcceptAll, ProviderStatus: r.State}
 	if r.DidYouMean != nil {
 		v.Suggestion = *r.DidYouMean
 	}
@@ -579,7 +579,7 @@ func (h Hunter) Verify(ctx context.Context, cl *c.Client, cr c.Creds, email stri
 			Score      *float64 `json:"score"`
 			Disposable bool     `json:"disposable"`
 			Webmail    bool     `json:"webmail"`
-			AcceptAll  bool     `json:"accept_all"`
+			AcceptAll  *bool    `json:"accept_all"`
 		} `json:"data"`
 	}
 	status, err := getJSON(ctx, cl, "Hunter", get(h.base(cl)+"/v2/email-verifier", url.Values{"api_key": {cr["api_key"]}, "email": {email}}), &r)
@@ -590,8 +590,8 @@ func (h Hunter) Verify(ctx context.Context, cl *c.Client, cr c.Creds, email stri
 		return c.Verification{}, c.Errf(c.ErrUnavailable, "Hunter is still verifying %s", email)
 	}
 	d := r.Data
-	v := c.Verification{Email: email, Reason: d.Status, Disposable: d.Disposable, Free: d.Webmail, CatchAll: d.AcceptAll,
-		ProviderStatus: d.Status}
+	v := c.Verification{Email: email, Reason: d.Status, Disposable: d.Disposable, Free: d.Webmail,
+		CatchAll: d.AcceptAll != nil && *d.AcceptAll, NotCatchAll: d.AcceptAll != nil && !*d.AcceptAll, ProviderStatus: d.Status}
 	if d.Score != nil {
 		v.Score = score(*d.Score)
 	}
@@ -603,7 +603,7 @@ func (h Hunter) Verify(ctx context.Context, cl *c.Client, cr c.Creds, email stri
 	case "disposable":
 		v.Status, v.Disposable = c.Undeliverable, true
 	case "accept_all":
-		v.Status, v.CatchAll = c.Risky, true
+		v.Status, v.CatchAll, v.NotCatchAll = c.Risky, true, false
 	default:
 		v.Status = c.Unknown
 	}

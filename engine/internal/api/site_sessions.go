@@ -86,6 +86,9 @@ func parseUA(ua string) (device, browser, os string) {
 		device = "desktop"
 	}
 	switch {
+	case strings.HasPrefix(ua, "outflare-"):
+		// Outflare's own libraries for apps (outflare-swift/1.0 (iPhone; iOS 18.1)).
+		browser = "app"
 	case has("Edg/", "EdgA/", "EdgiOS/"):
 		browser = "edge"
 	case has("OPR/", "Opera"):
@@ -248,6 +251,8 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 	if !page {
 		touch.ad = nil
 	}
+	// An app's screen counts as a view of the visit, as a page does.
+	view := page || m.text("type") == "screen"
 
 	var id string
 	var last time.Time
@@ -312,7 +317,7 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 				region, city, asn, isp, device_brand, device_model, os_version, browser_version, language)
 			VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
 				$27, $28, $29, $30, $31, $32, $33, $34, $35) RETURNING id::text`,
-			a.WorkspaceID, v.keyID, v.brandID, anon, rec, now, boolInt(page), cutUTF8(str("url"), 2000), cutUTF8(str("path"), 2000),
+			a.WorkspaceID, v.keyID, v.brandID, anon, rec, now, boolInt(view), cutUTF8(str("url"), 2000), cutUTF8(str("path"), 2000),
 			cutUTF8(referrer, 2000), cutUTF8(refHost, 253), touch.source, touch.medium, touch.campaign, touch.term, touch.content, ids,
 			touch.ref, touch.ofc, country, cutUTF8(tz, 100), v.device, v.browser, v.os, ad, countrySource,
 			region, city, v.asn, v.isp, v.detail.brand, v.detail.model, cutUTF8(v.detail.osVersion, 20), cutUTF8(v.detail.browserVersion, 20),
@@ -337,7 +342,7 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 		}
 		if _, err := tx.Exec(ctx, `UPDATE site_sessions SET last_seen_at = $2, events = events + 1, pageviews = pageviews + $3,
 				click_ids = click_ids || $4::jsonb WHERE id = $1`,
-			id, now, boolInt(page), cookies); err != nil {
+			id, now, boolInt(view), cookies); err != nil {
 			return false, err
 		}
 	}

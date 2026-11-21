@@ -27,6 +27,14 @@ func TestMenuBadges(t *testing.T) {
 	if asked != ws || len(badges) != 1 || badges["billing"] != "$50.00" {
 		t.Fatalf("badges for %s: %v", asked, out)
 	}
+	// A caller kept to one brand gets none: badges are about the whole
+	// workspace. It isn't refused either, so its sidebar's poll stays quiet.
+	owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})
+	tok := owner.must(201, "POST", "/v1/workspaces/"+ws+"/api-tokens", map[string]any{"name": "Northpeak only", "scopes": []string{"workspace.read"}, "brand": "northpeak"})
+	limited := &client{t: t, h: e.h, bearer: tok["token"].(string)}
+	if b := limited.must(200, "GET", "/v1/workspaces/"+ws+"/menu-badges", nil)["badges"].(map[string]any); len(b) != 0 {
+		t.Fatalf("badges for a brand-limited caller: %v", b)
+	}
 	// Without extensions there are none.
 	plain := freshEnv(t)
 	other, ws2 := setupOwner(t, plain.h)

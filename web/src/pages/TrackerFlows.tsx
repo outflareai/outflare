@@ -8,7 +8,7 @@ import type { Schemas } from "@outflare/sdk";
 import { PickBrand } from "@/components/pick-brand";
 import { pickedBrandId, useBrand } from "@/lib/brand";
 import { api, errorMessage } from "../api";
-import { ask, Button, Card, confirmAction, Empty, ErrorText, field, Loading, PageHeader, toast } from "../ui";
+import { ask, BackButton, Button, Card, confirmAction, Empty, ErrorText, field, Loading, PageHeader, toast } from "../ui";
 import { Routing, sentence, type RoutingBackend } from "./TrackerRouting";
 import type { Tab } from "../App";
 
@@ -47,7 +47,7 @@ function List({ canManage, go }: Props) {
         action={canManage && <Button variant="primary" onClick={() => void create()}>New flow</Button>}
       />
       {flows.length === 0 ? (
-        <Empty title="No flows yet">Make a flow when several campaigns should send their clicks the same way, then pick it on each campaign's Destination tab.</Empty>
+        <Empty title="No flows yet">Make a flow when several campaigns should send their clicks the same way, then pick it on each campaign's Landers and offers tab.</Empty>
       ) : (
         <Card title={`${flows.length} flow${flows.length === 1 ? "" : "s"}`}>
           <div className="overflow-x-auto">
@@ -109,10 +109,10 @@ function FlowPage({ id, canManage, go }: Props & { id: string }) {
   };
   return (
     <div className="space-y-4">
+      <BackButton to="flows" onClick={() => go("tracker-flows")} />
       <PageHeader
         title={flow.name}
-        description={links === 0 ? "No campaign uses it yet: pick it on a campaign's Destination tab." : `Used by ${links} link${links === 1 ? "" : "s"}: a change here changes them all.`}
-        back={{ label: "Flows", onClick: () => go("tracker-flows") }}
+        description={links === 0 ? "No campaign uses it yet: pick it on a campaign's Landers and offers tab." : `Used by ${links} link${links === 1 ? "" : "s"}: a change here changes them all.`}
         action={canManage && <Button variant="ghost" onClick={() => void archive()}>Archive</Button>}
       />
       <Card title="Name">

@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -145,4 +146,65 @@ func TestOpenRouterSignInMakesAKey(t *testing.T) {
 	// The key works wherever a pasted key does.
 	owner.must(200, "POST", base+"/integrations/"+id+"/test", nil)
 	owner.must(200, "PUT", base+"/ai-settings", map[string]any{"integration_id": id, "model": "openai/gpt-5"})
+}
+
+// Signing a connection in again (?integration=) keeps the connection: the
+// new tokens replace its old ones, nothing else is added, and a connection
+// of another connector is refused.
+func TestSignInAgainKeepsTheConnection(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/" && r.Method == "POST":
+			r.ParseForm()
+			tok := map[string]string{"abc": "cal_first", "def": "cal_second"}[r.Form.Get("code")]
+			if tok == "" {
+				w.WriteHeader(400)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"access_token": tok, "refresh_token": tok + "_r", "expires_in": 3600})
+		case r.URL.Path == "/me" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer cal_"):
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"id": 7, "email": "ana@acme.example", "name": "Ana", "username": "ana"}})
+		default:
+			w.WriteHeader(401)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	e.integrations.Client.BaseURLs["cal_com"] = srv.URL
+	e.integrations.Client.BaseURLs["cal_com.token"] = srv.URL
+	e.integrations.OAuthApps = map[string]connectors.OAuthApp{"cal_com": {ClientID: "cal-id", ClientSecret: "cal-secret"}}
+
+	signIn := func(code, query string) url.Values {
+		t.Helper()
+		link := owner.must(200, "GET", base+"/integrations/oauth/cal_com/authorize?format=json"+query, nil)["url"].(string)
+		u, _ := url.Parse(link)
+		return follow(t, owner, "/v1/integrations/oauth/callback?code="+code+"&state="+url.QueryEscape(u.Query().Get("state"))).Query()
+	}
+	first := signIn("abc", "")
+	id := first.Get("integration")
+	if id == "" {
+		t.Fatalf("first sign-in: %v", first)
+	}
+	again := signIn("def", "&integration="+id)
+	if again.Get("integration") != id || again.Get("signed_in") != "1" {
+		t.Fatalf("sign in again: %v", again)
+	}
+	var n int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM integrations WHERE workspace_id = $1 AND connector = 'cal_com'`, ws).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("connections: %d %v", n, err)
+	}
+	o, err := e.integrations.Open(context.Background(), e.pool, ws, id)
+	if err != nil || o.Creds["access_token"] != "cal_second" {
+		t.Fatalf("tokens after signing in again: %v %v", o, err)
+	}
+	var audits int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action = 'integration.signed_in' AND target_id = $2`, ws, id).Scan(&audits); err != nil || audits != 1 {
+		t.Fatalf("audit: %d %v", audits, err)
+	}
+
+	// Not a connection of this connector, or not one at all.
+	owner.must(404, "GET", base+"/integrations/oauth/cal_com/authorize?format=json&integration=00000000-0000-4000-8000-000000000000", nil)
+	owner.must(404, "GET", base+"/integrations/oauth/cal_com/authorize?format=json&integration=nope", nil)
 }

@@ -125,7 +125,7 @@ func TestRedirectModes(t *testing.T) {
 	if rec := get("", "/l/zzzzzzzz"); rec.Code != http.StatusNotFound {
 		t.Fatalf("shared domain, unknown code: %d", rec.Code)
 	}
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	owner.must(404, "PUT", "/v1/brands/"+other["id"].(string)+"/tracking-domains/"+domainID+"/fallback", map[string]any{"url": "https://northpeak.example/"})
 
 	found := false

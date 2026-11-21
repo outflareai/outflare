@@ -2,6 +2,7 @@ package emailfind
 
 import (
 	"context"
+	"math"
 	"time"
 )
 
@@ -12,7 +13,7 @@ import (
 type Code string
 
 const (
-	CodeFound         Code = "found"         // a confident guess; continue
+	CodeFound         Code = "found"         // a confident guess, or a connected finder's answer; continue
 	CodeVerified      Code = "verified"      // seen deliverable first-party; continue
 	CodeRisky         Code = "risky"         // catch-all or low confidence; caller's policy
 	CodeNotFound      Code = "not_found"     // no address could be built; skip
@@ -54,15 +55,31 @@ type NetworkSignal struct {
 }
 
 // Cost is what one find or verify spent. Native, first-party work is free, so
-// Cents and Units are zero and Provider is "outflare"; a workspace's own paid
-// verifier reports its spend and which connection answered: one credit an
-// address checked (Units), as the spend ledger books it. An answer from
-// the cache costs nothing.
+// Cents and Units are zero and Provider is "outflare"; the workspace's own
+// connected finder and paid verifier report their spend and which
+// connection answered: the lookups the finder charged plus one credit an
+// address the verifier checked (Units), as the spend ledger books them.
+// When both charged, Provider and Connection name the finder and Units is
+// the total. An answer from the cache costs nothing.
+//
+// Micros is what the providers said those units cost, in millionths of a
+// dollar, for a caller that keeps the exact cost (Treg reports each call's
+// cost; most providers report none, and their units are priced with the
+// workspace's spend rates). Only Go callers see it.
 type Cost struct {
 	Cents      int    `json:"cents"`
 	Units      int    `json:"units"`
 	Provider   string `json:"provider"`
 	Connection string `json:"connection,omitempty"`
+	Micros     int64  `json:"-"`
+}
+
+// micros rounds a provider's reported cost to whole millionths.
+func micros(v float64) int64 {
+	if v <= 0 {
+		return 0
+	}
+	return int64(math.Round(v))
 }
 
 // FindItem is one person to find an address for. Ref is the caller's own
@@ -74,10 +91,16 @@ type FindItem struct {
 	LastName  string `json:"last_name"`
 	Domain    string `json:"domain"`
 	Company   string `json:"company,omitempty"`
+	// LinkedInURL is the person's own LinkedIn profile, when the caller
+	// has it. Resolve gives it to the connected finders that can look a
+	// person up by profile and asks those first (finder.go). Anything that
+	// is not a person's profile URL is ignored.
+	LinkedInURL string `json:"linkedin_url,omitempty"`
 }
 
-// FindRequest is a batch to resolve. A repeat with the same IdempotencyKey in
-// the same workspace returns the cached result without re-spending. Keep
+// FindRequest is a batch to resolve. A repeat for the same people in the
+// same workspace does not spend again: a finder's answer is remembered per
+// person and a verifier's per address, whatever the IdempotencyKey. Keep
 // Items at or below MaxBatch so a job finishes inside the queue's lease.
 type FindRequest struct {
 	IdempotencyKey string     `json:"idempotency_key,omitempty"`

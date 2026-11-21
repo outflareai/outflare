@@ -170,6 +170,9 @@ func RunPaths(ctx context.Context, q Querier, ws, brand string, p Paths) (PathsR
 		window = p.Window.duration()
 	}
 	var a args
+	if err := a.leaveOutInternal(ctx, q, ws, brand); err != nil {
+		return PathsResult{}, err
+	}
 	pWS, pBrand := a.add(ws), a.add(brand)
 	pFrom, pTo := a.add(p.From), a.add(p.To)
 	pWindow := a.add(fmt.Sprintf("%d seconds", int64(window.Seconds())))
@@ -178,6 +181,9 @@ func RunPaths(ctx context.Context, q Querier, ws, brand string, p Paths) (PathsR
 	pLow, pHigh := a.add(p.From.Add(-window)), a.add(p.To.Add(window))
 	where := []string{`e.workspace_id = ` + pWS, `e.brand_id = ` + pBrand, `(e.record_id IS NOT NULL OR e.anonymous_id IS NOT NULL)`,
 		`e.occurred_at >= ` + pLow, `e.occurred_at < ` + pHigh}
+	if w := a.notInternal("e.record_id"); w != "" {
+		where = append(where, w)
+	}
 	switch {
 	case len(p.Kinds) == 1 && p.Kinds[0] == KindPage:
 		where = append(where, `e.name = 'page.viewed'`)

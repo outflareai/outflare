@@ -47,6 +47,7 @@ export const appLabels: Record<AgentApp["app"], string> = {
   chatgpt: "ChatGPT",
   cursor: "Cursor",
   vscode: "VS Code",
+  extension: "Outflare for Chrome",
   local: "An app on a computer",
   unknown: "Another app",
 };

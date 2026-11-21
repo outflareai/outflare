@@ -27,7 +27,9 @@ const jobKnowledgeFromReply = "knowledge.from_reply"
 func (s *Server) registerKnowledgeJobs(q *jobs.Queue) {
 	q.Handle(jobKnowledgeFromReply, s.knowledgeFromReplyJob)
 	q.Handle(support.JobAssistant, s.assistantJob)
+	q.Handle(support.JobChatUnanswered, support.ChatUnanswered(s.pool))
 	q.Handle(jobFindAnswer, s.findAnswerJob)
+	q.Handle(jobLoopInEmail, s.loopInEmailJob)
 	q.Handle(jobAssistantSend, s.assistantSendJob)
 }
 

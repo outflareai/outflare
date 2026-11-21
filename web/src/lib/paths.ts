@@ -4,12 +4,12 @@
 // settings). {brand} is the brand's handle, or "all" for every brand; a
 // workspace without brands, and the pages that belong to the whole
 // workspace (Members, Tokens and the like), leave it out. A last segment
-// opens one item, e.g. /acme/repocket/sequences/{id}.
+// opens one item, e.g. /acme/summitly/sequences/{id}.
 //
 // Older links still open: /w/{workspace id}/{tab} is rewritten to the slug,
-// and /{workspace}/{tab}?brand=repocket to /{workspace}/repocket/{tab}.
+// and /{workspace}/{tab}?brand=summitly to /{workspace}/summitly/{tab}.
 
-export const appTabs = ["crm", "sales-reporting", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "funnels", "trends", "retention", "paths", "dashboards", "channels", "analytics", "live", "page-speed", "tracking", "flags", "ab-tests", "links", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "reddit", "reddit-campaigns", "social", "reviews", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "signals", "revenue", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression", "knowledge", "company", "brands", "ideal-customers", "brand-accounts", "workspace", "workspace-brands", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "support", "help-centre", "agent-mail", "outreach-mailboxes", "telegram"] as const;
+export const appTabs = ["crm", "sales-reporting", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "funnels", "trends", "retention", "paths", "dashboards", "recordings", "heatmaps", "channels", "analytics", "live", "page-speed", "errors", "named-clicks", "internal-people", "tracking", "flags", "ab-tests", "links", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "reddit", "reddit-campaigns", "social", "mentions", "reviews", "ads", "partners", "partnerships", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "signals", "revenue", "automations", "templates", "topics", "providers", "people", "query", "query-endpoints", "data-catalog", "leads", "lists", "lead-finder", "email-finder", "suppression", "knowledge", "company", "brand-profile", "brands", "ideal-customers", "brand-accounts", "workspace", "workspace-brands", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "support", "help-centre", "agent-mail", "outreach-mailboxes", "telegram"] as const;
 export type Tab = (typeof appTabs)[number];
 
 export const isTab = (t?: string): t is Tab => !!t && (appTabs as readonly string[]).includes(t);
@@ -24,6 +24,7 @@ let brandPart = "";
 export function setBrandPart(part: string) {
   brandPart = part;
 }
+export const currentBrandPart = () => brandPart;
 
 export type Place = { ws?: string; brand?: string; tab?: Tab; item?: string; legacy?: boolean };
 
@@ -64,7 +65,7 @@ export function rememberWorkspaces(list: { id: string; slug: string }[]) {
 }
 
 // appPath is the URL of a page on the brand picked: appPath(ws,
-// "sequences", "q3-founders") is /acme/repocket/sequences/q3-founders, and
+// "sequences", "q3-founders") is /acme/summitly/sequences/q3-founders, and
 // appPath(ws, "connectors", "claude") /acme/connectors/claude. ws is the
 // workspace ID or slug.
 export function appPath(ws: string, tab: Tab, item?: string): string {

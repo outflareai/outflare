@@ -17,22 +17,22 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "handle": "geonode"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})
 	prog := owner.must(201, "POST", base+"/partner-programs", map[string]any{
-		"name": "Geonode affiliates", "kind": "affiliate", "brand": "geonode", "landing_url": "https://geonode.example/pricing",
+		"name": "Northpeak affiliates", "kind": "affiliate", "brand": "northpeak", "landing_url": "https://northpeak.example/pricing",
 	})
 	rules := prog["rules"].([]any)
-	if prog["slug"] != "geonode-affiliates" || prog["hold_days"] != float64(30) || len(rules) != 1 || rules[0].(map[string]any)["percent_bp"] != float64(2000) {
+	if prog["slug"] != "northpeak-affiliates" || prog["hold_days"] != float64(30) || len(rules) != 1 || rules[0].(map[string]any)["percent_bp"] != float64(2000) {
 		t.Fatalf("program = %v", prog)
 	}
-	owner.must(409, "POST", base+"/partner-programs", map[string]any{"name": "Geonode affiliates", "kind": "affiliate", "brand": "geonode"})
+	owner.must(409, "POST", base+"/partner-programs", map[string]any{"name": "Northpeak affiliates", "kind": "affiliate", "brand": "northpeak"})
 	owner.must(400, "POST", base+"/partner-programs", map[string]any{"name": "X", "kind": "loyalty"})
-	owner.must(400, "PUT", base+"/partner-programs/geonode-affiliates/rules", map[string]any{"rules": []any{
+	owner.must(400, "PUT", base+"/partner-programs/northpeak-affiliates/rules", map[string]any{"rules": []any{
 		map[string]any{"trigger": "lead", "kind": "percent", "percent_bp": 1000}}})
-	owner.must(400, "PATCH", base+"/partner-programs/geonode-affiliates", map[string]any{"kind": "referral"})
+	owner.must(400, "PATCH", base+"/partner-programs/northpeak-affiliates", map[string]any{"kind": "referral"})
 
 	// A partner is a customer record, with a code, a short link and a campaign link.
-	ana := owner.must(201, "POST", base+"/partners", map[string]any{"program": "geonode-affiliates", "email": "ana@example.com", "name": "Ana Lima", "payout_method": "PayPal: ana@example.com"})
+	ana := owner.must(201, "POST", base+"/partners", map[string]any{"program": "northpeak-affiliates", "email": "ana@example.com", "name": "Ana Lima", "payout_method": "PayPal: ana@example.com"})
 	if ana["code"] != "ana" || ana["status"] != "active" || ana["name"] != "Ana Lima" || ana["email"] != "ana@example.com" || ana["payout_method"] != "PayPal: ana@example.com" {
 		t.Fatalf("partner = %v", ana)
 	}
@@ -47,20 +47,20 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 		t.Fatalf("links = %v / %v", ana["link"], ana["campaign_link"])
 	}
 	anaID := ana["id"].(string)
-	owner.must(409, "POST", base+"/partners", map[string]any{"program": "geonode-affiliates", "email": "ana@example.com"})
-	owner.must(409, "POST", base+"/partners", map[string]any{"program": "geonode-affiliates", "email": "other@example.com", "code": "ANA"})
+	owner.must(409, "POST", base+"/partners", map[string]any{"program": "northpeak-affiliates", "email": "ana@example.com"})
+	owner.must(409, "POST", base+"/partners", map[string]any{"program": "northpeak-affiliates", "email": "other@example.com", "code": "ANA"})
 	owner.must(400, "PATCH", base+"/partners/"+anaID, map[string]any{"code": "ana2"})
 
 	// The short link counts the click and lands tagged, with the sub-id as utm_content.
 	code, loc := owner.rawUA("GET", "/r/"+ws+"/ana?sub=yt-review&to=/blog/proxies", "Mozilla/5.0")
-	if code != http.StatusFound || !strings.HasPrefix(loc, "https://geonode.example/blog/proxies?utm_source=partner") ||
+	if code != http.StatusFound || !strings.HasPrefix(loc, "https://northpeak.example/blog/proxies?utm_source=partner") ||
 		!strings.Contains(loc, "utm_content=yt-review") || !strings.Contains(loc, "&ref=ana&ref_click=") {
 		t.Fatalf("redirect %d %s", code, loc)
 	}
 	u, _ := url.Parse(loc)
 	click := u.Query().Get("ref_click")
 	// Another site in ?to lands on the landing page instead.
-	if _, loc := owner.rawUA("GET", "/r/"+ws+"/ana?to=https://evil.example/x", "Mozilla/5.0"); !strings.HasPrefix(loc, "https://geonode.example/pricing?") {
+	if _, loc := owner.rawUA("GET", "/r/"+ws+"/ana?to=https://evil.example/x", "Mozilla/5.0"); !strings.HasPrefix(loc, "https://northpeak.example/pricing?") {
 		t.Fatalf("open redirect: %s", loc)
 	}
 	if code, _ := owner.rawUA("GET", "/r/"+ws+"/nobody", "Mozilla/5.0"); code != http.StatusNotFound {
@@ -68,7 +68,7 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 	}
 
 	// The backend reports a sign-up with the click id, then a sale.
-	conv := "/v1/workspaces/" + ws + "/partner-conversions?brand=geonode"
+	conv := "/v1/workspaces/" + ws + "/partner-conversions?brand=northpeak"
 	lead := owner.must(201, "POST", conv, map[string]any{"type": "lead", "customer_id": "u-1", "email": "bo@example.com", "click_id": click})
 	if lead["credited"] != true || lead["partner_id"] != anaID || len(lead["rewards"].([]any)) != 0 || lead["conversion"].(map[string]any)["type"] != "signup" {
 		t.Fatalf("lead = %v", lead)
@@ -151,12 +151,12 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 	if st["balance_cents"] != float64(51000) || st["pending_cents"] != float64(1000) || st["clicks"] != float64(2) || st["customers"] != float64(2) {
 		t.Fatalf("stats = %v", st)
 	}
-	payouts := owner.must(200, "POST", base+"/partner-payouts?brand=geonode", map[string]any{})["data"].([]any)
+	payouts := owner.must(200, "POST", base+"/partner-payouts?brand=northpeak", map[string]any{})["data"].([]any)
 	if len(payouts) != 1 || payouts[0].(map[string]any)["amount_cents"] != float64(51000) || payouts[0].(map[string]any)["status"] != "due" {
 		t.Fatalf("payouts = %v", payouts)
 	}
 	po := payouts[0].(map[string]any)["id"].(string)
-	if again := owner.must(200, "POST", base+"/partner-payouts?brand=geonode", map[string]any{})["data"].([]any); len(again) != 0 {
+	if again := owner.must(200, "POST", base+"/partner-payouts?brand=northpeak", map[string]any{})["data"].([]any); len(again) != 0 {
 		t.Fatalf("second run = %v", again)
 	}
 	paid := owner.must(200, "POST", base+"/partner-payouts/"+po+"/paid", map[string]any{"note": "Wise batch", "reference": "WISE-123"})
@@ -169,13 +169,13 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 	}
 
 	// Lists.
-	if l := owner.must(200, "GET", base+"/partner-conversions?brand=geonode&partner_id="+anaID+"&type=sale", nil)["data"].([]any); len(l) != 2 {
+	if l := owner.must(200, "GET", base+"/partner-conversions?brand=northpeak&partner_id="+anaID+"&type=sale", nil)["data"].([]any); len(l) != 2 {
 		t.Fatalf("conversions = %v", l)
 	}
-	if l := owner.must(200, "GET", base+"/partner-referrals?brand=geonode&partner_id="+anaID, nil)["data"].([]any); len(l) != 2 {
+	if l := owner.must(200, "GET", base+"/partner-referrals?brand=northpeak&partner_id="+anaID, nil)["data"].([]any); len(l) != 2 {
 		t.Fatalf("referrals = %v", l)
 	}
-	if l := owner.must(200, "GET", base+"/partner-rewards?brand=geonode&status=paid", nil)["data"].([]any); len(l) != 3 {
+	if l := owner.must(200, "GET", base+"/partner-rewards?brand=northpeak&status=paid", nil)["data"].([]any); len(l) != 3 {
 		t.Fatalf("paid rewards = %v", l)
 	}
 

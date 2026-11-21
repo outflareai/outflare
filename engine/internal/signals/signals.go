@@ -105,7 +105,7 @@ type Signal struct {
 	WorkspaceID, BrandID, RecordID string
 	Type                           string
 	Title, Detail                  string
-	Source                         string // event, journey, manual, agent or api
+	Source                         string // event, journey, manual, agent, api or feed
 	EventID                        string
 	OwnerID                        *string // default: the record's owner
 	DueAt                          *time.Time

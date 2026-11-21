@@ -338,6 +338,28 @@ func (s *Server) loadOAuthClient(ctx context.Context, id string) (*oauthClient, 
 // appKind names the app a redirect URI belongs to, when it is one we know.
 // The consent screen marks other apps as unverified: anyone can register
 // a client called "Claude".
+// extensionIDs are the ids of Outflare's own browser extension (extension/).
+// Chrome hands a sign-in's answer to https://<id>.chromiumapp.org/ only
+// inside the extension with that id, so the redirect address proves the
+// app is the extension. The first is the id the key in
+// extension/manifest.json gives a copy loaded from this repository; a
+// store listing's id is added here when there is one.
+var extensionIDs = []string{"kolppcifpdmbigbfddkchjdgbcnlobcg"}
+
+// extensionScopes is everything the browser extension may ever hold: it
+// lists the brands to pick one, looks people and companies up and adds
+// them, with notes and to-dos.
+var extensionScopes = []string{auth.ScopeWorkspaceRead, auth.ScopeCustomersRead, auth.ScopeCustomersManage}
+
+// appScopes narrows scopes to what an app of this kind may hold: the
+// browser extension only extensionScopes, any other app all of them.
+func appScopes(kind string, scopes []string) []string {
+	if kind != "extension" {
+		return scopes
+	}
+	return slices.DeleteFunc(slices.Clone(scopes), func(sc string) bool { return !slices.Contains(extensionScopes, sc) })
+}
+
 func appKind(redirect string) string {
 	u, err := url.Parse(redirect)
 	if err != nil {
@@ -352,6 +374,8 @@ func appKind(redirect string) string {
 		return "claude"
 	case u.Scheme == "https" && under("chatgpt.com", "openai.com"):
 		return "chatgpt"
+	case u.Scheme == "https" && strings.HasSuffix(host, ".chromiumapp.org") && slices.Contains(extensionIDs, strings.TrimSuffix(host, ".chromiumapp.org")):
+		return "extension"
 	case u.Scheme == "cursor":
 		return "cursor"
 	case u.Scheme == "vscode" || u.Scheme == "vscode-insiders":
@@ -643,6 +667,7 @@ func (s *Server) approveAgentAuthorization(w http.ResponseWriter, r *http.Reques
 	if !appVerified(app, c.VerifiedAt) {
 		scopes = onlyReads(scopes)
 	}
+	scopes = appScopes(app, scopes)
 	if len(scopes) == 0 {
 		writeError(w, r, http.StatusForbidden, "forbidden", "your role gives an app nothing to do in this workspace")
 		return
@@ -778,8 +803,10 @@ func (s *Server) exchangeCode(w http.ResponseWriter, r *http.Request) {
 		var tokenID, grantID string
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO api_tokens (workspace_id, actor_id, name, prefix, token_hash, scopes, created_by, expires_at, brand_id, require_mission)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true) RETURNING id`,
-			wsID, actorID, name, access[:len(auth.PrefixAPIToken)+6], accessHash, scopes, userID, time.Now().Add(agentAccessTTL), brand).Scan(&tokenID); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+			// An AI app's changes wait for the person's rules; the browser
+			// extension is the person clicking, so its changes run.
+			wsID, actorID, name, access[:len(auth.PrefixAPIToken)+6], accessHash, scopes, userID, time.Now().Add(agentAccessTTL), brand, appKind(redirect) != "extension").Scan(&tokenID); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `
@@ -889,6 +916,9 @@ func (s *Server) stillGranted(ctx context.Context, tx pgx.Tx, wsID, userID strin
 // verifiedScopes keeps an unverified app to reading.
 func verifiedScopes(kind string, verifiedAt *time.Time, scopes []string) ([]string, error) {
 	if appVerified(kind, verifiedAt) {
+		if scopes = appScopes(kind, scopes); len(scopes) == 0 {
+			return nil, &errOAuth{"invalid_grant", "the person's role gives this app nothing to do in the workspace"}
+		}
 		return scopes, nil
 	}
 	if scopes = onlyReads(scopes); len(scopes) == 0 {
@@ -1084,7 +1114,7 @@ func (s *Server) listAgentApps(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if list[i].Verified {
-			list[i].AvailableScopes = agentWrites(roles[u])
+			list[i].AvailableScopes = appScopes(list[i].App, agentWrites(roles[u]))
 		} else {
 			list[i].AvailableScopes = []string{}
 		}
@@ -1170,7 +1200,7 @@ func (s *Server) updateAgentApp(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		verified := appVerified(appKind(redirect), verifiedAt)
-		writes := agentWrites(role)
+		writes := appScopes(appKind(redirect), agentWrites(role))
 		if !verified {
 			writes = []string{}
 		}
@@ -1194,7 +1224,7 @@ func (s *Server) updateAgentApp(w http.ResponseWriter, r *http.Request) {
 				return errDenied("you cannot grant scope " + sc)
 			}
 		}
-		next := agentScopes(role, "read", false)
+		next := appScopes(appKind(redirect), agentScopes(role, "read", false))
 		for _, sc := range writes {
 			if slices.Contains(req.Scopes, sc) {
 				next = append(next, sc)

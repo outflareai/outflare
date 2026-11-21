@@ -132,6 +132,8 @@ type partnerProgramView struct {
 	CreditWindowDays int     `json:"credit_window_days"`
 	CreditModel      string  `json:"credit_model"`
 	CodesWin         bool    `json:"codes_win"`
+	// CreditsFrom is the earliest conversion time the program credits; nil has no cutoff.
+	CreditsFrom *time.Time `json:"credits_from"`
 	// BlockSelfReferrals: a partner's own sign-ups and sales earn them nothing.
 	BlockSelfReferrals bool `json:"block_self_referrals"`
 	HoldDays           int  `json:"hold_days"`
@@ -195,7 +197,7 @@ const partnerProgramSelect = `
 	       (SELECT count(*) FROM partner_memberships m WHERE m.program_id = p.id)::int,
 	       COALESCE((SELECT i.connector FROM partner_imports i WHERE i.program_id = p.id AND i.workspace_id = p.workspace_id AND i.status = 'done'
 	                 ORDER BY i.created_at DESC LIMIT 1), ''), p.switched_over_at, p.lead_expiry_days, p.url_params,
-	       p.block_ad_clicks, p.block_social_clicks, p.created_at, p.updated_at, p.blocked_countries
+	       p.block_ad_clicks, p.block_social_clicks, p.created_at, p.updated_at, p.blocked_countries, p.credits_from
 	FROM partner_programs p WHERE p.workspace_id = $1`
 
 func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
@@ -205,7 +207,7 @@ func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
 		&v.CodesWin, &v.BlockSelfReferrals, &v.HoldDays, &v.AutoApprove, &v.AutoAccept, &v.PayBrowserSignups, &v.MinPayoutCents,
 		&v.PayoutTermDays, &v.PayoutMethods, &v.PayoutTokens, &v.TermsURL, &v.SalesSource, &v.PostbackHint,
 		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.ImportedFrom, &v.SwitchedOverAt, &v.LeadExpiryDays, &v.URLParams,
-		&v.BlockAdClicks, &v.BlockSocialClicks, &v.CreatedAt, &v.UpdatedAt, &v.BlockedCountries)
+		&v.BlockAdClicks, &v.BlockSocialClicks, &v.CreatedAt, &v.UpdatedAt, &v.BlockedCountries, &v.CreditsFrom)
 	if err == nil {
 		v.Portal = portalFor(v.Kind, portal)
 	}
@@ -338,33 +340,34 @@ func (s *Server) getPartnerProgram(w http.ResponseWriter, r *http.Request) {
 }
 
 type partnerProgramInput struct {
-	Name               *string          `json:"name"`
-	Slug               *string          `json:"slug"`
-	Kind               *string          `json:"kind"`
-	Status             *string          `json:"status"`
-	Brand              *string          `json:"brand"`
-	LandingURL         *string          `json:"landing_url"`
-	Currency           *string          `json:"currency"`
-	CreditWindowDays   *int             `json:"credit_window_days"`
-	CreditModel        *string          `json:"credit_model"`
-	CodesWin           *bool            `json:"codes_win"`
-	BlockSelfReferrals *bool            `json:"block_self_referrals"`
-	HoldDays           *int             `json:"hold_days"`
-	AutoApprove        *bool            `json:"auto_approve"`
-	AutoAccept         *bool            `json:"auto_accept"`
-	PayBrowserSignups  *bool            `json:"pay_browser_signups"`
-	MinPayoutCents     *int64           `json:"min_payout_cents"`
-	PayoutTermDays     optional[int]    `json:"payout_term_days"`
-	PayoutMethods      *[]string        `json:"payout_methods"`
-	PayoutTokens       *[]string        `json:"payout_tokens"`
-	TermsURL           *string          `json:"terms_url"`
-	SalesSource        *string          `json:"sales_source"`
-	Rules              *[]partnerRuleIn `json:"rules"`
-	LeadExpiryDays     optional[int]    `json:"lead_expiry_days"`
-	URLParams          *[]string        `json:"url_params"`
-	BlockAdClicks      *bool            `json:"block_ad_clicks"`
-	BlockSocialClicks  *bool            `json:"block_social_clicks"`
-	BlockedCountries   *[]string        `json:"blocked_countries"`
+	Name               *string             `json:"name"`
+	Slug               *string             `json:"slug"`
+	Kind               *string             `json:"kind"`
+	Status             *string             `json:"status"`
+	Brand              *string             `json:"brand"`
+	LandingURL         *string             `json:"landing_url"`
+	Currency           *string             `json:"currency"`
+	CreditWindowDays   *int                `json:"credit_window_days"`
+	CreditsFrom        optional[time.Time] `json:"credits_from"`
+	CreditModel        *string             `json:"credit_model"`
+	CodesWin           *bool               `json:"codes_win"`
+	BlockSelfReferrals *bool               `json:"block_self_referrals"`
+	HoldDays           *int                `json:"hold_days"`
+	AutoApprove        *bool               `json:"auto_approve"`
+	AutoAccept         *bool               `json:"auto_accept"`
+	PayBrowserSignups  *bool               `json:"pay_browser_signups"`
+	MinPayoutCents     *int64              `json:"min_payout_cents"`
+	PayoutTermDays     optional[int]       `json:"payout_term_days"`
+	PayoutMethods      *[]string           `json:"payout_methods"`
+	PayoutTokens       *[]string           `json:"payout_tokens"`
+	TermsURL           *string             `json:"terms_url"`
+	SalesSource        *string             `json:"sales_source"`
+	Rules              *[]partnerRuleIn    `json:"rules"`
+	LeadExpiryDays     optional[int]       `json:"lead_expiry_days"`
+	URLParams          *[]string           `json:"url_params"`
+	BlockAdClicks      *bool               `json:"block_ad_clicks"`
+	BlockSocialClicks  *bool               `json:"block_social_clicks"`
+	BlockedCountries   *[]string           `json:"blocked_countries"`
 }
 
 var (
@@ -380,7 +383,7 @@ func (in partnerProgramInput) check() error {
 		}
 	}
 	if in.Slug != nil && !programSlugRE.MatchString(*in.Slug) {
-		return errInvalid("slug must be 1 to 60 lowercase letters, digits and hyphens, such as geonode-affiliates")
+		return errInvalid("slug must be 1 to 60 lowercase letters, digits and hyphens, such as northpeak-affiliates")
 	}
 	if in.Kind != nil && !slices.Contains(partners.Kinds, *in.Kind) {
 		return errInvalid("kind is referral, affiliate or influencer")
@@ -597,12 +600,12 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 		err := tx.QueryRow(ctx, `
 			INSERT INTO partner_programs (workspace_id, brand_id, name, slug, kind, landing_url, currency, credit_window_days, credit_model,
 				codes_win, hold_days, auto_approve, auto_accept, min_payout_cents, terms_url, created_by, sales_source, block_self_referrals,
-				payout_term_days, payout_methods, payout_tokens)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::int, COALESCE($20::text[], '{}'), COALESCE($21::text[], '{}'))
+				payout_term_days, payout_methods, payout_tokens, credits_from)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::int, COALESCE($20::text[], '{}'), COALESCE($21::text[], '{}'), $22)
 			ON CONFLICT DO NOTHING RETURNING id::text`,
 			a.WorkspaceID, brand, name, slug, *in.Kind, deref(landing), currency, p.CreditWindowDays, p.CreditModel,
 			codesWin, p.HoldDays, p.AutoApprove, p.AutoAccept, p.MinPayoutCents, deref(terms), nullIfEmpty(a.ActorID), salesSource, blockSelf,
-			in.PayoutTermDays.Value, cleanList(in.PayoutMethods), cleanList(in.PayoutTokens)).Scan(&id)
+			in.PayoutTermDays.Value, cleanList(in.PayoutMethods), cleanList(in.PayoutTokens), in.CreditsFrom.Value).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict
 		}
@@ -744,11 +747,12 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 				terms_url = COALESCE($15, terms_url), sales_source = COALESCE($16, sales_source),
 				pay_browser_signups = COALESCE($17, pay_browser_signups), block_self_referrals = COALESCE($18, block_self_referrals),
 				payout_term_days = CASE WHEN $19 THEN $20 ELSE payout_term_days END,
-				payout_methods = COALESCE($21, payout_methods), payout_tokens = COALESCE($22, payout_tokens), updated_at = now()
+				payout_methods = COALESCE($21, payout_methods), payout_tokens = COALESCE($22, payout_tokens), updated_at = now(),
+				credits_from = CASE WHEN $23 THEN $24 ELSE credits_from END
 			WHERE workspace_id = $1 AND id = $2`,
 			a.WorkspaceID, cur.ID, name, in.Status, brand, landing, in.Currency, in.CreditWindowDays, in.CreditModel,
 			in.CodesWin, in.HoldDays, in.AutoApprove, in.AutoAccept, in.MinPayoutCents, terms, in.SalesSource, in.PayBrowserSignups, in.BlockSelfReferrals,
-			in.PayoutTermDays.Set, in.PayoutTermDays.Value, cleanList(in.PayoutMethods), cleanList(in.PayoutTokens)); err != nil {
+			in.PayoutTermDays.Set, in.PayoutTermDays.Value, cleanList(in.PayoutMethods), cleanList(in.PayoutTokens), in.CreditsFrom.Set, in.CreditsFrom.Value); err != nil {
 			return err
 		}
 		if in.Brand != nil {
@@ -761,7 +765,7 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 		changed := []string{}
 		for k, set := range map[string]bool{"name": in.Name != nil, "status": in.Status != nil, "brand": in.Brand != nil,
 			"landing_url": in.LandingURL != nil, "currency": in.Currency != nil, "credit_window_days": in.CreditWindowDays != nil,
-			"credit_model": in.CreditModel != nil, "codes_win": in.CodesWin != nil, "hold_days": in.HoldDays != nil,
+			"credit_model": in.CreditModel != nil, "credits_from": in.CreditsFrom.Set, "codes_win": in.CodesWin != nil, "hold_days": in.HoldDays != nil,
 			"auto_approve": in.AutoApprove != nil, "auto_accept": in.AutoAccept != nil, "min_payout_cents": in.MinPayoutCents != nil,
 			"terms_url": in.TermsURL != nil, "sales_source": in.SalesSource != nil, "pay_browser_signups": in.PayBrowserSignups != nil,
 			"block_self_referrals": in.BlockSelfReferrals != nil, "payout_term_days": in.PayoutTermDays.Set,

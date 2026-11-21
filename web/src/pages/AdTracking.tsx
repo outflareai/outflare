@@ -109,18 +109,29 @@ export function AdTrackingHealthCard({ ws, brand }: { ws: string; brand?: string
           </div>
         )}
         {h.networks.length > 0 && (
-          <div className="divide-y rounded-md border">
-            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 py-1.5 text-[12px] text-muted-foreground">
-              <span>Paid visits</span><span>Click id</span><span>Ad ids only</span><span>Untracked</span>
-            </div>
-            {h.networks.map((n) => (
-              <div key={n.network} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 py-1.5 tabular-nums">
-                <span>{n.label} <span className="text-muted-foreground">· {n.visits.toLocaleString()}</span></span>
-                <span>{pct(n.click_id, n.visits)}</span>
-                <span>{pct(n.ad_ids_only, n.visits)}</span>
-                <span className={n.untracked > 0 ? "text-amber-700 dark:text-amber-400" : ""}>{pct(n.untracked, n.visits)}</span>
-              </div>
-            ))}
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full text-[13px]">
+              <thead className="bg-muted/40 font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
+                <tr>
+                  <th scope="col" className="px-3 py-2 text-left font-medium">Source</th>
+                  <th scope="col" className="w-28 px-3 py-2 text-right font-medium">Paid visits</th>
+                  <th scope="col" className="w-28 px-3 py-2 text-right font-medium" title="Visits that arrived with the network's click id, the best tracking">Click id</th>
+                  <th scope="col" className="w-28 px-3 py-2 text-right font-medium" title="Visits with the campaign and ad ids but no click id">Ad ids only</th>
+                  <th scope="col" className="w-28 px-3 py-2 text-right font-medium" title="Paid visits with nothing that says which ad they came from">Untracked</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y font-mono tabular-nums">
+                {h.networks.map((n) => (
+                  <tr key={n.network}>
+                    <th scope="row" className="px-3 py-2 text-left font-sans font-normal">{n.label}</th>
+                    <td className="px-3 py-2 text-right">{n.visits.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">{pct(n.click_id, n.visits)}</td>
+                    <td className="px-3 py-2 text-right">{pct(n.ad_ids_only, n.visits)}</td>
+                    <td className={`px-3 py-2 text-right ${n.untracked > 0 ? "text-amber-700 dark:text-amber-400" : ""}`}>{pct(n.untracked, n.visits)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

@@ -95,3 +95,44 @@ type WorkspaceUserResult struct {
 type WorkspaceUserManager interface {
 	UpdateWorkspaceUser(context.Context, *Client, Creds, WorkspaceUserUpdate) (WorkspaceUserResult, error)
 }
+
+// CapWorkspaceCreateUsers creates users in a tenant the workspace connected
+// and allowed it for. Each new user takes one of the tenant's own licences.
+const CapWorkspaceCreateUsers = "workspace.create_users"
+
+// CodeWorkspaceCreateOff means the connection was not set up to create users.
+const CodeWorkspaceCreateOff = "workspace_create_off"
+
+// CodeWorkspaceUserElsewhere means the address already belongs to a user
+// outside the connected tenant, so nothing was created or changed.
+const CodeWorkspaceUserElsewhere = "workspace_user_elsewhere"
+
+// WorkspaceUserCreate is one new user. The password is the caller's to keep:
+// the connector sends it to the provider once and never stores, logs or
+// returns it.
+type WorkspaceUserCreate struct {
+	Email      string
+	GivenName  string
+	FamilyName string
+	Password   string
+	// RecoveryEmail is optional.
+	RecoveryEmail string
+}
+
+// WorkspaceUserCreated says what happened. Created is false when the user
+// was already in the connected tenant (a retry), in which case nothing,
+// its password included, was changed.
+type WorkspaceUserCreated struct {
+	ID      string `json:"id"`
+	Created bool   `json:"created"`
+}
+
+type WorkspaceUserCreator interface {
+	CreateWorkspaceUser(context.Context, *Client, Creds, WorkspaceUserCreate) (WorkspaceUserCreated, error)
+}
+
+// WorkspaceCreateChecker says whether a connection could create a user now,
+// without creating or changing anything. Nil means it could.
+type WorkspaceCreateChecker interface {
+	CheckWorkspaceCreate(context.Context, *Client, Creds) error
+}

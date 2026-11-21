@@ -22,7 +22,9 @@ func (s *Server) listLinkOrderCatalog(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	limit, ok := pageLimit(w, r, 50, 200)
+	// Up to 1,000 rows a page: the Catalog page loads a whole intermediary
+	// database (11,000+ sites) to filter and rank it in the browser.
+	limit, ok := pageLimit(w, r, 50, maxCatalogPage)
 	if !ok {
 		return
 	}
@@ -221,6 +223,9 @@ func (s *Server) importLinkOrderCatalog(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, out)
 }
 
+// maxCatalogPage is the largest catalog page.
+const maxCatalogPage = 1000
+
 // maxCatalogImportBytes bounds one catalog import request. A full
 // intermediary database (11,000+ sites with every metric column) fits;
 // the Catalog page still sends a large file in batches of about 1 MB so
@@ -366,6 +371,11 @@ func decodeDonorWrite(w http.ResponseWriter, r *http.Request, create bool) (link
 		return in, false
 	} else if v != nil {
 		in.PBN = v
+	}
+	if v, ok := boolVal("best_link"); !ok {
+		return in, false
+	} else if v != nil {
+		in.BestLink = v
 	}
 	if v, ok := str("country"); !ok {
 		return in, false

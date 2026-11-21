@@ -287,13 +287,23 @@ func tracked(r *http.Request, status int, route string) bool {
 	case "GET /healthz", "GET /readyz", "GET /v1/meta", "GET /.well-known/outflare.json":
 		return false
 	}
-	// Websites send a request per page view (and one for flags): one in a hundred that went
+	// The web app's own events are the events: posting them isn't another.
+	if status < 400 && route == "POST /v1/ui-events" {
+		return false
+	}
+	// The web app notes what its person opened as they move around: its
+	// pageviews already say so.
+	if status < 400 && route == "POST /v1/me/menu/recents" {
+		return false
+	}
+	// Websites send a request per page view (one for flags, and a recorded visit one every few
+	// seconds): one in a hundred that went
 	// fine is enough to see the endpoint is used; every failure counts.
 	if status < 400 {
 		switch route {
-		case "OPTIONS /v1/site/events", "OPTIONS /v1/site/flags":
+		case "OPTIONS /v1/site/events", "OPTIONS /v1/site/flags", "OPTIONS /v1/site/replay", "GET /v1/site/replay.js":
 			return false
-		case "POST /v1/site/events", "POST /v1/site/flags":
+		case "POST /v1/site/events", "POST /v1/site/flags", "POST /v1/site/replay":
 			return rand.IntN(100) == 0
 		}
 	}

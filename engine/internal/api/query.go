@@ -44,6 +44,10 @@ func (s *Server) routesQuery(mux *http.ServeMux) {
 	// (query_brand.go).
 	mux.HandleFunc("GET /v1/brands/{brand}/query/tables", s.onBrand("", s.listQueryTables))
 	mux.HandleFunc("POST /v1/brands/{brand}/query", s.onBrand("", s.runQuery))
+	// A builder's SQL, written without running it (query_builder.go).
+	mux.HandleFunc("POST /v1/brands/{brand}/query/build", s.onBrand("", s.buildQuery))
+	// Describe it in English (query_ask.go).
+	s.registerQueryAsk(mux)
 }
 
 // readsOnly reports whether a POST only reads, so an agent kept to
@@ -57,7 +61,11 @@ func readsOnly(r *http.Request) bool {
 		// Running a saved query only reads too. A CSV download is not
 		// here: personal data leaving the app in bulk waits for a mission.
 		q := r.PathValue("saved_query")
-		return r.URL.Path == "/v1/brands/"+b+"/query" || (q != "" && r.URL.Path == "/v1/brands/"+b+"/queries/"+q+"/run")
+		// So does previewing a change to a campaign's places.
+		if id := r.PathValue("id"); id != "" && r.URL.Path == "/v1/brands/"+b+"/ads/campaigns/"+id+"/locations/preview" {
+			return true
+		}
+		return r.URL.Path == "/v1/brands/"+b+"/query" || r.URL.Path == "/v1/brands/"+b+"/query/build" || (q != "" && r.URL.Path == "/v1/brands/"+b+"/queries/"+q+"/run")
 	}
 	base := "/v1/workspaces/" + r.PathValue("ws")
 	// Asking the knowledge only reads it (it keeps the question, for the gaps).
@@ -117,14 +125,189 @@ var queryTables = []queryTable{
 	{"broadcasts", auth.ScopeEmailsRead, "Email broadcasts and how many they reached."},
 	{"visits", auth.ScopeAnalyticsRead, "Website visits from the Outflare site snippet, with UTM tags."},
 	{"social_posts", auth.ScopeSocialRead, "Posts on the workspace's own social accounts, with their numbers."},
+	{"brand_mentions", auth.ScopeSocialRead, "Places someone named the brand (about brand) or a tracked competitor (competitor_id) in a video, episode, post, forum thread or news story: source, quote, author, reach, score 0 to 100 and status (new, contacted, replied, not_a_fit, on_board)."},
+	{"mention_episodes", auth.ScopeSocialRead, "Podcast episodes the mention listener found naming the brand or a competitor: the show, the show notes and, when the show publishes one, the transcript."},
+	{"mention_listen_rules", auth.ScopeSocialRead, "Changes made by hand to what the mention listener listens for: a row turned off, terms added or automatic terms skipped, per brand and competitor."},
+	{"brand_mention_settings", auth.ScopeSocialRead, "Whether the mention listener is on for each brand, the sources it reads (sources), how often it scans and how its last scan went."},
+	{"mention_videos", auth.ScopeSocialRead, "YouTube videos the mention listener found for the brand, with their captions once read (captions_status: waiting, read, none, failed)."},
 	{"reviews", auth.ScopeSocialRead, "Reviews on the brands' review pages (Trustpilot, G2, Capterra, SourceForge, Google); rating is 1 to 5."},
 	{"review_page_days", auth.ScopeSocialRead, "Each review page's numbers by day: the platform's score and count, new reviews, stars and Outflare's review score."},
 	{"backlinks", auth.ScopeSEORead, "Links from other sites to the brands' websites: status live or lost, the linking domain's strength (source_rating, 0 to 100), traffic and spam score, and when each was found, lost or regained."},
 	{"link_prospects", auth.ScopeSEORead, "Pages that could link to a website (link building): how each was found (method), its score, and where its pitch stands (stage: prospect, excluded, pitched, replied, agreed, live, declined, removed) with when."},
+	{"seo_organic_countries", auth.ScopeSEORead, "First-touch Organic Search sessions with their time on the site, signups and payments by the visitor's country (ISO alpha-2, '' unknown), host and day, from PostHog. revenue_usd is USD only; a payment is counted once, as by landing page. Average time on site is session_seconds / organic_sessions."},
 	{"seo_organic_conversions_by_page", auth.ScopeSEORead, "First-touch Organic Search signups and payments by landing page and day, from PostHog. organic_sessions are sessions that started on the page; signups and payments are attributed to the person's first organic landing page. revenue_usd is USD only. A payment is counted once across payment_succeeded and paid service_purchased."},
 	{"seo_organic_conversions_by_cluster", auth.ScopeSEORead, "The same organic conversions rolled up by the brand's current content search groups (and Ungrouped). Groups can overlap, so do not add group totals together; use seo_organic_conversions_by_page or the API totals for a unique sum."},
+	{"seo_cannibal_primaries", auth.ScopeSEORead, "The page a person chose to keep for a search several of a site's pages compete for, one per site and search; searches without a row use Outflare's pick (the page targeting the search, else the one with the most clicks)."},
 	{"coverage_donor_profiles", auth.ScopeCoverageRead, "The brand's paid-link donor catalog: domain, PBN flag, niches and stored metrics, without notes."},
 	{"coverage_link_orders", auth.ScopeCoverageRead, "Paid link orders: status, donor price (minor units and currency), live-check result and Coverage placement, without notes."},
+	{"ad_accounts", auth.ScopeAnalyticsRead, "Connected ad accounts (Google Ads, Meta Ads and others): currency, time zone and how fresh the sync is."},
+	{"ad_entities", auth.ScopeAnalyticsRead, "Campaigns, ad groups and ads (level) as the network has them: status, budget and bidding; amounts in micros."},
+	{"ad_metrics_daily", auth.ScopeAnalyticsRead, "Each campaign's, ad group's and ad's daily spend, impressions, clicks and the network's conversions; amounts in micros. Sum one level only."},
+	{"ad_conversion_actions_daily", auth.ScopeAnalyticsRead, "The networks' daily conversions split by conversion action."},
+	{"ad_keywords", auth.ScopeAnalyticsRead, "Search ad keywords with quality score and bid estimates."},
+	{"ad_keyword_metrics_daily", auth.ScopeAnalyticsRead, "Each search keyword's daily spend, clicks and conversions."},
+	{"ad_search_terms_daily", auth.ScopeAnalyticsRead, "What people searched when a search ad showed, per day, with spend and conversions."},
+	{"ad_clicks", auth.ScopeAnalyticsRead, "Individual ad clicks with their click id (gclid and the like), campaign, ad group, ad and keyword."},
+	{"ad_acquisitions", auth.ScopeCustomersRead, "The ad click that brought each person in, with when they signed up and first paid: joins ad spend to customers."},
+	{"ad_revenue", auth.ScopeAnalyticsRead, "Each payment and refund credited to the ad acquisition or last ad touch; value_minor in minor units."},
+	{"ad_changes", auth.ScopeAnalyticsRead, "Pauses, resumes and budget changes Outflare made to campaigns, by whom, and whether the network shows them."},
+	{"ad_conversion_sends", auth.ScopeAnalyticsRead, "Conversions sent back to the ad networks, with their status and why one was skipped."},
+	{"ad_audiences", auth.ScopeAnalyticsRead, "Lists synced to the ad networks as audiences to target or exclude."},
+	{"ad_match_quality", auth.ScopeAnalyticsRead, "What an ad network says about how well the conversions sent to it match its accounts, per pixel, event and day."},
+	{"ad_holdouts", auth.ScopeAnalyticsRead, "Holdout tests for paid ads: the countries a brand kept its ads out of, and when."},
+	{"ad_brand_economics", auth.ScopeAnalyticsRead, "The brand's ad targets: cost per payer and sign-up, payback, margin and daily ceiling."},
+	{"attribution_conversions", auth.ScopeAnalyticsRead, "Conversions (sign-ups, payments and other counted events) with how many touches led to them."},
+	{"attribution_credits", auth.ScopeAnalyticsRead, "Each conversion's credit shared over the touches before it, per attribution model; weights add up to 1."},
+	{"attribution_models", auth.ScopeAnalyticsRead, "Attribution models: built-in ones (no brand) and the brand's own."},
+	{"tracking_campaigns", auth.ScopeAnalyticsRead, "Tracking campaigns: the tags and redirect links visits and clicks are credited to, and what their traffic costs."},
+	{"tracking_links", auth.ScopeAnalyticsRead, "The redirect links of each tracking campaign."},
+	{"tracking_link_clicks", auth.ScopeAnalyticsRead, "Each click on a tracking or partner link, with device, place, bot flag and cost (no address kept)."},
+	{"tracking_destination_days", auth.ScopeAnalyticsRead, "Clicks per link destination per day."},
+	{"tracker_traffic_sources", auth.ScopeAnalyticsRead, "Click tracker traffic sources and what is sent back to them, without postback addresses or tokens."},
+	{"tracker_offers", auth.ScopeAnalyticsRead, "Click tracker offers: payout, cap and whether the page works."},
+	{"tracker_offer_days", auth.ScopeAnalyticsRead, "Clicks and conversions per offer per day."},
+	{"tracker_landers", auth.ScopeAnalyticsRead, "Click tracker landing pages and whether they work."},
+	{"tracker_lander_clicks", auth.ScopeAnalyticsRead, "Clicks on a lander's calls to action."},
+	{"tracker_flows", auth.ScopeAnalyticsRead, "Click tracker flows that route clicks to landers and offers."},
+	{"tracker_conversions", auth.ScopeAnalyticsRead, "Conversions offers reported by postback, tied to their click; payout in micros."},
+	{"tracker_network_costs", auth.ScopeAnalyticsRead, "What each traffic source network campaign spent per day, and how it was shared over clicks; in micros."},
+	{"search_daily", auth.ScopeSEORead, "Google Search Console clicks, impressions, click rate and average position per page and search query per day."},
+	{"search_segments", auth.ScopeSEORead, "Search Console clicks, impressions and position per page by country and device per day."},
+	{"search_vitals", auth.ScopeSEORead, "Core Web Vitals from Google (75th percentile and share of good visits) per page, device and metric per day."},
+	{"search_sitemaps", auth.ScopeSEORead, "Sitemaps Search Console knows: when submitted and read, errors, warnings, submitted and indexed pages."},
+	{"search_ga4_outcomes", auth.ScopeSEORead, "Google Analytics 4 sessions, conversions and revenue per landing path, source and day; revenue in micros."},
+	{"search_algorithm_updates", auth.ScopeSEORead, "Google algorithm updates and their dates, per site, to compare before and after."},
+	{"url_inspections", auth.ScopeSEORead, "Search Console URL inspections: whether Google indexed each page, why not, canonicals and last crawl."},
+	{"indexability_snapshots", auth.ScopeSEORead, "Each site's indexing totals by day: pages crawled, indexable, in sitemaps, indexed and not."},
+	{"seo_sites", auth.ScopeSEORead, "The brand's websites Outflare crawls and reports on, with crawl settings, without verification tokens."},
+	{"seo_snapshots", auth.ScopeSEORead, "Reports read from SEO data connections (Ahrefs, Semrush, DataForSEO and others) per host, report and day; numbers in metrics."},
+	{"seo_regressions", auth.ScopeSEORead, "Drops Outflare detected on a site (clicks, rankings, indexing, speed): before, after and whether resolved."},
+	{"seo_competitors", auth.ScopeSEORead, "The brand's competitors for each site: domain, how they were found, common keywords and presence scans."},
+	{"tracked_keywords", auth.ScopeSEORead, "Keywords whose rankings Outflare checks, with country, device, engine and how often."},
+	{"rank_observations", auth.ScopeSEORead, "Each ranking check: the site's position and ranking page for a tracked keyword on a day, and the top results."},
+	{"keyword_serps", auth.ScopeSEORead, "Full search result pages read for a keyword, as JSON items."},
+	{"crawl_runs", auth.ScopeSEORead, "Each crawl of a site: when, how many pages, health score and issue counts."},
+	{"crawl_pages", auth.ScopeSEORead, "Each page a crawl found: status, title, meta, canonical, headings, links, words, and AI signals."},
+	{"crawl_issues", auth.ScopeSEORead, "Problems a crawl found on a page, by rule and severity."},
+	{"crawl_links", auth.ScopeSEORead, "Links between pages a crawl found, with anchor text."},
+	{"crawl_ai_bots", auth.ScopeSEORead, "Which AI crawlers each crawl found the site's robots.txt lets in, and how many pages they're blocked from."},
+	{"backlink_events", auth.ScopeSEORead, "Each time a backlink was found, lost, regained or rated."},
+	{"competitor_pages", auth.ScopeSEORead, "Pages on competitors' sites from their sitemaps: when each first appeared and when it went."},
+	{"competitor_events", auth.ScopeSEORead, "What competitors did: new pages, ranking changes, new links and the like, with details as JSON."},
+	{"page_conversions", auth.ScopeSEORead, "Sessions, visitors and conversions per landing page per day, overall and from search."},
+	{"page_targets", auth.ScopeSEORead, "The keyword each page is meant to rank for, and other keywords it covers."},
+	{"link_pitches", auth.ScopeSequencesRead, "Each link-building pitch to a prospect: status, the opener, and how the site replied."},
+	{"ai_prompts", auth.ScopeSEORead, "Questions Outflare asks AI assistants to see if they name the brand, with intent, persona, topic and demand."},
+	{"ai_runs", auth.ScopeSEORead, "Each run that asks a cohort's prompts of AI models: status, samples and cost."},
+	{"ai_samples", auth.ScopeSEORead, "Each answer an AI model gave to a prompt, with the model, whether it searched the web, and the brands it named."},
+	{"ai_mentions", auth.ScopeSEORead, "Each brand or competitor named in an AI answer: position, how often, and the stance taken."},
+	{"ai_citations", auth.ScopeSEORead, "Each web page an AI answer cited: host, position, and whether it is the brand's, a competitor's or another's."},
+	{"ai_named_brands", auth.ScopeSEORead, "Every brand AI answers name, sorted into the brand itself, competitors and others."},
+	{"ai_cohorts", auth.ScopeSEORead, "Groups of AI visibility prompts, with locale, aliases, competitors and schedule."},
+	{"ai_brand_facts", auth.ScopeSEORead, "Facts about the brand that AI answers are checked against."},
+	{"ai_fact_checks", auth.ScopeSEORead, "Whether each AI answer got each brand fact right, with the quote."},
+	{"ai_claims", auth.ScopeSEORead, "Claims AI answers make about the brand and competitors, with sentiment and the quote."},
+	{"ai_bot_hits", auth.ScopeSEORead, "Requests AI crawlers made to the brand's sites per day, from the brand's CDN connection."},
+	{"ai_bot_reports", auth.ScopeSEORead, "Requests AI crawlers made to the brand's sites per day, from Outflare's site snippet or server reports."},
+	{"ai_page_checks", auth.ScopeSEORead, "Checks of how an AI crawler sees a page: what it found."},
+	{"ai_benchmarks", auth.ScopeSEORead, "Mentions and AI search volume per brand and competitor per platform per day."},
+	{"analytics_daily", auth.ScopeAnalyticsRead, "Numbers from connected web analytics (Google Analytics, PostHog, Plausible and others) per report, key and day."},
+	{"page_vitals", auth.ScopeAnalyticsRead, "Real visitors' page speed (LCP, INP, CLS, FCP, TTFB) per page view."},
+	{"heatmap_clicks", auth.ScopeCustomersRead, "Where visitors clicked on each page, per day and device, by position."},
+	{"heatmap_scrolls", auth.ScopeCustomersRead, "How far down each page visitors scrolled, per day and device."},
+	{"experiments", auth.ScopeSEORead, "SEO and website experiments: hypothesis, design, metric, status and result."},
+	{"experiment_pages", auth.ScopeSEORead, "The pages in each experiment, which group each is in, and its baseline."},
+	{"site_visitors", auth.ScopeCustomersRead, "Each browser seen on the brand's site: who it is once known, its company, visits and pages."},
+	{"session_recordings", auth.ScopeCustomersRead, "Recorded visits (session replay): when, how long, pages, device and size; not the recording itself."},
+	{"sales_leads", auth.ScopeCustomersRead, "Sales leads: who introduced each, who owns it (SDR, AE), its state, amount and quality."},
+	{"sales_messages", auth.ScopeCustomersRead, "Messages in sales conversations: who sent them, direction, status and when; without their content."},
+	{"sales_events", auth.ScopeCustomersRead, "Everything that happened on a sales lead: who did what and when; without content."},
+	{"sales_members", auth.ScopeCustomersRead, "The brand's sales team and each person's role."},
+	{"sales_quotas", auth.ScopeCustomersRead, "Each salesperson's target per period, in minor units."},
+	{"sales_templates", auth.ScopeCustomersRead, "Sales message templates (without their text)."},
+	{"sales_alert_settings", auth.ScopeCustomersRead, "Where the brand's Sales alerts are posted in Slack, and whether they are on."},
+	{"crm_activities", auth.ScopeCustomersRead, "Tasks, calls and notes on records: kind, title, status, priority, who and when; without the note's text."},
+	{"crm_calendar_events", auth.ScopeCustomersRead, "Calendar events with customers, from the team's connected calendars; without their content."},
+	{"crm_mail_messages", auth.ScopeCustomersRead, "Emails between the team and customers, captured from connected mailboxes; without their content."},
+	{"crm_mail_sends", auth.ScopeCustomersRead, "Emails the team sent to customers from Outflare, with status; without their content."},
+	{"support_conversations", auth.ScopeInboxRead, "Support conversations: channel, status, assignee, first reply and resolution times, SLA breaches, ratings and how the AI agent did."},
+	{"support_messages", auth.ScopeInboxRead, "Messages in support conversations: who, when and status; without bodies."},
+	{"support_assistant_runs", auth.ScopeInboxRead, "Each time the support AI agent drafted or sent an answer: what it did, why, what it cited and the feedback; without the reply text."},
+	{"conversation_sentiments", auth.ScopeCustomersRead, "The sentiment read from each conversation, with the words that show it."},
+	{"support_sla_policies", auth.ScopeInboxRead, "The brand's support response time targets."},
+	{"help_centre_days", auth.ScopeWorkspaceRead, "Help centre views and searches per day, including searches that found nothing."},
+	{"help_article_days", auth.ScopeWorkspaceRead, "Each help article's views and helpful votes per day."},
+	{"score_definitions", auth.ScopeCustomersRead, "The brand's scores (such as health or fit): what they score, how, and the bands."},
+	{"score_history", auth.ScopeCustomersRead, "Each record's score value and band per day."},
+	{"signals", auth.ScopeCustomersRead, "Signals on records (buying intent, churn risk and the like): status, owner, outcome and when."},
+	{"signal_types", auth.ScopeCustomersRead, "The kinds of signal the brand watches for."},
+	{"ideal_customer_profiles", auth.ScopeProfilesRead, "The brand's ideal customer profiles, as filters."},
+	{"partner_programs", auth.ScopePartnersRead, "Partner and affiliate programs: kind, credit rules, payout terms and portal; without postback secrets or payout tokens."},
+	{"partner_offer_templates", auth.ScopePartnersRead, "Saved offer templates for partnerships: a name and the offer's terms."},
+	{"partner_link_rules", auth.ScopePartnersRead, "The brand's rule for a paid link removed after payment: restore or refund, and for how long."},
+	{"partner_memberships", auth.ScopePartnersRead, "Each partner in a program: code, status, group and payout method; without postback addresses or payout tokens."},
+	{"partner_groups", auth.ScopePartnersRead, "Groups of partners in a program."},
+	{"partner_clicks", auth.ScopePartnersRead, "Clicks on partners' links (no address kept)."},
+	{"partner_referrals", auth.ScopePartnersRead, "People partners referred: how (link, code), status and first sale."},
+	{"partner_conversions", auth.ScopePartnersRead, "Sales and events credited to partner referrals, in minor units."},
+	{"partner_rewards", auth.ScopePartnersRead, "Commissions and other rewards earned: amount, status, hold and payout."},
+	{"partner_payouts", auth.ScopePartnersRead, "Payouts to partners, in minor units."},
+	{"partner_promo_codes", auth.ScopePartnersRead, "Partners' promo codes and their sync to the payment connection."},
+	{"commission_plans", auth.ScopeCustomersRead, "Commission plans for the sales team."},
+	{"commission_statements", auth.ScopeCustomersRead, "Monthly commission statements per salesperson, in minor units."},
+	{"revenue_days", auth.ScopeCustomersRead, "The brand's MRR per day, with new, expansion, reactivation, contraction and churned MRR, customers, and revenue at risk."},
+	{"revenue_customers", auth.ScopeCustomersRead, "Each customer's current MRR."},
+	{"revenue_forecast_history", auth.ScopeCustomersRead, "Each week's quarterly forecast: target, won, expected renewals and deals, forecast and best case."},
+	{"spend_recurring", auth.ScopeOutcomesRead, "Recurring costs the brand entered (tools, services), with how often."},
+	{"product_aliases", auth.ScopeCustomersRead, "Names products go by in payments and events, mapped to the brand's products."},
+	{"smart_lists", auth.ScopeCustomersRead, "The brand's smart and static lists: rules, how many members, and when refreshed."},
+	{"smart_list_members", auth.ScopeCustomersRead, "Who is in each smart list now."},
+	{"static_list_members", auth.ScopeCustomersRead, "Who is in each static list, and how they were added."},
+	{"lead_lists", auth.ScopeLeadsRead, "Lead lists: where leads come from, filters, enrichment and refresh."},
+	{"agent_runs", auth.ScopeAgentsRead, "Agent runs: the goal, plan, mode, status, turns, spend cap and the report each ended with."},
+	{"agent_run_updates", auth.ScopeAgentsRead, "What happened in each agent run, in the agent's and the team's words."},
+	{"missions", auth.ScopeMissionsRead, "Missions: goal and its metric and target, plan, limits, status, turns and report."},
+	{"mission_actions", auth.ScopeMissionsRead, "Each API call an agent asked to make in a mission: method, path, why, who decided and the result's status; without request bodies or results."},
+	{"mission_updates", auth.ScopeMissionsRead, "What happened in each mission, in the agent's and the team's words, with what needs a decision."},
+	{"actions", auth.ScopeActionsRead, "Every agent action held for approval or run: method, path, why, how it was decided and the result's status; without request bodies or results."},
+	{"brand_findings", auth.ScopeWorkspaceRead, "What agents learned about the brand (what works and what doesn't), with evidence and confidence."},
+	{"memories", auth.ScopeWorkspaceRead, "Things agents were told to remember."},
+	{"brand_profile_facts", auth.ScopeWorkspaceRead, "The brand profile: what agents know about the company as separate facts, each with its section, source, evidence, whether a person confirmed it and whether it may be said to customers."},
+	{"brand_personas", auth.ScopeWorkspaceRead, "The brand's personas: who buys, with their goals, pains, triggers, objections and channels."},
+	{"brand_profile_changes", auth.ScopeWorkspaceRead, "Every change to a brand profile fact or persona: what changed, from what to what, and who made it."},
+	{"ab_tests", auth.ScopeAnalyticsRead, "A/B tests: hypothesis, variants, goals, guardrails, decision, result and what was learned."},
+	{"ab_test_checks", auth.ScopeAnalyticsRead, "Checks that each test variant shows as it should."},
+	{"insights", auth.ScopeAnalyticsRead, "Saved charts and reports (insights), with their settings."},
+	{"alerts", auth.ScopeWorkspaceRead, "Alerts raised on records and metrics, with who owns them."},
+	{"journey_versions", auth.ScopeEmailsRead, "Each version of each journey: trigger, entry rules, goal, steps and exit rules."},
+	{"journey_run_steps", auth.ScopeEmailsRead, "Each step people went through in journeys, with its outcome and the email it sent."},
+	{"lifecycle_stages", auth.ScopeCustomersRead, "The brand's lifecycle stages per level, in order."},
+	{"social_accounts", auth.ScopeSocialRead, "The brand's and competitors' social accounts, with followers and sync status."},
+	{"social_account_days", auth.ScopeSocialRead, "Each social account's followers, following and posts per day."},
+	{"social_publications", auth.ScopeSocialRead, "Posts drafted, scheduled and published from Outflare, with status and where they went."},
+	{"social_post_snapshots", auth.ScopeSocialRead, "Each post's numbers over time: impressions, likes, replies, reposts, clicks."},
+	{"content_items", auth.ScopeContentRead, "The brand's content (articles and pages): text, target keyword, status and where it is published."},
+	{"content_publishes", auth.ScopeContentRead, "Each time content was published to or updated in a CMS, and whether it went live."},
+	{"brand_assets", auth.ScopeContentRead, "The brand's files: logos, fonts, product shots, voices, pictures of people, and every picture, video and voice-over made for it."},
+	{"brand_generations", auth.ScopeContentRead, "Each request to a picture, video or voice provider: the model, prompt, references, status, the file it made and what it used."},
+	{"brand_videos", auth.ScopeContentRead, "Talking videos: script, status and stage, the files of each stage, the fix that waits, the person's rating, and what it is a variation of."},
+	{"brand_video_steps", auth.ScopeContentRead, "What each stage of a talking video did, per round: its status, the provider request and the file it made."},
+	{"brand_video_versions", auth.ScopeContentRead, "Every version of a talking video: the current one, a fix that waits, earlier ones, and fixes turned down with the reason."},
+	{"creatives", auth.ScopeContentRead, "Creatives: what each is tagged with (persona, pain, hook), its words, the skill that made it, and a person's approval and rating with reasons."},
+	{"creative_skills", auth.ScopeContentRead, "Skills: the saved recipes creatives are made from."},
+	{"creative_skill_versions", auth.ScopeContentRead, "Every version of a skill: its model, sizes, rules and the prompts it splits between."},
+	{"creative_skill_drafts", auth.ScopeContentRead, "Ads described in words and the skill the workspace's own AI model drafted from each, before a person saves it."},
+	{"creative_lessons", auth.ScopeContentRead, "What the brand taught its creatives: how to say a word, and rules added to every prompt."},
+	{"creative_history", auth.ScopeContentRead, "Everything that happened to a creative or talking video, with who did it and what they said."},
+	{"email_templates", auth.ScopeEmailsRead, "Lifecycle and transactional email templates, with subject and content."},
+	{"email_topics", auth.ScopeEmailsRead, "Email topics people can subscribe to or leave."},
+	{"email_broadcast_recipients", auth.ScopeEmailsRead, "Who each broadcast went to, and who was skipped; without addresses."},
+	{"suppressions", auth.ScopeLeadsRead, "Addresses and domains that must not be emailed, and why."},
+	{"field_definitions", auth.ScopeCustomersRead, "Every field records can have: key, type, options, who may write it and how sensitive it is."},
+	{"option_sets", auth.ScopeCustomersRead, "Option lists fields choose from."},
+	{"record_types", auth.ScopeCustomersRead, "The brand's own record types (besides people and companies)."},
+	{"attribute_changes", auth.ScopeCustomersRead, "The full history of every record field: old and new value, who changed it, from where and when."},
+	{"record_merges", auth.ScopeCustomersRead, "Records merged into others: which, by whom, when, and whether undone."},
 }
 
 type queryColumn struct {
@@ -159,23 +342,8 @@ func (s *Server) listQueryTables(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	rows, err := s.pool.Query(r.Context(), `SELECT table_name, column_name, data_type FROM information_schema.columns
-		WHERE table_schema = 'query' ORDER BY table_name, ordinal_position`)
+	cols, err := s.queryColumns(r.Context())
 	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	cols := map[string][]queryColumn{}
-	for rows.Next() {
-		var t string
-		var c queryColumn
-		if err := rows.Scan(&t, &c.Name, &c.Type); err != nil {
-			s.internal(w, r, err)
-			return
-		}
-		cols[t] = append(cols[t], c)
-	}
-	if err := rows.Err(); err != nil {
 		s.internal(w, r, err)
 		return
 	}

@@ -6,6 +6,15 @@ import { api, errorMessage } from "../api";
 import { Badge, Button, Empty, ErrorText, Loading, PageHeader, field, type tones } from "../ui";
 import type { Tab } from "../App";
 import { scoreTone } from "./SiteAudits";
+import { SearchPerformance } from "./SearchPerformance";
+import { SEOBoard } from "./SEOBoard";
+import { SEOTargets } from "./SEOTargets";
+import { track } from "../lib/analytics";
+import { SEODeclining } from "./SEODeclining";
+import { SEOCannibal } from "./SEOCannibal";
+import { SEOCountryPages } from "./SEOCountryPages";
+import { SEOTechnical } from "./SEOTechnical";
+import { SEOLinks } from "./SEOLinks";
 
 // The SEO overview: is each brand doing better in search? One full-width
 // chart per number, for the weeks picked, with a y-axis, each week's value
@@ -78,7 +87,122 @@ function rangeToURL(r: Range) {
   history.replaceState(history.state, "", url);
 }
 
-export function SEOOverview({ ws, go }: Props) {
+// The SEO overview opens on the dashboard: tiles of organic money and
+// clicks by period, and the pages and countries behind them. Search
+// Console's Performance report and the weekly trends are the other views.
+// The view stays in the address.
+type View = "dashboard" | "targets" | "declining" | "cannibalization" | "country-pages" | "technical" | "links" | "performance" | "trends";
+const viewFromURL = (): View => {
+  const v = new URLSearchParams(location.search).get("view");
+  return v === "trends" || v === "performance" || v === "targets" || v === "declining" || v === "cannibalization" || v === "country-pages" || v === "technical" || v === "links" ? v : "dashboard";
+};
+
+export function SEOOverview(props: Props) {
+  const [view, setView] = useState<View>(viewFromURL);
+  const pick = (v: View) => {
+    const url = new URL(location.href);
+    if (v === "dashboard") url.searchParams.delete("view");
+    else url.searchParams.set("view", v);
+    // The dashboard's tile is its own.
+    if (v !== "dashboard") url.searchParams.delete("period");
+    if (v !== "country-pages") url.searchParams.delete("prefix");
+    history.replaceState(history.state, "", url);
+    setView(v);
+    track("ui.seo_overview_view_switched", { view: v });
+  };
+  const tabs = (
+    <div className="flex gap-1 border-b">
+      {(
+        [
+          ["dashboard", "Dashboard"],
+          ["targets", "Targets"],
+          ["declining", "Declining"],
+          ["cannibalization", "Cannibalization"],
+          ["country-pages", "Country pages"],
+          ["technical", "Technical"],
+          ["links", "Links"],
+          ["performance", "Performance"],
+          ["trends", "Trends"],
+        ] as const
+      ).map(([id, text]) => (
+        <button
+          type="button"
+          key={id}
+          onClick={() => pick(id)}
+          className={"border-b-2 px-3 py-2 text-[13px] " + (view === id ? "border-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground")}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+  if (view === "trends") return <Trends {...props} tabs={tabs} />;
+  if (view === "targets")
+    return (
+      <div className="space-y-6">
+        <PageHeader title="SEO overview" description="Every page's target keyword and how it ranks: Search Console position on the page with its change and a 12-week line, the tracked rank by country, other pages competing for it, and whether it is in the title and H1." />
+        {tabs}
+        <SEOTargets ws={props.ws} go={props.go} />
+      </div>
+    );
+  if (view === "declining")
+    return (
+      <div className="space-y-6">
+        <PageHeader title="SEO overview" description="Pages losing search clicks over the last 7 or 28 days against the period before: new, still declining or recovering, with where the loss is, what moved and what it costs." />
+        {tabs}
+        <SEODeclining ws={props.ws} />
+      </div>
+    );
+  if (view === "cannibalization")
+    return (
+      <div className="space-y-6">
+        <PageHeader title="SEO overview" description="Searches two or more of the brand's pages compete for: new, ongoing, gained a page or resolved against the 28 days before, the page to keep, and the clicks split between them." />
+        {tabs}
+        <SEOCannibal ws={props.ws} />
+      </div>
+    );
+  if (view === "country-pages")
+    return (
+      <div className="space-y-6">
+        <PageHeader title="SEO overview" description="Pages made for a country, city or network, and how they rank in that country: Search Console's numbers there, the tracked rank, and median positions by template." />
+        {tabs}
+        <SEOCountryPages ws={props.ws} />
+      </div>
+    );
+  if (view === "technical")
+    return (
+      <div className="space-y-6">
+        <PageHeader title="SEO overview" description="Technical SEO from the latest crawl against the one before: issues in unique pages and templates, new and fixed, with the clicks at stake, plus robots.txt, indexing, sitemaps and Core Web Vitals." />
+        {tabs}
+        <SEOTechnical ws={props.ws} />
+      </div>
+    );
+  if (view === "links")
+    return (
+      <div className="space-y-6">
+        <PageHeader title="SEO overview" description="Referring domains week by week against competitors, links won and lost, bought links that failed their live check, and the anchor profile." />
+        {tabs}
+        <SEOLinks ws={props.ws} />
+      </div>
+    );
+  if (view === "dashboard")
+    return (
+      <div className="space-y-6">
+        <PageHeader title="SEO overview" description="Organic revenue, payments, sign-ups and search clicks for today, yesterday, the month so far, its forecast and last month, each against the period before. Pick a tile for the pages and countries behind it." />
+        {tabs}
+        <SEOBoard ws={props.ws} go={props.go} />
+      </div>
+    );
+  return (
+    <div className="space-y-6">
+      <PageHeader title="SEO overview" description="Search Console's Performance report, asked live from your own Search Console: the same numbers for the same choices, with more filters." />
+      {tabs}
+      <SearchPerformance ws={props.ws} go={props.go} />
+    </div>
+  );
+}
+
+function Trends({ ws, go, tabs }: Props & { tabs: React.ReactNode }) {
   const [data, setData] = useState<SEOOverviewBrand[] | null>(null);
   const [dates, setDates] = useState<Dates | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
@@ -151,13 +275,14 @@ export function SEOOverview({ ws, go }: Props) {
       action={<RangeControl value={range} onChange={setRange} />}
     />
   );
-  if (error) return <div className="space-y-6">{header}<ErrorText>{error}</ErrorText></div>;
-  if (!data || !dates) return <div className="space-y-6">{header}<Loading /></div>;
+  if (error) return <div className="space-y-6">{header}{tabs}<ErrorText>{error}</ErrorText></div>;
+  if (!data || !dates) return <div className="space-y-6">{header}{tabs}<Loading /></div>;
 
   const nothing = data.every((b) => b.weeks.every((w) => w.visitors === null && w.search_clicks === null) && b.seo.length === 0 && b.seo_status.state === "not_connected");
   return (
     <div className="space-y-8">
       {header}
+      {tabs}
       {nothing && (
         <Empty title="Nothing to compare yet" action={<Button onClick={() => go("connectors")}>Connect a tool</Button>}>
           Connect Google Search Console for branded search, an analytics tool such as GA4 or Plausible for visitors, and Ahrefs or DataForSEO for domain rating and backlinks. Each runs on your own account. Numbers show up here after their first sync.

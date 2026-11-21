@@ -224,10 +224,15 @@ until it is sent, now or at `send_at` (within 30 days).
 - **Importing people.** `POST /v1/brands/{brand}/records/import` (MCP
   `import_people`, or Lists, New list, Upload a CSV of people in the web app, also offered while making a broadcast) takes up to
   10,000 rows with an email, the workspace's own `user_id` or both. Each
-  row is matched by user id, then email; only an email nobody in the
-  brand holds makes a new person, with the `origin` you give
-  (`first_party`, `prospect` or `import`). With `list_id`, everyone goes
-  into that static list, ready for a broadcast.
+  row is matched by user id, then email. An email match adds the row's
+  `user_id` with source `import` if that person has no active user id in
+  the brand, so later events and transactions using that id find the same
+  person. If the person already has a different user id, the row is
+  skipped with reason `this email belongs to a person with another user id`;
+  it changes nothing and is not counted as matched. Only an email nobody
+  in the brand holds makes a new person, with the `origin` you give
+  (`first_party`, `prospect` or `import`). With `list_id`, everyone matched
+  or made goes into that static list, ready for a broadcast.
 - **Service messages.** With `"service": true` a broadcast is news about
   the service people use (a change, an end date), not marketing. It sends
   a transactional template to a records or list audience, skips marketing

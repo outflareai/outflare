@@ -73,7 +73,9 @@ func TestAdFindingsQueue(t *testing.T) {
 	if pause == nil || pause["unit"] != "payers" || pause["autonomy"] != "approve" || pause["rule"] != "pause" || pause["rule_version"] != 2.0 || pause["shadow"] != false || !strings.HasSuffix(pause["reason"].(string), "none.") {
 		t.Fatalf("the pause finding: %v", list)
 	}
-	if ev := pause["evidence"].(map[string]any); ev["unit"] != "payers" || ev["payers"] != 0.0 || ev["target_micros"] != 10_000_000.0 {
+	// exchange_rates is shared by every test, so the target arrives as set
+	// or, when another test left a EUR rate, in the account's currency.
+	if ev := pause["evidence"].(map[string]any); ev["unit"] != "payers" || ev["payers"] != 0.0 || (ev["target_micros"] != 10_000_000.0 && ev["target_micros"] != 9_090_909.0) {
 		t.Fatalf("evidence: %v", ev)
 	}
 	if l := owner.must(200, "GET", base+"/findings?kind=pause", nil)["data"].([]any); len(l) != 1 {
@@ -236,6 +238,27 @@ func TestAdFindingsQueue(t *testing.T) {
 	}
 	owner.must(409, "POST", base+"/findings/"+sid+"/acknowledge", nil)
 
+	// One finding reads on its own, and a person says whether it was good
+	// or bad advice. The reason is kept on the finding and as one of the
+	// brand's memories; rating again replaces both, never adds a second.
+	if f := owner.must(200, "GET", base+"/findings/"+aid, nil); f["id"] != aid || f["feedback"] != "" || f["feedback_at"] != nil {
+		t.Fatalf("one finding: %v", f)
+	}
+	owner.must(404, "GET", base+"/findings/00000000-0000-0000-0000-000000000000", nil)
+	owner.must(400, "POST", base+"/findings/"+aid+"/feedback", map[string]any{"rating": "meh"})
+	if f := owner.must(200, "POST", base+"/findings/"+aid+"/feedback", map[string]any{"rating": "bad", "note": "We never cut brand campaigns."}); f["feedback"] != "bad" || f["feedback_note"] != "We never cut brand campaigns." || f["feedback_at"] == nil || f["status"] != "acknowledged" {
+		t.Fatalf("rated: %v", f)
+	}
+	owner.must(200, "POST", base+"/findings/"+aid+"/feedback", map[string]any{"rating": "good", "note": "Right after all."})
+	var memories int
+	var memory string
+	if err := e.pool.QueryRow(ctx, `SELECT count(*), max(text) FROM memories WHERE workspace_id = $1 AND brand_id = $2 AND kind = 'feedback'`, ws, brand).Scan(&memories, &memory); err != nil {
+		t.Fatal(err)
+	}
+	if memories != 1 || !strings.Contains(memory, "good advice") || !strings.Contains(memory, "Why: Right after all.") || !strings.Contains(memory, "Still right?") {
+		t.Fatalf("%d feedback memories: %q", memories, memory)
+	}
+
 	// A refresh within the hour is a no-op that says when the next may be.
 	exec(`DELETE FROM jobs WHERE kind = 'ads.suggest' AND workspace_id = $1`, ws)
 	if r := owner.must(202, "POST", base+"/findings/refresh", nil); r["queued"] != true || r["next_at"] == nil {
@@ -259,7 +282,7 @@ func TestAdFindingsQueue(t *testing.T) {
 			autos++
 		}
 	}
-	for _, n := range []string{"ad_suggestion.created", "ad_suggestion.approved", "ad_suggestion.reverted", "ad_suggestion.dismissed", "ad_suggestion.acknowledged",
+	for _, n := range []string{"ad_suggestion.created", "ad_suggestion.approved", "ad_suggestion.reverted", "ad_suggestion.dismissed", "ad_suggestion.acknowledged", "ad_suggestion.rated",
 		"ad_campaign.paused", "ad_campaign.resumed", "ad_campaign.target_changed", "ad_campaign.exclusion_removed", "ad_change.applied"} {
 		if names[n] == 0 {
 			t.Fatalf("no %s event: %v", n, names)

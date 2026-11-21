@@ -179,7 +179,7 @@ func TestTrafficSources(t *testing.T) {
 	if l := owner.must(200, "GET", base+"/traffic-sources?status=archived", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("archived: %v", l)
 	}
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	owner.must(404, "GET", "/v1/brands/"+other["id"].(string)+"/traffic-sources/"+srcID, nil)
 	owner.must(400, "PATCH", base+"/tracking-campaigns/"+plain["code"].(string), map[string]any{"traffic_source": tab["id"].(string) + "x"})
 	owner.must(200, "PATCH", base+"/tracking-campaigns/"+c["code"].(string), map[string]any{"traffic_source": ""})

@@ -1,9 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { OrderThread } from "./OrderThread";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, errorMessage } from "../../api";
 import { Badge, Button, ErrorText, field, confirmAction, toast } from "../../ui";
 import { ago } from "../../format";
 import { anchorSourceLabel, kindLabel, secondaryTypeLabel } from "./targets";
+import { checkInAhrefs } from "./ahrefsCheck";
+import { greenLight, needsAhrefsCheck, qualityLine, topPageLabel } from "./quality";
+import { track } from "../../lib/analytics";
 import {
   approverGate,
   bothAmounts,
@@ -44,11 +48,15 @@ export function OrderSheet({ order, data, onClose }: { order?: LinkOrder; data: 
   const [notes, setNotes] = useState("");
   const [equivalents, setEquivalents] = useState<LinkOrderEquivalent[] | null>(null);
   const [replaceDonor, setReplaceDonor] = useState("");
+  // Approving or publishing without a green light needs this ticked.
+  const [override, setOverride] = useState(false);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     setErr("");
     setBusy("");
     setEquivalents(null);
+    setOverride(false);
     if (!order) return;
     const q = quotedOf(order);
     setQuoteAmount(q ? String(q.amount_minor / 10 ** minorDigits(q.currency)) : "");
@@ -98,6 +106,12 @@ export function OrderSheet({ order, data, onClose }: { order?: LinkOrder; data: 
   const replacements = data.orders.filter((o) => o.replaces_order_id === order.id && o.status !== "lost");
   const canReplace = data.canManage && order.status === "lost" && replacements.length === 0;
   const canCredit = order.status === "lost" && !order.credit_payment_id && replacements.length === 0;
+  // The green light: before money is committed (Approve) and before the
+  // link is recorded as published, the donor's verdict must be OK with a
+  // recent Ahrefs check, or the person ticks that they go ahead anyway.
+  const light = d ? greenLight(d) : null;
+  const gated = (canApprove || canPublish) && !!light;
+  const lightBlocked = gated && light!.tone !== "green" && !override;
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
@@ -228,6 +242,37 @@ export function OrderSheet({ order, data, onClose }: { order?: LinkOrder; data: 
           ) : null}
         </dl>
         {order.notes ? <p className="text-[13px] text-muted-foreground">{order.notes}</p> : null}
+        {gated && d && light ? (
+          <div className={`flex flex-col gap-2 rounded-md border-2 p-3 ${light.tone === "green" ? "border-green-500/60" : light.tone === "red" ? "border-red-500/60" : "border-amber-500/60"}`} data-testid="order-light">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13px] font-semibold">Before {canApprove ? "approving" : "publishing"}: check the donor</span>
+              <Badge tone={light.tone}>● {light.label}</Badge>
+              <Badge tone={d.quality?.top_page_share == null ? "grey" : light.tone === "red" ? "red" : d.quality.verdict === "check" ? "amber" : "green"}>{topPageLabel(d)}</Badge>
+            </div>
+            <div className="text-[12px] text-muted-foreground">
+              DR {d.domain_rating ?? dash} · {d.traffic == null ? dash : d.traffic.toLocaleString()} visits/mo{qualityLine(d) ? ` · ${qualityLine(d)}` : ""}
+              {d.ahrefs_check ? ` · Ahrefs ${d.ahrefs_check.status === "checked" ? `checked ${ago(d.ahrefs_check.at)}` : d.ahrefs_check.status}` : " · never checked in Ahrefs"}
+            </div>
+            {light.why.length ? <ul className="list-disc pl-5 text-[12px]">{light.why.map((w) => <li key={w}>{w}</li>)}</ul> : null}
+            {light.tone !== "green" ? (
+              <div className="flex flex-wrap items-center gap-3">
+                {data.canManage && light.tone !== "red" && needsAhrefsCheck(d) ? (
+                  <Button variant="ghost" disabled={checking} onClick={async () => {
+                    setChecking(true);
+                    await checkInAhrefs(data, [d.id], "order");
+                    setChecking(false);
+                  }}>
+                    Check in Ahrefs now
+                  </Button>
+                ) : null}
+                <label className="flex items-center gap-2 text-[12px]">
+                  <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} />
+                  Go ahead without a green light
+                </label>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {err ? <ErrorText>{err}</ErrorText> : null}
 
         {canQuote ? (
@@ -263,10 +308,11 @@ export function OrderSheet({ order, data, onClose }: { order?: LinkOrder; data: 
           ) : null}
           {canApprove ? (
             <Button
-              disabled={!!busy || !!approveBlocked}
-              title={approveBlocked}
+              disabled={!!busy || !!approveBlocked || lightBlocked}
+              title={approveBlocked || (lightBlocked ? "No green light for this donor yet: check it in Ahrefs, or tick Go ahead without a green light." : undefined)}
               onClick={async () => {
-                if (approveBlocked) return;
+                if (approveBlocked || lightBlocked) return;
+                if (light && light.tone !== "green") track("ui.link_order_light_overridden", { step: "approve", tone: light.tone });
                 if (!(await confirmAction("Approve this order?", `This freezes the quoted donor price of ${bothAmounts(quoted)} and reserves it against the ${order.quoted_currency} budget, when one is set. Only the brand approver can do this.`, "Approve", false))) return;
                 void run("approve", () => post("/approve"));
               }}
@@ -283,13 +329,18 @@ export function OrderSheet({ order, data, onClose }: { order?: LinkOrder; data: 
                   setErr("A published URL is required.");
                   return;
                 }
+                if (lightBlocked) {
+                  setErr("No green light for this donor yet: check it in Ahrefs, or tick Go ahead without a green light.");
+                  return;
+                }
+                if (light && light.tone !== "green") track("ui.link_order_light_overridden", { step: "publish", tone: light.tone });
                 void run("publish", () => post("/publish", { published_url: publishedUrl.trim(), proof_url: proofUrl.trim() }));
               }}
             >
               <div className="text-[13px] font-medium">Record publication</div>
               <input className={field} value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." aria-label="Published URL" required />
               <input className={field} value={proofUrl} onChange={(e) => setProofUrl(e.target.value)} placeholder="Proof URL (optional)" aria-label="Proof URL" />
-              <Button type="submit" disabled={busy === "publish"}>Mark published</Button>
+              <Button type="submit" disabled={busy === "publish" || lightBlocked}>Mark published</Button>
             </form>
           ) : null}
           {canCheck ? (
@@ -391,6 +442,7 @@ export function OrderSheet({ order, data, onClose }: { order?: LinkOrder; data: 
             <textarea className={field} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" aria-label="Order notes" />
           ) : null}
         </div>
+        <OrderThread data={data} orderId={order.id} />
       </SheetContent>
     </Sheet>
   );

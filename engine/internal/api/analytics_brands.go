@@ -15,8 +15,8 @@ import (
 
 // Analytics sites by brand: each site a tool reads (a GA4 property, a
 // Search Console site, a PostHog project) reports for one brand: the one
-// someone picked, else its connection's, else the workspace's first brand.
-// A domain only suggests a brand.
+// someone picked, else the brand whose domain the site is on, else its
+// connection's, else the workspace's first brand.
 
 func (s *Server) routesAnalyticsBrands(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/site-brands", s.inBrand(auth.ScopeAnalyticsRead, s.listSiteBrands))
@@ -33,7 +33,7 @@ type siteOwner struct {
 // siteOwners says who owns each of a connection's sites, by site id.
 func (s *Server) siteOwners(ctx context.Context, ws, integration string, sites, hosts []string) (map[string]siteOwner, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT x.site, outflare_site_brand_or_first($2, x.site)::text, outflare_site_brand_chosen($2, x.site) IS NULL
+		SELECT x.site, outflare_site_brand_now($2, x.site)::text, outflare_site_brand_placed($2, x.site) IS NULL
 		FROM unnest($3::text[], $4::text[]) AS x (site, host)
 		JOIN integrations i ON i.id = $2 AND i.workspace_id = $1`,
 		ws, integration, sites, hosts)
@@ -69,9 +69,9 @@ type siteBrand struct {
 	Site        string  `json:"site"`
 	Host        string  `json:"host"`
 	BrandID     *string `json:"brand_id"`
-	// Source says why: set (someone picked it), domain (its connection's
-	// brand; the name is older than that) or default (the workspace's first
-	// brand, until someone picks one).
+	// Source says why: set (someone picked it), domain (the brand whose
+	// website the site is on, else its connection's brand) or default (the
+	// workspace's first brand, until someone picks one).
 	Source    string     `json:"source"`
 	UpdatedAt *time.Time `json:"updated_at"`
 }
@@ -89,8 +89,8 @@ const siteBrandSQL = `
 		LEFT JOIN daily d ON d.integration_id = k.integration_id AND d.site = k.site
 		LEFT JOIN analytics_syncs s ON s.integration_id = k.integration_id AND s.site = k.site
 	)
-	SELECT x.integration_id::text, x.site, x.host, outflare_site_brand_or_first(x.integration_id, x.site)::text,
-		o.integration_id IS NOT NULL, outflare_site_brand_chosen(x.integration_id, x.site) IS NULL, o.updated_at
+	SELECT x.integration_id::text, x.site, x.host, outflare_site_brand_now(x.integration_id, x.site)::text,
+		o.integration_id IS NOT NULL, outflare_site_brand_placed(x.integration_id, x.site) IS NULL, o.updated_at
 	FROM sites x
 	LEFT JOIN analytics_site_brands o ON o.integration_id = x.integration_id AND o.site = x.site`
 

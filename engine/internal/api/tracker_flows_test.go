@@ -133,7 +133,7 @@ func TestTrackerFlows(t *testing.T) {
 	}
 
 	// Another brand sees none of it, and can't use it.
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	obase := "/v1/brands/" + other["id"].(string)
 	if n := len(owner.must(200, "GET", obase+"/flows?status=all", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("another brand sees %d flows", n)

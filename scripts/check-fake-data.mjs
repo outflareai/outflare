@@ -4,9 +4,8 @@
 // example.com or a .example, .test or .invalid domain, so nobody's real
 // address, and no domain someone could register, ends up in public history.
 // The few real addresses and domains allowed are in
-// scripts/fake-data-allowed.txt. Geonode and Repocket are allowed as example
-// brand names and websites, but never in an email address: those would be
-// real people's inboxes.
+// scripts/fake-data-allowed.txt. Example brands are fictional (Northpeak,
+// Summitly) at .example domains.
 //
 // Checks the lines a pull request adds (git diff base...head) and its title
 // and description (PR_TITLE, PR_BODY), which are as public as the code.
@@ -82,7 +81,9 @@ if (tree) {
 		});
 	}
 } else {
-	const diff = execFileSync('git', ['diff', '--unified=0', '--no-color', '--no-ext-diff', `${base}...${head}`], {
+	// --relative: only this folder's changes, with paths from it, when the
+	// repository is a folder of a larger one. At the top it changes nothing.
+	const diff = execFileSync('git', ['diff', '--relative', '--unified=0', '--no-color', '--no-ext-diff', `${base}...${head}`], {
 		encoding: 'utf8',
 		maxBuffer: 256 * 1024 * 1024,
 	});

@@ -1,28 +1,32 @@
 // A playbook's home in a brand: what is on, what each part has done and
 // how its signals ended. Community playbooks and a brand's own share it.
 import { useEffect, useState } from "react";
-import type { PlaybookHome, PlaybookLift } from "@outflare/sdk";
+import type { PlaybookHome, PlaybookLift, Schemas } from "@outflare/sdk";
 import { api } from "@/api";
 import { Badge, field } from "@/ui";
 import { plural } from "@/format";
 import type { Tab } from "@/App";
 
 type Go = (tab: Tab, item?: string) => void;
-type Home = Pick<PlaybookHome, "parts" | "signals">;
+type Part = PlaybookHome["parts"][number] | Schemas["OwnPlaybook"]["parts"][number];
+type Home = { parts: Part[]; signals: PlaybookHome["signals"] };
 
-export const partKind: Record<PlaybookHome["parts"][number]["kind"], string> = { rule: "Rule", journey: "Journey", smart_list: "List", signal_type: "Signal type", metric: "Metric", score: "Score" };
-const partTab: Record<PlaybookHome["parts"][number]["kind"], Tab> = { rule: "rules", journey: "journeys", smart_list: "lists", signal_type: "signals", metric: "people", score: "people" };
+export const partKind: Record<Part["kind"], string> = { rule: "Rule", journey: "Journey", smart_list: "List", signal_type: "Signal type", metric: "Metric", score: "Score", routing_rule: "Routing rule", email: "Email" };
+const partTab: Record<Part["kind"], Tab> = { rule: "rules", journey: "journeys", smart_list: "lists", signal_type: "signals", metric: "people", score: "people", routing_rule: "people", email: "templates" };
+const partItem = (part: Part) => (part.kind === "metric" ? "metrics" : part.kind === "score" ? "scores" : part.kind === "routing_rule" ? "routing" : (part.id ?? undefined));
 
 // PlaybookHomeSection is the playbook's home in the brand: what is on,
 // what each part has done, and how its signals ended.
 export function PlaybookHomeSection({ home, go, title = "In this brand" }: { home: Home; go: Go; title?: string }) {
-  const did = (part: PlaybookHome["parts"][number]) =>
+  const did = (part: Part) =>
     part.kind === "rule" ? `fired ${plural(part.count, "time")} in 30 days`
       : part.kind === "journey" ? `${part.count} in it now`
         : part.kind === "smart_list" ? `${part.count} on it`
           : part.kind === "metric" ? `on ${plural(part.count, "record")}`
             : part.kind === "score" ? `${plural(part.count, "record")} scored`
-          : `${part.count} open`;
+              : part.kind === "routing_rule" ? `${part.count} routed`
+                : part.kind === "email" ? `sent ${plural(part.count, "time")} in 30 days`
+                  : `${part.count} open`;
   const off = home.parts.filter((x) => (x.kind === "rule" || x.kind === "journey") && x.status !== "active").length;
   const g = home.signals;
   const closed = g.won + g.no_change + g.not_useful;
@@ -45,7 +49,7 @@ export function PlaybookHomeSection({ home, go, title = "In this brand" }: { hom
         {home.parts.map((part) => (
           <li key={part.kind + part.key} className="flex items-center gap-2 py-1.5">
             <span className="w-20 shrink-0 text-[12px] text-muted-foreground">{partKind[part.kind]}</span>
-            <button type="button" className="min-w-0 flex-1 truncate text-left underline-offset-4 hover:underline" onClick={() => go(partTab[part.kind], part.kind === "metric" ? "metrics" : part.kind === "score" ? "scores" : part.id ?? undefined)}>{part.name}</button>
+            <button type="button" className="min-w-0 flex-1 truncate text-left underline-offset-4 hover:underline" onClick={() => go(partTab[part.kind], partItem(part))}>{part.name}</button>
             <span className="shrink-0 text-[12px] text-muted-foreground">{did(part)}</span>
             {(part.kind === "rule" || part.kind === "journey") && <Badge tone={part.status === "active" ? "green" : part.status === "paused" ? "amber" : "grey"}>{part.status === "active" ? "On" : part.status === "paused" ? "Paused" : "Draft"}</Badge>}
           </li>
@@ -68,18 +72,19 @@ const verdictText: Record<string, { text: string; tone: "green" | "red" | "grey"
 
 // PlaybookLiftSection answers "did this playbook work?": each of its
 // journeys that holds some back at random, against the ones held back.
-export function PlaybookLiftSection({ brand, playbook, go }: { brand: string; playbook: string; go: Go }) {
+export function PlaybookLiftSection({ brand, playbook, go, own }: { brand: string; playbook: string; go: Go; own?: boolean }) {
   const [lift, setLift] = useState<Lift | null>(null);
   const [days, setDays] = useState(30);
   useEffect(() => {
     let live = true;
-    void api.GET("/v1/brands/{brand}/playbooks/{id}/lift", { params: { path: { brand, id: playbook }, query: { days } } }).then(({ data }) => {
+    const params = { path: { brand, id: playbook }, query: { days } };
+    void (own ? api.GET("/v1/brands/{brand}/own-playbooks/{id}/lift", { params }) : api.GET("/v1/brands/{brand}/playbooks/{id}/lift", { params })).then(({ data }) => {
       if (live && data) setLift(data);
     });
     return () => {
       live = false;
     };
-  }, [brand, playbook, days]);
+  }, [brand, playbook, days, own]);
   if (!lift || lift.journeys.length === 0) return null;
   return (
     <section className="space-y-3 rounded-md border p-3">

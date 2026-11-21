@@ -235,7 +235,7 @@ function Sections({ ws, sections, go }: { ws: string; sections: DigestSection[];
                 <dd className="font-medium tabular-nums">
                   {m.value}
                   {m.previous !== null && m.previous !== m.value && (
-                    <span className="ml-1 text-xs text-muted-foreground">{m.value > m.previous ? "+" : "−"}{Math.abs(m.value - m.previous)}</span>
+                    <span className="ml-1 text-xs text-muted-foreground">{m.value > m.previous ? "+" : "−"}{+Math.abs(m.value - m.previous).toFixed(2)}</span>
                   )}
                 </dd>
               </div>

@@ -1,7 +1,10 @@
 package emailbison
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
+	"mime/multipart"
 	"net/http"
 	"strings"
 
@@ -9,7 +12,7 @@ import (
 )
 
 // The blocklist: GET /api/blacklisted-emails and /api/blacklisted-domains
-// list it, page by page; POST .../bulk adds many at once.
+// list it, page by page; POST .../bulk adds many at once, from a CSV file.
 
 var _ c.BlocklistReader = EmailBison{}
 
@@ -57,12 +60,36 @@ func (EmailBison) Block(ctx context.Context, cl *c.Client, creds c.Creds, entrie
 		}
 	}
 	if len(emails) > 0 {
-		if err := a.do(ctx, http.MethodPost, "/api/blacklisted-emails/bulk", map[string]any{"emails": emails}, nil); err != nil {
+		if err := a.uploadList(ctx, "/api/blacklisted-emails/bulk", "email", emails); err != nil {
 			return err
 		}
 	}
 	if len(domains) > 0 {
-		return a.do(ctx, http.MethodPost, "/api/blacklisted-domains/bulk", map[string]any{"domains": domains}, nil)
+		return a.uploadList(ctx, "/api/blacklisted-domains/bulk", "domain", domains)
 	}
 	return nil
+}
+
+// uploadList sends a list to one of EmailBison's bulk blocklist endpoints.
+// They take a CSV file as multipart form data (field csv), one value a
+// row under a header naming the column; a JSON body gets an HTTP 500.
+func (a *api) uploadList(ctx context.Context, path, column string, values []string) error {
+	var file bytes.Buffer
+	w := csv.NewWriter(&file)
+	w.Write([]string{column})
+	for _, v := range values {
+		w.Write([]string{v})
+	}
+	w.Flush()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	part, err := mw.CreateFormFile("csv", column+"s.csv")
+	if err != nil {
+		return c.Errf(c.ErrInvalid, "bad EmailBison request: %v", err)
+	}
+	part.Write(file.Bytes())
+	if err := mw.Close(); err != nil {
+		return c.Errf(c.ErrInvalid, "bad EmailBison request: %v", err)
+	}
+	return a.send(ctx, http.MethodPost, path, mw.FormDataContentType(), &body, nil)
 }

@@ -67,6 +67,11 @@ export type EnrollmentStatus = Schemas["EnrollmentStatus"];
 export type Message = Schemas["Message"];
 export type InboundMessage = Schemas["InboundMessage"];
 export type InboxTag = Schemas["InboxTag"];
+export type InboxNote = Schemas["InboxNote"];
+export type SupportPerson = Schemas["SupportPerson"];
+export type SavedReply = Schemas["SavedReply"];
+export type InboxPresence = Schemas["InboxPresence"];
+export type InboxLoopIn = Schemas["InboxLoopIn"];
 export type InboxView = Schemas["InboxView"];
 export type Team = Schemas["Team"];
 export type Sender = Schemas["Sender"];
@@ -149,6 +154,8 @@ export type AnalyticsSitePlan = Schemas["AnalyticsSitePlan"];
 export type AnalyticsReport = Schemas["AnalyticsReport"];
 export type SiteAnalyticsReport = Schemas["SiteAnalyticsReport"];
 export type PageSpeedReport = Schemas["PageSpeedReport"];
+export type ErrorIssue = Schemas["ErrorIssue"];
+export type ClickAction = Schemas["ClickAction"];
 export type SiteLiveReport = Schemas["SiteLiveReport"];
 export type AnalyticsReportName = Schemas["AnalyticsReportName"];
 export type AnalyticsMetrics = Schemas["AnalyticsMetrics"];
@@ -211,6 +218,8 @@ export type SocialOverview = Schemas["SocialOverview"];
 export type SocialWatch = Schemas["SocialWatch"];
 export type SocialWatchInput = Schemas["SocialWatchInput"];
 export type SocialItem = Schemas["SocialItem"];
+export type Mention = Schemas["Mention"];
+export type MentionsOverview = Schemas["MentionsOverview"];
 export type SocialAction = Schemas["SocialAction"];
 export type SocialAccountChannel = Schemas["SocialAccountChannel"];
 export type SocialAccount = Schemas["SocialAccount"];
@@ -296,6 +305,12 @@ export type AdSummaryRow = Schemas["AdSummaryRow"];
 export type AdConversionTarget = Schemas["AdConversionTarget"];
 export type AdConversionRule = Schemas["AdConversionRule"];
 export type AdConversionSend = Schemas["AdConversionSend"];
+export type AdConversionSendStatus = Schemas["AdConversionSendStatus"];
+export type AdConversionCheck = Schemas["AdConversionCheck"];
+export type AdMatchQuality = Schemas["AdMatchQuality"];
+export type BrandAdAudience = Schemas["BrandAdAudience"];
+export type AdPerformanceDay = Schemas["AdPerformanceDay"];
+export type AdCampaignSignals = Schemas["AdCampaignSignals"];
 export type AdSettings = Schemas["AdSettings"];
 export type SEOOverviewBrand = Schemas["SEOOverviewBrand"];
 export type Backlink = Schemas["Backlink"];
@@ -375,6 +390,7 @@ export type HelpCentreStats = Schemas["HelpCentreStats"];
 export type SupportConversation = Schemas["SupportConversation"];
 export type SupportMessage = Schemas["SupportMessage"];
 export type SupportMailbox = Schemas["SupportMailbox"];
+export type SupportImport = Schemas["SupportImport"];
 export type SupportCounts = Schemas["SupportCounts"];
 export type SupportSLAPolicy = Schemas["SupportSLAPolicy"];
 export type SupportChatWidget = Schemas["SupportChatWidget"];
@@ -385,7 +401,19 @@ export type SupportAssistantSetting = Schemas["SupportAssistantSetting"];
 export type SupportHandoffTopic = Schemas["SupportHandoffTopic"];
 export type KnowledgeReplyImport = Schemas["KnowledgeReplyImport"];
 export type Brand = Schemas["Brand"];
+export type BrandAsset = Schemas["BrandAsset"];
+export type BrandAssetKind = Schemas["BrandAssetKind"];
 export type BrandContext = Schemas["BrandContext"];
+export type BrandVideo = Schemas["BrandVideo"];
+export type BrandVideoVersion = Schemas["BrandVideoVersion"];
+export type BrandVideoSettings = Schemas["BrandVideoSettings"];
+export type CreativeHistoryEntry = Schemas["CreativeHistoryEntry"];
+export type CreativeLesson = Schemas["CreativeLesson"];
+export type Creative = Schemas["Creative"];
+export type CreativeStatus = Schemas["CreativeStatus"];
+export type CreativeSkill = Schemas["CreativeSkill"];
+export type CreativeSkillVersion = Schemas["CreativeSkillVersion"];
+export type CreativeSkillVariant = Schemas["CreativeSkillVariant"];
 export type BrandMoved = Schemas["BrandMoved"];
 export type BrandLinkSuggestion = Schemas["BrandLinkSuggestion"];
 export type AnalyticsSiteBrand = Schemas["AnalyticsSiteBrand"];
@@ -403,6 +431,13 @@ export type WorkspaceStatus = Schemas["WorkspaceStatus"];
 export type ICP = Schemas["ICP"];
 export type CustomerProfile = Schemas["CustomerProfile"];
 export type CustomerProfileInput = Schemas["CustomerProfileInput"];
+export type BrandProfile = Schemas["BrandProfile"];
+export type ProfileSection = Schemas["ProfileSection"];
+export type ProfileFact = Schemas["ProfileFact"];
+export type ProfileFactInput = Schemas["ProfileFactInput"];
+export type ProfileChange = Schemas["ProfileChange"];
+export type Persona = Schemas["Persona"];
+export type PersonaInput = Schemas["PersonaInput"];
 export type MissionPlanInput = Schemas["MissionPlanInput"];
 export type MissionPlanResult = Schemas["MissionPlanResult"];
 export type MissionDraft = Schemas["MissionDraft"];
@@ -502,7 +537,7 @@ export type ClientOptions = {
 };
 
 /** This SDK's version, sent in the Outflare-Client header. */
-export const SDK_VERSION = "0.1.0";
+export const SDK_VERSION = "0.110.0";
 
 type Held = components["schemas"]["MissionHeld"];
 type WithoutHeldResponse<R> = R extends { content: { "application/json": infer C } }
@@ -712,6 +747,21 @@ export async function verifyWebhook(
 }
 
 /**
+ * The signature that lets a page say who its visitor is. Run it on your
+ * server when someone signs in, with the site's identify secret (ofid_,
+ * from Website tracking, never in a page), and give the page the user id
+ * and the result: `outflare.identify(user.id, signature)` then joins the
+ * browser's visits to that person. It is hex(HMAC-SHA256(secret, userId))
+ * and uses Web Crypto, so it runs in Node 18+, Deno, Bun and Workers.
+ */
+export async function identifySignature(secret: string, userId: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(userId)));
+  return Array.from(mac, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * The tag that hands your server's flag decisions to the page, so the
  * Outflare site script shows the visitor's version at once, with no request
  * and no flash of the original. Decide with `POST .../flags/evaluate`
@@ -741,3 +791,17 @@ export type SearchReportRun = Schemas["SearchReportRun"];
 export type SearchCollectionSchedule = Schemas["SearchCollectionSchedule"];
 export type SearchCollectionRun = Schemas["SearchCollectionRun"];
 export type SearchWorkspace = Schemas["SearchWorkspace"];
+export { Tracker, trackerVersion, describeError, errorHash, looksLikeCrawler } from "./track.js";
+export type { TrackerOptions, ExceptionMessage, TrackMessage, IdentifyMessage, GroupMessage, PageMessage, AliasMessage, Who, Traits, Properties } from "./track.js";
+export { LocalFlags, decideFlags, decideFlag, flagBucket, flagDevice } from "./flags.js";
+export type {
+  FlagDefinition,
+  FlagDefinitions,
+  FlagDefinitionRule,
+  FlagDefinitionVariant,
+  FlagVisitor,
+  FlagSubject,
+  FlagReason,
+  LocalFlagDecisions,
+  LocalFlagsOptions,
+} from "./flags.js";

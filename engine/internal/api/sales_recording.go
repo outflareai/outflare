@@ -20,12 +20,13 @@ type salesTemplate struct {
 	Name      string `json:"name"`
 	Body      string `json:"body"`
 	Archived  bool   `json:"archived"`
+	Favorite  bool   `json:"favorite"`
 }
 
 func (s *Server) salesTemplate(ctx context.Context, q mailQuery, a *access, id string) (salesTemplate, error) {
 	var t salesTemplate
 	var sealed []byte
-	err := q.QueryRow(ctx, `SELECT t.id::text,v.id::text,t.version,t.archived,v.content_sealed FROM sales_templates t JOIN sales_template_versions v ON v.template_id=t.id AND v.workspace_id=t.workspace_id AND v.brand_id=t.brand_id AND v.version=t.version WHERE t.workspace_id=$1 AND t.brand_id=$2 AND t.owner_id=$3 AND t.id=$4`, a.WorkspaceID, a.Brand, a.UserID, id).Scan(&t.ID, &t.VersionID, &t.Version, &t.Archived, &sealed)
+	err := q.QueryRow(ctx, `SELECT t.id::text,v.id::text,t.version,t.archived,t.favorite,v.content_sealed FROM sales_templates t JOIN sales_template_versions v ON v.template_id=t.id AND v.workspace_id=t.workspace_id AND v.brand_id=t.brand_id AND v.version=t.version WHERE t.workspace_id=$1 AND t.brand_id=$2 AND t.owner_id=$3 AND t.id=$4`, a.WorkspaceID, a.Brand, a.UserID, id).Scan(&t.ID, &t.VersionID, &t.Version, &t.Archived, &t.Favorite, &sealed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return t, errNotFound
 	}
@@ -86,13 +87,14 @@ func (s *Server) putSalesTemplate(w http.ResponseWriter, r *http.Request) {
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		if create {
 			in.Version = 1
+			in.Favorite = false
 			_, err := tx.Exec(r.Context(), `INSERT INTO sales_templates(id,workspace_id,brand_id,owner_id)VALUES($1,$2,$3,$4)`, in.ID, a.WorkspaceID, a.Brand, a.UserID)
 			if err != nil {
 				return err
 			}
 		} else {
 			var version int
-			err := tx.QueryRow(r.Context(), `SELECT version FROM sales_templates WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND id=$4 FOR UPDATE`, a.WorkspaceID, a.Brand, a.UserID, in.ID).Scan(&version)
+			err := tx.QueryRow(r.Context(), `SELECT version,favorite FROM sales_templates WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND id=$4 FOR UPDATE`, a.WorkspaceID, a.Brand, a.UserID, in.ID).Scan(&version, &in.Favorite)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errNotFound
 			}
@@ -127,6 +129,46 @@ func (s *Server) putSalesTemplate(w http.ResponseWriter, r *http.Request) {
 			status = 201
 		}
 		writeJSON(w, status, in)
+	}
+}
+
+func (s *Server) favoriteSalesTemplate(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.salesPerson(w, r); !ok {
+		return
+	}
+	a := accessFrom(r.Context())
+	var in struct {
+		Favorite *bool `json:"favorite"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Favorite == nil {
+		writeError(w, r, 400, "invalid_request", "provide favorite")
+		return
+	}
+	id := r.PathValue("id")
+	if !validUUID(id) {
+		writeError(w, r, 404, "not_found", "template not found")
+		return
+	}
+	var out salesTemplate
+	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(r.Context(), `UPDATE sales_templates SET favorite=$5 WHERE workspace_id=$1 AND brand_id=$2 AND owner_id=$3 AND id=$4 AND NOT archived`, a.WorkspaceID, a.Brand, a.UserID, id, *in.Favorite)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return errNotFound
+		}
+		if err = record(r.Context(), tx, &a.principal, a.WorkspaceID, "sales.template_favorite_updated", "sales_template", id, map[string]any{"brand_id": a.Brand, "favorite": *in.Favorite}); err != nil {
+			return err
+		}
+		out, err = s.salesTemplate(r.Context(), tx, a, id)
+		return err
+	})
+	if !s.recordError(w, r, err) {
+		writeJSON(w, 200, out)
 	}
 }
 
@@ -166,6 +208,7 @@ func (s *Server) putSalesDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	a := accessFrom(r.Context())
 	var in struct {
+		AssistID   string `json:"assist_id"`
 		Revision   int    `json:"revision"`
 		Body       string `json:"body"`
 		TemplateID string `json:"template_id"`
@@ -201,6 +244,19 @@ func (s *Server) putSalesDraft(w http.ResponseWriter, r *http.Request) {
 		d.Revision++
 		d.Body = in.Body
 		action := "draft_saved"
+		if in.AssistID != "" {
+			if !validUUID(in.AssistID) {
+				return errInvalid("invalid AI preview")
+			}
+			preview, e := s.salesAssist(r.Context(), tx, a, l.ID, in.AssistID)
+			if e != nil {
+				return e
+			}
+			if l.State == "archived" || preview.Status != "ready" || preview.BaseRevision != in.Revision || preview.Body != in.Body || in.TemplateID != "" || in.Discard {
+				return recordConflict{"record_changed", "This AI preview no longer matches your draft. Generate another preview."}
+			}
+			action = "draft_assist_applied"
+		}
 		if in.Discard || strings.TrimSpace(in.Body) == "" {
 			d.TemplateVersionID = nil
 			d.ResolvedText = ""
@@ -225,7 +281,7 @@ func (s *Server) putSalesDraft(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return s.salesEvent(r.Context(), tx, a, l, m.Role, action, nil, map[string]any{"draft_id": d.ID, "revision": d.Revision, "template_version_id": d.TemplateVersionID})
+		return s.salesEvent(r.Context(), tx, a, l, m.Role, action, nil, map[string]any{"draft_id": d.ID, "revision": d.Revision, "template_version_id": d.TemplateVersionID, "assist_id": in.AssistID})
 	})
 	if !s.recordError(w, r, err) {
 		writeJSON(w, 200, d)
@@ -361,53 +417,9 @@ func (s *Server) importSalesLead(w http.ResponseWriter, r *http.Request) {
 	}
 	var l salesLead
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		rec, err := lockRecord(r.Context(), tx, a, in.RecordID)
-		if err != nil {
-			return err
-		}
-		if rec.Type != "person" {
-			return errInvalid("Sales lead must reference a person CRM record")
-		}
-		i, err := s.integrations.Get(r.Context(), tx, a.WorkspaceID, in.IntegrationID)
-		if err != nil {
-			return err
-		}
-		if i.Connector != "emailbison" || i.BrandID != nil && *i.BrandID != a.Brand || len(i.BrandIDs) > 0 && !slices.Contains(i.BrandIDs, a.Brand) {
-			return errInvalid("choose this brand's original EmailBison connection")
-		}
-		id := newID()
-		tag, err := tx.Exec(r.Context(), `INSERT INTO sales_leads(id,workspace_id,brand_id,record_id,source,source_id,integration_id,source_sealed)VALUES($1,$2,$3,$4,$5,$6,$7,$8)ON CONFLICT(workspace_id,brand_id,source,source_id)DO NOTHING`, id, a.WorkspaceID, a.Brand, in.RecordID, in.Source, in.SourceID, in.IntegrationID, s.salesSeal(id, salesSource{SenderID: in.SenderID, ReplyID: in.ReplyID, Attribution: in.Attribution}))
-		if err != nil {
-			return err
-		}
-		fresh := tag.RowsAffected() > 0
-		if err = tx.QueryRow(r.Context(), `SELECT id::text FROM sales_leads WHERE workspace_id=$1 AND brand_id=$2 AND source=$3 AND source_id=$4 FOR UPDATE`, a.WorkspaceID, a.Brand, in.Source, in.SourceID).Scan(&id); err != nil {
-			return err
-		}
-		l, err = s.salesLoad(r.Context(), tx, a, id, false)
-		if err != nil {
-			return err
-		}
-		if l.RecordID != in.RecordID || deref(l.IntegrationID) != in.IntegrationID {
-			return errInvalid("source lead already maps to another record or connection")
-		}
-		for _, msg := range in.Messages {
-			_, added, e := s.storeSalesMessage(r.Context(), tx, a, l, msg, "emailbison:"+in.IntegrationID)
-			if e != nil {
-				return e
-			}
-			if added {
-				if e = s.salesEvent(r.Context(), tx, a, l, "bridge", "message_received", nil, nil); e != nil {
-					return e
-				}
-			}
-		}
-		if fresh {
-			if err = s.salesEvent(r.Context(), tx, a, l, "bridge", "lead_arrived", nil, map[string]string{"source": in.Source}); err != nil {
-				return err
-			}
-		}
-		l, err = s.salesLoad(r.Context(), tx, a, id, false)
+		var err error
+		l, _, _, err = s.importSalesConversation(r.Context(), tx, a, salesImport{Source: in.Source, SourceID: in.SourceID, RecordID: in.RecordID,
+			IntegrationID: in.IntegrationID, SenderID: in.SenderID, ReplyID: in.ReplyID, Messages: in.Messages, Attribution: in.Attribution})
 		return err
 	})
 	if !s.recordError(w, r, err) {

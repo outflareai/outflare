@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, PageHeader, toast } from "../ui";
+import { Badge, Card, Empty, ErrorText, field, Loading, PageHeader } from "../ui";
 import { PickBrand } from "@/components/pick-brand";
 import { useBrand } from "@/lib/brand";
 import { nameItem } from "@/lib/records";
-import { ago } from "../format";
 import { day, presetLabels, today, whole } from "./Funnels";
-import { takeDraft } from "@/components/insight-panels";
+import { embedSpec, type InsightEmbed } from "@/lib/insight-embed";
+import { InsightBar, InsightList, InsightMissing, partName, useInsightEditor, useInsightRoute } from "@/lib/insight-editor";
+import { peekDraft, takeDraft } from "@/components/insight-panels";
 
 // Paths (docs/insights.md): where people went step by step, as a flow
 // chart: the pages they viewed and the events they caused, from a start,
@@ -17,7 +18,6 @@ export type PathsSpec = Schemas["PathsSpec"];
 export type PathsResult = Schemas["PathsResult"];
 type PathPoint = Schemas["PathPoint"];
 type Catalog = Schemas["InsightsCatalog"];
-type Insight = Schemas["Insight"];
 type Preset = NonNullable<Schemas["InsightDateRange"]["preset"]>;
 
 const starter: PathsSpec = { date_range: { preset: "last_30_days" }, steps: 4, kinds: ["page"] };
@@ -36,37 +36,36 @@ export function cleanPaths(s: PathsSpec): PathsSpec {
   return out;
 }
 
-export function Paths({ ws, canManage }: { ws: string; canManage: boolean }) {
+export function Paths({ ws, canManage, item, onOpen }: { ws: string; canManage: boolean; item?: string; onOpen?: (id?: string) => void }) {
   const { brand, active } = useBrand(ws);
   useEffect(() => nameItem("paths", "Paths"), []);
+  const route = useInsightRoute(item, onOpen, peekDraft() === "paths");
   return (
     <div className="space-y-6">
       <PageHeader title="Paths" description="Where people go, step by step: the pages they view and the things they do after landing, before signing up, or on the way to paying." />
-      {brand ? <PathsFor key={brand.id} brand={brand.id} canManage={canManage} /> : <PickBrand what="Paths" brands={active.length} />}
+      {!brand ? (
+        <PickBrand what="Paths" brands={active.length} />
+      ) : route.listing ? (
+        <InsightList key={brand.id} brand={brand.id} kind="paths" what="paths question" plural="paths questions" canManage={canManage} onOpen={onOpen} column="Asks" describe={(i) => { const x = i.spec as PathsSpec; return x.end ? `What leads to ${partName(x.end) || "…"}` : x.start ? `What follows ${partName(x.start) || "…"}` : "Where people go from their first step"; }} empty="A paths question shows where people go step by step, after a page or on the way to an event. Build one and save it to open it again or put it on a dashboard." />
+      ) : (
+        <PathsFor key={brand.id} brand={brand.id} canManage={canManage} item={route.item} onOpen={onOpen} />
+      )}
     </div>
   );
 }
 
-function PathsFor({ brand, canManage }: { brand: string; canManage: boolean }) {
+export function PathsFor({ brand, canManage, embed, item, onOpen }: { brand: string; canManage: boolean; embed?: InsightEmbed; item?: string; onOpen?: (id?: string) => void }) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [saved, setSaved] = useState<Insight[]>([]);
-  const [current, setCurrent] = useState<Insight | null>(null);
-  const [spec, setSpec] = useState<PathsSpec>(() => takeDraft<PathsSpec>("paths") ?? starter);
+  const ed = useInsightEditor<PathsSpec>({ brand, kind: "paths", starter, clean: cleanPaths, embed, item, onOpen, initial: () => takeDraft<PathsSpec>("paths"), embedSpec: () => embedSpec<PathsSpec>(embed!, starter) });
+  const { spec, setSpec } = ed;
   const [result, setResult] = useState<PathsResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const [name, setName] = useState("");
   const run = useRef(0);
-
-  const loadSaved = useCallback(async () => {
-    const { data } = await api.GET("/v1/brands/{brand}/insights", { params: { path: { brand }, query: { kind: "paths" } } });
-    if (data) setSaved(data.data);
-  }, [brand]);
 
   useEffect(() => {
     api.GET("/v1/brands/{brand}/insights/catalog", { params: { path: { brand } } }).then(({ data, error }) => (data ? setCatalog(data) : setError(errorMessage(error))));
-    loadSaved();
-  }, [brand, loadSaved]);
+  }, [brand]);
 
   useEffect(() => {
     if (!pathsReady(spec)) return;
@@ -83,38 +82,8 @@ function PathsFor({ brand, canManage }: { brand: string; canManage: boolean }) {
     return () => clearTimeout(t);
   }, [brand, spec]);
 
-  function open(i: Insight) {
-    setCurrent(i);
-    setName(i.name);
-    setSpec(i.spec as PathsSpec);
-  }
-
-  async function save() {
-    const body = cleanPaths(spec);
-    if (current) {
-      const { data, error } = await api.PATCH("/v1/brands/{brand}/insights/{insight}", { params: { path: { brand, insight: current.id } }, body: { name, spec: body } });
-      if (!data) return toast(errorMessage(error), "error");
-      setCurrent(data);
-    } else {
-      const { data, error } = await api.POST("/v1/brands/{brand}/insights", { params: { path: { brand } }, body: { kind: "paths", name, spec: body } });
-      if (!data || !("id" in data)) return toast(errorMessage(error), "error");
-      setCurrent(data);
-    }
-    toast("Saved");
-    loadSaved();
-  }
-
-  async function remove() {
-    if (!current || !(await confirmAction(`Delete ${current.name}?`, "The paths question goes for everyone, and off any dashboard it is on. The data stays.", "Delete"))) return;
-    const { error } = await api.DELETE("/v1/brands/{brand}/insights/{insight}", { params: { path: { brand, insight: current.id } } });
-    if (error) return toast(errorMessage(error), "error");
-    toast("Deleted");
-    setCurrent(null);
-    setName("");
-    loadSaved();
-  }
-
-  if (!catalog) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
+  if (!catalog || ed.loading) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
+  if (ed.missing) return <InsightMissing ed={ed} what="question" />;
   const anchor: "start" | "end" | "none" = spec.start ? "start" : spec.end ? "end" : "none";
   const point = spec.start ?? spec.end;
   const setPoint = (p: PathPoint | undefined) => setSpec((s) => (anchor === "end" ? { ...s, end: p, start: undefined } : { ...s, start: p, end: undefined }));
@@ -122,24 +91,10 @@ function PathsFor({ brand, canManage }: { brand: string; canManage: boolean }) {
 
   return (
     <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+      <div className="xl:col-span-2">
+        <InsightBar ed={ed} what="question" all="All paths questions" canManage={canManage} canSave={pathsReady(spec)} placeholder="After landing on pricing" deleteWarning="The paths question goes for everyone, and off any dashboard it is on. The data stays." embed={!!embed} />
+      </div>
       <div className="min-w-0 space-y-4">
-        <Card title="Saved" action={current ? <Button variant="ghost" onClick={() => { setCurrent(null); setName(""); setSpec(starter); }}>New question</Button> : undefined}>
-          {saved.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">None yet. Build one below and save it to put it on a dashboard.</p>
-          ) : (
-            <ul className="-mx-1 space-y-0.5">
-              {saved.map((i) => (
-                <li key={i.id}>
-                  <button onClick={() => open(i)} className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-accent ${current?.id === i.id ? "bg-accent font-medium" : ""}`}>
-                    <span className="truncate">{i.name}</span>
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{ago(i.updated_at)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
         <Card title="Where paths begin or end" description="From a page or event, towards one, or from whatever each person did first.">
           <div className="space-y-2 text-[13px]">
             <select id="paths-anchor" aria-label="Paths run" className={`${field} w-full`} value={anchor} onChange={(e) => {
@@ -224,15 +179,6 @@ function PathsFor({ brand, canManage }: { brand: string; canManage: boolean }) {
           </div>
         </Card>
 
-        {canManage && (
-          <Card title={current ? "Save changes" : "Save this question"}>
-            <div className="flex gap-2">
-              <input id="paths-name" aria-label="Name" className={`${field} min-w-0 flex-1`} placeholder="After landing on pricing" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
-              <Button disabled={!name.trim() || !pathsReady(spec)} onClick={save}>Save</Button>
-            </div>
-            {current && <button className="mt-2 text-[12px] text-muted-foreground hover:text-destructive" onClick={remove}>Delete this question</button>}
-          </Card>
-        )}
       </div>
 
       <div className="min-w-0 space-y-4">
@@ -266,7 +212,7 @@ function PointEditor({ point, catalog, onChange, label }: { point: PathPoint; ca
           <input aria-label="Event" list="paths-events" className={`${field} min-w-0 font-mono`} placeholder="signed_up" value={point.name} onChange={(e) => onChange({ ...point, name: e.target.value.trim() })} />
           <datalist id="paths-events">
             {catalog.events.map((e) => (
-              <option key={e.name} value={e.name}>{`${whole(e.count)} in 90 days`}</option>
+              <option key={e.name} value={e.name}>{`${e.label ? `${e.label} · ` : ""}${whole(e.count)} in 90 days`}</option>
             ))}
           </datalist>
         </>

@@ -27,6 +27,10 @@ func (s *Server) routesInbox(mux *http.ServeMux) {
 		mux.HandleFunc("PATCH "+b.path+"/{id}", b.on(manage, s.updateInbound))
 		mux.HandleFunc("POST "+b.path+"/{id}/reply", b.on(manage, s.replyInbound))
 	}
+	// Working together (inbox_teamwork.go), under the brand only.
+	mux.HandleFunc("POST /v1/brands/{brand}/inbox/{id}/notes", s.onBrand(manage, s.noteInbound))
+	mux.HandleFunc("PUT /v1/brands/{brand}/inbox/{id}/followers/{user}", s.onBrand(manage, s.followInbound))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/inbox/{id}/followers/{user}", s.onBrand(manage, s.unfollowInbound))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/{id}/sync", s.inWorkspace(auth.ScopeMailboxesManage, s.syncMailbox))
 }
 
@@ -66,6 +70,9 @@ type inboundView struct {
 	ClassifiedAt       *time.Time     `json:"classified_at"`
 	BrandID            *string        `json:"brand_id"`
 	Group              *string        `json:"group"`
+	// Working together: the team it sits with.
+	TeamID   *string `json:"team_id"`
+	TeamName *string `json:"team_name"`
 }
 
 // withGroup fills in the group from the category.
@@ -83,12 +90,13 @@ const inboundSelect = `
 	       i.lead_id, NULLIF(trim(l.first_name || ' ' || l.last_name), ''), NULLIF(l.company, ''), i.sequence_id, q.name, i.received_at,
 	       i.category, i.category_source, i.assigned_to, u.name, i.snoozed_until, i.done, i.tags,
 	       i.source, i.integration_id, i.category_confidence, i.category_reason, i.details, i.needs_review, i.classified_at,
-	       i.brand_id, NULL::text
+	       i.brand_id, NULL::text, i.team_id::text, tm.name
 	FROM inbound_messages i
 	JOIN mailboxes m ON m.id = i.mailbox_id
 	LEFT JOIN leads l ON l.id = i.lead_id
 	LEFT JOIN sequences q ON q.id = i.sequence_id
-	LEFT JOIN users u ON u.id = i.assigned_to`
+	LEFT JOIN users u ON u.id = i.assigned_to
+	LEFT JOIN teams tm ON tm.id = i.team_id`
 
 func (s *Server) listInbox(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -214,6 +222,28 @@ func (s *Server) listInbox(w http.ResponseWriter, r *http.Request) {
 		where += ` AND i.assigned_to = ` + arg(v)
 	default:
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "assigned_to must be me, none or a user id")
+		return
+	}
+	if v := q.Get("team_id"); v != "" {
+		if !validUUID(v) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "team_id is a team's id")
+			return
+		}
+		where += ` AND i.team_id = ` + arg(v)
+	}
+	// following=me is the replies the caller was looped in on.
+	switch v := q.Get("following"); {
+	case v == "":
+	case v == "me" && a.UserID == "":
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "following=me needs a signed-in person; API tokens pass a user id")
+		return
+	case v == "me", validUUID(v):
+		if v == "me" {
+			v = a.UserID
+		}
+		where += ` AND EXISTS (SELECT 1 FROM inbox_followers f WHERE f.inbound_id = i.id AND f.user_id = ` + arg(v) + `)`
+	default:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "following must be me or a user id")
 		return
 	}
 	// tag takes one tag, or several separated by commas for replies with
@@ -381,7 +411,13 @@ func (s *Server) getInbound(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"message": v, "thread": thread})
+	s.sawLoopIn(r.Context(), loopInReply, a.WorkspaceID, v.ID, a.UserID)
+	notes, followers, err := s.inboundTeamwork(r.Context(), a.WorkspaceID, v.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": v, "thread": thread, "notes": notes, "followers": followers})
 }
 
 func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
@@ -397,12 +433,13 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 		Done         *bool               `json:"done"`
 		Tags         *[]string           `json:"tags"`
 		NeedsReview  *bool               `json:"needs_review"`
+		TeamID       optional[string]    `json:"team_id"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Read == nil && !req.Category.Set && !req.AssignedTo.Set && !req.SnoozedUntil.Set && req.Done == nil && req.Tags == nil && req.NeedsReview == nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing to change: send read, category, assigned_to, snoozed_until, done, tags or needs_review")
+	if req.Read == nil && !req.Category.Set && !req.AssignedTo.Set && !req.SnoozedUntil.Set && req.Done == nil && req.Tags == nil && req.NeedsReview == nil && !req.TeamID.Set {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing to change: send read, category, assigned_to, team_id, snoozed_until, done, tags or needs_review")
 		return
 	}
 	if req.Category.Value != nil && !slices.Contains(inbox.Categories, *req.Category.Value) {
@@ -411,6 +448,10 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AssignedTo.Value != nil && !validUUID(*req.AssignedTo.Value) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "assigned_to must be a user id or null")
+		return
+	}
+	if req.TeamID.Value != nil && !validUUID(*req.TeamID.Value) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "team_id must be a team's id or null")
 		return
 	}
 	if req.SnoozedUntil.Value != nil && !req.SnoozedUntil.Value.After(time.Now()) {
@@ -450,6 +491,15 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 				return errInvalid("assigned_to is not a member of this workspace")
 			}
 		}
+		if req.TeamID.Value != nil {
+			var found bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM teams WHERE workspace_id = $1 AND id = $2)`, a.WorkspaceID, *req.TeamID.Value).Scan(&found); err != nil {
+				return err
+			}
+			if !found {
+				return errInvalid("team not found")
+			}
+		}
 		set := []string{}
 		args := []any{v.ID}
 		arg := func(x any) string { args = append(args, x); return "$" + strconv.Itoa(len(args)) }
@@ -475,6 +525,10 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 		if req.AssignedTo.Set {
 			set = append(set, "assigned_to = "+arg(req.AssignedTo.Value))
 			changed["assigned_to"] = req.AssignedTo.Value
+		}
+		if req.TeamID.Set {
+			set = append(set, "team_id = "+arg(req.TeamID.Value))
+			changed["team_id"] = req.TeamID.Value
 		}
 		if req.SnoozedUntil.Set {
 			set = append(set, "snoozed_until = "+arg(req.SnoozedUntil.Value))

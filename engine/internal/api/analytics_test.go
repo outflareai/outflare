@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 var plausibleCalls atomic.Int64
@@ -96,6 +97,9 @@ func TestAnalyticsReports(t *testing.T) {
 
 	// Plausible has no search queries; bad input is explained.
 	owner.must(422, "GET", base+"/analytics/"+id+"/reports/search_queries", nil)
+	// Only search engines' tools narrow a report to one page or search.
+	owner.must(422, "GET", base+"/analytics/"+id+"/reports/pages?keyword=pricing", nil)
+	owner.must(400, "GET", base+"/analytics/"+id+"/reports/events?page=/pricing", nil)
 	owner.must(404, "GET", base+"/analytics/"+id+"/reports/nope", nil)
 	owner.must(400, "GET", base+"/analytics/"+id+"/reports/traffic?from=yesterday", nil)
 	owner.must(400, "GET", base+"/analytics/"+id+"/reports/traffic?from=2026-10-05&to=2026-10-01", nil)
@@ -159,12 +163,30 @@ func TestGoogleSignInConnectsBoth(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"rows": []any{}})
 		case "/webmasters/v3/sites":
 			json.NewEncoder(w).Encode(map[string]any{"siteEntry": []any{map[string]any{"siteUrl": "sc-domain:example.com", "permissionLevel": "siteOwner"}}})
+		case "/webmasters/v3/sites/sc-domain:example.com/searchAnalytics/query":
+			// The searches that showed one page, when asked for that page.
+			var b struct {
+				Dimensions []string `json:"dimensions"`
+				Groups     []struct {
+					Filters []struct{ Dimension, Expression string } `json:"filters"`
+				} `json:"dimensionFilterGroups"`
+			}
+			json.NewDecoder(r.Body).Decode(&b)
+			if len(b.Groups) != 1 || len(b.Groups[0].Filters) != 1 || b.Groups[0].Filters[0].Dimension != "page" || b.Groups[0].Filters[0].Expression != "https://example.com/pricing" {
+				json.NewEncoder(w).Encode(map[string]any{"rows": []any{}})
+				return
+			}
+			row := map[string]any{"clicks": 7, "impressions": 70, "ctr": 0.1, "position": 2.5}
+			if len(b.Dimensions) == 1 {
+				row["keys"] = []string{"example pricing"}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"rows": []any{row}})
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(g.Close)
-	for _, id := range []string{"google_analytics", "google_analytics.token", "google_analytics.admin", "google.userinfo", "google_search_console"} {
+	for _, id := range []string{"google_analytics", "google_analytics.token", "google_analytics.admin", "google.userinfo", "google_search_console", "google_search_console.token"} {
 		e.integrations.Client.BaseURLs[id] = g.URL
 	}
 	app := connectors.OAuthApp{ClientID: "cid", ClientSecret: "secret"}
@@ -204,12 +226,41 @@ func TestGoogleSignInConnectsBoth(t *testing.T) {
 		t.Fatalf("after switching 9 off: %v", rep["site"])
 	}
 
-	// Signing in again does not add a second Search Console.
+	// Signing in again with the same account renews the connections it
+	// has, mending one Google stopped accepting, and adds no copy that
+	// would import every site a second time.
+	var gsc string
+	for _, x := range got {
+		if x.(map[string]any)["connector"] == "google_search_console" {
+			gsc = x.(map[string]any)["id"].(string)
+		}
+	}
+	// A page's searches: Search Console is asked for that page only.
+	rep := owner.must(200, "GET", base+"/analytics/"+gsc+"/reports/search_queries?from=2026-10-01&to=2026-10-03&page="+url.QueryEscape("https://example.com/pricing"), nil)
+	if rows := rep["rows"].([]any); len(rows) != 1 || rows[0].(map[string]any)["key"] != "example pricing" || rep["totals"].(map[string]any)["clicks"] != 7.0 {
+		t.Fatalf("searches of a page: %v", rep)
+	}
+	if other := owner.must(200, "GET", base+"/analytics/"+gsc+"/reports/search_queries?from=2026-10-01&to=2026-10-03&page="+url.QueryEscape("https://example.com/"), nil); other["rows"] != nil || other["cached"] != false {
+		t.Fatalf("another page is its own answer: %v", other)
+	}
+	if _, err := e.pool.Exec(context.Background(), `UPDATE integrations SET status = 'error', last_error = 'HTTP 401' WHERE id = $1`, gsc); err != nil {
+		t.Fatal(err)
+	}
+	events := track.Capture(t)
 	link = owner.must(200, "GET", base+"/integrations/oauth/google_search_console/authorize?format=json", nil)["url"].(string)
 	u, _ = url.Parse(link)
 	cb = follow(t, owner, "/v1/integrations/oauth/callback?code=abc&state="+url.QueryEscape(u.Query().Get("state")))
-	if cb.Query().Get("also") != "" {
+	if cb.Query().Get("also") != "" || cb.Query().Get("integration") != gsc || cb.Query().Get("renewed") != "true" {
 		t.Fatalf("second sign-in: %s", cb)
+	}
+	if again := owner.must(200, "GET", base+"/analytics", nil)["data"].([]any); len(again) != 2 {
+		t.Fatalf("a second sign-in added a copy: %v", again)
+	}
+	if i := owner.must(200, "GET", base+"/integrations/"+gsc, nil); i["status"] != "connected" || i["name"] != "Google Search Console (jo@example.com)" {
+		t.Fatalf("renewed connection: %v", i)
+	}
+	if n := len(named(events(), "integration.signed_in")); n != 2 {
+		t.Fatalf("each renewed connection records integration.signed_in: %d", n)
 	}
 }
 
@@ -384,4 +435,76 @@ func TestAnalyticsSyncAndHistory(t *testing.T) {
 	}
 	owner.must(404, "PATCH", base+"/analytics/"+id+"/sites/other-com.example", map[string]any{"sync": true})
 	owner.must(400, "PATCH", site, map[string]any{"domain": "not a domain"})
+}
+
+// One account connected twice reads the same site twice: the site counts
+// once, and a brand's pages read only the brand's own sites, never the
+// connection's default when that is another brand's.
+func TestAnalyticsSiteCopiesAndBrands(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	mine := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak"})["id"].(string)
+	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme Pets"})["id"].(string)
+	conn := func(name string) string {
+		return owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "plausible", "name": name, "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}})["id"].(string)
+	}
+	first, second := conn("Plausible"), conn("Plausible 2")
+	for _, id := range []string{first, second} {
+		owner.must(200, "PUT", base+"/analytics/"+id+"/site-brand", map[string]any{"site": "example.com", "brand": mine})
+		owner.must(200, "POST", base+"/analytics/"+id+"/sync", nil)
+	}
+	// The second synced last, so it is the one counted.
+	if _, err := e.pool.Exec(context.Background(), `UPDATE analytics_syncs SET last_ok_at = now() - interval '5 days' WHERE integration_id = $1`, first); err != nil {
+		t.Fatal(err)
+	}
+
+	sites := owner.must(200, "GET", base+"/analytics/overview?brand="+mine, nil)["data"].([]any)
+	if len(sites) != 1 {
+		t.Fatalf("overview: %v", sites)
+	}
+	tools := sites[0].(map[string]any)["tools"].([]any)
+	copies := 0
+	for _, x := range tools {
+		tool := x.(map[string]any)
+		if c, ok := tool["copy_of"].(map[string]any); ok {
+			copies++
+			if tool["integration_id"] != first || c["integration_id"] != second || c["name"] != "Plausible 2" {
+				t.Fatalf("the copy is the connection that synced earlier: %v", tool)
+			}
+		}
+	}
+	if len(tools) != 2 || copies != 1 {
+		t.Fatalf("both connections show, one marked a copy: %v", tools)
+	}
+	byTool := owner.must(200, "GET", base+"/analytics/history?group=tool&brand="+mine, nil)["data"].([]any)
+	if len(byTool) != 1 || byTool[0].(map[string]any)["integration_id"] != second {
+		t.Fatalf("history counts the site once: %v", byTool)
+	}
+	if cmp := owner.must(200, "GET", base+"/analytics/compare?host=example.com&brand="+mine, nil)["data"].([]any); len(cmp) != 1 {
+		t.Fatalf("compare counts the site once: %v", cmp)
+	}
+
+	// The connection's one default is the site; another brand's page never
+	// reads it.
+	owner.must(200, "PUT", base+"/analytics/"+first+"/site", map[string]any{"site": "example.com"})
+	report := base + "/analytics/" + first + "/reports/traffic"
+	if got := owner.must(404, "GET", report+"?site=example.com&brand="+other, nil); errCode(got) != "site_not_in_brand" {
+		t.Fatalf("another brand's site: %v", got)
+	}
+	if got := owner.must(400, "GET", report+"?brand="+other, nil); errCode(got) != "pick_site" {
+		t.Fatalf("a brand with no site here: %v", got)
+	}
+	if got := owner.must(200, "GET", report+"?brand="+mine, nil); got["site"] != "example.com" {
+		t.Fatalf("the brand's own site: %v", got)
+	}
+	// Named without a brand, as API callers did before brands, it still reads.
+	owner.must(200, "GET", report+"?site=example.com", nil)
+	for brand, want := range map[string]string{other: "", mine: "example.com"} {
+		for _, x := range owner.must(200, "GET", "/v1/brands/"+brand+"/analytics", nil)["data"].([]any) {
+			if src := x.(map[string]any); src["id"] == first && src["site"] != want {
+				t.Fatalf("brand %s reads site %q, want %q", brand, src["site"], want)
+			}
+		}
+	}
 }

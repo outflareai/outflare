@@ -1173,7 +1173,15 @@ type tokenView struct {
 	// Its changes go through the action layer: run, held for a person or
 	// refused by the grants a person set for it.
 	ActionGate bool `json:"action_gate"`
+	// The person who created it, or null when no person did (another token
+	// or an agent made it) or that person's account has been deleted.
+	CreatedBy *tokenCreator `json:"created_by"`
 	tokenLimitsView
+}
+
+type tokenCreator struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // tokenLimitsView is what a token may do to mailbox allocation and sending.
@@ -1186,12 +1194,17 @@ type tokenLimitsView struct {
 }
 
 const tokenColumns = `id, name, prefix, scopes, created_at, expires_at, last_used_at, brand_id::text,
-	daily_send_budget, CASE max_priority WHEN 0 THEN 'low' WHEN 1 THEN 'normal' WHEN 2 THEN 'high' END, may_take_mailboxes, default_team_id::text, action_gate`
+	daily_send_budget, CASE max_priority WHEN 0 THEN 'low' WHEN 1 THEN 'normal' WHEN 2 THEN 'high' END, may_take_mailboxes, default_team_id::text, action_gate,
+	api_tokens.created_by::text, (SELECT COALESCE(NULLIF(u.name, ''), u.email) FROM users u WHERE u.id = api_tokens.created_by)`
 
 func scanToken(row pgx.Row) (tokenView, error) {
 	var v tokenView
+	var creatorID, creatorName *string
 	err := row.Scan(&v.ID, &v.Name, &v.Prefix, &v.Scopes, &v.CreatedAt, &v.ExpiresAt, &v.LastUsedAt, &v.BrandID,
-		&v.DailySendBudget, &v.MaxPriority, &v.MayTakeMailboxes, &v.DefaultTeamID, &v.ActionGate)
+		&v.DailySendBudget, &v.MaxPriority, &v.MayTakeMailboxes, &v.DefaultTeamID, &v.ActionGate, &creatorID, &creatorName)
+	if creatorID != nil && creatorName != nil {
+		v.CreatedBy = &tokenCreator{ID: *creatorID, Name: *creatorName}
+	}
 	return v, err
 }
 

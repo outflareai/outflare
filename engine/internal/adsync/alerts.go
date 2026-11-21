@@ -52,6 +52,7 @@ const (
 	AlertDisapproved     = "alert.disapproved"
 	AlertAutoApplyOn     = "alert.auto_apply_on"
 	AlertSendsFailing    = "alert.sends_failing"
+	AlertSendsNotCounted = "alert.sends_not_counted"
 	AlertTrackingBroken  = "alert.tracking_broken"
 	// OverspendPause is the protective change: pause a campaign that spent
 	// more than twice its daily budget today.
@@ -94,6 +95,13 @@ const (
 	// conversions sent in 24 hours, out of at least sendsMin.
 	sendsFailingShare = 0.10
 	sendsMin          = 10
+	// Sends not counted: the platform accepted notCountedMin conversions
+	// that carried its own click id over notCountedDays days, ending
+	// notCountedLag days ago (it reports a conversion up to a day or two
+	// late), and counts none for that conversion action.
+	notCountedMin  = 10
+	notCountedDays = 7
+	notCountedLag  = 2
 	// Tracking broken: under trackingCapture of paid visits in 24 hours
 	// carried a click id (out of at least trackingMinVisits), or paid
 	// visits with campaign ids brought no sign-up while the 7-day median
@@ -107,10 +115,10 @@ const (
 
 // AlertKinds lists every kind this job writes, for the API's filters and
 // the status blocker.
-var AlertKinds = []string{AlertSpendAnomaly, AlertPacing, AlertFlatline, AlertZeroConversions, AlertDisapproved, AlertAutoApplyOn, AlertSendsFailing, AlertTrackingBroken, OverspendPause}
+var AlertKinds = []string{AlertSpendAnomaly, AlertPacing, AlertFlatline, AlertZeroConversions, AlertDisapproved, AlertAutoApplyOn, AlertSendsFailing, AlertSendsNotCounted, AlertTrackingBroken, OverspendPause}
 
 // CriticalAlertKinds are the kinds the status blocker calls critical.
-var CriticalAlertKinds = []string{AlertTrackingBroken, AlertSendsFailing, OverspendPause, AlertSpendAnomaly}
+var CriticalAlertKinds = []string{AlertTrackingBroken, AlertSendsFailing, AlertSendsNotCounted, OverspendPause, AlertSpendAnomaly}
 
 type alertsPayload struct {
 	Workspace string `json:"workspace_id"`
@@ -261,6 +269,11 @@ func (s *Syncer) runAlerts(ctx context.Context, ws string, res *AlertResult) err
 		return err
 	}
 	findings = append(findings, more...)
+	more, err = s.sendsNotCounted(ctx, ws, byAccount, days)
+	if err != nil {
+		return err
+	}
+	findings = append(findings, more...)
 	more, err = s.trackingBroken(ctx, ws, camps, days, firstParty)
 	if err != nil {
 		return err
@@ -312,14 +325,15 @@ func (s *Syncer) alertCampaigns(ctx context.Context, ws string) ([]campaignRow, 
 	return out, rows.Err()
 }
 
-// alertDays reads the last 36 days of every campaign, by campaign and day.
+// alertDays reads the last 36 days of every campaign, by campaign and day,
+// counted from the syncer's own clock, like the rules that read them.
 func (s *Syncer) alertDays(ctx context.Context, ws string, camps []campaignRow) (map[string]map[string]dayRow, error) {
 	ids := make([]string, len(camps))
 	for i, c := range camps {
 		ids[i] = c.id
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT ad_entity_id, to_char(day, 'YYYY-MM-DD'), spend_micros, impressions, clicks, COALESCE(conversions, 0)
-		FROM ad_metrics_daily WHERE workspace_id = $1 AND ad_entity_id = ANY($2::uuid[]) AND day >= current_date - 37`, ws, ids)
+		FROM ad_metrics_daily WHERE workspace_id = $1 AND ad_entity_id = ANY($2::uuid[]) AND day >= $3::date - 37`, ws, ids, s.now().UTC().Format(time.DateOnly))
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +538,8 @@ func (s *Syncer) disapproved(ctx context.Context, ws string, camps []campaignRow
 	for _, c := range camps {
 		by[c.id] = c
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT c.id, count(*)::int, (array_agg(e.name ORDER BY e.name))[1:5]
+	rows, err := s.Pool.Query(ctx, `SELECT c.id, count(*)::int, (array_agg(e.name ORDER BY e.name))[1:5],
+			COALESCE((array_agg(DISTINCT e.details->>'`+connectors.AdDetailPolicyReasons+`') FILTER (WHERE COALESCE(e.details->>'`+connectors.AdDetailPolicyReasons+`', '') <> ''))[1:3], '{}')
 		FROM ad_entities e JOIN ad_entities g ON g.id = e.parent_id JOIN ad_entities c ON c.id = g.parent_id
 		WHERE e.workspace_id = $1 AND e.level = 'ad' AND e.status = 'active' AND e.details->>'`+connectors.AdDetailPolicy+`' = 'disapproved'
 		GROUP BY c.id`, ws)
@@ -536,8 +551,8 @@ func (s *Syncer) disapproved(ctx context.Context, ws string, camps []campaignRow
 	for rows.Next() {
 		var id string
 		var n int
-		var names []string
-		if err := rows.Scan(&id, &n, &names); err != nil {
+		var names, why []string
+		if err := rows.Scan(&id, &n, &names, &why); err != nil {
 			return nil, err
 		}
 		c, ok := by[id]
@@ -545,8 +560,11 @@ func (s *Syncer) disapproved(ctx context.Context, ws string, camps []campaignRow
 			continue
 		}
 		reason := fmt.Sprintf("%s has %s the platform disapproved: %s.", c.name, countOf(n, "live ad", "live ads"), strings.Join(names, ", "))
+		if len(why) > 0 {
+			reason += " Its reasons: " + strings.Join(why, "; ") + "."
+		}
 		out = append(out, finding{c: c, kind: AlertDisapproved, autonomy: "alert", unit: "platform_conversions", reason: reason,
-			evidence: map[string]any{"ads": n, "ad_names": names, "window": "now"}})
+			evidence: map[string]any{"ads": n, "ad_names": names, "reasons": why, "window": "now"}})
 	}
 	return out, rows.Err()
 }
@@ -606,6 +624,96 @@ func (s *Syncer) sendsFailing(ctx context.Context, ws string, byAccount map[stri
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].account < out[j].account })
 	return out, nil
+}
+
+// sendsNotCounted checks, once a sync, the conversions each account's rules
+// sent against what the platform counts for the same conversion action. A
+// platform only counts a conversion it can tie to one of its ad clicks, so
+// it always counts fewer than were sent; what should never happen is that
+// it accepts a week of conversions carrying its own click id and counts
+// none of them (the platform books a conversion on the day of its click,
+// so its count is read over the last 35 days). That means the conversion action is not counted where
+// people look (removed, secondary, or another account's), or the sends
+// land somewhere else. Only accounts whose platform reports conversions by
+// action (rows in ad_conversion_actions_daily) are checked, and only rules
+// that name their action.
+func (s *Syncer) sendsNotCounted(ctx context.Context, ws string, byAccount map[string][]campaignRow, days map[string]map[string]dayRow) ([]finding, error) {
+	rows, err := s.Pool.Query(ctx, `WITH sent AS (
+			SELECT r.ad_account_id, r.target_name, count(*)::int AS n
+			FROM ad_conversion_sends q JOIN ad_conversion_rules r ON r.id = q.rule_id
+			WHERE q.workspace_id = $1 AND q.status = 'sent' AND r.enabled AND r.target_name <> ''
+			  AND q.match_keys && ARRAY['gclid', 'gbraid', 'wbraid']
+			  AND COALESCE(q.sent_at, q.updated_at) >= now() - make_interval(days => $2)
+			  AND COALESCE(q.sent_at, q.updated_at) < now() - make_interval(days => $3)
+			GROUP BY 1, 2)
+		SELECT s.ad_account_id, s.target_name, s.n FROM sent s
+		WHERE s.n >= $4
+		  AND EXISTS (SELECT 1 FROM ad_conversion_actions_daily x JOIN ad_entities e ON e.id = x.ad_entity_id
+			WHERE x.workspace_id = $1 AND e.ad_account_id = s.ad_account_id AND x.day >= (now() - interval '35 days')::date)
+		  AND NOT EXISTS (SELECT 1 FROM ad_conversion_actions_daily x JOIN ad_entities e ON e.id = x.ad_entity_id
+			WHERE x.workspace_id = $1 AND e.ad_account_id = s.ad_account_id AND x.action = s.target_name
+			  AND x.day >= (now() - interval '35 days')::date AND x.conversions > 0)
+		ORDER BY s.ad_account_id, s.n DESC, s.target_name`, ws, notCountedDays+notCountedLag, notCountedLag, notCountedMin)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type miss struct {
+		actions []string
+		sent    int
+	}
+	acct := map[string]*miss{}
+	var order []string
+	for rows.Next() {
+		var id, action string
+		var n int
+		if err := rows.Scan(&id, &action, &n); err != nil {
+			return nil, err
+		}
+		x := acct[id]
+		if x == nil {
+			x = &miss{}
+			acct[id] = x
+			order = append(order, id)
+		}
+		x.actions = append(x.actions, action)
+		x.sent += n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []finding
+	for _, id := range order {
+		x := acct[id]
+		top, ok := topCampaign(byAccount[id], days, 7)
+		if !ok {
+			continue
+		}
+		reason := fmt.Sprintf("%s accepted %s for %s with its own click id in the week to %d days ago and counts none of them. Check that the conversion action still exists, is counted as a primary conversion and belongs to this account",
+			top.acctName, countOf(x.sent, "conversion", "conversions"), quoted(x.actions), notCountedLag)
+		out = append(out, finding{c: top, kind: AlertSendsNotCounted, autonomy: "alert", unit: "platform_conversions", reason: reason + ".", account: id,
+			evidence: map[string]any{"account_id": id, "account_name": top.acctName, "scope": "account", "sent": x.sent, "counted": 0, "actions": x.actions,
+				"window": fmt.Sprintf("%d days ending %d days ago", notCountedDays, notCountedLag)}})
+	}
+	return out, nil
+}
+
+// quoted names up to three conversion actions in a sentence.
+func quoted(names []string) string {
+	more := 0
+	if len(names) > 3 {
+		more = len(names) - 3
+		names = names[:3]
+	}
+	q := make([]string, len(names))
+	for i, n := range names {
+		q[i] = "\"" + trim(n, 60) + "\""
+	}
+	out := strings.Join(q, ", ")
+	if more > 0 {
+		out += fmt.Sprintf(" and %d more", more)
+	}
+	return out
 }
 
 // trackingBroken checks each brand's paid visits in 24 hours: whether they
@@ -929,8 +1037,15 @@ func (s *Syncer) writeFinding(ctx context.Context, ws string, f finding) (id str
 		if f.account != "" {
 			data["account_id"] = f.account
 		}
-		return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "ad_alert.raised", TargetType: "ad_suggestion", TargetID: id, Data: data,
-			Props: map[string]any{"connector": f.c.connector, "kind": f.kind, "autonomy": f.autonomy, "shadow": f.shadow, "applied": false}})
+		if err := audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "ad_alert.raised", TargetType: "ad_suggestion", TargetID: id, Data: data,
+			Props: map[string]any{"connector": f.c.connector, "kind": f.kind, "autonomy": f.autonomy, "shadow": f.shadow, "applied": false}}); err != nil {
+			return err
+		}
+		// Refused conversions need someone now: people hear about it too.
+		if f.kind == AlertSendsFailing && f.account != "" && !f.shadow {
+			return raiseSendsRefused(ctx, tx, ws, id, f)
+		}
+		return nil
 	})
 	return id, inserted, err
 }

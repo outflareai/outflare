@@ -171,3 +171,149 @@ func TestPartnerProposalQuote(t *testing.T) {
 	owner.must(200, "POST", admin+"/proposals/"+pid, map[string]any{"action": "invite", "version": 2})
 	partner.must(200, "POST", portal, map[string]any{"action": "decline", "version": 2})
 }
+
+// A recipient may counter an offer up to three times, changing only the price,
+// their page, the link text and the publish date; the brand accepts the last
+// one into the agreement.
+func TestPartnerProposalCounterOffers(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak"})
+	id := owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Partners", "kind": "affiliate", "brand": "northpeak", "auto_accept": true})["id"].(string)
+	admin := base + "/partner-programs/" + id
+	fake := httptest.NewServer(&fakeResend{})
+	defer fake.Close()
+	e.integrations.Client.BaseURLs["resend"] = fake.URL
+	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "resend", "credentials": map[string]any{"api_key": "re_test_not_a_real_key"}})
+	if _, err := e.pool.Exec(ctx, `INSERT INTO email_domains(workspace_id,provider_id,domain,status) SELECT workspace_id,id,'northpeak.example','verified' FROM email_providers WHERE workspace_id=$1`, ws); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(200, "PUT", admin+"/portal", map[string]any{"enabled": true, "settings": map[string]any{"email_from": "partners@northpeak.example"}})
+	config := proposalFixture()
+	config["deliverables"].([]any)[1].(map[string]any)["link_url"] = "https://northpeak.example/pricing"
+	config["deliverables"].([]any)[1].(map[string]any)["link_attribute"] = "follow"
+	pid := owner.must(200, "POST", admin+"/proposals", map[string]any{"email": "maya@creator.example", "config": config})["id"].(string)
+	sess := owner.must(201, "POST", admin+"/widget-sessions", map[string]any{"customer_id": "maya", "email": "maya@creator.example"})
+	partner := &client{t: t, h: e.h, bearer: sess["token"].(string)}
+	portal := "/p/" + id + "/api/proposals/" + pid
+	owner.must(200, "POST", admin+"/proposals/"+pid, map[string]any{"action": "invite", "version": 1})
+
+	// Nothing to change, a deliverable that isn't in the offer, or a bad page are refused.
+	partner.must(400, "POST", portal, map[string]any{"action": "counter", "version": 1, "amount_cents": 10000})
+	partner.must(400, "POST", portal, map[string]any{"action": "counter", "version": 1, "changes": map[string]any{"podcast": map[string]any{"link_text": "x"}}})
+	partner.must(400, "POST", portal, map[string]any{"action": "counter", "version": 1, "changes": map[string]any{"website": map[string]any{"placement_url": "javascript:alert(1)"}}})
+	// Our link's destination and type are locked: a counter that tries to change them is refused.
+	partner.must(400, "POST", portal, map[string]any{"action": "counter", "version": 1, "changes": map[string]any{"website": map[string]any{"link_url": "https://elsewhere.example/", "link_attribute": "nofollow"}}})
+	partner.must(200, "POST", portal, map[string]any{"action": "counter", "version": 1, "amount_cents": 15000, "note": "My rate", "changes": map[string]any{"website": map[string]any{"placement_url": "https://creator.example/tools", "link_text": "Northpeak"}}})
+	partner.must(400, "POST", portal, map[string]any{"action": "counter", "version": 1, "amount_cents": 14000})
+	// The brand answers with the same offer twice more; the fourth counter is refused.
+	for round := 2; round <= 4; round++ {
+		owner.must(200, "POST", admin+"/proposals/"+pid, map[string]any{"action": "revise", "version": round - 1, "config": config})
+		owner.must(200, "POST", admin+"/proposals/"+pid, map[string]any{"action": "invite", "version": round})
+		want := 200
+		if round == 4 {
+			want = 400
+		}
+		partner.must(want, "POST", portal, map[string]any{"action": "counter", "version": round, "amount_cents": int64(10000 + round*1000), "changes": map[string]any{"website": map[string]any{"placement_url": "https://creator.example/tools", "link_text": "Northpeak"}}})
+	}
+	// Put the offer back to round 3's counter, waiting for the brand.
+	if _, err := e.pool.Exec(ctx, `UPDATE partner_proposals SET status='quote_received' WHERE workspace_id=$1 AND id=$2`, ws, pid); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(400, "POST", admin+"/proposals/"+pid, map[string]any{"action": "accept_counter", "version": 3})
+	got := owner.must(200, "POST", admin+"/proposals/"+pid, map[string]any{"action": "accept_counter", "version": 4})
+	if got["status"] != "accepted" || got["version"].(float64) != 5 {
+		t.Fatalf("counter not accepted: %v", got)
+	}
+	c := got["config"].(map[string]any)
+	web := c["deliverables"].([]any)[1].(map[string]any)
+	if web["placement_url"] != "https://creator.example/tools" || web["link_text"] != "Northpeak" || web["link_url"] != "https://northpeak.example/pricing" || web["link_attribute"] != "follow" {
+		t.Fatalf("counter changed locked terms or lost its own: %v", web)
+	}
+	var total float64
+	for _, m := range c["milestones"].([]any) {
+		total += m.(map[string]any)["amount_cents"].(float64)
+	}
+	if total != 13000 {
+		t.Fatalf("price = %v, want the third counter's 13000", total)
+	}
+	counters := got["progress"].(map[string]any)["counters"].([]any)
+	if len(counters) != 3 || counters[2].(map[string]any)["accepted_at"] == nil {
+		t.Fatalf("counter history: %v", counters)
+	}
+	owner.must(400, "POST", admin+"/proposals/"+pid, map[string]any{"action": "accept_counter", "version": 5})
+}
+
+// A brand saves offer templates and sets its rule for a removed paid link;
+// each offer carries the rule it was sent with.
+func TestPartnerOfferTemplatesAndLinkRule(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	events := track.Capture(t)
+	brand := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak"})["id"].(string)
+	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Other brand"})["id"].(string)
+	b := "/v1/brands/" + brand
+
+	rule := owner.must(200, "GET", b+"/partner-link-rule", nil)
+	if rule["removal"] != "restore_or_refund" || rule["restore_days"].(float64) != 14 || rule["guarantee_months"].(float64) != 12 {
+		t.Fatalf("default rule: %v", rule)
+	}
+	owner.must(400, "PUT", b+"/partner-link-rule", map[string]any{"removal": "pray", "restore_days": 14, "guarantee_months": 12})
+	owner.must(400, "PUT", b+"/partner-link-rule", map[string]any{"removal": "warn_only", "restore_days": 0, "guarantee_months": 12})
+	owner.must(200, "PUT", b+"/partner-link-rule", map[string]any{"removal": "shrinking_refund", "restore_days": 7, "guarantee_months": 24})
+	if got := owner.must(200, "GET", "/v1/brands/"+other+"/partner-link-rule", nil); got["removal"] != "restore_or_refund" {
+		t.Fatalf("one brand's rule leaked into another: %v", got)
+	}
+
+	owner.must(400, "POST", b+"/partner-offer-templates", map[string]any{"name": "", "config": proposalFixture()})
+	tpl := owner.must(200, "POST", b+"/partner-offer-templates", map[string]any{"name": "Guest post", "config": proposalFixture()})
+	tid := tpl["id"].(string)
+	owner.must(200, "PUT", b+"/partner-offer-templates/"+tid, map[string]any{"name": "Guest post, 2026", "config": proposalFixture()})
+	list := owner.must(200, "GET", b+"/partner-offer-templates", nil)["data"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["name"] != "Guest post, 2026" {
+		t.Fatalf("templates: %v", list)
+	}
+	if n := len(owner.must(200, "GET", "/v1/brands/"+other+"/partner-offer-templates", nil)["data"].([]any)); n != 0 {
+		t.Fatal("another brand saw the template")
+	}
+	owner.must(404, "PUT", "/v1/brands/"+other+"/partner-offer-templates/"+tid, map[string]any{"name": "Taken", "config": proposalFixture()})
+	owner.must(404, "DELETE", "/v1/brands/"+other+"/partner-offer-templates/"+tid, nil)
+	owner.must(200, "DELETE", b+"/partner-offer-templates/"+tid, nil)
+	owner.must(404, "DELETE", b+"/partner-offer-templates/"+tid, nil)
+	seen := map[string]bool{}
+	for _, ev := range events() {
+		seen[ev.Name] = true
+	}
+	for _, name := range []string{"partner_link_rule.updated", "partner_offer_template.created", "partner_offer_template.updated", "partner_offer_template.deleted"} {
+		if !seen[name] {
+			t.Errorf("no %s event", name)
+		}
+	}
+
+	// The rule is copied into an offer when it is sent, not when it's drafted.
+	id := owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Partners", "kind": "affiliate", "brand": "northpeak", "auto_accept": true})["id"].(string)
+	admin := b + "/partner-programs/" + id
+	fake := httptest.NewServer(&fakeResend{})
+	defer fake.Close()
+	e.integrations.Client.BaseURLs["resend"] = fake.URL
+	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "resend", "credentials": map[string]any{"api_key": "re_test_not_a_real_key"}})
+	if _, err := e.pool.Exec(ctx, `INSERT INTO email_domains(workspace_id,provider_id,domain,status) SELECT workspace_id,id,'northpeak.example','verified' FROM email_providers WHERE workspace_id=$1`, ws); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(200, "PUT", base+"/partner-programs/"+id+"/portal", map[string]any{"enabled": true, "settings": map[string]any{"email_from": "partners@northpeak.example"}})
+	config := proposalFixture()
+	config["removal"] = map[string]any{"removal": "warn_only", "restore_days": 1, "guarantee_months": 1}
+	p := owner.must(200, "POST", admin+"/proposals", map[string]any{"email": "maya@creator.example", "config": config})
+	if p["config"].(map[string]any)["removal"] != nil {
+		t.Fatalf("a draft took a rule from the client: %v", p["config"])
+	}
+	sent := owner.must(200, "POST", admin+"/proposals/"+p["id"].(string), map[string]any{"action": "invite", "version": 1})
+	got := sent["config"].(map[string]any)["removal"].(map[string]any)
+	if got["removal"] != "shrinking_refund" || got["restore_days"].(float64) != 7 || got["guarantee_months"].(float64) != 24 {
+		t.Fatalf("offer carries %v, want the brand's rule", got)
+	}
+}

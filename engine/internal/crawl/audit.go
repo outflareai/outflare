@@ -77,7 +77,7 @@ var Rules = []Rule{
 	{"redirect_to_broken", SevError, "links", "Redirect to a broken page", "The redirect ends on a page that is not found or fails.", "Redirect to a working page, or restore the target."},
 	{"redirect_temporary", SevNotice, "links", "Temporary redirect", "A 302, 303 or 307 redirect tells search engines the move is temporary, so they keep the old URL.", "Use a 301 (or 308) for a page that has moved for good."},
 	{"link_internal_nofollow", SevNotice, "links", "Nofollow on internal links", "The page marks links to its own site nofollow, so they pass no value to those pages.", "Remove rel=\"nofollow\" from links to your own pages."},
-	{"link_no_text", SevNotice, "links", "Links without text", "Links with no text or image alt tell readers, screen readers and search engines nothing about where they go.", "Give each link words that describe its page, or alt text on its image."},
+	{"link_no_text", SevNotice, "links", "Links without text", "The page has links with nothing readable inside them: usually an icon, a logo or an image with no alt text, or a card wrapped in an empty link. A screen reader can only say \"link\", and search engines learn nothing about the page it leads to.", "Put words in each link that describe where it goes, or alt text on its image. A link that repeats on many pages usually sits in one shared header, footer or card, so fix it there once."},
 	{"link_to_http", SevWarning, "links", "Links to an insecure page", "A secure page links to a page of the site on plain http.", "Link to the https URL."},
 	{"links_out_none", SevNotice, "links", "No links out", "The page links nowhere, a dead end for readers and crawlers.", "Link to related pages."},
 	{"links_out_many", SevNotice, "links", "Too many links", "The page has over 300 links, which spreads its value thin and buries the important ones.", "Keep the links that matter."},
@@ -475,7 +475,7 @@ func RunAudit(pages []AuditPage, links []AuditLink) Audit {
 		byID[pages[i].ID] = &pages[i]
 	}
 	seen := map[[2]string]bool{}
-	nofollow, noText := map[*AuditPage]int{}, map[*AuditPage]int{}
+	nofollow, noText := map[*AuditPage]int{}, map[*AuditPage][]string{}
 	for _, l := range links {
 		from := byID[l.From]
 		if from == nil {
@@ -486,7 +486,7 @@ func RunAudit(pages []AuditPage, links []AuditLink) Audit {
 				nofollow[from]++
 			}
 			if l.Anchor == "" {
-				noText[from]++
+				noText[from] = append(noText[from], l.To)
 			}
 			if strings.HasPrefix(from.URL, "https://") && strings.HasPrefix(l.To, "http://") {
 				if key := [2]string{"http:" + strconv.FormatInt(l.From, 10), l.To}; !seen[key] {
@@ -514,8 +514,8 @@ func RunAudit(pages []AuditPage, links []AuditLink) Audit {
 	for p, n := range nofollow {
 		add(p, "link_internal_nofollow", strconv.Itoa(n)+" links")
 	}
-	for p, n := range noText {
-		add(p, "link_no_text", strconv.Itoa(n)+" links")
+	for p, to := range noText {
+		add(p, "link_no_text", linksTo(to))
 	}
 
 	sort.SliceStable(a.Issues, func(i, j int) bool { return a.Issues[i].PageID < a.Issues[j].PageID })
@@ -677,4 +677,31 @@ func storeAudit(ctx context.Context, tx pgx.Tx, ws, runID string) (Audit, error)
 	_, err = tx.Exec(ctx, `UPDATE crawl_runs SET health_score = $2, issues_errors = $3, issues_warnings = $4, issues_notices = $5 WHERE id = $1`,
 		runID, a.Score, a.Errors, a.Warnings, a.Notices)
 	return a, err
+}
+
+// linksTo says how many links a page has and where the first few lead,
+// so a reader can find them: "3 links, to /pricing, /docs and 1 more".
+func linksTo(to []string) string {
+	const show = 3
+	s := strconv.Itoa(len(to)) + " links"
+	if len(to) == 1 {
+		s = "1 link"
+	}
+	var first []string
+	seen := map[string]bool{}
+	for _, u := range to {
+		if !seen[u] {
+			seen[u] = true
+			first = append(first, u)
+		}
+	}
+	more := len(first) - show
+	if more > 0 {
+		first = first[:show]
+	}
+	s += ", to " + strings.Join(first, ", ")
+	if more > 0 {
+		s += " and " + strconv.Itoa(more) + " more"
+	}
+	return s
 }

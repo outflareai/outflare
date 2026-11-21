@@ -36,6 +36,8 @@ type Store struct {
 	secretKey string
 	http      *http.Client
 	now       func() time.Time
+	// retryWait is the pause before the second try; tests shorten it.
+	retryWait time.Duration
 }
 
 // Config says where the bucket is.
@@ -142,7 +144,7 @@ func (s *Store) List(ctx context.Context, prefix string, limit int) ([]string, e
 
 // Check confirms the bucket can be written, read and deleted.
 func (s *Store) Check(ctx context.Context) error {
-	key := ".outflare-check"
+	key := "outflare-check"
 	if err := s.Put(ctx, key, "text/plain", []byte("ok")); err != nil {
 		return err
 	}
@@ -152,10 +154,36 @@ func (s *Store) Check(ctx context.Context) error {
 	return s.Delete(ctx, key)
 }
 
+// do sends one request, trying again when the store or the network
+// fails in a way that passes: every call here is safe to repeat.
 func (s *Store) do(ctx context.Context, method, key string, query url.Values, h http.Header, body []byte) (*http.Response, error) {
 	if key != "" && (!keyRe.MatchString(key) || strings.Contains(key, "..") || strings.Contains(key, "//")) {
 		return nil, fmt.Errorf("blobs: key %q has characters keys may not use", key)
 	}
+	wait := s.retryWait
+	if wait == 0 {
+		wait = 200 * time.Millisecond
+	}
+	for try := 1; ; try++ {
+		resp, again, err := s.once(ctx, method, key, query, h, body)
+		if err == nil || !again || try == tries || ctx.Err() != nil {
+			return resp, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(wait):
+		}
+		wait *= 3
+	}
+}
+
+// tries is how often a request is sent before its failure is returned.
+const tries = 3
+
+// once sends the request once. again says the failure may pass: the
+// network, or the store answering 429 or 5xx.
+func (s *Store) once(ctx context.Context, method, key string, query url.Values, h http.Header, body []byte) (resp *http.Response, again bool, err error) {
 	u := *s.endpoint
 	u.Path = strings.TrimRight(u.Path, "/") + "/" + s.bucket
 	if key != "" {
@@ -164,26 +192,26 @@ func (s *Store) do(ctx context.Context, method, key string, query url.Values, h 
 	u.RawQuery = canonicalQuery(query)
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for k, v := range h {
 		req.Header[k] = v
 	}
 	s.sign(req, body)
-	resp, err := s.http.Do(req)
+	resp, err = s.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("blobs: %s: %w", method, err)
+		return nil, true, fmt.Errorf("blobs: %s: %w", method, err)
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		resp.Body.Close()
-		return nil, ErrNotFound
+		return nil, false, ErrNotFound
 	}
 	if resp.StatusCode >= 300 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1000))
 		resp.Body.Close()
-		return nil, fmt.Errorf("blobs: %s %s: %s: %s", method, key, resp.Status, strings.TrimSpace(string(msg)))
+		return nil, resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500, fmt.Errorf("blobs: %s %s: %s: %s", method, key, resp.Status, strings.TrimSpace(string(msg)))
 	}
-	return resp, nil
+	return resp, false, nil
 }
 
 // sign adds an AWS Signature Version 4 to req.

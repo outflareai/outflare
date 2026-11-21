@@ -47,6 +47,8 @@ func (s *Server) routesLeads(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/recipients/check", s.onBrand(read, s.checkRecipients))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/suppression-syncs", s.inWorkspace(read, s.listSuppressionSyncs))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/suppression-syncs/{integration}", s.inWorkspace(auth.ScopeSuppressionsManage, s.updateSuppressionSync))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/guard-list-syncs", s.inWorkspace(read, s.listGuardListSyncs))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/guard-list-syncs/{integration}", s.inWorkspace(auth.ScopeSuppressionsManage, s.updateGuardListSync))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/contact-rules", s.inWorkspace(auth.ScopeWorkspaceRead, s.getContactRules))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/contact-rules", s.inWorkspace(auth.ScopeWorkspaceManage, s.updateContactRules))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/recipients/check", s.inBrand(read, s.checkRecipients))

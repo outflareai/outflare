@@ -213,7 +213,7 @@ func (s *Server) desktopReport(w http.ResponseWriter, r *http.Request) {
 	for _, e := range rep.Errors {
 		metrics.DesktopReadFailed(e.Provider, e.Code)
 		track.Emit(r.Context(), track.Event{Name: "ai_device.read_failed", WorkspaceID: d.WorkspaceID, UserID: d.UserID,
-			ActorType: "human", Surface: "desktop", Outcome: "error", ErrorCode: e.Code, RequestID: RequestID(r.Context()),
+			ActorType: "human", Surface: "desktop", Outcome: desktopReadOutcome(e.Code), ErrorCode: e.Code, RequestID: RequestID(r.Context()),
 			Props: map[string]any{"provider": e.Provider, "device_id": d.ID}})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": applied, "report_every_seconds": int(desktopReportEvery.Seconds())})
@@ -317,4 +317,17 @@ func (s *Server) unlinkAIDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// desktopReadOutcome says whether a failed read on someone's computer is
+// broken (error) or a state only they can change (failure): a tool they
+// aren't signed in to, a sign-in that expired, a connection that dropped.
+// Those repeat on every report until the person acts, and the Computers
+// page already tells them what to do, so they aren't errors to fix.
+func desktopReadOutcome(code string) string {
+	switch code {
+	case "not_signed_in", "token_expired", "not_installed", "rate_limited", "network", "keychain_denied", "source_off":
+		return track.Failure
+	}
+	return track.Error
 }

@@ -222,7 +222,7 @@ func (s *Server) getRevenueTeam(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	out := map[string]any{}
 	err := s.readTx(ctx, func(tx pgx.Tx) error {
-		fc, err := buildForecast(r, tx, a, r.URL.Query().Get("quarter"))
+		fc, err := buildForecast(r.Context(), tx, a, r.URL.Query().Get("quarter"))
 		if err != nil {
 			return err
 		}

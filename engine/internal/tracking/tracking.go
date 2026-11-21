@@ -154,8 +154,11 @@ func Rewrite(ctx context.Context, q Querier, ws, enrollmentID, sequenceID string
 }
 
 // scanners are user agents of link scanners that mail filters run on
-// every link before a person sees the email.
-var scanners = regexp.MustCompile(`(?i)bot|crawl|spider|scan|preview|barracuda|proofpoint|mimecast|symantec|forcepoint|trendmicro|microsoft office|outlook-ios|python|curl|wget|go-http-client|java/|headless`)
+// every link before a person sees the email, and of the fetchers that
+// build a link's preview when someone shares it (Meta's
+// facebookexternalhit, WhatsApp) or watch a page's uptime and speed. None
+// of them is a visitor.
+var scanners = regexp.MustCompile(`(?i)bot|crawl|spider|scan|preview|barracuda|proofpoint|mimecast|symantec|forcepoint|trendmicro|microsoft office|outlook-ios|python|curl|wget|go-http-client|java/|headless|externalhit|facebookcatalog|meta-externalagent|whatsapp|vkshare|pingdom|gtmetrix|lighthouse|statuscake`)
 
 // LikelyBot reports whether a click looks automated: a known scanner, no
 // user agent, or within a minute of sending.

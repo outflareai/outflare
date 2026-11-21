@@ -200,7 +200,7 @@ function KnowledgePage({ ws, canManage, open, setOpen, go }: { ws: string; canMa
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Knowledge"
+        title="Library"
         description="What your business knows, written once. Your team reads it, and every AI in Outflare answers from it: agents, missions and, when you allow it, replies to customers."
         action={
           <div className="flex gap-2">
@@ -1281,7 +1281,7 @@ function Editor({
   return (
     <div className="space-y-5">
       <PageHeader
-        back={{ label: "Knowledge", onClick: close }}
+        back={{ label: "Library", onClick: close }}
         title={id ? (snippet ? "Quick answer" : "Article") : snippet ? "New quick answer" : "New article"}
         description={item ? <>Version {item.version}, updated {ago(item.updated_at)}{item.updated_by ? ` by ${item.updated_by}` : ""}.</> : snippet ? "A question your customers or team ask, and the answer to give." : "Write it the way you'd explain it to a new teammate."}
         action={

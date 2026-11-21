@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +43,10 @@ func (s *Server) routesFlags(mux *http.ServeMux) {
 		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listFlags))
 		mux.HandleFunc("POST "+t.path, t.on(s.inWorkspace)(manage, s.createFlag))
 		mux.HandleFunc("POST "+t.path+"/evaluate", t.on(s.inWorkspace)(read, s.evaluateFlags))
+		if t.brand {
+			// New with brand routes, so it has no workspace twin.
+			mux.HandleFunc("GET "+t.path+"/definitions", s.onBrand(read, s.flagDefinitions))
+		}
 		mux.HandleFunc("GET "+t.path+"/{flag}", t.on(s.inWorkspace)(read, s.getFlag))
 		mux.HandleFunc("PATCH "+t.path+"/{flag}", t.on(s.inWorkspace)(manage, s.updateFlag))
 		mux.HandleFunc("DELETE "+t.path+"/{flag}", t.on(s.inWorkspace)(manage, s.archiveFlag))
@@ -225,6 +231,10 @@ func (s *Server) applyFlagInput(ctx context.Context, a *access, f *flagView, in 
 	if !flags.ValidKey(f.Key) {
 		return errInvalid("key is required: lowercase letters, digits, - and _, up to 64, such as new-pricing")
 	}
+	if isNew && f.Key == "definitions" {
+		// GET .../flags/definitions is the route server libraries read.
+		return errInvalid("definitions can't be a flag's key: pick another, such as new-definitions")
+	}
 	if in.Name != nil {
 		f.Name = strings.TrimSpace(*in.Name)
 	}
@@ -283,6 +293,9 @@ func (s *Server) applyFlagInput(ctx context.Context, a *access, f *flagView, in 
 	}
 	if msg := flags.CheckRules(f.Rules); msg != "" {
 		return errInvalid(msg)
+	}
+	if err := s.checkFlagLists(ctx, a.WorkspaceID, f.BrandID, f.Rules); err != nil {
+		return err
 	}
 	if in.OnSite != nil {
 		f.OnSite = *in.OnSite
@@ -710,6 +723,9 @@ func (s *Server) siteFlags(w http.ResponseWriter, r *http.Request) {
 		URL         string `json:"url"`
 		Referrer    string `json:"referrer"`
 		Language    string `json:"language"`
+		// The site said this browser is signed in (outflare.signedIn).
+		// A hint for which version to show, never proof of who it is.
+		SignedIn bool `json:"signedIn"`
 		// Versions a person chose to see (?of_flag=key:version).
 		Preview map[string]string `json:"preview"`
 	}
@@ -760,7 +776,14 @@ func (s *Server) siteFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	device, _, _ := parseUA(r.Header.Get("User-Agent"))
-	v := flags.Visitor{Subject: anon, URL: clip(in.URL, 2000), Referrer: clip(in.Referrer, 2000), Language: clip(in.Language, 35), Device: device}
+	v := flags.Visitor{Subject: anon, SignedIn: in.SignedIn, URL: clip(in.URL, 2000), Referrer: clip(in.Referrer, 2000), Language: clip(in.Language, 35), Device: device}
+	if err := s.flagPerson(ctx, k.workspaceID, k.brandID, list, func(f liveFlag) bool {
+		return f.onSite && (f.brandID == nil || *f.brandID == *k.brandID)
+	}, &v, anon, ""); err != nil {
+		outcome = "error"
+		s.internal(w, r, err)
+		return
+	}
 	visual := false
 	var noCode []string
 	ans := decideFlags(list, v, func(f liveFlag) bool {
@@ -849,9 +872,86 @@ func (s *Server) evaluateFlags(w http.ResponseWriter, r *http.Request) {
 	device, _, _ := parseUA(in.UserAgent)
 	v := flags.Visitor{Subject: subject, SignedIn: strings.TrimSpace(in.UserID) != "", URL: clip(in.URL, 2000), Referrer: clip(in.Referrer, 2000),
 		Language: clip(in.Language, 35), Device: device, Properties: props}
-	ans := decideFlags(list, v, func(f liveFlag) bool {
+	decided := func(f liveFlag) bool {
 		return a.sees(f.brandID) && (len(in.Keys) == 0 || slices.Contains(in.Keys, f.Key))
-	}, nil, true)
+	}
+	var brand *string
+	if a.Brand != "" {
+		brand = &a.Brand
+	}
+	if err := s.flagPerson(r.Context(), a.WorkspaceID, brand, list, decided, &v, strings.TrimSpace(in.AnonymousID), strings.TrimSpace(in.UserID)); err != nil {
+		outcome = "error"
+		s.internal(w, r, err)
+		return
+	}
+	ans := decideFlags(list, v, decided, nil, true)
 	outcome = "ok"
 	writeJSON(w, http.StatusOK, ans)
+}
+
+// flagDefinitionsRefresh is how often a server library should ask for the
+// definitions again, in seconds.
+const flagDefinitionsRefresh = 30
+
+// flagDefinition is a flag as a server library needs it to decide
+// locally: everything flags.Evaluate reads.
+type flagDefinition struct {
+	Key       string          `json:"key"`
+	Variants  []flags.Variant `json:"variants"`
+	Rollout   int             `json:"rollout"`
+	Rules     []flags.Rule    `json:"rules"`
+	Salt      string          `json:"salt"`
+	Group     string          `json:"group"`
+	GroupFrom int             `json:"group_from"`
+	GroupTo   int             `json:"group_to"`
+}
+
+// flagDefinitions gives a server every flag that is on, with its rules,
+// versions and salt, so its Outflare library can decide for each visitor
+// in its own memory (the same answer evaluateFlags gives) and ask again
+// only every flagDefinitionsRefresh seconds. The ETag changes when any
+// flag does; a library that sends it back gets 304 and keeps what it has.
+func (s *Server) flagDefinitions(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	outcome := "error"
+	defer func() { metrics.FlagsDecided("definitions", outcome, time.Since(start)) }()
+	a := accessFrom(r.Context())
+	list, err := s.liveFlags(r.Context(), a.WorkspaceID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	defs := []flagDefinition{}
+	for _, f := range list {
+		if f.Status != "on" || !a.sees(f.brandID) {
+			continue
+		}
+		d := flagDefinition{Key: f.Key, Variants: f.Variants, Rollout: f.Rollout, Rules: f.Rules, Salt: f.Salt, Group: f.Group, GroupFrom: f.GroupFrom, GroupTo: f.GroupTo}
+		if d.Variants == nil {
+			d.Variants = []flags.Variant{}
+		}
+		if d.Rules == nil {
+			d.Rules = []flags.Rule{}
+		}
+		defs = append(defs, d)
+	}
+	slices.SortFunc(defs, func(x, y flagDefinition) int { return strings.Compare(x.Key, y.Key) })
+	body, err := json.Marshal(map[string]any{"flags": defs, "refresh_seconds": flagDefinitionsRefresh})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	sum := sha256.Sum256(body)
+	etag := `"` + hex.EncodeToString(sum[:12]) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if match := r.Header.Get("If-None-Match"); match != "" && strings.Contains(match, etag) {
+		outcome = "unchanged"
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	outcome = "ok"
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }

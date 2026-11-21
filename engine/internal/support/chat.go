@@ -104,6 +104,12 @@ func IntakeChat(ctx context.Context, tx pgx.Tx, m ChatMessage) (Received, error)
 	if err := queueAssistant(ctx, tx, ws, conv, out.MessageID); err != nil {
 		return out, err
 	}
+	// A new chat goes to someone who is online, when anyone is.
+	if out.Started {
+		if err := assignToOnline(ctx, tx, ws, conv); err != nil {
+			return out, err
+		}
+	}
 	action := "support.message_received"
 	if out.Started {
 		action = "support.conversation_started"

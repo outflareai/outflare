@@ -38,7 +38,7 @@ func TestParseRedditInfo(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, state, category string
 	}{
-		{"live", `{"author": "ana", "body": "Try Geonode", "score": 4, "removed_by_category": null}`, "live", ""},
+		{"live", `{"author": "ana", "body": "Try Northpeak", "score": 4, "removed_by_category": null}`, "live", ""},
 		{"mod removed", `{"author": "ana", "body": "[removed]", "score": 1}`, "removed", "removed"},
 		{"automod", `{"author": "ana", "selftext": "x", "removed_by_category": "automod_filtered", "num_comments": 3}`, "removed", "automod_filtered"},
 		{"deleted", `{"author": "[deleted]", "body": "[deleted]"}`, "gone", "deleted"},
@@ -114,18 +114,18 @@ func TestRedditActionValidate(t *testing.T) {
 		req   redditActionRequest
 		param string
 	}{
-		{"comment", redditActionRequest{Kind: "comment", TargetURL: thread, Content: "Geonode works well"}, ""},
+		{"comment", redditActionRequest{Kind: "comment", TargetURL: thread, Content: "Northpeak works well"}, ""},
 		{"comment on subreddit", redditActionRequest{Kind: "comment", TargetURL: "https://www.reddit.com/r/proxies", Content: "x"}, "target_url"},
 		{"reply", redditActionRequest{Kind: "reply", TargetURL: comment, Content: "+1"}, ""},
 		{"reply on thread", redditActionRequest{Kind: "reply", TargetURL: thread, Content: "+1"}, "target_url"},
 		{"post without title", redditActionRequest{Kind: "post", TargetURL: "https://www.reddit.com/r/proxies", Content: "x"}, "title"},
 		{"empty", redditActionRequest{Kind: "comment", TargetURL: thread}, "content"},
-		{"utm", redditActionRequest{Kind: "comment", TargetURL: thread, Content: "x", LinkURL: "https://geonode.com/?utm_source=reddit"}, "link_url"},
+		{"utm", redditActionRequest{Kind: "comment", TargetURL: thread, Content: "x", LinkURL: "https://northpeak.example/?utm_source=reddit"}, "link_url"},
 		{"votes", redditActionRequest{Kind: "upvotes", TargetURL: comment, UpvotesGoal: 10}, ""},
 		{"votes on subreddit", redditActionRequest{Kind: "upvotes", TargetURL: "https://www.reddit.com/r/proxies", UpvotesGoal: 10}, "target_url"},
 		{"no votes", redditActionRequest{Kind: "upvotes", TargetURL: comment}, "upvotes_goal"},
 		{"boost without speed", redditActionRequest{Kind: "comment", TargetURL: thread, Content: "x", UpvotesGoal: 10}, "upvotes_per_day"},
-		{"thread", redditActionRequest{Kind: "thread", TargetURL: thread, Content: "Which proxy?", Children: []redditChild{{Account: 2, Content: "Geonode"}}}, ""},
+		{"thread", redditActionRequest{Kind: "thread", TargetURL: thread, Content: "Which proxy?", Children: []redditChild{{Account: 2, Content: "Northpeak"}}}, ""},
 		{"thread bad account", redditActionRequest{Kind: "thread", TargetURL: thread, Content: "x", Children: []redditChild{{Account: 11, Content: "y"}}}, "children[0].account"},
 		{"bad kind", redditActionRequest{Kind: "downvotes", TargetURL: thread}, "kind"},
 	} {
@@ -134,7 +134,7 @@ func TestRedditActionValidate(t *testing.T) {
 			t.Errorf("%s: %q (%s), want %q", tc.name, param, msg, tc.param)
 		}
 	}
-	r := redditActionRequest{Kind: "comment", TargetURL: thread, Content: "x", LinkURL: "https://geonode.com"}
+	r := redditActionRequest{Kind: "comment", TargetURL: thread, Content: "x", LinkURL: "https://northpeak.example"}
 	if sub, kind, _, _ := r.validate(); sub != "proxies" || kind != "thread" || r.LinkType != "other" {
 		t.Errorf("derived: %s %s %s", sub, kind, r.LinkType)
 	}

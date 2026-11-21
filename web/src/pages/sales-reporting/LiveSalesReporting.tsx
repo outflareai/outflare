@@ -39,6 +39,8 @@ import {
 import { Throughput } from "./Throughput";
 import { ResultsGrowth } from "./ResultsGrowth";
 import { previousRange, type Outcome } from "./results";
+import { DiscoveryTrace } from "./DiscoveryTrace";
+import { FinderLanes } from "./FinderLanes";
 import { ToolFundingLink } from "./ToolFundingLink";
 import { SalesReportingPreview } from "./SalesReporting";
 import "./sales-reporting.css";
@@ -87,6 +89,7 @@ type Data = {
   buckets: { at: string; counts: Partial<Counts> }[];
   totals: Partial<Counts>;
   cohort: Record<string, number> | null;
+  discovery?: Discovery | null;
   tools: {
     from: string;
     to: string;
@@ -124,6 +127,37 @@ type Data = {
     }[];
   };
   groups?: Group[];
+};
+type DiscoveryCounts = Partial<
+  Record<"found" | "new" | "passed" | "graded_ab" | "sent", number>
+>;
+// The connected portal's company discovery system. Counts and cents only.
+type Discovery = {
+  missions: {
+    id: string;
+    name: string;
+    state: string;
+    budget_cents: number | null;
+    spent_cents: number | null;
+  }[];
+  totals: DiscoveryCounts;
+  buckets: { at: string; counts: DiscoveryCounts }[];
+  lanes: {
+    total: number;
+    by_status: Record<string, number>;
+    rows: {
+      title: string;
+      method: string | null;
+      status: string;
+      found: number;
+      new: number;
+      passed: number;
+    }[];
+  };
+  spend: {
+    window_cents: number | null;
+    rows: { tool: string; units: number | null; cents: number | null }[];
+  };
 };
 const stamp = (iso: string) =>
   new Intl.DateTimeFormat("en-GB", {
@@ -185,7 +219,9 @@ function LiveSalesReporting({
 }) {
   const brand = pickedBrandId();
   const [period, setPeriod] = useState<Period>("24h");
-  const [view, setView] = useState<"flow" | "costs" | "results">("flow");
+  const [view, setView] = useState<"flow" | "costs" | "results" | "discovery">(
+    "flow",
+  );
   const [connection, setConnection] = useState("");
   const [revision, setRevision] = useState(0);
   const [data, setData] = useState<Data>();
@@ -285,6 +321,15 @@ function LiveSalesReporting({
             <Button
               variant="ghost"
               onClick={() => {
+                observe("team_activity");
+                go("crm", "sales:activity");
+              }}
+            >
+              Team activity
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
                 observe("preview");
                 preview();
               }}
@@ -378,7 +423,7 @@ function LiveSalesReporting({
               role="group"
               aria-label="Sales reporting sections"
             >
-              {(["flow", "costs", "results"] as const).map((v) => (
+              {(["flow", "discovery", "costs", "results"] as const).map((v) => (
                 <button
                   key={v}
                   aria-pressed={view === v}
@@ -390,6 +435,7 @@ function LiveSalesReporting({
                   {
                     {
                       flow: "Live flow",
+                      discovery: "Discovery",
                       costs: "Costs & capacity",
                       results: "Results",
                     }[v]
@@ -454,7 +500,7 @@ function LiveSalesReporting({
                     </span>
                     <span className="sr-stage-note">
                       {available.includes(s.id)
-                        ? "View leads →"
+                        ? "View companies →"
                         : "Connect Lead Portal"}
                     </span>
                   </button>
@@ -469,7 +515,7 @@ function LiveSalesReporting({
               />
               {data.cohort && (
                 <Card
-                  title="Same leads"
+                  title="Same companies"
                   description="Companies discovered in the selected period, followed through their latest recorded progress. Recent cohorts still need time to move forward."
                 >
                   <div className="sr-cohort">
@@ -515,6 +561,21 @@ function LiveSalesReporting({
                 <LiveCapacity data={data} />
               </div>
             </>
+          )}
+          {view === "discovery" && brand && (
+            <FinderLanes
+              brand={brand}
+              days={{ "24h": 1, "48h": 2, "7d": 7, "30d": 30, "365d": 365 }[period]}
+              observe={observe}
+              go={go}
+            >
+              <LiveDiscovery
+                data={data}
+                brand={brand}
+                connection={connection}
+                observe={observe}
+              />
+            </FinderLanes>
           )}
           {view === "costs" && (
             <>
@@ -679,7 +740,7 @@ function LiveResults({
       />
       <Card
         title="Confirmed customers"
-        description="Confirmed customers recorded in Outflare. Open a lead to see the owner, conversation and latest deal details."
+        description="Confirmed customers recorded in Outflare. Open a company to see the owner, conversation and latest deal details."
       >
         <IntervalLeads
           key={`closed:${period}`}
@@ -725,7 +786,7 @@ function LiveCosts({
         <>
           <div className="sr-summary-grid">
             <Summary
-              label="Per verified lead"
+              label="Per verified company"
               value={fine(unit(day))}
               note="Recorded Sales costs / verified companies"
             />
@@ -747,7 +808,7 @@ function LiveCosts({
                   <th>Tool</th>
                   <th>Last hour</th>
                   <th>Last 24h</th>
-                  <th>Per lead</th>
+                  <th>Per company</th>
                   <th>Wallet balance</th>
                 </tr>
               </thead>
@@ -797,11 +858,459 @@ function LiveCosts({
             Recorded usage, including allocated tool charges; excludes mailbox
             subscriptions and staff time. Shared usage has no reliable Sales
             allocation. Wallet balances are shared across tools and teams and
-            are never added together. — means unavailable or no verified leads.
+            are never added together. — means unavailable or no verified
+            companies.
           </p>
         </>
       )}
     </Card>
+  );
+}
+const words = (value: string) => {
+  const text = value.replace(/_/g, " ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+const share = (part: number, whole: number) =>
+  whole > 0 ? `${Math.round((100 * part) / whole)}%` : "—";
+type Lane = {
+  id: string;
+  title: string;
+  method: string | null;
+  origin: string | null;
+  status: string;
+  segment: string | null;
+  idea: string | null;
+  why: string | null;
+  verdict: string | null;
+  learned: string | null;
+  recipe: Partial<
+    Record<"queries" | "urls" | "seeds" | "describe" | "jobs", string[]>
+  >;
+  found: number;
+  new: number;
+  known: number;
+  screened: number;
+  passed: number;
+  ai_cents: number | null;
+  expected_size: number | null;
+  last_activity_at: string | null;
+};
+const recipeParts = [
+  ["queries", "Searches it runs"],
+  ["describe", "Descriptions it matches"],
+  ["jobs", "Job-ad phrases it looks for"],
+  ["urls", "Pages it reads"],
+  ["seeds", "Companies it starts from"],
+] as const;
+// How the connected portal looks for companies: one row per lane, opened for its recipe and lessons.
+function LaneBoard({
+  brand,
+  connection,
+  total,
+  statuses,
+  observe,
+}: {
+  brand: string;
+  connection: string;
+  total: number;
+  statuses: Record<string, number>;
+  observe: (action: string, value?: string, count?: number) => void;
+}) {
+  const [status, setStatus] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [open, setOpen] = useState("");
+  const [page, setPage] = useState<{ total: number; rows: Lane[] }>();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    setBusy(true);
+    setError("");
+    api
+      .GET("/v1/brands/{brand}/sales/reporting/lanes", {
+        params: {
+          path: { brand },
+          query: {
+            offset,
+            ...(status ? { status } : {}),
+            ...(connection ? { integration: connection } : {}),
+          },
+        },
+        signal: controller.signal,
+      })
+      .then((r) => {
+        if (controller.signal.aborted) return;
+        if (r.error) setError(errorMessage(r.error));
+        else
+          setPage(
+            (r.data?.lanes as unknown as { total: number; rows: Lane[] }) ?? {
+              total: 0,
+              rows: [],
+            },
+          );
+        setBusy(false);
+      })
+      .catch((e) => {
+        // Leaving the view cancels the read; that is not an error to show.
+        if (controller.signal.aborted) return;
+        setError(errorMessage(e));
+        setBusy(false);
+      });
+    return () => controller.abort();
+  }, [brand, connection, status, offset]);
+  const choices = Object.entries(statuses).sort((a, b) => b[1] - a[1]);
+  return (
+    <Card
+      title="Search lanes"
+      description={`${number(total)} ways of finding companies. Open a lane to see how it searches, why it exists and what it learned. Counts are all-time; the lanes that passed the most companies come first.`}
+    >
+      <div
+        className="sr-periods"
+        role="group"
+        aria-label="Lane state"
+        style={{ flexWrap: "wrap" }}
+      >
+        {[["", total] as [string, number], ...choices].map(([value, n]) => (
+          <button
+            key={value}
+            aria-pressed={status === value}
+            onClick={() => {
+              setStatus(value);
+              setOffset(0);
+              setOpen("");
+              observe("lane_status", value || "all");
+            }}
+          >
+            {value ? words(value) : "All"} · {number(n)}
+          </button>
+        ))}
+      </div>
+      {error && <ErrorText>{error}</ErrorText>}
+      {!page && busy && <Loading />}
+      {page && (
+        <>
+          <div className="sr-table-wrap mt-4" aria-busy={busy}>
+            <table className="sr-table">
+              <thead>
+                <tr>
+                  <th>Lane</th>
+                  <th>State</th>
+                  <th>Found</th>
+                  <th>New</th>
+                  <th>Passed</th>
+                  <th>Pass rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {page.rows.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>No lanes in this state.</td>
+                  </tr>
+                )}
+                {page.rows.map((r) => (
+                  <LaneRow
+                    key={r.id}
+                    lane={r}
+                    brand={brand}
+                    connection={connection}
+                    observe={observe}
+                    open={open === r.id}
+                    toggle={() => {
+                      setOpen(open === r.id ? "" : r.id);
+                      if (open !== r.id) observe("lane_opened", r.status);
+                    }}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {page.total > 50 && (
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span className="text-xs text-muted-foreground">
+                {number(offset + 1)}–{number(Math.min(offset + 50, page.total))}{" "}
+                of {number(page.total)}
+              </span>
+              <span className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  disabled={busy || offset === 0}
+                  onClick={() => {
+                    setOffset(Math.max(0, offset - 50));
+                    setOpen("");
+                    observe("lane_page", "previous");
+                  }}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={busy || offset + 50 >= page.total}
+                  onClick={() => {
+                    setOffset(offset + 50);
+                    setOpen("");
+                    observe("lane_page", "next");
+                  }}
+                >
+                  Next
+                </Button>
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+function LaneRow({
+  lane: r,
+  open,
+  toggle,
+  brand,
+  connection,
+  observe,
+}: {
+  brand: string;
+  connection: string;
+  observe: (action: string, value?: string) => void;
+  lane: Lane;
+  open: boolean;
+  toggle: () => void;
+}) {
+  const notes = [
+    ["The idea", r.idea],
+    ["Why it was proposed", r.why],
+    ["Latest verdict", r.verdict],
+    ["What it learned", r.learned],
+  ].filter((n): n is [string, string] => !!n[1]);
+  const lists = recipeParts.filter(([key]) => r.recipe?.[key]?.length);
+  return (
+    <>
+      <tr>
+        <td>
+          <button
+            type="button"
+            className="sr-lead-link text-left"
+            aria-expanded={open}
+            onClick={toggle}
+          >
+            {r.title}
+          </button>
+          <small className="block text-muted-foreground">
+            {[r.method && words(r.method), r.origin && words(r.origin)]
+              .filter(Boolean)
+              .join(" · ")}
+          </small>
+        </td>
+        <td>{words(r.status)}</td>
+        <td>{number(r.found)}</td>
+        <td>{number(r.new)}</td>
+        <td>{number(r.passed)}</td>
+        <td>{share(r.passed, r.new)}</td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={6}>
+            <div className="grid gap-3 py-2 text-sm">
+              {r.segment && (
+                <p>
+                  <strong>Who it targets:</strong> {r.segment}
+                </p>
+              )}
+              {notes.map(([label, text]) => (
+                <p key={label}>
+                  <strong>{label}:</strong> {text}
+                </p>
+              ))}
+              {lists.map(([key, label]) => (
+                <div key={key}>
+                  <strong>{label}</strong>
+                  <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+                    {r.recipe[key]!.map((item, i) => (
+                      <li key={i} style={{ overflowWrap: "anywhere" }}>
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {notes.length + lists.length === 0 && !r.segment && (
+                <p className="text-muted-foreground">
+                  The portal recorded no detail for this lane.
+                </p>
+              )}
+              <DiscoveryTrace
+                brand={brand}
+                connection={connection}
+                lane={r.id}
+                observe={observe}
+              />
+              <p className="text-xs text-muted-foreground">
+                {number(r.known)} already held · {number(r.screened)} screened ·
+                AI spend {fine(r.ai_cents)}
+                {r.expected_size === null
+                  ? ""
+                  : ` · expected about ${number(r.expected_size)} companies`}
+                {r.last_activity_at
+                  ? ` · last worked ${stamp(r.last_activity_at)}`
+                  : " · not worked yet"}
+              </p>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+function LiveDiscovery({
+  data,
+  brand,
+  connection,
+  observe,
+}: {
+  data: Data;
+  brand: string;
+  connection: string;
+  observe: (action: string, value?: string, count?: number) => void;
+}) {
+  const d = data.discovery;
+  const count = (key: keyof DiscoveryCounts) => d?.totals[key] ?? 0;
+  const unit = (n: number) =>
+    !d || d.spend.window_cents === null || n === 0
+      ? null
+      : d.spend.window_cents / n;
+  return (
+    <>
+      <Card
+        title="Company discovery"
+        description={
+          d
+            ? `${dateLabel(Date.parse(data.from), true)} – ${dateLabel(Date.parse(data.to), true)} UTC · companies found by search lanes, screened, graded and sent to research`
+            : data.source.status === "connected"
+              ? "The connected portal does not report discovery. Refresh to retry."
+              : "Connect Lead Portal to see company discovery."
+        }
+      >
+        {d && (
+          <>
+            <div className="sr-summary-grid">
+              <Summary
+                label="Found"
+                value={number(count("found"))}
+                note={`${number(count("new"))} not already held (${share(count("new"), count("found"))})`}
+              />
+              <Summary
+                label="Passed screening"
+                value={number(count("passed"))}
+                note={`${share(count("passed"), count("new"))} of new companies`}
+              />
+              <Summary
+                label="Graded A or B"
+                value={number(count("graded_ab"))}
+                note="Second read by the larger model"
+              />
+              <Summary
+                label="Sent to research"
+                value={number(count("sent"))}
+                note={`${fine(unit(count("sent")))} recorded spend each`}
+              />
+              <Summary
+                label="Spend in this period"
+                value={fine(d.spend.window_cents)}
+                note="Recorded discovery costs"
+              />
+            </div>
+            {d.missions.length > 0 && (
+              <div className="sr-table-wrap mt-4">
+                <table className="sr-table">
+                  <thead>
+                    <tr>
+                      <th>Mission</th>
+                      <th>State</th>
+                      <th>Spent in total</th>
+                      <th>Spending cap</th>
+                      <th>Left</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.missions.map((m) => (
+                      <tr key={m.id}>
+                        <td>{m.name}</td>
+                        <td>{words(m.state)}</td>
+                        <td>{fine(m.spent_cents)}</td>
+                        <td>
+                          {m.budget_cents === null
+                            ? "No cap"
+                            : fine(m.budget_cents)}
+                        </td>
+                        <td>
+                          {m.budget_cents === null || m.spent_cents === null
+                            ? "—"
+                            : fine(Math.max(0, m.budget_cents - m.spent_cents))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </Card>
+      {d && (
+        <>
+          <Card title="Agent activity">
+            <DiscoveryTrace
+              brand={brand}
+              connection={connection}
+              observe={observe}
+            />
+          </Card>
+          <LaneBoard
+            brand={brand}
+            connection={connection}
+            total={d.lanes.total}
+            statuses={d.lanes.by_status}
+            observe={observe}
+          />
+        </>
+      )}
+      {d && (
+        <Card
+          title="Discovery tools & spend"
+          description="What discovery used in this period. — means the cost of that tool is not recorded."
+        >
+          <div className="sr-table-wrap">
+            <table className="sr-table">
+              <thead>
+                <tr>
+                  <th>Tool</th>
+                  <th>Uses</th>
+                  <th>Recorded spend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.spend.rows.map((r) => (
+                  <tr key={r.tool}>
+                    <td>{r.tool}</td>
+                    <td>
+                      {r.units === null ? "—" : number(Math.round(r.units))}
+                    </td>
+                    <td>{fine(r.cents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th>Total</th>
+                  <td></td>
+                  <td>{fine(d.spend.window_cents)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Card>
+      )}
+    </>
   );
 }
 function LiveCapacity({ data }: { data: Data }) {
@@ -942,7 +1451,7 @@ function IntervalLeads({
             <span className="text-xs text-muted-foreground">
               {g.total
                 ? `${g.offset + 1}–${Math.min(g.total, g.offset + 50)} of ${number(g.total)}`
-                : "No leads in this interval"}
+                : "No companies in this interval"}
             </span>
           </div>
           {g.leads.length > 0 && (
@@ -950,7 +1459,7 @@ function IntervalLeads({
               <table className="sr-table">
                 <thead>
                   <tr>
-                    <th>Company / lead</th>
+                    <th>Company / person</th>
                     <th>Uploaded by</th>
                     <th>Current status</th>
                     <th>Milestone time</th>

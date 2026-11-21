@@ -31,6 +31,8 @@ var aliases = map[string]string{
 	"zoom_scheduler":           "zoom",
 	"cheapverifier":            "cheapinboxes",
 	"slack_knowledge":          "slack",
+	"slack_feeds":              "slack",
+	"telegram_bot":             "telegram",
 	"outlook_mail":             "outlook_calendar", // the Outlook mark
 	"google_workspace":         "google_mail",
 	"google_workspace_mail":    "google_mail",

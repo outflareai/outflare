@@ -65,7 +65,7 @@ export function WorkspaceSettings({ ws, canManage, onSaved }: { ws: Workspace; c
 
   return (
     <div className="max-w-2xl space-y-6">
-      <PageHeader title="General" description={canManage ? "The workspace's name, its address in the app, and the AI model missions use." : "Only owners and admins can change these."} />
+      <PageHeader title="General" description={canManage ? "The workspace's name, its address in the app, and the AI model Outflare's agent uses." : "Only owners and admins can change these."} />
 
       <Card title="Name" description="Shown in the sidebar, in emails about this workspace and to everyone in it.">
         <form onSubmit={saveName} className="flex flex-col gap-3 sm:flex-row sm:items-end">

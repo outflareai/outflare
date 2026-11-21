@@ -260,7 +260,7 @@ func TestLinkOrderLiveCheckJobWritesLastCheckAndTwoFailuresLose(t *testing.T) {
 		return o["last_check_live"] == true && o["last_check_target_match"] == true
 	})
 	checked := owner.must(200, "GET", path, nil)
-	if checked["last_check_rel"] == nil || checked["last_check_anchor"] == "" {
+	if checked["last_check_rel"] == nil || checked["last_check_anchor"] == "" || checked["last_check_anchor_match"] != "" {
 		t.Fatalf("check fields: %v", checked)
 	}
 	paid := owner.must(200, "POST", path+"/pay", nil)

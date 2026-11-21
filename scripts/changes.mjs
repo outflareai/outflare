@@ -24,7 +24,7 @@ import { join } from 'node:path';
 export const kinds = { launch: 'Added', improvement: 'Changed', fix: 'Fixed', security: 'Security' };
 export const areas = [
 	'agents', 'crm', 'outreach', 'deliverability', 'inbox', 'lifecycle', 'seo', 'social', 'paid-ads',
-	'partners', 'analytics', 'records', 'connectors', 'api', 'workspace', 'self-hosting', 'general',
+	'partners', 'analytics', 'records', 'connectors', 'api', 'developer-setup', 'workspace', 'self-hosting', 'general',
 ];
 
 const args = process.argv.slice(2);
@@ -39,6 +39,8 @@ const edition = opt('edition', 'open-source');
 const since = opt('since', '');
 // Paths whose changes a person using Outflare could notice (Cloud passes its own).
 const product = new RegExp(opt('product', '^(engine|web|api|mcp|sdk|cli|deploy|Dockerfile)'));
+// Every path git prints is from --dir (--relative), which is the top of the
+// repository only when this code is a repository of its own.
 const git = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', maxBuffer: 64 << 20 }).trim();
 
 // A note: front matter with kind, area and, in Cloud only, public; then the text.
@@ -71,7 +73,7 @@ function check(base) {
 		for (const f of readdirSync(notesDir).filter((f) => f.endsWith('.md') && f !== 'README.md'))
 			for (const p of parse(readFileSync(join(notesDir, f), 'utf8'), f).problems) problems.push(`changes/${f}: ${p}`);
 	if (base) {
-		const files = git('diff', '--name-only', '--diff-filter=AM', `${base}...HEAD`).split('\n').filter(Boolean);
+		const files = git('diff', '--relative', '--name-only', '--diff-filter=AM', `${base}...HEAD`).split('\n').filter(Boolean);
 		const labels = (process.env.PR_LABELS ?? '').split(',').map((l) => l.trim());
 		const noted = files.some(isNote) || git('diff', `${base}...HEAD`, '--', 'CHANGELOG.md').split('\n').some((l) => /^\+- /.test(l));
 		if (files.some((f) => product.test(f)) && !noted && !labels.includes('no-note'))
@@ -121,7 +123,7 @@ function legacy(from, to) {
 const prOfMerge = (commit) => Number(git('log', '-1', '--format=%s', commit).match(/^Merge pull request #(\d+)/)?.[1]) || undefined;
 
 function list(from, to) {
-	const added = git('log', '--diff-filter=A', '--no-renames', '--format=%H', '--name-only', `${from}..${to}`, '--', 'changes');
+	const added = git('log', '--relative', '--diff-filter=A', '--no-renames', '--format=%H', '--name-only', `${from}..${to}`, '--', 'changes');
 	const notes = [];
 	let commit = '';
 	for (const line of added.split('\n')) {
@@ -129,7 +131,7 @@ function list(from, to) {
 		else if (isNote(line)) {
 			let text;
 			try {
-				text = git('show', `${to}:${line}`);
+				text = git('show', `${to}:./${line}`);
 			} catch {
 				continue; // added and removed again within the range
 			}
@@ -176,7 +178,7 @@ function fold() {
 	// The notes in HEAD's tree that weren't in the release's: a tree diff, not a
 	// commit range, so a note first written in a merge commit counts too.
 	const added = from
-		? git('diff', '--no-renames', '--diff-filter=A', '--name-only', from, 'HEAD', '--', 'changes')
+		? git('diff', '--relative', '--no-renames', '--diff-filter=A', '--name-only', from, 'HEAD', '--', 'changes')
 		: git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'changes');
 	const notes = [];
 	for (const f of added.split('\n').filter(isNote)) {

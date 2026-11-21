@@ -66,7 +66,14 @@ const (
 )
 
 var (
-	siteKinds = []string{"page", "track"}
+	siteKinds = []string{"page", "track", "screen"}
+	// What an app's library says about itself (context.app, context.device,
+	// context.os, context.library). A device's own name is never kept: it
+	// is often its owner's ("Ana's iPhone").
+	siteApp     = []string{"name", "version", "build"}
+	siteDevice  = []string{"manufacturer", "model", "type"}
+	siteOS      = []string{"name", "version"}
+	siteLibrary = []string{"name", "version"}
 	// The click ids ad platforms add to landing pages, and the cookies of
 	// their pixels site.js reads with consent (adtrack).
 	siteClickIDs = append(adtrack.Params(), siteCookieKeys()...)
@@ -112,10 +119,37 @@ type siteKeyView struct {
 	RotatedAt         *time.Time `json:"rotated_at"`
 	// When the key's proxy secret was made; null when it has none.
 	ProxySecretAt *time.Time `json:"proxy_secret_at"`
-	Snippet       string     `json:"snippet"`
+	// When the key's identify secret was made; null when it has none.
+	IdentifySecretAt *time.Time `json:"identify_secret_at"`
+	Snippet          string     `json:"snippet"`
 	// Whether the script asks for visitors' versions on its own, so tests
 	// made in the visual editor run with no change to the site's tag.
 	Tests bool `json:"tests"`
+	// Autocapture: the script records clicks on buttons and links
+	// (element_clicked) and form submits (form_submitted) with no code on
+	// the site. Both are off until someone turns them on.
+	CaptureClicks bool `json:"capture_clicks"`
+	CaptureForms  bool `json:"capture_forms"`
+	// The script sends uncaught errors on the site as Error Caught, for
+	// the Errors page. Off until someone turns it on.
+	CaptureErrors bool `json:"capture_errors"`
+	// The script loads the ChatGPT Ads pixel of the brand's own ChatGPT
+	// Ads connection, and gives it the signed-in visitor's hashed email
+	// and id (site_pixels.go). Off until someone turns it on.
+	ChatGPTPixel bool `json:"chatgpt_pixel"`
+	// The Pixel ID on the brand's ChatGPT Ads connection, "" when the
+	// brand has none: the switch can't be turned on without one.
+	ChatGPTPixelID string `json:"chatgpt_pixel_id"`
+	// The script loads Meta's or TikTok's pixel, the one the brand's
+	// conversions for that platform go to, and sends it the conversions
+	// a page's own event causes with the id the server sends them with
+	// (site_pixels.go). Off until someone turns it on; the id is "" when
+	// the brand sends that platform no conversions, and then the switch
+	// can't be turned on.
+	MetaPixel     bool   `json:"meta_pixel"`
+	MetaPixelID   string `json:"meta_pixel_id"`
+	TikTokPixel   bool   `json:"tiktok_pixel"`
+	TikTokPixelID string `json:"tiktok_pixel_id"`
 	// An optional two-line guard for the top of the site's <head>, so a
 	// returning visitor never sees the original of what a test changes.
 	FlickerGuard string `json:"flicker_guard"`
@@ -160,6 +194,18 @@ type siteKeyInput struct {
 	ExcludedParams *[]string `json:"excluded_params"`
 	// Run no-code A/B tests on this site (on by default).
 	Tests *bool `json:"tests"`
+	// Record clicks on buttons and links, and form submits, without code
+	// on the site (both off by default).
+	CaptureClicks *bool `json:"capture_clicks"`
+	CaptureForms  *bool `json:"capture_forms"`
+	// Send the site's uncaught errors to the Errors page (off by default).
+	CaptureErrors *bool `json:"capture_errors"`
+	// Load the brand's ChatGPT Ads pixel from the script (off by default).
+	ChatGPTPixel *bool `json:"chatgpt_pixel"`
+	// Load the pixel the brand's Meta Ads or TikTok Ads conversions go
+	// to from the script (off by default).
+	MetaPixel   *bool `json:"meta_pixel"`
+	TikTokPixel *bool `json:"tiktok_pixel"`
 }
 
 func newSiteKey() string {
@@ -226,7 +272,7 @@ func (s *Server) loadSiteKeys(ctx context.Context, ws string, id *string) ([]sit
 		SELECT k.id::text, k.name, k.key, k.brand_id::text, k.origins, k.excluded_params, CASE WHEN k.previous_expires_at > now() THEN k.previous_expires_at END,
 			coalesce((SELECT d.events FROM site_key_days d WHERE d.key_id = k.id AND d.day = current_date), 0),
 			coalesce((SELECT d.bots FROM site_key_days d WHERE d.key_id = k.id AND d.day = current_date), 0),
-			k.created_at, k.last_used_at, k.rotated_at, k.proxy_secret_at, k.tests = 'on',
+			k.created_at, k.last_used_at, k.rotated_at, k.proxy_secret_at, k.identify_secret_at, k.tests = 'on', k.capture_clicks, k.capture_forms, k.capture_errors, k.chatgpt_pixel, k.meta_pixel, k.tiktok_pixel,
 			coalesce(w.events, 0), coalesce(w.own_domain, 0), coalesce(w.safari_direct, 0)
 		FROM site_keys k
 		LEFT JOIN LATERAL (SELECT sum(d.events)::int AS events, sum(d.own_domain)::int AS own_domain, sum(d.safari_direct)::int AS safari_direct
@@ -237,7 +283,7 @@ func (s *Server) loadSiteKeys(ctx context.Context, ws string, id *string) ([]sit
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (siteKeyView, error) {
 		var v siteKeyView
-		err := row.Scan(&v.ID, &v.Name, &v.Key, &v.BrandID, &v.Origins, &v.ExcludedParams, &v.PreviousExpiresAt, &v.EventsToday, &v.BotsToday, &v.CreatedAt, &v.LastUsedAt, &v.RotatedAt, &v.ProxySecretAt, &v.Tests,
+		err := row.Scan(&v.ID, &v.Name, &v.Key, &v.BrandID, &v.Origins, &v.ExcludedParams, &v.PreviousExpiresAt, &v.EventsToday, &v.BotsToday, &v.CreatedAt, &v.LastUsedAt, &v.RotatedAt, &v.ProxySecretAt, &v.IdentifySecretAt, &v.Tests, &v.CaptureClicks, &v.CaptureForms, &v.CaptureErrors, &v.ChatGPTPixel, &v.MetaPixel, &v.TikTokPixel,
 			&v.OwnDomain.Events, &v.OwnDomain.Through, &v.OwnDomain.SafariDirect)
 		v.Snippet = s.siteSnippet(v.Key, v.Origins)
 		v.OwnDomain.Status = ownDomainStatus(v.OwnDomain.Events, v.OwnDomain.Through)
@@ -248,7 +294,24 @@ func (s *Server) loadSiteKeys(ctx context.Context, ws string, id *string) ([]sit
 	if list == nil {
 		list = []siteKeyView{}
 	}
-	return list, err
+	if err != nil {
+		return list, err
+	}
+	// Each brand's pixels, read once.
+	pixels := map[string]brandPixels{}
+	for i := range list {
+		if list[i].BrandID == nil {
+			continue
+		}
+		b := *list[i].BrandID
+		if _, ok := pixels[b]; !ok {
+			if pixels[b], err = s.brandPixelsOf(ctx, s.pool, ws, b); err != nil {
+				return list, err
+			}
+		}
+		list[i].ChatGPTPixelID, list[i].MetaPixelID, list[i].TikTokPixelID = pixels[b].chatgpt, pixels[b].meta.ID, pixels[b].tiktok.ID
+	}
+	return list, nil
 }
 
 func (s *Server) listSiteKeys(w http.ResponseWriter, r *http.Request) {
@@ -452,6 +515,27 @@ func (s *Server) updateSiteKey(w http.ResponseWriter, r *http.Request) {
 	if req.Tests != nil {
 		tests = *req.Tests
 	}
+	clicks, forms, errs := cur.CaptureClicks, cur.CaptureForms, cur.CaptureErrors
+	if req.CaptureErrors != nil {
+		errs = *req.CaptureErrors
+	}
+	if req.CaptureClicks != nil {
+		clicks = *req.CaptureClicks
+	}
+	if req.CaptureForms != nil {
+		forms = *req.CaptureForms
+	}
+	pixel := cur.ChatGPTPixel
+	if req.ChatGPTPixel != nil {
+		pixel = *req.ChatGPTPixel
+	}
+	metaPixel, tiktokPixel := cur.MetaPixel, cur.TikTokPixel
+	if req.MetaPixel != nil {
+		metaPixel = *req.MetaPixel
+	}
+	if req.TikTokPixel != nil {
+		tiktokPixel = *req.TikTokPixel
+	}
 	if req.Name != nil {
 		if name = strings.TrimSpace(*req.Name); name == "" || len(name) > 100 {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "name must be 1 to 100 characters")
@@ -477,12 +561,46 @@ func (s *Server) updateSiteKey(w http.ResponseWriter, r *http.Request) {
 		}
 		brand = &id
 	}
+	// The pixel is the brand's own: turning the switch on, or keeping it
+	// on while moving the key to another brand, needs that brand's
+	// ChatGPT Ads connection to name one.
+	if pixel && (!cur.ChatGPTPixel || deref(brand) != deref(cur.BrandID)) {
+		id, err := s.chatgptPixelID(ctx, s.pool, a.WorkspaceID, deref(brand))
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if id == "" {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "this brand has no ChatGPT Ads pixel yet: connect ChatGPT Ads for the brand and add its Pixel ID on the connection, then turn this on")
+			return
+		}
+	}
+	// Meta's and TikTok's pixels are the ones the brand's conversions go
+	// to: the same rule, with a conversion for that platform to name one.
+	moved := deref(brand) != deref(cur.BrandID)
+	for _, p := range []struct {
+		on, was         bool
+		connector, name string
+	}{{metaPixel, cur.MetaPixel, metaAdsConnector, "Meta Ads"}, {tiktokPixel, cur.TikTokPixel, tiktokAdsConnector, "TikTok Ads"}} {
+		if !p.on || (p.was && !moved) {
+			continue
+		}
+		px, err := s.conversionPixel(ctx, s.pool, a.WorkspaceID, deref(brand), p.connector)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if px.ID == "" {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "this brand sends no conversions to "+p.name+" yet: under Paid ads, Settings, Send conversions, add one for "+p.name+" and pick its pixel, then turn this on")
+			return
+		}
+	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE site_keys SET name = $3, brand_id = $4, origins = $5, excluded_params = $6, tests = $7 WHERE id = $1 AND workspace_id = $2`,
-			cur.ID, a.WorkspaceID, name, brand, origins, excluded, onOff(tests)); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE site_keys SET name = $3, brand_id = $4, origins = $5, excluded_params = $6, tests = $7, capture_clicks = $8, capture_forms = $9, capture_errors = $10, chatgpt_pixel = $11, meta_pixel = $12, tiktok_pixel = $13 WHERE id = $1 AND workspace_id = $2`,
+			cur.ID, a.WorkspaceID, name, brand, origins, excluded, onOff(tests), clicks, forms, errs, pixel, metaPixel, tiktokPixel); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "site_key.updated", "site_key", cur.ID, map[string]any{"brand_id": brand, "origins": len(origins), "excluded_params": len(excluded), "tests": tests})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "site_key.updated", "site_key", cur.ID, map[string]any{"brand_id": brand, "origins": len(origins), "excluded_params": len(excluded), "tests": tests, "capture_clicks": clicks, "capture_forms": forms, "capture_errors": errs, "chatgpt_pixel": pixel, "meta_pixel": metaPixel, "tiktok_pixel": tiktokPixel})
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -576,6 +694,13 @@ type siteKeyRow struct {
 	excludedParams []string
 	// The hash of the key's proxy secret, when it has one.
 	proxyHash []byte
+	// Autocapture: the script records clicks and form submits on its own.
+	captureClicks, captureForms, captureErrors bool
+	// The script loads the brand's ChatGPT Ads pixel (site_pixels.go).
+	chatgptPixel bool
+	// The script loads the pixel the brand's Meta Ads or TikTok Ads
+	// conversions go to.
+	metaPixel, tiktokPixel bool
 	// The country of the batch's visitor, set per request: from the site's
 	// own proxy ("proxy") or the IP database ("ip"); "" when neither knows.
 	country, countrySource string
@@ -660,6 +785,9 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", `send {"key": "ofk_...", "batch": [...]}`)
 		return
 	}
+	for i := range in.Batch {
+		in.Batch[i] = pgSafeJSON(in.Batch[i])
+	}
 	// An address that keeps sending keys that don't exist is turned away.
 	// Valid keys are limited per key instead, since a site that forwards
 	// events through its own domain sends them all from one address.
@@ -670,9 +798,9 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	var k siteKeyRow
 	if strings.HasPrefix(in.Key, auth.PrefixSiteKey) && len(in.Key) <= 100 {
-		err = s.pool.QueryRow(ctx, `SELECT id::text, workspace_id::text, brand_id::text, origins, excluded_params, proxy_secret_hash FROM site_keys
+		err = s.pool.QueryRow(ctx, `SELECT id::text, workspace_id::text, brand_id::text, origins, excluded_params, proxy_secret_hash, capture_clicks, capture_forms, capture_errors, chatgpt_pixel, meta_pixel, tiktok_pixel FROM site_keys
 			WHERE revoked_at IS NULL AND (key = $1 OR (previous_key = $1 AND previous_expires_at > now()))`, in.Key).
-			Scan(&k.id, &k.workspaceID, &k.brandID, &k.origins, &k.excludedParams, &k.proxyHash)
+			Scan(&k.id, &k.workspaceID, &k.brandID, &k.origins, &k.excludedParams, &k.proxyHash, &k.captureClicks, &k.captureForms, &k.captureErrors, &k.chatgptPixel, &k.metaPixel, &k.tiktokPixel)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			s.internal(w, r, err)
 			return
@@ -686,6 +814,11 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.siteOriginOK(r, k, r.Header.Get("Origin")) {
+		if r.Header.Get("Origin") == "" {
+			// An app sends no Origin: it needs a key that names no websites.
+			writeError(w, r, http.StatusForbidden, "forbidden", "this site key takes events only from its websites; for an app, make a site key with no origins")
+			return
+		}
 		writeError(w, r, http.StatusForbidden, "forbidden", "this site key does not take events from this origin; add it to the key's origins")
 		return
 	}
@@ -782,7 +915,21 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 	if in.Consent && anon != "" {
 		setSiteCookie(w, r.Header.Get("Origin"), anon)
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"accepted": accepted, "rejected": rejected})
+	out := map[string]any{"accepted": accepted, "rejected": rejected}
+	// A brand that records visits or draws heatmaps tells its script so.
+	if rp := s.siteReplayFor(ctx, k.workspaceID, k.brandID); rp != nil {
+		out["replay"] = rp
+	}
+	// A site key with autocapture on tells its script what to record.
+	if k.captureClicks || k.captureForms || k.captureErrors {
+		out["capture"] = map[string]bool{"clicks": k.captureClicks, "forms": k.captureForms, "errors": k.captureErrors}
+	}
+	// A site key that loads ad pixels tells its script which, and who the
+	// signed-in visitor is to them.
+	if px := s.sitePixelsFor(ctx, k, anon); px != nil {
+		out["pixels"] = px
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // revealOrLog asks for the company behind the visitor (queueReveal). The
@@ -869,6 +1016,8 @@ func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua
 		return 0, 0, "", err
 	}
 	totals := ingestTotals{names: map[string]*seenName{}}
+	var actions []clickAction
+	actionsLoaded := false
 	for _, raw := range batch {
 		// A page speed reading has no visitor: it is kept on its own.
 		if isVitals(raw) {
@@ -906,6 +1055,33 @@ func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua
 		}
 		if err == nil && anon == "" {
 			anon = m.text("anonymousId")
+		}
+		// A captured click the brand has named is stored a second time
+		// under that name, so reports can use it like any other event.
+		if err == nil && k.brandID != nil && m.text("type") == "track" {
+			if name, _ := eventNameFor(m.text("event")); name == clickEvent {
+				if !actionsLoaded {
+					actionsLoaded = true
+					if actions, err = loadClickActions(ctx, tx, k.workspaceID, *k.brandID, true); err != nil {
+						return 0, 0, "", err
+					}
+				}
+				for _, cp := range namedClicks(raw, actions) {
+					nm, _, cerr := siteMessage(cp, ua, k.excludedParams)
+					if cerr == nil {
+						// A name the brand chose itself never counts
+						// toward the day's cap on new names.
+						if n, _ := eventNameFor(nm.text("event")); n != "" {
+							known[n] = true
+						}
+						cerr = s.ingestSiteOne(ctx, tx, a, c, v, set, nm, "", now, &totals)
+					}
+					var badCopy errInvalid
+					if cerr != nil && !errors.As(cerr, &badCopy) {
+						return 0, 0, "", cerr
+					}
+				}
+			}
 		}
 		var bad errInvalid
 		switch {
@@ -1035,8 +1211,8 @@ func browserNames(ctx context.Context, tx pgx.Tx, ws, brand string) (map[string]
 	return known, added, rows.Err()
 }
 
-// siteMessage keeps what a browser may say: a page view or a track call on
-// an anonymous id, its properties and the page and campaign it came from.
+// siteMessage keeps what a browser or an app may say: a page view, an
+// app's screen view or a track call on an anonymous id, its properties and the page and campaign it came from.
 // A userId, traits and the browser's clock are dropped: the browser cannot
 // say who someone is, and its time is not trusted.
 func siteMessage(raw json.RawMessage, ua string, excluded []string) (eventMessage, string, error) {
@@ -1074,7 +1250,7 @@ func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMess
 	}
 	kind := strings.ToLower(m.text("type"))
 	if !slices.Contains(siteKinds, kind) {
-		return nil, errInvalid("a site key sends page and track events only")
+		return nil, errInvalid("a site key sends page, screen and track events only")
 	}
 	anon, err := m.id("anonymousId", "anonymous_id")
 	if err != nil {
@@ -1146,6 +1322,10 @@ func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMess
 		cleanPage(page, excluded)
 	}
 	pick("campaign", siteCampaign, 500)
+	pick("app", siteApp, 100)
+	pick("device", siteDevice, 100)
+	pick("os", siteOS, 100)
+	pick("library", siteLibrary, 100)
 	if kind == "page" {
 		siteAdArrival(ctxOut, props, adKept, adSkipped)
 	}
@@ -1175,6 +1355,13 @@ func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMess
 		if n := m.text("name"); n != "" {
 			out["name"] = mustJSON(cutUTF8(n, 200))
 		}
+	case "screen":
+		// A screen has no address: its name is all that says which one.
+		n := strings.TrimSpace(m.text("name"))
+		if n == "" {
+			return nil, errInvalid("a screen event needs name, such as Checkout")
+		}
+		out["name"] = mustJSON(cutUTF8(n, 200))
 	}
 	return out, nil
 }

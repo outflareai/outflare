@@ -84,6 +84,10 @@ func (r *Runner) loadCampaigns(ctx context.Context, ws string) ([]campaign, map[
 	if err != nil {
 		return nil, nil, err
 	}
+	rates, err := paidads.LoadRates(ctx, r.Pool)
+	if err != nil {
+		return nil, nil, err
+	}
 	brands := map[string]brandCtx{}
 	byBrand := map[string][]int{}
 	ids := make([]string, len(camps))
@@ -100,6 +104,12 @@ func (r *Runner) loadCampaigns(ctx context.Context, ws string) ([]campaign, map[
 				return nil, nil, err
 			}
 			b.econ = econ
+			// Findings are written in the brand's own currency.
+			for _, i := range idx {
+				if k, ok := rates.Rate(camps[i].currency, econ.Currency); ok && econ.Currency != "" && econ.Currency != camps[i].currency {
+					camps[i].report, camps[i].fx = econ.Currency, k
+				}
+			}
 			if b.lag, err = paidads.ClickToPaymentLag(ctx, r.Pool, key); err != nil {
 				return nil, nil, err
 			}
@@ -169,6 +179,13 @@ func (r *Runner) loadCampaigns(ctx context.Context, ws string) ([]campaign, map[
 			c.unit, c.target = UnitPlatform, c.platformTarget
 			if b.econ.HasTarget() {
 				c.unit, c.target = UnitPayers, b.econ.TargetCostPerPayerMicros
+				// The brand's target is in its own currency; the rules
+				// compare it with the account's spend, so put it in the
+				// account's currency.
+				if c.fx > 0 && c.target != nil {
+					t := int64(math.Round(float64(*c.target) / c.fx))
+					c.target = &t
+				}
 			}
 			for i := 0; i < 7; i++ {
 				if d := c.days[c.last.AddDate(0, 0, -i).Format(time.DateOnly)]; c.budget != nil && *c.budget > 0 && d.spend >= *c.budget*9/10 {

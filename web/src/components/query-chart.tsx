@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { runs, short, smooth } from "./chart-kit";
 
 // A query's results drawn as bars, lines or areas: one x column along the
 // bottom and up to eight y columns on one shared axis. Series take the
@@ -74,6 +75,7 @@ export function QueryChart({ columns, rows, spec, height = 280, gaps = false, fi
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(720);
   const [hover, setHover] = useState<number | null>(null);
+  const uid = useId().replace(/:/g, "");
   useEffect(() => {
     if (!box.current) return;
     const o = new ResizeObserver(([e]) => setWidth(Math.max(280, Math.floor(e.contentRect.width))));
@@ -92,7 +94,7 @@ export function QueryChart({ columns, rows, spec, height = 280, gaps = false, fi
     return <p className="p-4 text-[13px] text-muted-foreground">Pick a column along the bottom and at least one number column to draw.</p>;
   }
 
-  const pad = { top: 12, right: 12, bottom: 28, left: 56 };
+  const pad = { top: 12, right: 12, bottom: 28, left: 48 };
   const w = width - pad.left - pad.right;
   const h = height - pad.top - pad.bottom;
   const all = data.flatMap((d) => d.v).filter((v): v is number => v !== null);
@@ -121,17 +123,9 @@ export function QueryChart({ columns, rows, spec, height = 280, gaps = false, fi
   const barW = Math.max(1, (groupW - 2 * (ys.length - 1)) / ys.length);
   const r = Math.min(4, barW / 2);
 
-  // A null starts a new piece of the line.
-  const path = (k: number) => {
-    let out = "", gap = true;
-    data.forEach((d, i) => {
-      const v = d.v[k];
-      if (v === null) return void (gap = true);
-      out += `${gap ? "M" : "L"}${cx(i).toFixed(1)},${y(v).toFixed(1)}`;
-      gap = false;
-    });
-    return out;
-  };
+  // A null starts a new piece of the line; each piece is a smooth curve.
+  const pieces = (k: number) => runs(data.map((d) => d.v[k])).map((r) => r.map(([i, v]) => [cx(i), y(v)] as [number, number]));
+  const path = (k: number) => pieces(k).map(smooth).join("");
   // A point with no neighbour on either side gets a dot, or it wouldn't show.
   const alone = (k: number, i: number) => data[i].v[k] !== null && (i === 0 || data[i - 1].v[k] === null) && (i === data.length - 1 || data[i + 1].v[k] === null);
 
@@ -155,15 +149,23 @@ export function QueryChart({ columns, rows, spec, height = 280, gaps = false, fi
         </ul>
       )}
       <svg width={width} height={height} role="img" aria-label={`${spec.type} chart of ${ys.map((s) => s.name).join(", ")} by ${spec.x}, ${total} points`} className="block">
+        <defs>
+          {ys.map((_, k) => (
+            <linearGradient key={k} id={`${uid}-g${k}`} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={color(k)} stopOpacity={ys.length === 1 ? 0.28 : 0.12} />
+              <stop offset="100%" stopColor={color(k)} stopOpacity={0} />
+            </linearGradient>
+          ))}
+        </defs>
         {ticks.map((t) => (
           <g key={t}>
-            <line x1={pad.left} x2={pad.left + w} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth={1} />
-            <text x={pad.left - 6} y={y(t)} dy="0.32em" textAnchor="end" className="fill-muted-foreground font-mono text-[11px]">{fmt(t)}</text>
+            <line x1={pad.left} x2={pad.left + w} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth={1} strokeDasharray={t === 0 ? undefined : "3 4"} />
+            <text x={pad.left - 8} y={y(t)} dy="0.32em" textAnchor="end" className="fill-muted-foreground text-[11px] tabular-nums">{short(t)}</text>
           </g>
         ))}
         {data.map((d, i) =>
           i % every === 0 ? (
-            <text key={i} x={cx(i)} y={height - 8} textAnchor="middle" className="fill-muted-foreground font-mono text-[11px]">
+            <text key={i} x={cx(i)} y={height - 8} textAnchor="middle" className="fill-muted-foreground text-[11px]">
               {d.x.length > 14 ? d.x.slice(0, 13) + "…" : d.x}
             </text>
           ) : null,
@@ -186,10 +188,11 @@ export function QueryChart({ columns, rows, spec, height = 280, gaps = false, fi
         {spec.type !== "bar" &&
           ys.map((s, k) => (
             <g key={s.name}>
-              {spec.type === "area" && !gaps && (
-                <path d={`${path(k)}L${cx(data.length - 1).toFixed(1)},${y(0)}L${cx(0).toFixed(1)},${y(0)}Z`} fill={color(k)} opacity={0.14} />
-              )}
-              <path d={path(k)} fill="none" stroke={color(k)} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={styles[s.name]?.dashed ? "4 4" : undefined} opacity={styles[s.name]?.dashed ? 0.6 : 1} />
+              {!styles[s.name]?.dashed &&
+                pieces(k).map((pts, pi) => (
+                  <path key={pi} d={`${smooth(pts)}L${pts[pts.length - 1][0].toFixed(1)},${y(Math.max(lo, 0))}L${pts[0][0].toFixed(1)},${y(Math.max(lo, 0))}Z`} fill={`url(#${uid}-g${k})`} opacity={spec.type === "area" ? 1 : 0.6} />
+                ))}
+              <path d={path(k)} fill="none" stroke={color(k)} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={styles[s.name]?.dashed ? "4 4" : undefined} opacity={styles[s.name]?.dashed ? 0.6 : 1} />
               {data.map((d, i) => (alone(k, i) ? <circle key={i} cx={cx(i)} cy={y(d.v[k] as number)} r={3} fill={color(k)} /> : null))}
             </g>
           ))}
@@ -207,16 +210,17 @@ export function QueryChart({ columns, rows, spec, height = 280, gaps = false, fi
       </svg>
       {hover !== null && (
         <div
-          className="pointer-events-none absolute z-10 rounded-md border bg-popover px-2 py-1 text-[12px] text-popover-foreground shadow-md"
+          className="pointer-events-none absolute z-10 min-w-[150px] rounded-lg border bg-popover/95 px-3 py-2 text-[12px] text-popover-foreground shadow-lg backdrop-blur-sm"
           style={{ left: Math.min(cx(hover) + 8, width - 180), top: ys.length > 1 ? 32 : 8 }}
         >
-          <div className="font-medium">{title ? title(hover) : data[hover].x}</div>
+          <div className="mb-1 font-medium">{title ? title(hover) : data[hover].x}</div>
           {ys.map((s, k) => {
             const v = data[hover].v[k];
             return (
-              <div key={s.name} className="flex items-center gap-1.5">
-                <span className="inline-block size-2 rounded-[2px]" style={{ background: color(k) }} />
-                {s.name}: <span className="font-mono">{v === null ? "–" : fmt(v)}</span>
+              <div key={s.name} className="flex items-center gap-2">
+                <span className="inline-block size-2.5 rounded-[3px]" style={{ background: color(k) }} />
+                <span className="flex-1 text-muted-foreground">{s.name}</span>
+                <span className="font-semibold tabular-nums">{v === null ? "–" : fmt(v)}</span>
               </div>
             );
           })}

@@ -86,3 +86,24 @@ func (s *Server) AIModelOn(ctx context.Context, ws, task, integrationID, model s
 	}
 	return research.Choice{Provider: p, IntegrationID: integrationID, Model: m, Price: price, Task: task}, nil
 }
+
+// AIModelsOn lists the chat models one of the workspace's connected AI
+// connections can use, asked of its provider with the workspace's own key,
+// for a feature that lets the workspace pick a model of that connection.
+func (s *Server) AIModelsOn(ctx context.Context, ws, integrationID string) (llm.Provider, []llm.ModelInfo, error) {
+	conns, err := s.aiConnections(ctx, ws)
+	if err != nil {
+		return llm.Provider{}, nil, err
+	}
+	i := slices.IndexFunc(conns, func(c connectors.Integration) bool { return c.ID == integrationID })
+	if i < 0 {
+		return llm.Provider{}, nil, errAI{http.StatusConflict, "connector_needed", "That AI model connection is no longer connected. Reconnect it or choose another."}
+	}
+	p, _ := llm.ProviderFor(conns[i].Connector)
+	o, err := s.integrations.Open(ctx, s.pool, ws, integrationID)
+	if err != nil {
+		return p, nil, err
+	}
+	list, err := models.Models(ctx, o)
+	return p, list, err
+}

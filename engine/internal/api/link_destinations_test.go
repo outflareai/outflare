@@ -171,9 +171,9 @@ func TestLinkDestinations(t *testing.T) {
 		"url":        {map[string]any{"url": "northpeak"}},
 		"token":      {map[string]any{"url": "https://northpeak.example/?x={nope}"}},
 		"unknown id": {map[string]any{"id": "00000000-0000-4000-8000-000000000009", "url": "https://northpeak.example/a"}},
-		"twenty-one": func() []any {
+		"too many": func() []any {
 			var l []any
-			for range 21 {
+			for range 101 {
 				l = append(l, map[string]any{"url": "https://northpeak.example/a"})
 			}
 			return l
@@ -185,7 +185,7 @@ func TestLinkDestinations(t *testing.T) {
 	}
 	plain := owner.must(201, "POST", links, map[string]any{"url": "https://northpeak.example/plain", "content": "no-redirect", "redirect": false})
 	owner.must(400, "PUT", links+"/"+plain["id"].(string)+"/destinations", map[string]any{"destinations": []any{map[string]any{"url": "https://northpeak.example/a"}}})
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	owner.must(404, "GET", "/v1/brands/"+other["id"].(string)+"/tracking-campaigns/"+c["code"].(string)+"/links/"+linkID+"/destinations", nil)
 
 	found := false

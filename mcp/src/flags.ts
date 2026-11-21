@@ -21,7 +21,7 @@ const variant = z.object({
   payload: z.unknown().optional().describe("Any JSON the page reads with this version, such as {\"headline\": \"Ship faster\"}."),
 });
 const rule = z.object({
-  attribute: z.string().describe("host, path, url, referrer, device (desktop, mobile, tablet), language, signed_in, query.<name> (a parameter of the page's address) or property.<name> (sent to evaluate_flags)."),
+  attribute: z.string().describe("host, path, url, referrer, device (desktop, mobile, tablet), language, signed_in, query.<name> (a parameter of the page's address), property.<name> (sent to evaluate_flags), or who the visitor is: user_id, list (is / is_not with People list ids) or person.<field> (a field of their record)."),
   op: z.enum(["is", "is_not", "contains", "not_contains", "starts_with", "ends_with", "exists", "not_exists"]),
   values: z.array(z.string().max(500)).max(50).optional().describe("Any of these; none for exists and not_exists."),
 });

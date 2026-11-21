@@ -27,6 +27,10 @@ func (Connector) Read(ctx context.Context, cl *c.Client, creds c.Creds, q url.Va
 	switch {
 	case q.Get("check") == "1":
 		read = "check"
+	case q.Has("trace"):
+		read = "trace"
+	case q.Has("lanes"):
+		read = "lanes"
 	case q.Has("lead_ids"):
 		read = "origins"
 	case q.Has("stages"):
@@ -64,6 +68,10 @@ func (Connector) Read(ctx context.Context, cl *c.Client, creds c.Creds, q url.Va
 	if q.Get("check") != "1" && !validReport(out, q) {
 		return nil, c.Errf(c.ErrUnavailable, "Lead Portal returned an invalid reporting shape")
 	}
+	// The discovery block is an optional extra: a malformed one is dropped, the rest of the report stands.
+	if _, summary := out["totals"]; summary && !validDiscovery(out["discovery"]) {
+		out["discovery"] = nil
+	}
 	return out, nil
 }
 func (v Connector) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Account, error) {
@@ -79,6 +87,9 @@ func (v Connector) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Acc
 
 // Validate untrusted provider data before the API combines it with native counts.
 func validReport(out map[string]any, q url.Values) bool {
+	if q.Get("trace") == "1" {
+		return validTrace(out["trace"])
+	}
 	if q.Has("lead_ids") {
 		origins, ok := out["origins"].(map[string]any)
 		if !ok || len(origins) > 100 {
@@ -90,6 +101,9 @@ func validReport(out map[string]any, q url.Values) bool {
 			}
 		}
 		return true
+	}
+	if q.Has("lanes") {
+		return validLanes(out["lanes"])
 	}
 	counts := func(v any) bool {
 		m, ok := v.(map[string]any)
@@ -209,6 +223,177 @@ func validReport(out map[string]any, q url.Values) bool {
 		}
 	}
 	return out["bucket"] == "hour" || out["bucket"] == "day"
+}
+
+// validDiscovery checks the optional Sales discovery block: counts and cents only, bounded lists and text.
+func validDiscovery(value any) bool {
+	if value == nil {
+		return true
+	}
+	d, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	amount := func(v any) bool {
+		if v == nil {
+			return true
+		}
+		n, ok := v.(float64)
+		return ok && n >= 0 && !math.IsInf(n, 0) && !math.IsNaN(n)
+	}
+	whole := func(v any) bool {
+		n, ok := v.(float64)
+		return ok && n >= 0 && math.Trunc(n) == n
+	}
+	text := func(v any, max int) bool {
+		t, ok := v.(string)
+		return ok && len(t) > 0 && len(t) <= max
+	}
+	counts := func(v any) bool {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, v := range m {
+			if !strings.Contains(",found,new,passed,graded_ab,sent,", ","+k+",") || !whole(v) {
+				return false
+			}
+		}
+		return true
+	}
+	missions, ok := d["missions"].([]any)
+	if !ok || len(missions) > 50 || !counts(d["totals"]) {
+		return false
+	}
+	for _, x := range missions {
+		m, ok := x.(map[string]any)
+		if !ok || !text(m["id"], 100) || !text(m["name"], 200) || !text(m["state"], 40) || !amount(m["budget_cents"]) || !amount(m["spent_cents"]) {
+			return false
+		}
+	}
+	buckets, ok := d["buckets"].([]any)
+	if !ok || len(buckets) > 8784 {
+		return false
+	}
+	for _, x := range buckets {
+		b, ok := x.(map[string]any)
+		if !ok || !counts(b["counts"]) {
+			return false
+		}
+		at, ok := b["at"].(string)
+		if !ok {
+			return false
+		}
+		if _, e := time.Parse(time.RFC3339, at); e != nil {
+			return false
+		}
+	}
+	lanes, ok := d["lanes"].(map[string]any)
+	if !ok || !whole(lanes["total"]) {
+		return false
+	}
+	statuses, ok := lanes["by_status"].(map[string]any)
+	if !ok || len(statuses) > 20 {
+		return false
+	}
+	for k, v := range statuses {
+		if len(k) == 0 || len(k) > 40 || !whole(v) {
+			return false
+		}
+	}
+	rows, ok := lanes["rows"].([]any)
+	if !ok || len(rows) > 50 {
+		return false
+	}
+	for _, x := range rows {
+		r, ok := x.(map[string]any)
+		if !ok || !text(r["title"], 200) || !text(r["status"], 40) || !whole(r["found"]) || !whole(r["new"]) || !whole(r["passed"]) {
+			return false
+		}
+		if r["method"] != nil && !text(r["method"], 40) {
+			return false
+		}
+	}
+	spend, ok := d["spend"].(map[string]any)
+	if !ok || !amount(spend["window_cents"]) {
+		return false
+	}
+	tools, ok := spend["rows"].([]any)
+	if !ok || len(tools) > 50 {
+		return false
+	}
+	for _, x := range tools {
+		t, ok := x.(map[string]any)
+		if !ok || !text(t["tool"], 100) || !amount(t["units"]) || !amount(t["cents"]) {
+			return false
+		}
+	}
+	return true
+}
+
+// validLanes checks a page of the discovery lane board: bounded text, whole counts and short recipe lists.
+func validLanes(value any) bool {
+	page, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	whole := func(v any) bool {
+		n, ok := v.(float64)
+		return ok && n >= 0 && math.Trunc(n) == n
+	}
+	short := func(v any, max int) bool { // Optional text.
+		if v == nil {
+			return true
+		}
+		t, ok := v.(string)
+		return ok && len(t) <= max
+	}
+	rows, ok := page["rows"].([]any)
+	if !ok || len(rows) > 50 || !whole(page["total"]) || !whole(page["offset"]) {
+		return false
+	}
+	for _, x := range rows {
+		r, ok := x.(map[string]any)
+		if !ok {
+			return false
+		}
+		for _, key := range []string{"id", "title", "status"} {
+			if t, ok := r[key].(string); !ok || len(t) == 0 || len(t) > 200 {
+				return false
+			}
+		}
+		for _, key := range []string{"method", "origin", "segment", "idea", "why", "verdict", "learned", "last_activity_at", "created_at"} {
+			if !short(r[key], 1300) {
+				return false
+			}
+		}
+		for _, key := range []string{"found", "new", "known", "screened", "passed"} {
+			if !whole(r[key]) {
+				return false
+			}
+		}
+		for _, key := range []string{"ai_cents", "expected_size"} {
+			if n, ok := r[key].(float64); r[key] != nil && (!ok || n < 0) {
+				return false
+			}
+		}
+		recipe, ok := r["recipe"].(map[string]any)
+		if !ok || len(recipe) > 5 {
+			return false
+		}
+		for key, list := range recipe {
+			items, ok := list.([]any)
+			if !ok || len(items) > 12 || !strings.Contains(",queries,urls,seeds,describe,jobs,", ","+key+",") {
+				return false
+			}
+			for _, item := range items {
+				if t, ok := item.(string); !ok || len(t) > 300 {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 var attributionID = regexp.MustCompile(`^(worker|api_key|sales_agent|manual):[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)

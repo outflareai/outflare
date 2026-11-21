@@ -13,6 +13,7 @@ import { Button, Empty, ErrorText, Loading } from "@/ui";
 import { useBrand } from "@/lib/brand";
 import { ago } from "@/format";
 import type { CatalogInfo } from "@/lib/records";
+import { useSubSources } from "@/components/sub-source-picker";
 
 type Summary =
   paths["/v1/brands/{brand}/crm/summary"]["get"]["responses"][200]["content"]["application/json"];
@@ -21,13 +22,16 @@ export function CRMReports({
   cat,
   onOpen,
   onTasks,
+  onEvent,
 }: {
   ws: string;
   cat: CatalogInfo;
   onOpen: (id: string) => void;
   onTasks: () => void;
+  onEvent?: (key: string) => void;
 }) {
   const { brand } = useBrand(ws);
+  const events = useSubSources(brand?.id, "event");
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
@@ -182,6 +186,38 @@ export function CRMReports({
             )}
           </section>
         </>
+      )}
+      {(events.list?.length ?? 0) > 0 && (
+        <section className="rounded-lg border">
+          <header className="border-b p-4">
+            <h3 className="text-sm font-semibold">People from events</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              How many people the brand has from each event or conference. Open one to see them on People.
+            </p>
+          </header>
+          <table className="w-full text-sm">
+            <thead className="border-b text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 font-medium">Event or conference</th>
+                <th className="px-4 py-2 text-right font-medium">People</th>
+                <th className="w-8" />
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {[...(events.list ?? [])]
+                .sort((a, b) => b.people - a.people || a.label.localeCompare(b.label))
+                .map((e) => (
+                  <tr key={e.key} className="cursor-pointer hover:bg-muted/30" onClick={() => onEvent?.(e.key)}>
+                    <td className="px-4 py-2.5 font-medium">{e.label}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{e.people.toLocaleString()}</td>
+                    <td className="px-2">
+                      <ArrowUpRight className="size-4 text-muted-foreground" />
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </section>
       )}
     </div>
   );

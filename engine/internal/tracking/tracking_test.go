@@ -38,6 +38,16 @@ func TestLinksAndBots(t *testing.T) {
 	if !LikelyBot("Mozilla/5.0 Safari", now.Add(-10*time.Second), now) || !LikelyBot("", now.Add(-time.Hour), now) || !LikelyBot("python-requests/2", now.Add(-time.Hour), now) {
 		t.Error("bots not caught")
 	}
+	// A share-preview fetcher isn't a visitor, though it doesn't say "bot".
+	for _, ua := range []string{"facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)", "WhatsApp/2.23.20.0", "meta-externalagent/1.1"} {
+		if !LikelyBot(ua, now.Add(-time.Hour), now) {
+			t.Fatalf("%s counted as a person", ua)
+		}
+	}
+	// A person on Facebook's or WhatsApp's in-app browser is still a person.
+	if LikelyBot("Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [FBAN/FBIOS;FBAV/480.0.0;FBBV/1;FBDV/iPhone15,2]", now.Add(-time.Hour), now) {
+		t.Fatal("Facebook's in-app browser counted as a bot")
+	}
 	if LikelyBot("Mozilla/5.0 (Macintosh) Safari/605", now.Add(-time.Hour), now) {
 		t.Error("person flagged")
 	}

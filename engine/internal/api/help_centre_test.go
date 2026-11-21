@@ -215,27 +215,27 @@ func TestHelpCentreBrands(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	kb := base + "/knowledge"
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "handle": "geonode"})
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})
-	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Proxy setup", "brand_id": "geonode", "visibility": "public", "body": "Use the dashboard."})
-	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Payout schedule", "brand_id": "repocket", "visibility": "public", "body": "Monthly."})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "handle": "summitly"})
+	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Proxy setup", "brand_id": "northpeak", "visibility": "public", "body": "Use the dashboard."})
+	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Payout schedule", "brand_id": "summitly", "visibility": "public", "body": "Monthly."})
 	// Brands share no knowledge: an item saved with no brand is the
-	// workspace's first brand's, so it isn't in Geonode's help centre.
+	// workspace's first brand's, so it isn't in Northpeak's help centre.
 	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Account security", "visibility": "public", "body": "Turn on two-factor sign-in."})
 
-	geo := owner.must(201, "POST", base+"/help-centres", map[string]any{"brand_id": "geonode", "enabled": true})
-	if geo["name"] != "Geonode Help Center" || geo["articles"] != 1.0 {
+	geo := owner.must(201, "POST", base+"/help-centres", map[string]any{"brand_id": "northpeak", "enabled": true})
+	if geo["name"] != "Northpeak Help Center" || geo["articles"] != 1.0 {
 		t.Fatalf("brand help centre = %v", geo)
 	}
-	owner.must(400, "POST", base+"/help-centres", map[string]any{"brand_id": "geonode"})
-	owner.must(201, "POST", base+"/help-centres", map[string]any{"brand_id": "repocket", "name": "Repocket Help"})
-	owner.must(400, "PATCH", base+"/help-centres/"+geo["id"].(string), map[string]any{"brand_id": "repocket"})
+	owner.must(400, "POST", base+"/help-centres", map[string]any{"brand_id": "northpeak"})
+	owner.must(201, "POST", base+"/help-centres", map[string]any{"brand_id": "summitly", "name": "Summitly Help"})
+	owner.must(400, "PATCH", base+"/help-centres/"+geo["id"].(string), map[string]any{"brand_id": "summitly"})
 
 	body := helpGet(t, e.h, "GET", "/h/"+geo["slug"].(string)+"/", "", "").Body.String()
 	if !strings.Contains(body, "Proxy setup") || strings.Contains(body, "Account security") || strings.Contains(body, "Payout schedule") {
 		t.Fatalf("brand home = %s", body)
 	}
-	if l := owner.must(200, "GET", base+"/help-centres?brand=repocket", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["name"] != "Repocket Help" {
+	if l := owner.must(200, "GET", base+"/help-centres?brand=summitly", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["name"] != "Summitly Help" {
 		t.Fatalf("brand list = %v", l)
 	}
 
@@ -244,11 +244,11 @@ func TestHelpCentreBrands(t *testing.T) {
 	if strings.Contains(body, "PostalAddress") {
 		t.Fatal("no address yet, no markup")
 	}
-	owner.must(200, "PATCH", base+"/brands/geonode/context", map[string]any{"legal_name": "Geonode Example Inc",
+	owner.must(200, "PATCH", base+"/brands/northpeak/context", map[string]any{"legal_name": "Northpeak Example Inc",
 		"address": map[string]any{"line1": "1 Example Ave", "city": "Austin", "region": "TX", "postal_code": "78701", "country": "US"}})
 	body = helpGet(t, e.h, "GET", "/h/"+geo["slug"].(string)+"/", "", "").Body.String()
-	if !strings.Contains(body, `<p class="ftext faddr">Geonode Example Inc, 1 Example Ave, Austin TX 78701, United States</p>`) ||
-		!strings.Contains(body, `"@type":"Organization","name":"Geonode Example Inc"`) {
+	if !strings.Contains(body, `<p class="ftext faddr">Northpeak Example Inc, 1 Example Ave, Austin TX 78701, United States</p>`) ||
+		!strings.Contains(body, `"@type":"Organization","name":"Northpeak Example Inc"`) {
 		t.Fatalf("help centre without the brand's address = %s", body)
 	}
 }

@@ -170,7 +170,7 @@ func TestRevenue(t *testing.T) {
 	}
 
 	// Another brand sees none of it.
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})["id"].(string)
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly", "handle": "summitly"})["id"].(string)
 	if got := owner.must(200, "GET", "/v1/brands/"+other+"/revenue", nil); got["recurring"] != nil || got["collected"] != nil || len(got["at_risk"].([]any)) != 0 {
 		t.Fatalf("another brand's report: %v", got)
 	}

@@ -176,7 +176,9 @@ func TestNewsWatchFindsArticlesAndCoverage(t *testing.T) {
 	if err := e.srv.RunNewsSearch(ctx, ws, topicID); err == nil {
 		t.Fatal("a busy provider is retried")
 	}
-	if s := owner.must(200, "GET", base+"/news-searches/"+topicID, nil); s["last_error_code"] != "connector_quota" {
+	// A rate limit (HTTP 429) is the provider being busy, not the account
+	// out of quota: it is kept as unavailable and tried again.
+	if s := owner.must(200, "GET", base+"/news-searches/"+topicID, nil); s["last_error_code"] != "connector_unavailable" {
 		t.Fatalf("failed run: %v", s)
 	}
 	// It is checked again in 15 minutes, not at its next interval.

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
 
@@ -36,7 +37,7 @@ func (MicrosoftAds) Definition() c.Definition {
 		"https://learn.microsoft.com/advertising/guides/get-started", "https://developers.ads.microsoft.com/Account",
 		"Spend, clicks and conversions per campaign from your Microsoft Advertising (Bing) accounts.",
 		"Signs in with Microsoft and reads every Microsoft Advertising account the sign-in can see. Microsoft also asks for a developer token: get your own from the Microsoft Advertising developer portal (Account, Request token) and add it after signing in. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget; it sends offline conversions only to the goals you choose under Paid ads.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsManage)
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsManage, c.CapAdsKeywords)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
 		TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
@@ -187,7 +188,7 @@ func (m MicrosoftAds) msUpdate(ctx context.Context, cl *c.Client, creds c.Creds,
 		} `json:"PartialErrors"`
 	}
 	body := map[string]any{"AccountId": atoi64(acct.ID), "Campaigns": []any{campaign}}
-	if err := m.scoped(cl, creds, acct).post(ctx, cl.Base("microsoft_ads.campaign", msCampaignBase)+"/Campaigns/Update", body, &resp); err != nil {
+	if err := m.scoped(cl, creds, acct).put(ctx, cl.Base("microsoft_ads.campaign", msCampaignBase)+"/Campaigns", body, &resp); err != nil {
 		return err
 	}
 	if len(resp.PartialErrors) > 0 {
@@ -227,19 +228,32 @@ func msDate(s string) map[string]int {
 }
 
 func (m MicrosoftAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdDay, error) {
+	csv, err := m.report(ctx, cl, creds, acct, map[string]any{
+		"Type": "CampaignPerformanceReportRequest", "Aggregation": "Daily",
+		"Columns": []string{"TimePeriod", "CampaignId", "CampaignName", "Spend", "Impressions", "Clicks", "Conversions", "Revenue"},
+		"Time":    map[string]any{"CustomDateRangeStart": msDate(from), "CustomDateRangeEnd": msDate(to)},
+	})
+	if err != nil || csv == nil {
+		return nil, err
+	}
+	return parseMSReport(bytes.NewReader(csv))
+}
+
+// report asks for one performance report over the account (request names
+// its Type, Aggregation, Columns and Time), waits for it and returns its
+// CSV; nil when the range holds no data.
+func (m MicrosoftAds) report(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, request map[string]any) ([]byte, error) {
 	base := cl.Base("microsoft_ads.reporting", msReportingBase)
-	req := map[string]any{"ReportRequest": map[string]any{
-		"Type": "CampaignPerformanceReportRequest", "Format": "Csv", "FormatVersion": "2.0", "ReportName": "Outflare",
+	rr := map[string]any{"Format": "Csv", "FormatVersion": "2.0", "ReportName": "Outflare",
 		"ExcludeReportHeader": true, "ExcludeReportFooter": true, "ExcludeColumnHeaders": false, "ReturnOnlyCompleteData": false,
-		"Aggregation": "Daily",
-		"Columns":     []string{"TimePeriod", "CampaignId", "CampaignName", "Spend", "Impressions", "Clicks", "Conversions", "Revenue"},
-		"Scope":       map[string]any{"AccountIds": []int64{atoi64(acct.ID)}},
-		"Time":        map[string]any{"CustomDateRangeStart": msDate(from), "CustomDateRangeEnd": msDate(to)},
-	}}
+		"Scope": map[string]any{"AccountIds": []int64{atoi64(acct.ID)}}}
+	for k, v := range request {
+		rr[k] = v
+	}
 	var sub struct {
 		ReportRequestID string `json:"ReportRequestId"`
 	}
-	if err := m.scoped(cl, creds, acct).post(ctx, base+"/GenerateReport/Submit", req, &sub); err != nil {
+	if err := m.scoped(cl, creds, acct).post(ctx, base+"/GenerateReport/Submit", map[string]any{"ReportRequest": rr}, &sub); err != nil {
 		return nil, err
 	}
 	deadline := time.Now().Add(msPoll.limit)
@@ -274,7 +288,7 @@ func (m MicrosoftAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, a
 }
 
 // download reads the report: a zip holding one CSV.
-func (MicrosoftAds) download(ctx context.Context, cl *c.Client, u string) ([]c.AdDay, error) {
+func (MicrosoftAds) download(ctx context.Context, cl *c.Client, u string) ([]byte, error) {
 	if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://127.0.0.1") {
 		return nil, c.Errf(c.ErrUnavailable, "Microsoft Advertising sent a report address that is not https")
 	}
@@ -300,7 +314,176 @@ func (MicrosoftAds) download(ctx context.Context, cl *c.Client, u string) ([]c.A
 		return nil, c.Errf(c.ErrUnavailable, "opening the Microsoft Advertising report: %v", err)
 	}
 	defer f.Close()
-	return parseMSReport(io.LimitReader(f, 256<<20))
+	csv, err := io.ReadAll(io.LimitReader(f, 256<<20))
+	if err != nil {
+		return nil, c.Errf(c.ErrUnavailable, "reading the Microsoft Advertising report: %v", err)
+	}
+	if csv == nil {
+		csv = []byte{}
+	}
+	return csv, nil
+}
+
+// msRows reads a report's CSV into one map per row, by column name, with
+// TimePeriod as a date.
+func msRows(raw []byte) ([]map[string]string, error) {
+	br := bufio.NewReader(bytes.NewReader(raw))
+	if b, err := br.Peek(3); err == nil && string(b) == "\xef\xbb\xbf" {
+		_, _ = br.Discard(3) // the byte order mark Excel wants
+	}
+	cr := csv.NewReader(br)
+	cr.FieldsPerRecord = -1
+	cr.LazyQuotes = true
+	head, err := cr.Read()
+	if err == io.EOF {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, c.Errf(c.ErrUnavailable, "the Microsoft Advertising report could not be read: %v", err)
+	}
+	var out []map[string]string
+	for {
+		row, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, c.Errf(c.ErrUnavailable, "the Microsoft Advertising report could not be read: %v", err)
+		}
+		m := make(map[string]string, len(head))
+		for i, h := range head {
+			if i < len(row) {
+				m[strings.TrimSpace(h)] = strings.TrimSpace(row[i])
+			}
+		}
+		if t, err := time.Parse("1/2/2006", m["TimePeriod"]); err == nil {
+			m["TimePeriod"] = t.Format(time.DateOnly)
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// msNum reads a report figure ("1,204.50", "12%").
+func msNum(s string) float64 {
+	v, _ := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSuffix(s, "%"), ",", ""), 64)
+	return v
+}
+
+// ---- ad groups and ads ----
+
+var _ c.AdItemsReader = MicrosoftAds{}
+
+// msItemDays is how far back the list of ads looks: the longest window a
+// sync re-reads, so every ad a sync has days for is listed.
+const msItemDays = 95
+
+// msMaxCampaigns bounds the ad group reads of one sync.
+const msMaxCampaigns = 500
+
+// AdItems lists the account's ad groups, read campaign by campaign
+// (AdGroups/QueryByCampaignId), or its ads. Ads come from the ad
+// performance report over the last msItemDays days, one row an ad, since
+// the service lists ads only one ad group and ad type at a time: an ad
+// that showed nothing in that time isn't listed.
+func (m MicrosoftAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level string) ([]c.AdItem, error) {
+	switch level {
+	case c.AdLevelGroup:
+		camps, err := m.AdCampaigns(ctx, cl, creds, acct)
+		if err != nil {
+			return nil, err
+		}
+		var out []c.AdItem
+		for i, cp := range camps {
+			if i >= msMaxCampaigns {
+				break
+			}
+			var resp struct {
+				AdGroups []struct {
+					ID     flexInt `json:"Id"`
+					Name   string  `json:"Name"`
+					Status string  `json:"Status"`
+				} `json:"AdGroups"`
+			}
+			if err := m.scoped(cl, creds, acct).post(ctx, cl.Base("microsoft_ads.campaign", msCampaignBase)+"/AdGroups/QueryByCampaignId",
+				map[string]any{"CampaignId": atoi64(cp.ID)}, &resp); err != nil {
+				return nil, err
+			}
+			for _, g := range resp.AdGroups {
+				if g.ID != 0 {
+					out = append(out, c.AdItem{ID: fmt.Sprint(int64(g.ID)), ParentID: cp.ID, Name: g.Name, Status: status(g.Status), ProviderStatus: g.Status})
+				}
+			}
+		}
+		return out, nil
+	case c.AdLevelAd:
+		now := time.Now().UTC()
+		raw, err := m.report(ctx, cl, creds, acct, map[string]any{
+			"Type": "AdPerformanceReportRequest", "Aggregation": "Summary",
+			"Columns": []string{"AdGroupId", "AdId", "AdTitle", "TitlePart1", "AdDescription", "FinalUrl", "AdStatus", "Impressions"},
+			"Time": map[string]any{"CustomDateRangeStart": msDate(now.AddDate(0, 0, -msItemDays).Format(time.DateOnly)),
+				"CustomDateRangeEnd": msDate(now.Format(time.DateOnly))},
+		})
+		if err != nil || raw == nil {
+			return nil, err
+		}
+		rows, err := msRows(raw)
+		if err != nil {
+			return nil, err
+		}
+		var out []c.AdItem
+		seen := map[string]bool{}
+		for _, r := range rows {
+			id := r["AdId"]
+			if id == "" || r["AdGroupId"] == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			title := firstText(r["AdTitle"], r["TitlePart1"])
+			it := c.AdItem{ID: id, ParentID: r["AdGroupId"], Name: title, Status: status(r["AdStatus"]), ProviderStatus: r["AdStatus"],
+				Details: adDetails(map[string]string{c.AdDetailHeadline: title, c.AdDetailText: r["AdDescription"], c.AdDetailURL: r["FinalUrl"]})}
+			if r["FinalUrl"] != "" {
+				it.Details[c.AdDetailTemplated] = strconv.FormatBool(adtrack.HasTemplate(r["FinalUrl"]))
+			}
+			out = append(out, it)
+		}
+		return out, nil
+	}
+	return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+}
+
+// AdItemDays reads the ad group or the ad performance report by day.
+func (m MicrosoftAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level, from, to string) ([]c.AdItemDay, error) {
+	typ, id, parent, name := "AdGroupPerformanceReportRequest", "AdGroupId", "CampaignId", "AdGroupName"
+	switch level {
+	case c.AdLevelGroup:
+	case c.AdLevelAd:
+		typ, id, parent, name = "AdPerformanceReportRequest", "AdId", "AdGroupId", "AdTitle"
+	default:
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	raw, err := m.report(ctx, cl, creds, acct, map[string]any{
+		"Type": typ, "Aggregation": "Daily",
+		"Columns": []string{"TimePeriod", parent, id, name, "Spend", "Impressions", "Clicks", "Conversions", "Revenue"},
+		"Time":    map[string]any{"CustomDateRangeStart": msDate(from), "CustomDateRangeEnd": msDate(to)},
+	})
+	if err != nil || raw == nil {
+		return nil, err
+	}
+	rows, err := msRows(raw)
+	if err != nil {
+		return nil, err
+	}
+	var out []c.AdItemDay
+	for _, r := range rows {
+		if _, err := time.Parse(time.DateOnly, r["TimePeriod"]); err != nil || r[id] == "" {
+			continue // a footer or a blank line
+		}
+		out = append(out, c.AdItemDay{ID: r[id], ParentID: r[parent], Name: r[name], Date: r["TimePeriod"],
+			SpendMicros: c.Micros(msNum(r["Spend"])), Impressions: int64(msNum(r["Impressions"])), Clicks: int64(msNum(r["Clicks"])),
+			Conversions: ptrF(msNum(r["Conversions"])), ConversionValueMicros: ptrI(c.Micros(msNum(r["Revenue"])))})
+	}
+	return out, nil
 }
 
 func parseMSReport(r io.Reader) ([]c.AdDay, error) {

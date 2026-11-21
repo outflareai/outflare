@@ -20,21 +20,27 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/emailsend"
 	"github.com/outflareai/outflare/engine/internal/connectors/engain"
 	"github.com/outflareai/outflare/engine/internal/connectors/googleworkspace"
+	"github.com/outflareai/outflare/engine/internal/connectors/guards"
 	"github.com/outflareai/outflare/engine/internal/connectors/hubspot"
 	"github.com/outflareai/outflare/engine/internal/connectors/inboxkit"
 	"github.com/outflareai/outflare/engine/internal/connectors/instantly"
+	"github.com/outflareai/outflare/engine/internal/connectors/intercom"
 	"github.com/outflareai/outflare/engine/internal/connectors/leadportal"
 	"github.com/outflareai/outflare/engine/internal/connectors/linkedin"
 	"github.com/outflareai/outflare/engine/internal/connectors/mailsignin"
 	"github.com/outflareai/outflare/engine/internal/connectors/manifest"
+	"github.com/outflareai/outflare/engine/internal/connectors/media"
 	"github.com/outflareai/outflare/engine/internal/connectors/models"
+	"github.com/outflareai/outflare/engine/internal/connectors/parallel"
 	"github.com/outflareai/outflare/engine/internal/connectors/partnerapps"
 	"github.com/outflareai/outflare/engine/internal/connectors/payments"
+	"github.com/outflareai/outflare/engine/internal/connectors/podcasts"
 	"github.com/outflareai/outflare/engine/internal/connectors/reddit"
 	"github.com/outflareai/outflare/engine/internal/connectors/seo"
 	"github.com/outflareai/outflare/engine/internal/connectors/slack"
 	"github.com/outflareai/outflare/engine/internal/connectors/smartlead"
 	"github.com/outflareai/outflare/engine/internal/connectors/tagmanager"
+	"github.com/outflareai/outflare/engine/internal/connectors/telegrambot"
 	"github.com/outflareai/outflare/engine/internal/connectors/tgapp"
 	"github.com/outflareai/outflare/engine/internal/connectors/verifiers"
 	"github.com/outflareai/outflare/engine/internal/connectors/workspace"
@@ -48,6 +54,8 @@ func Available() []c.Connector {
 	out = append(out, leadportal.Connector{})
 	out = append(out, verifiers.All()...)
 	out = append(out, data.All()...)
+	out = append(out, parallel.Connector{})
+	out = append(out, guards.All()...)
 	out = append(out, emailbison.EmailBison{}, instantly.Instantly{}, smartlead.Smartlead{}, cheapinboxes.Connector{}, inboxkit.Connector{})
 	out = append(out, googleworkspace.Connector{})
 	out = append(out, mailsignin.All()...)
@@ -55,6 +63,7 @@ func Available() []c.Connector {
 	out = append(out, hubspot.All()...)
 	out = append(out, attio.All()...)
 	out = append(out, models.All()...)
+	out = append(out, media.All()...)
 	out = append(out, analytics.All()...)
 	out = append(out, seo.All()...)
 	out = append(out, seo.CrUX{})
@@ -68,12 +77,15 @@ func Available() []c.Connector {
 	out = append(out, tgapp.Connector{})
 	out = append(out, workspace.Connector{})
 	out = append(out, reddit.All()...)
+	out = append(out, podcasts.All()...)
 	out = append(out, engain.All()...)
 	out = append(out, x.All()...)
 	out = append(out, linkedin.All()...)
 	out = append(out, dnshosts.All()...)
 	out = append(out, tagmanager.All()...)
 	out = append(out, slack.All()...)
+	out = append(out, telegrambot.All()...)
+	out = append(out, intercom.All()...)
 	out = append(out, manifest.All(integrations.FS)...)
 	return out
 }

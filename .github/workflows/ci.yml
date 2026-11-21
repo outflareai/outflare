@@ -36,17 +36,18 @@ jobs:
   # Pull requests get light checks; the merge queue's batch gets everything
   # once, for every pull request in it (Cloud's docs/merge-queue.md):
   #
-  # - A pull request that is ready for review runs gofmt, go vet and the
-  #   tests of the packages it changes and the packages that import them
-  #   (the "light" part; the API package only when api/ or the package
-  #   itself changed, in two shards then), and the web, SDK and Python jobs
-  #   only when it changes what they build. A draft runs none of the Go
-  #   tests, nor does a change to docs, change notes or web/ alone, nor a
-  #   head that only merges main into a commit whose tests passed. A change
-  #   to go.mod or go.sum runs every part. A migration runs the rollback
-  #   check on the same light set.
+  # - A pull request that is ready for review runs one quick part: gofmt,
+  #   go vet (which compiles everything) and the tests of the packages it
+  #   changes itself, never the API package; and the web, SDK and Python
+  #   jobs only when it changes what they build. Its batch runs every test
+  #   with main straight after, so nothing is tested twice. A draft runs
+  #   none of the Go tests, nor does a change to docs, change notes or web/
+  #   alone, nor a head that only merges main into a commit whose tests
+  #   passed. A migration gets its file checks; the rollback check runs in
+  #   its batch.
   # - A batch (batch/*) runs every part, the Docker image when its inputs
-  #   changed, and the migrations job (every part) when it adds a migration.
+  #   changed, the library tests when a library changed, and the migrations
+  #   job (every part) when it adds a migration that does more than add.
   # - On main, a commit whose files are exactly a commit CI already passed on
   #   (the batch the merge queue fast-forwarded main to, or a merge whose
   #   second parent is one) isn't tested again: every job is skipped and the
@@ -72,6 +73,7 @@ jobs:
       web: ${{ steps.scope.outputs.web || 'true' }}
       python: ${{ steps.scope.outputs.python || 'true' }}
       image: ${{ steps.scope.outputs.image || 'true' }}
+      libs: ${{ steps.scope.outputs.libs || 'true' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: github.event_name == 'push'
@@ -103,6 +105,12 @@ jobs:
               echo "tested=true" >> "$GITHUB_OUTPUT"; exit 0
             fi
           done
+      # checkmigrations -additive (below) needs Go; only a batch asks.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'batch/')
+        with:
+          go-version-file: go.mod
+          cache: false
       - name: Do the Go tests need to run?
         id: scope
         env:
@@ -112,46 +120,50 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "$EVENT" != pull_request ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           batch=false
           case "$HEAD_REF" in batch/*) batch=true ;; esac
+          # The event and app libraries (Go, Ruby, PHP, Swift, Android,
+          # Flutter, React Native) have their own toolchains and tests, and
+          # nothing else in the repository can break them: they run only
+          # when one of them, or what they are versioned and packaged by,
+          # changes. They took about four minutes of every batch.
+          libs='^(sdk/(go|ruby|php|swift|android|flutter|react-native)/|Package\.swift|composer\.json|scripts/library-version|\.github/workflows/ci\.yml)'
           if ! listed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | "\(.status)\t\(.filename)"'); then
             echo "go=true" >> "$GITHUB_OUTPUT"; echo "migrations=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           files=$(cut -f2 <<<"$listed")
           has() { grep -qE "$1" <<<"$files"; }
           # The migrations job checks the migration files (append-only, unique
-          # numbers, expand-only) on any pull request that touches them. The
-          # previous version's tests on the new schema (the rollback check) run
-          # when it adds a migration: on the pull request itself once it is
-          # ready, on the light set (below), so its author finds a failure
-          # there, and every part again in its batch. On 2026-11-01 the full
-          # check on pull requests ran 55 times (about 30 billed minutes
-          # each) and caught nothing.
+          # numbers, expand-only) on any pull request that touches them.
           if has '^(engine/internal/db/migrations/|scripts/checkmigrations/)'; then echo "migrations=true" >> "$GITHUB_OUTPUT"; fi
-          if [ "$DRAFT" = true ] || ! grep -qE '^added[[:space:]]engine/internal/db/migrations/' <<<"$listed"; then
+          # The rollback check itself runs once, in the batch, which tests
+          # against the real main; the pull request's own copy cost about
+          # 1,300 billed minutes a day (2026-11-18) and its batch ran it
+          # again. And only when a new migration can change what the previous
+          # version sees: one that only creates tables and plain indexes
+          # (checkmigrations -additive, which says no whenever it can't tell,
+          # and no on an error) runs the file checks alone.
+          if [ "$batch" != true ] || ! grep -qE '^added[[:space:]]engine/internal/db/migrations/' <<<"$listed"; then
             echo 'migration_parts=[{"name":"check","part":""}]' >> "$GITHUB_OUTPUT"
-          elif [ "$batch" != true ]; then
-            # Split like the engine job's light set when it holds the API
-            # package: on its own, the previous version's API tests on the new
-            # schema ran past go test's 25 minutes (2026-11-03).
-            if has '^(api/|engine/internal/api/)'; then
-              echo 'migration_parts=[{"name":"light 1/2","part":"light 1 2"},{"name":"light 2/2","part":"light 2 2"}]' >> "$GITHUB_OUTPUT"
-            else
-              echo 'migration_parts=[{"name":"light","part":"light"}]' >> "$GITHUB_OUTPUT"
-            fi
+          elif [ "$(go run ./scripts/checkmigrations -additive -base "$BASE_SHA" 2>/dev/null || echo false)" = true ]; then
+            echo "::notice::The new migrations only add to the schema; the previous version's tests are not run again."
+            echo 'migration_parts=[{"name":"check","part":""}]' >> "$GITHUB_OUTPUT"
           fi
           if [ "$batch" = true ]; then
             echo "::notice::A merge queue batch: everything runs."
             echo "go=true" >> "$GITHUB_OUTPUT"
+            has "$libs" || echo "libs=false" >> "$GITHUB_OUTPUT"
             if ! has '^(Dockerfile|\.dockerignore|go\.(mod|sum)|pnpm-lock\.yaml|pnpm-workspace\.yaml|package\.json|[^/]+/package\.json)'; then echo "image=false" >> "$GITHUB_OUTPUT"; fi
             exit 0
           fi
           # A pull request on its own: only what it can break, and never the
           # Docker image (its batch builds it).
           echo "image=false" >> "$GITHUB_OUTPUT"
-          has '^(web/|sdk/|mcp/|api/|package\.json|pnpm-|[^/]+/package\.json|engine/internal/ownkeys/)' || echo "web=false" >> "$GITHUB_OUTPUT"
+          has "$libs" || echo "libs=false" >> "$GITHUB_OUTPUT"
+          has '^(web/|sdk/|mcp/|api/|package\.json|pnpm-|[^/]+/package\.json|Package\.swift|composer\.json|scripts/library-version|engine/internal/ownkeys/)' || echo "web=false" >> "$GITHUB_OUTPUT"
           has '^(sdk/python/|api/)' || echo "python=false" >> "$GITHUB_OUTPUT"
           if [ "$DRAFT" = true ]; then
             echo "::notice::Draft: the Go tests run when this is marked ready for review."
@@ -185,21 +197,15 @@ jobs:
             echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           echo "go=true" >> "$GITHUB_OUTPUT"
-          # A dependency change can break any package: every part. A schema
-          # change used to as well; its batch runs every part anyway, and on
-          # the pull request it cost 65 billed minutes a push for nothing
-          # found (2026-11-01).
-          if has '^go\.(mod|sum)$'; then
-            echo "::notice::go.mod or go.sum changed; every part runs."
-            exit 0
-          fi
-          # The light set runs in one job, or two when it holds the API
-          # package (the slowest by far; scripts/test-shard.sh light).
-          if has '^(api/|engine/internal/api/)'; then
-            echo 'parts=[{"name":"light 1/2","part":"light 1 2"},{"name":"light 2/2","part":"light 2 2"}]' >> "$GITHUB_OUTPUT"
-          else
-            echo 'parts=[{"name":"light","part":"light"}]' >> "$GITHUB_OUTPUT"
-          fi
+          # One quick part: gofmt, go vet (which compiles every package and
+          # its tests) and the tests of the packages the pull request itself
+          # changes, never the API package. The batch runs every test with
+          # main, and most batches hold one pull request (378 of 456 in two
+          # weeks to 2026-11-18), so the light set (importers, and the API
+          # package in two shards of about 18 minutes) ran the same tests
+          # twice: a third of all Actions minutes, and 23 minutes before a
+          # pull request could join a batch that takes 16.
+          echo 'parts=[{"name":"light","part":"quick"}]' >> "$GITHUB_OUTPUT"
           {
             echo "changed<<EOF_CHANGED"
             echo "$files"
@@ -216,7 +222,11 @@ jobs:
     if: ${{ !cancelled() && needs.same-files.outputs.tested != 'true' && needs.same-files.outputs.go != 'false' }}
     name: engine (${{ matrix.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A pull request's first light part runs its share of the API tests and
+    # then every changed package and its importers. A change to a package
+    # most others import took 29 minutes and was stopped at 30 twice with no
+    # test failing; the batch's parts take about 15 and are not affected.
+    timeout-minutes: 45
     permissions:
       contents: read
       issues: write # files a test that only passed when re-run
@@ -261,6 +271,42 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      # The tests' database is thrown away with the job, so it needn't
+      # survive a crash: without syncing every commit to disk the API tests
+      # ran 18% faster on a two-core runner (2026-11-18). A service container
+      # takes no server flags, so set them once it is up. Never fails a job.
+      - name: Postgres doesn't sync to disk
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d outflare_test -q \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()" || echo "::warning::Could not turn off disk syncing; the tests run as before."
+      # Applying every migration to an empty database took 30 to 65 seconds
+      # of each part. go-cache.yml saves main's migrated database as a dump
+      # whenever the migrations change; loading it takes about 3 seconds, and
+      # the tests then apply only the migrations it doesn't have. If it can't
+      # be loaded the database is emptied again and the tests migrate it
+      # themselves, as before.
+      - name: Restore the saved schema
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/schema.sql.gz
+          key: schema-v1-${{ hashFiles('engine/internal/db/migrations/**') }}
+          restore-keys: |
+            schema-v1-
+      - name: Load the saved schema
+        env:
+          PGPASSWORD: postgres
+          DUMP: ${{ runner.temp }}/schema.sql.gz
+        run: |
+          if [ ! -s "$DUMP" ]; then echo "No saved schema; the tests apply every migration."; exit 0; fi
+          if ! gunzip -c "$DUMP" | psql -h localhost -U postgres -d outflare_test -q -v ON_ERROR_STOP=1 >/dev/null; then
+            echo "::warning::The saved schema didn't load; the tests apply every migration."
+            psql -h localhost -U postgres -d postgres -q -c "DROP DATABASE outflare_test" -c "CREATE DATABASE outflare_test"
+          fi
       # Go's build cache, so a part compiles only what changed instead of the
       # whole engine (go vet alone took 5 minutes cold). setup-go's own cache
       # is keyed on go.sum and never refreshed, so it held almost nothing.
@@ -274,6 +320,39 @@ jobs:
       # the background: it took one to three minutes of every part, while
       # the runner starts with about 12 GB free and the cache (about 0.5 GB
       # packed, since go-cache.yml trims it) needs a few.
+      # A self-hosted runner keeps its disk between jobs, and several runners
+      # can share one disk: Go's caches and Docker's images fill it in time,
+      # and a full disk fails the cache restore and the tests' databases.
+      - name: Make room on a self-hosted runner
+        id: room
+        if: runner.environment != 'github-hosted'
+        run: |
+          df -h ~ | tail -1
+          # Runners that share a disk fill it together: their caches take a
+          # large part of it, and every job's test database needs room at the
+          # same moment, so a disk that looks half free can run out mid-job.
+          # So past 50% this runner gives back what it can rebuild: its Go
+          # caches and its Docker images, build cache and stale volumes. Only
+          # the runners that start a job while the disk is that full do it,
+          # which brings it back under 50% without every job starting cold.
+          docker container prune -f >/dev/null 2>&1 || true
+          docker volume prune -af >/dev/null 2>&1 || docker volume prune -f >/dev/null 2>&1 || true
+          docker builder prune -af >/dev/null 2>&1 || true
+          used=$(df --output=pcent ~ | tail -1 | tr -dc 0-9)
+          # Go trims its build cache only after five days, so a busy runner's
+          # grows without limit: start it again past 8 GB.
+          build=$(du -sm ~/.cache/go-build 2>/dev/null | cut -f1)
+          echo "Go build cache: ${build:-0} MB"; docker system df 2>/dev/null || true
+          if [ "${used:-0}" -ge 50 ] || [ "${build:-0}" -ge 8000 ]; then
+            chmod -R u+w ~/go/pkg/mod 2>/dev/null || true
+            rm -rf ~/.cache/go-build ~/go/pkg/mod
+            docker system prune -af --volumes >/dev/null 2>&1 || true
+            df -h ~ | tail -1
+          fi
+          # The runner still has its last job's Go caches: restoring the saved
+          # one over them fails file by file (the module cache is read-only)
+          # and costs half a minute of errors. Restore only onto an empty one.
+          if [ -d ~/.cache/go-build ] && [ -d ~/go/pkg/mod ]; then echo "warm=true" >> "$GITHUB_OUTPUT"; fi
       - name: Make room for the Go build cache
         run: |
           df -h /
@@ -281,6 +360,7 @@ jobs:
       # The v3 in the key (here and in go-cache.yml) skips every cache saved
       # before it: bump it when a saved cache breaks restores.
       - name: Restore the Go build cache
+        if: steps.room.outputs.warm != 'true'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
@@ -293,9 +373,9 @@ jobs:
       - name: Free space after the restore
         run: df -h /
       - name: gofmt
-        if: matrix.part == 'rest' || startsWith(matrix.part, 'light') && !endsWith(matrix.part, '2 2')
+        if: matrix.part == 'rest' || matrix.part == 'quick'
         run: test -z "$(gofmt -l api engine)" || (gofmt -l api engine && exit 1)
-      - if: matrix.part == 'rest' || startsWith(matrix.part, 'light') && !endsWith(matrix.part, '2 2')
+      - if: matrix.part == 'rest' || matrix.part == 'quick'
         run: go vet ./...
       - name: Tests (${{ matrix.name }})
         env:
@@ -340,11 +420,17 @@ jobs:
     # touch what it builds, or it is the nightly race run. Runs if same-files
     # fails.
     if: ${{ !cancelled() && needs.same-files.outputs.race != 'true' && needs.same-files.outputs.tested != 'true' && (needs.same-files.outputs.web != 'false' || needs.same-files.outputs.python != 'false') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Not ubuntu-latest: the 26.04 image has no build of Python 3.9, the oldest
+    # the Python SDK supports, which the SDK tests below install.
+    runs-on: ubuntu-24.04
+    # The web checks take about nine minutes and the library tests, on the
+    # batches that run them, five to six more: at 15 the job was stopped
+    # with nothing failing (2026-11-18, in the Python tests, its last step).
+    timeout-minutes: 25
     env:
       WEB: ${{ needs.same-files.outputs.web }}
       PYTHON: ${{ needs.same-files.outputs.python }}
+      LIBS: ${{ needs.same-files.outputs.libs }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -355,7 +441,10 @@ jobs:
         if: env.WEB != 'false'
         with:
           node-version: 22
-          cache: pnpm
+          # A runner of your own keeps pnpm's store on its disk, and saving
+          # it to the cache from there failed the job, so only GitHub's
+          # machines use the cache.
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
       - if: env.WEB != 'false'
         run: pnpm install --frozen-lockfile
       - name: SDK types match api/openapi.yaml
@@ -366,9 +455,25 @@ jobs:
       - name: Sales reporting periods, growth and funding destinations
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:sales-reporting-results
+      - name: Chart forecast tests
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:forecast
+      - name: Crash reporting only counts the app's own scripts
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:own-script
+      - name: Tracking domain registration note
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:registration
       - name: Browser for subscription brand checks
         if: env.WEB != 'false'
-        run: pnpm --filter @outflare/web exec playwright install chromium --only-shell
+        # A self-hosted runner lacks the system libraries Chromium loads
+        # (libnspr4 and friends), which GitHub's machines already have.
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" != github-hosted ]; then
+            pnpm --filter @outflare/web exec playwright install --with-deps chromium --only-shell
+          else
+            pnpm --filter @outflare/web exec playwright install chromium --only-shell
+          fi
       - name: Sales reporting demo and conversation navigation
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:sales-reporting
@@ -381,9 +486,33 @@ jobs:
       - name: Paid ads page against mocked API answers
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:ads
+      - name: Alerts page, Telegram chat per kind
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:alerts
+      - name: Brand kit page against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:brand-kit
+      - name: Creatives library and skills pages against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:creatives
+      - name: Creatives start page against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:creative-start
+      - name: Talking videos pages against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:talking-videos
+      - name: Fixes page against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:fixes
+      - name: One Inbox against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:inbox
       - name: Tracker report page against mocked API answers
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:tracker-report
+      - name: SEO target report against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:seo-targets
       - name: Tracker campaigns page against mocked API answers
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:tracker-campaigns
@@ -399,9 +528,18 @@ jobs:
       - name: Tracker logs page against mocked API answers
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:tracker-logs
+      - name: A saved report as a dashboard tile against mocked API answers
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:dashboard-report-tile
       - name: Importing leads into a list
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:lead-import
+      - name: Side menu groups stay open, fold and are remembered
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:sidebar-nav
+      - name: Pinned and recent pages in the menu
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:menu-pins
       - name: Reload once when a deploy removed the page's scripts
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:stale-build-reload
@@ -418,6 +556,54 @@ jobs:
         run: pnpm --filter @outflare/sdk test
       - if: env.WEB != 'false'
         run: pnpm --filter @outflare/mcp test
+      # The event SDKs for Go, Ruby and PHP use only what each language
+      # ships with, so they run on the runner's own toolchains. GitHub's
+      # machines ship them all; a runner of your own may not, so Go is set up
+      # here and tools.sh (below) stands in for the others.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: env.WEB != 'false' && env.LIBS != 'false'
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Where the runner has no Ruby, PHP, Swift or Gradle, each runs from
+      # its official image instead, as the runner's user, on the same files.
+      - name: Ruby, PHP, Swift and Gradle, where the runner has none
+        if: env.WEB != 'false' && env.LIBS != 'false'
+        run: |
+          {
+            echo 'in_image() { image=$1; shift; docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e GRADLE_USER_HOME=/tmp/gradle -v "$PWD":/work -w /work "$image" "$@"; }'
+            command -v ruby >/dev/null || echo 'ruby() { in_image ruby:3.4-slim ruby "$@"; }'
+            command -v php >/dev/null || echo 'php() { in_image php:8.4-cli php "$@"; }'
+            command -v swift >/dev/null || echo 'swift() { in_image swift:6.2 swift "$@"; }'
+            command -v gradle >/dev/null || echo 'gradle() { in_image gradle:9-jdk21 gradle "$@"; }'
+          } > "$RUNNER_TEMP/tools.sh"
+      - name: Go, Ruby and PHP event SDK tests
+        if: env.WEB != 'false' && env.LIBS != 'false'
+        run: |
+          . "$RUNNER_TEMP/tools.sh"
+          (cd sdk/go && go vet ./... && go test ./...)
+          (cd sdk/ruby && ruby -Ilib -Itest test/tracker_test.rb)
+          (cd sdk/php && php tests/run.php)
+      # The libraries for apps. React Native is built by pnpm -r build above;
+      # Swift and Gradle are on the runner; Dart is fetched and checked
+      # against the hash its release was read with.
+      - name: App library tests (React Native, Swift, Android, Flutter)
+        if: env.WEB != 'false' && env.LIBS != 'false'
+        env:
+          DART_VERSION: 3.14.0
+          DART_SHA256: 90f7fd75fe21e16437778df882f280910d9bbd4809c90024f21de82435dded1d
+        run: |
+          . "$RUNNER_TEMP/tools.sh"
+          pnpm --filter @outflare/react-native test
+          # The Swift package is the one at the top of the repository.
+          swift test
+          node --test scripts/library-version.test.mjs
+          php -r 'require "sdk/php/src/Tracker.php"; $c = json_decode(file_get_contents("composer.json"), true); is_dir(current($c["autoload"]["psr-4"])) || exit(1);'
+          (cd sdk/android && gradle --no-daemon -q test)
+          curl -fsSL -o "$RUNNER_TEMP/dart.zip" "https://storage.googleapis.com/dart-archive/channels/stable/release/$DART_VERSION/sdk/dartsdk-linux-x64-release.zip"
+          echo "$DART_SHA256  $RUNNER_TEMP/dart.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/dart.zip" -d "$RUNNER_TEMP"
+          (cd sdk/flutter && "$RUNNER_TEMP/dart-sdk/bin/dart" pub get && "$RUNNER_TEMP/dart-sdk/bin/dart" analyze --fatal-infos && "$RUNNER_TEMP/dart-sdk/bin/dart" test)
       # The bring-your-own-keys scan (engine/internal/ownkeys, which reads
       # TypeScript too) runs in every light part and every batch, so not
       # here again: it cost two minutes on 267 runs a day.
@@ -470,7 +656,11 @@ jobs:
     if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.same-files.outputs.migrations == 'true' || needs.same-files.result != 'success') }}
     name: migrations (${{ matrix.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A light part runs go test twice (the packages that share the database,
+    # then the others), each allowed 25 minutes by scripts/test-shard.sh,
+    # after building this version and the previous one. At 30 minutes the
+    # first light part was stopped with every test still passing.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -510,15 +700,62 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      # The tests' database is thrown away with the job, so it needn't
+      # survive a crash: without syncing every commit to disk the API tests
+      # ran 18% faster on a two-core runner (2026-11-18). A service container
+      # takes no server flags, so set them once it is up. Never fails a job.
+      - name: Postgres doesn't sync to disk
+        if: matrix.part != ''
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d outflare_test -q \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()" || echo "::warning::Could not turn off disk syncing; the tests run as before."
       # The engine job's Go build cache (see there), so the previous
       # version's tests compile only what changed since main's last fill.
+      # A self-hosted runner keeps its disk between jobs, and several runners
+      # can share one disk: Go's caches and Docker's images fill it in time,
+      # and a full disk fails the cache restore and the tests' databases.
+      - name: Make room on a self-hosted runner
+        id: room
+        if: runner.environment != 'github-hosted'
+        run: |
+          df -h ~ | tail -1
+          # Runners that share a disk fill it together: their caches take a
+          # large part of it, and every job's test database needs room at the
+          # same moment, so a disk that looks half free can run out mid-job.
+          # So past 50% this runner gives back what it can rebuild: its Go
+          # caches and its Docker images, build cache and stale volumes. Only
+          # the runners that start a job while the disk is that full do it,
+          # which brings it back under 50% without every job starting cold.
+          docker container prune -f >/dev/null 2>&1 || true
+          docker volume prune -af >/dev/null 2>&1 || docker volume prune -f >/dev/null 2>&1 || true
+          docker builder prune -af >/dev/null 2>&1 || true
+          used=$(df --output=pcent ~ | tail -1 | tr -dc 0-9)
+          # Go trims its build cache only after five days, so a busy runner's
+          # grows without limit: start it again past 8 GB.
+          build=$(du -sm ~/.cache/go-build 2>/dev/null | cut -f1)
+          echo "Go build cache: ${build:-0} MB"; docker system df 2>/dev/null || true
+          if [ "${used:-0}" -ge 50 ] || [ "${build:-0}" -ge 8000 ]; then
+            chmod -R u+w ~/go/pkg/mod 2>/dev/null || true
+            rm -rf ~/.cache/go-build ~/go/pkg/mod
+            docker system prune -af --volumes >/dev/null 2>&1 || true
+            df -h ~ | tail -1
+          fi
+          # The runner still has its last job's Go caches: restoring the saved
+          # one over them fails file by file (the module cache is read-only)
+          # and costs half a minute of errors. Restore only onto an empty one.
+          if [ -d ~/.cache/go-build ] && [ -d ~/go/pkg/mod ]; then echo "warm=true" >> "$GITHUB_OUTPUT"; fi
       - name: Make room for the Go build cache
         if: matrix.part != ''
         run: |
           df -h /
           sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift >/dev/null 2>&1 &
       - name: Restore the Go build cache
-        if: matrix.part != ''
+        if: matrix.part != '' && steps.room.outputs.warm != 'true'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |

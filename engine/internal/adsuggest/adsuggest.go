@@ -100,7 +100,10 @@ const (
 )
 
 // Manageable are the platforms whose campaigns Outflare can change
-// (connectors.AdsManager); only they get findings.
+// (connectors.AdsManager) and the rules read: only they get findings.
+// Zeropark is changed when asked (pause, budget, a target paused) but
+// gets none: the rules judge by customers acquired, which pop and push
+// traffic has no click id to tie to.
 var Manageable = map[string]bool{"google_ads": true, "meta_ads": true, "microsoft_ads": true, "linkedin_ads": true, "tiktok_ads": true, "reddit_ads": true, "x_ads": true, "chatgpt_ads": true}
 
 // Runner runs the jobs. Store opens the networks for the exclusion rules'

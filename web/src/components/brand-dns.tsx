@@ -231,7 +231,7 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     track("ui.dns_one_click_used", { where: "brand_dns", how: "added", groups: pending.length });
-    if (heldByMission(data)) toast("Waiting for approval in a mission.");
+    if (heldByMission(data)) toast("Waiting for approval on the Agents page.");
     void load();
     onChange?.();
   }
@@ -242,7 +242,7 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
     const { data, error } = await api.POST("/v1/workspaces/{ws}/brands/{brand}/dns/check", path);
     setChecking(false);
     if (error) return toast(errorMessage(error), "error");
-    if (heldByMission(data)) return toast("Waiting for approval in a mission.");
+    if (heldByMission(data)) return toast("Waiting for approval on the Agents page.");
     if (!data) return;
     setDNS(data);
     setCheckedAt(new Date());

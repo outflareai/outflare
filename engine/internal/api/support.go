@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
@@ -36,6 +37,10 @@ func (s *Server) routesSupport(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+brandBase+"/conversations/{id}/replies", s.onBrand(manage, s.replySupportConversation))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/notes", s.inBrand(manage, s.noteSupportConversation))
 	mux.HandleFunc("POST "+brandBase+"/conversations/{id}/notes", s.onBrand(manage, s.noteSupportConversation))
+	mux.HandleFunc("POST "+brandBase+"/conversations/{id}/hand-off", s.onBrand(manage, s.handOffSupportConversation))
+	// Looping a teammate in (inbox_teamwork.go), under the brand only.
+	mux.HandleFunc("PUT "+brandBase+"/conversations/{id}/followers/{user}", s.onBrand(manage, s.followSupportConversation))
+	mux.HandleFunc("DELETE "+brandBase+"/conversations/{id}/followers/{user}", s.onBrand(manage, s.unfollowSupportConversation))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/suggest-reply", s.inBrand(manage, s.suggestSupportReply))
 	mux.HandleFunc("POST "+brandBase+"/conversations/{id}/suggest-reply", s.onBrand(manage, s.suggestSupportReply))
 	mux.HandleFunc("GET "+base+"/conversations/{id}/articles", s.inBrand(read, s.listSupportArticles))
@@ -114,11 +119,47 @@ type supportConversationView struct {
 	ClosedAt       *time.Time     `json:"closed_at"`
 	LastMessageAt  time.Time      `json:"last_message_at"`
 	CreatedAt      time.Time      `json:"created_at"`
+	// Where it started: outflare, or the tool it is copied from (intercom),
+	// where it is answered; a copied one is read-only here except for notes.
+	Source          string  `json:"source"`
+	ExternalID      *string `json:"external_id"`
+	ExternalChannel *string `json:"external_channel"`
+	// Who has it in that tool: the teammate and the team, by their names
+	// there.
+	ExternalAssignee *string `json:"external_assignee"`
+	ExternalTeam     *string `json:"external_team"`
+	// "", low, medium, high or urgent.
+	Priority string `json:"priority"`
+	Reopens  int    `json:"reopens"`
+	// The customer's rating of the conversation; null when not rated.
+	Rating *supportRatingView `json:"rating"`
+	// What the tool's AI agent (Intercom's Fin) did in it; null when no AI
+	// agent took part.
+	AI *supportAIView `json:"ai"`
+}
+
+type supportRatingView struct {
+	Score   int        `json:"score"`
+	Remark  string     `json:"remark"`
+	RatedAt *time.Time `json:"rated_at"`
+}
+
+type supportAIView struct {
+	Agent        string          `json:"agent"`
+	Resolution   string          `json:"resolution"`
+	AnswerType   string          `json:"answer_type"`
+	SourceType   string          `json:"source_type"`
+	SourceTitle  string          `json:"source_title"`
+	Rating       *int            `json:"rating"`
+	RatingRemark *string         `json:"rating_remark"`
+	Sources      json.RawMessage `json:"sources"`
 }
 
 const supportConversationSelect = `
-	SELECT c.id::text, c.brand_id::text, c.record_id::text, COALESCE(NULLIF(r.name, ''), ''), c.contact_email,
-		c.mailbox_id::text, m.email, CASE WHEN c.channel = 'chat' THEN 'chat' WHEN c.inbound_address_id IS NOT NULL AND c.mailbox_id IS NULL THEN 'forwarding' ELSE 'mailbox' END,
+	SELECT c.id::text, c.brand_id::text, c.record_id::text, COALESCE(NULLIF(r.name, ''), ''),
+		COALESCE(NULLIF(c.contact_email, ''), (SELECT ri.value FROM record_identities ri WHERE ri.record_id = c.record_id AND ri.namespace = 'email'
+			AND ri.valid_to IS NULL ORDER BY ri.verified DESC, ri.valid_from LIMIT 1), ''),
+		c.mailbox_id::text, m.email, CASE WHEN c.source <> 'outflare' THEN 'imported' WHEN c.channel = 'chat' THEN 'chat' WHEN c.inbound_address_id IS NOT NULL AND c.mailbox_id IS NULL THEN 'forwarding' ELSE 'mailbox' END,
 		ia.local_part, c.reply_from, c.channel, c.subject, c.status,
 		c.assignee_id::text, COALESCE(NULLIF(u.name, ''), u.email), c.team_id::text, t.name,
 		c.tags, c.unread, c.last_from,
@@ -127,23 +168,42 @@ const supportConversationSelect = `
 		(SELECT count(*) FROM support_messages sm WHERE sm.conversation_id = c.id AND sm.kind <> 'note')::int,
 		c.first_message_at, c.first_reply_at, c.closed_at, c.last_message_at, c.created_at,
 		c.reply_due_at, c.reply_breached_at, c.resolve_due_at, c.resolve_breached_at, c.identity_verified, c.visitor_seen_at,
-		c.topic_id::text, ht.name
+		c.topic_id::text, ht.name,
+		c.source, c.external_id, c.external_channel, xa.name, xt.name, c.priority, c.reopens, c.rating, c.rating_remark, c.rated_at,
+		c.ai_agent, c.ai_resolution, c.ai_answer_type, c.ai_source_type, c.ai_source_title, c.ai_rating, c.ai_rating_remark, c.ai_sources
 	FROM support_conversations c
 	LEFT JOIN records r ON r.id = c.record_id
 	LEFT JOIN mailboxes m ON m.id = c.mailbox_id
 	LEFT JOIN inbound_addresses ia ON ia.id = c.inbound_address_id
 	LEFT JOIN users u ON u.id = c.assignee_id
 	LEFT JOIN teams t ON t.id = c.team_id
-	LEFT JOIN support_handoff_topics ht ON ht.id = c.topic_id`
+	LEFT JOIN support_handoff_topics ht ON ht.id = c.topic_id
+	LEFT JOIN support_external_agents xa ON xa.id = c.external_assignee_id
+	LEFT JOIN support_external_agents xt ON xt.id = c.external_team_id`
 
 func (s *Server) scanSupportConversation(row pgx.CollectableRow) (supportConversationView, error) {
 	var v supportConversationView
 	var assigneeID, assigneeName, teamID, teamName, topicID, topicName *string
+	var rating *int
+	var ratingRemark *string
+	var ratedAt *time.Time
+	var ai supportAIView
 	err := row.Scan(&v.ID, &v.BrandID, &v.RecordID, &v.Contact.Name, &v.Contact.Email, &v.MailboxID, &v.MailboxEmail,
 		&v.Via, &v.InboundAddress, &v.ReplyFrom, &v.Channel, &v.Subject, &v.Status, &assigneeID, &assigneeName, &teamID, &teamName, &v.Tags, &v.Unread, &v.LastFrom,
 		&v.Preview, &v.Messages, &v.FirstMessageAt, &v.FirstReplyAt, &v.ClosedAt, &v.LastMessageAt, &v.CreatedAt,
 		&v.SLA.ReplyDueAt, &v.SLA.ReplyBreachedAt, &v.SLA.ResolveDueAt, &v.SLA.ResolveBreachedAt, &v.IdentityVerified, &v.VisitorSeenAt,
-		&topicID, &topicName)
+		&topicID, &topicName,
+		&v.Source, &v.ExternalID, &v.ExternalChannel, &v.ExternalAssignee, &v.ExternalTeam, &v.Priority, &v.Reopens, &rating, &ratingRemark, &ratedAt,
+		&ai.Agent, &ai.Resolution, &ai.AnswerType, &ai.SourceType, &ai.SourceTitle, &ai.Rating, &ai.RatingRemark, &ai.Sources)
+	if rating != nil {
+		v.Rating = &supportRatingView{Score: *rating, Remark: deref(ratingRemark), RatedAt: ratedAt}
+	}
+	if ai.Agent != "" {
+		if len(ai.Sources) == 0 {
+			ai.Sources = json.RawMessage("[]")
+		}
+		v.AI = &ai
+	}
 	if topicID != nil {
 		v.Topic = &supportPerson{ID: *topicID, Name: deref(topicName)}
 	}
@@ -216,6 +276,22 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "assignee is me, none or a user id")
 		return
 	}
+	// following=me is the conversations the caller was looped in on.
+	switch f := qs.Get("following"); {
+	case f == "":
+	case f == "me" && a.UserID == "":
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "following=me needs a person signed in; pass their user id")
+		return
+	case f == "me", validUUID(f):
+		if f == "me" {
+			f = a.UserID
+		}
+		args = append(args, f)
+		where += ` AND EXISTS (SELECT 1 FROM support_followers f WHERE f.conversation_id = c.id AND f.user_id = $` + itoa(len(args)) + `)`
+	default:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "following is me or a user id")
+		return
+	}
 	if t := qs.Get("team_id"); t != "" {
 		if !validUUID(t) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "team_id is a team's id")
@@ -252,6 +328,15 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 		where += ` AND c.status <> 'closed' AND c.reply_breached_at IS NULL AND c.reply_due_at <= now() + interval '1 hour'`
 	default:
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "sla is overdue or due_soon")
+		return
+	}
+	switch src := qs.Get("source"); src {
+	case "":
+	case "outflare", "intercom":
+		args = append(args, src)
+		where += ` AND c.source = $` + itoa(len(args))
+	default:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "source is outflare or intercom")
 		return
 	}
 	if q := strings.TrimSpace(qs.Get("q")); q != "" {
@@ -336,6 +421,12 @@ type supportMessageView struct {
 	Error     *string        `json:"error"`
 	CreatedAt time.Time      `json:"created_at"`
 	SentAt    *time.Time     `json:"sent_at"`
+	// Who wrote it: customer, agent (a teammate), ai (an AI agent such as
+	// Intercom's Fin) or system; empty on messages from before it was kept.
+	AuthorType string `json:"author_type"`
+	// For a copied conversation, the teammate, team or bot who wrote it in
+	// that tool, by their name there.
+	ExternalAuthor *string `json:"external_author"`
 }
 
 // supportConversation loads one conversation the caller can see.
@@ -370,8 +461,9 @@ func (s *Server) getSupportConversation(w http.ResponseWriter, r *http.Request) 
 			     WHEN e.status IN ('bounced', 'complained', 'suppressed', 'failed', 'cancelled') THEN 'failed'
 			     ELSE 'sending' END,
 			COALESCE(m.error, CASE WHEN e.status IN ('bounced', 'complained', 'suppressed', 'failed', 'cancelled') THEN COALESCE(e.status_reason, e.status) END),
-			m.created_at, COALESCE(m.sent_at, e.sent_at)
+			m.created_at, COALESCE(m.sent_at, e.sent_at), m.author_type, xa.name
 		FROM support_messages m LEFT JOIN users u ON u.id = m.author_id LEFT JOIN emails e ON e.id = m.email_id
+		LEFT JOIN support_external_agents xa ON xa.id = m.external_author_id
 		WHERE m.conversation_id = $1 AND m.workspace_id = $2 ORDER BY m.created_at, m.id`, c.ID, a.WorkspaceID)
 	if err != nil {
 		s.internal(w, r, err)
@@ -381,7 +473,7 @@ func (s *Server) getSupportConversation(w http.ResponseWriter, r *http.Request) 
 		var m supportMessageView
 		var authorID, authorName *string
 		err := row.Scan(&m.ID, &m.Kind, &authorID, &authorName, &m.FromEmail, &m.FromName, &m.ToEmail, &m.Subject, &m.Body,
-			&m.AutoReply, &m.Status, &m.Error, &m.CreatedAt, &m.SentAt)
+			&m.AutoReply, &m.Status, &m.Error, &m.CreatedAt, &m.SentAt, &m.AuthorType, &m.ExternalAuthor)
 		if authorID != nil {
 			m.Author = &supportPerson{ID: *authorID, Name: deref(authorName)}
 		}
@@ -414,7 +506,13 @@ func (s *Server) getSupportConversation(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversation": c, "messages": msgs, "other_conversations": other})
+	s.sawLoopIn(ctx, loopInSupport, a.WorkspaceID, c.ID, a.UserID)
+	following, err := followers(ctx, s.pool, "support_followers", "conversation_id", a.WorkspaceID, c.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversation": c, "messages": msgs, "other_conversations": other, "followers": following})
 }
 
 // supportWrites refuses a brand-limited caller a conversation shared by
@@ -425,6 +523,25 @@ func (s *Server) supportWrites(w http.ResponseWriter, r *http.Request, a *access
 	}
 	writeError(w, r, http.StatusForbidden, "forbidden", "this conversation belongs to no brand, so only people with every brand can change it")
 	return false
+}
+
+// supportAnswers refuses changes to a conversation copied from another
+// tool: it is answered, assigned and closed there, and the next sync would
+// undo the change. Notes still work.
+func supportAnswers(w http.ResponseWriter, r *http.Request, c *supportConversationView) bool {
+	if c.Source == "" || c.Source == "outflare" {
+		return true
+	}
+	writeError(w, r, http.StatusConflict, "conversation_imported",
+		"this conversation is copied from "+supportSourceName(c.Source)+" and answered there: reply, assign or close it in "+supportSourceName(c.Source))
+	return false
+}
+
+func supportSourceName(source string) string {
+	if source == "intercom" {
+		return "Intercom"
+	}
+	return source
 }
 
 // supportError writes the error for a failed support call; false if none.
@@ -491,6 +608,9 @@ func (s *Server) updateSupportConversation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !s.supportWrites(w, r, a, c) {
+		return
+	}
+	if !supportAnswers(w, r, c) {
 		return
 	}
 	data := map[string]any{}
@@ -601,6 +721,9 @@ func (s *Server) replySupportConversation(w http.ResponseWriter, r *http.Request
 	if !s.supportWrites(w, r, a, c) {
 		return
 	}
+	if !supportAnswers(w, r, c) {
+		return
+	}
 	if req.AssistantRunID != "" && !validUUID(req.AssistantRunID) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "assistant_run_id is not a draft waiting on this conversation")
 		return
@@ -687,6 +810,9 @@ func (s *Server) suggestSupportReply(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	c, err := s.supportConversation(ctx, a, r.PathValue("id"))
 	if s.supportError(w, r, err) {
+		return
+	}
+	if !supportAnswers(w, r, c) {
 		return
 	}
 	var question string

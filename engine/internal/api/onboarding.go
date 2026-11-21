@@ -136,7 +136,7 @@ func (s *Server) loadOnboarding(ctx context.Context, ws string) (onboardingView,
 	models := s.connectorsIn(false, connectors.CategoryModel)
 	tools := s.connectorsIn(true, connectors.CategoryModel)
 	done := map[string]bool{"goal": v.Goal != nil}
-	var brand, team, ai, connected, mission bool
+	var brand, team, ai, connected, mission, anyBrand bool
 	// An AI is connected when the workspace has its own model key, or an
 	// AI app (Claude, ChatGPT) runs Outflare over MCP.
 	err = s.pool.QueryRow(ctx, `
@@ -149,9 +149,10 @@ func (s *Server) loadOnboarding(ctx context.Context, ws string) (onboardingView,
 				OR EXISTS (SELECT 1 FROM oauth_grants g JOIN api_tokens t ON t.id = g.api_token_id
 					WHERE g.workspace_id = $1 AND t.revoked_at IS NULL AND g.expires_at > now()),
 			EXISTS (SELECT 1 FROM integrations WHERE workspace_id = $1 AND connector = ANY($3)),
-			EXISTS (SELECT 1 FROM agent_runs WHERE workspace_id = $1) OR EXISTS (SELECT 1 FROM missions WHERE workspace_id = $1)`,
+			EXISTS (SELECT 1 FROM agent_runs WHERE workspace_id = $1) OR EXISTS (SELECT 1 FROM missions WHERE workspace_id = $1),
+			EXISTS (SELECT 1 FROM brands WHERE workspace_id = $1 AND status = 'active')`,
 		ws, models, tools,
-	).Scan(&brand, &team, &ai, &connected, &mission)
+	).Scan(&brand, &team, &ai, &connected, &mission, &anyBrand)
 	if err != nil {
 		return v, err
 	}
@@ -199,7 +200,7 @@ func (s *Server) loadOnboarding(ctx context.Context, ws string) (onboardingView,
 	base := s.appPath(ctx, ws, "")
 	for _, st := range s.stepsFor() {
 		sv := onboardingStepView{
-			ID: st.id, Title: st.title, Detail: st.detail, Tool: st.tool, Walkthrough: st.walkthrough,
+			ID: st.id, Title: stepTitle(st.id, st.title, anyBrand), Detail: st.detail, Tool: st.tool, Walkthrough: st.walkthrough,
 			Done: done[st.id], Page: base + st.page,
 		}
 		sv.Skipped = !sv.Done && slices.Contains(skipped, st.id)
@@ -355,4 +356,13 @@ func (s *Server) updateOnboarding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// stepTitle words the brand step for a workspace that already has a brand
+// without a website, so it never asks to add a brand that is there.
+func stepTitle(id, title string, anyBrand bool) string {
+	if id == "brand" && anyBrand {
+		return "Add your brand's website"
+	}
+	return title
 }

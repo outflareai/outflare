@@ -54,7 +54,7 @@ func (h *Host) AddAlertKind(k AlertKind) {
 }
 
 // RaiseAlert keeps an alert, records alert.raised and queues its emails and
-// Slack post, all in tx. It returns the alert's id, or "" when the same
+// its Slack and Telegram posts, all in tx. It returns the alert's id, or "" when the same
 // thing (its DedupeKey) was already raised.
 func RaiseAlert(ctx context.Context, tx pgx.Tx, a Alert) (string, error) {
 	return alerts.Raise(ctx, tx, a)

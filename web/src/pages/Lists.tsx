@@ -85,13 +85,13 @@ function credits(n: number) {
 
 // Lead lists belong to one brand (plans/brands/README.md): with all brands
 // picked the page asks for one, and switching brands opens it afresh.
-export function Lists(props: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab) => void }) {
+export function Lists(props: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab, item?: string) => void }) {
   const { brand, active } = useBrand(props.ws);
   if (!brand) return <PickBrand what="Lead lists" brands={active.length} />;
   return <ListsPage key={brand.id} {...props} />;
 }
 
-function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab) => void }) {
+function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab, item?: string) => void }) {
   const brandId = useBrand(ws).brand?.id ?? "";
   const [lists, setLists] = useState<LeadList[] | null>(null);
   const [smart, setSmart] = useState<SmartList[] | null>(null);
@@ -210,6 +210,7 @@ function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage
           onBack={() => setOpen(undefined)}
           onEdit={(l) => setEditingSmart(l)}
           onChanged={load}
+          go={go}
         />
         {sheet}
       </>
@@ -402,7 +403,7 @@ function ListDetail({
   ws, id, canManage, integrationName, onBack, onEdit, onChanged, go,
 }: {
   ws: string; id: string; canManage: boolean; integrationName: (id?: string | null) => string | undefined;
-  onBack: () => void; onEdit: (l: LeadList) => void; onChanged: () => void; go: (t: Tab) => void;
+  onBack: () => void; onEdit: (l: LeadList) => void; onChanged: () => void; go: (t: Tab, item?: string) => void;
 }) {
   const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<LeadList | null>(null);

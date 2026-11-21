@@ -85,7 +85,7 @@ func SourceForBrand(ctx context.Context, q Querier, ws, brand, siteHost string) 
 		FROM search_syncs y JOIN integrations i ON i.id = y.integration_id AND i.status = 'connected'
 		WHERE y.workspace_id = $1 AND y.host <> '' AND ($2 = y.host OR $2 LIKE '%.' || y.host)
 		AND integration_serves(i,$3::uuid)
-          AND outflare_site_brand_or_first(i.id, y.site) = $3::uuid
+          AND outflare_site_brand_now(i.id, y.site) = $3::uuid
         ORDER BY (y.site LIKE 'sc-domain:%') DESC, length(y.host) DESC, y.newest_day DESC NULLS LAST, y.integration_id
 		LIMIT 1`, ws, bare, brand).Scan(&s.IntegrationID, &s.Property, &s.Host, &s.OldestDay, &s.NewestDay, &s.LastRunAt, &s.LastError)
 	if errors.Is(err, pgx.ErrNoRows) {

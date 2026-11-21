@@ -37,8 +37,8 @@ func TestQuery(t *testing.T) {
 	h := freshServer(t)
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
-	gn := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
+	gn := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})["id"].(string)
 	owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Ada", "brand_id": rp,
 		"identities": []map[string]any{{"namespace": "email", "value": "ada@acme.example"}}})
 	owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Grace", "brand_id": gn})
@@ -50,7 +50,7 @@ func TestQuery(t *testing.T) {
 	owner.must(201, "POST", "/v1/workspaces/"+other+"/records", map[string]any{"type": "person", "name": "Elsewhere"})
 
 	// A query reads one brand's records.
-	out := owner.must(200, "POST", base+"/query?brand=repocket", map[string]any{"sql": "select name, email from people order by name;"})
+	out := owner.must(200, "POST", base+"/query?brand=summitly", map[string]any{"sql": "select name, email from people order by name;"})
 	rows := queryRows(t, out)
 	if len(rows) != 1 || rows[0][0] != "Ada" || rows[0][1] != "ada@acme.example" {
 		t.Fatalf("people: %v", out)
@@ -72,7 +72,7 @@ func TestQuery(t *testing.T) {
 
 	// A token kept to one brand sees only that brand's people: one made
 	// without a brand belongs to the workspace's first brand.
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": []string{"customers.read", "leads.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly agent", "scopes": []string{"customers.read", "leads.read"}, "brand": "summitly"})
 	agent := &client{t: t, h: h, bearer: tok["token"].(string), header: map[string]string{"Outflare-Client": "mcp/0.1.0", "Outflare-Tool": "run_query"}}
 	out = agent.must(200, "POST", base+"/query", map[string]any{"sql": "select name from people order by name"})
 	if rows := queryRows(t, out); len(rows) != 1 || rows[0][0] != "Ada" {
@@ -185,6 +185,9 @@ func TestQueryTablesMatchSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Built-in types other than people and companies are views made per
+	// query too.
+	own = append(own, "customer_account")
 	names = slices.DeleteFunc(names, func(n string) bool { return slices.Contains(own, n) && !slices.Contains(views, n) })
 	slices.Sort(names)
 	// The database can be newer than this code: the previous version runs on

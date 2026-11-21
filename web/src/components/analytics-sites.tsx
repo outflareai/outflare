@@ -33,7 +33,7 @@ const belongs = (host: string, b: Brand) => !!host && domainsOf(b).some((d) => h
 const testCopy = /\b(staging|stage|test|testing|dev|development|sandbox|qa|preview|local)\b/i;
 
 // guessBrand reads the brand from the site's address, else from its name
-// ("zenshield-4fe59" is Zenshield). GA4 adds the account in brackets, which
+// ("summitly-4fe59" is Summitly). GA4 adds the account in brackets, which
 // names the company rather than the site, so that part is left out.
 export function guessBrand(site: AnalyticsSitePlan, brands: Brand[]): Brand | undefined {
   return guess(site, brands)?.brand;
@@ -254,10 +254,11 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
           </p>
         )}
         <div className="flex gap-2">
-          {onCancel && <Button variant="ghost" onClick={onCancel} disabled={busy}>Later</Button>}
-          {canManage && (onCancel || changed.length > 0) && (
+          {onCancel && (changed.length > 0 || missing > 0 || !canManage) && <Button variant="ghost" onClick={onCancel} disabled={busy}>Later</Button>}
+          {canManage && onCancel && changed.length === 0 && missing === 0 && <Button onClick={onCancel}>Done</Button>}
+          {canManage && (changed.length > 0 || missing > 0) && (
             <Button onClick={save} disabled={busy || changed.length === 0 || missing > 0} title={missing > 0 ? "Choose a brand or Don't import for every site" : undefined}>
-              {busy ? "Saving…" : missing > 0 ? `${missing === 1 ? "1 site needs" : `${missing} sites need`} a choice` : changed.length ? `Save ${changed.length === 1 ? "1 site" : `${changed.length} sites`}` : "Saved"}
+              {busy ? "Saving…" : missing > 0 ? `${missing === 1 ? "1 site needs" : `${missing} sites need`} a choice` : `Save ${changed.length === 1 ? "1 site" : `${changed.length} sites`}`}
             </Button>
           )}
         </div>

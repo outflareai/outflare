@@ -15,6 +15,10 @@ A product is something the brand sells, such as "Residential proxies" or "Datace
 
 `POST /v1/brands/{brand}/products` adds one (scope `catalog.manage`, MCP `create_product`). `PATCH .../products/{product}` changes its name, churn mode, days and aliases (in the app: Edit on its row in People → Products). `POST .../archive` archives it: it keeps its history, but its events no longer move anyone and it leaves companies' overall status. `POST .../restore` brings it back.
 
+### Categories
+
+A product can belong to a **category**, a family of products such as `proxies` or `web_data` (`category`, lowercase letters, digits, dots, dashes and underscores; empty for none). Set it when adding or editing a product (People → Products, `PATCH .../products/{product}` with `{"category": "proxies"}`); `GET .../products?category=proxies` lists one category. Trends split and filter events by it (`product_category`, [Insights](insights.md)), and a [metric](metrics.md) can count one category's products only, such as GB used across every proxy product in the last 30 days. Stages stay per product.
+
 ### Which product an event is about
 
 An event names its product in its properties:
@@ -27,9 +31,21 @@ An event names its product in its properties:
 
 Products come from wherever your brand already has them: a billing connection, the API, the names in your events, or by hand. You don't need Stripe. Choose which of these the brand takes names from with `sources` (`PATCH /v1/brands/{brand}/lifecycle`).
 
+### Products from events
+
+An event that names its product and that product's category adds the product by itself, so a brand that sends usage needs no setup:
+
+```json
+{"type": "track", "userId": "u_42", "event": "Product Usage", "properties": {"product": "residential_proxies", "product_category": "proxies"}}
+```
+
+When `properties.product_category` is a valid [category](#categories) and the name matches no product or mapped name, the product is added with that name as its key (`residential_proxies`), a readable name made from it ("Residential proxies"), that category and churn mode `inactivity` (usage-based products churn when they go quiet). Its `product.created` event says `from_event`. When a later event gives a product another category, the product moves to it (`product.updated`): the events are the source of truth, so change the category where they are sent. Rename a product or change its churn mode as usual.
+
+A name that someone ignored is never added, a name that isn't a valid key stays held, an event without a category is held as before, and browser events never add products. Turning off `event` in the brand's `sources` turns this off too.
+
 ### Held names
 
-A name no product has yet is **held** for review: it is listed with how often and when it was seen, and drives nothing until someone maps it. `GET /v1/brands/{brand}/product-names?status=held` (MCP `list_product_names`) lists them. `PATCH .../product-names/{name}` with `{"status": "mapped", "product_id": "..."}` maps one, and `{"status": "ignored"}` ignores it (scope `customers.manage`). You can also map or ignore a name before it is seen (`POST .../product-names`). Events already stored keep the product they had; events from then on use the mapping.
+A name no product has yet, sent without a category, is **held** for review: it is listed with how often and when it was seen, and drives nothing until someone maps it. `GET /v1/brands/{brand}/product-names?status=held` (MCP `list_product_names`) lists them. `PATCH .../product-names/{name}` with `{"status": "mapped", "product_id": "..."}` maps one, and `{"status": "ignored"}` ignores it (scope `customers.manage`). You can also map or ignore a name before it is seen (`POST .../product-names`). Events already stored keep the product they had; events from then on use the mapping.
 
 Names are held only once the brand has a product or has stages on, so a brand that doesn't use products never collects them.
 

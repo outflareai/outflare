@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,6 +57,8 @@ type Syncer struct {
 
 type payload struct {
 	Integration string `json:"integration_id"`
+	// Now: someone asked for this sync, so it is not a scheduled one.
+	Now bool `json:"now,omitempty"`
 }
 
 // Register adds the job handler.
@@ -175,10 +178,11 @@ func (s *Syncer) QueueDue(ctx context.Context) error {
 // Enqueue asks for a sync of one connection. Key de-duplicates; "" is a
 // sync someone asked for now.
 func Enqueue(ctx context.Context, q jobs.Querier, ws, integrationID, key string) (int64, error) {
-	if key == "" {
+	now := key == ""
+	if now {
 		key = fmt.Sprintf("%s:now:%d", integrationID, time.Now().Unix()/30)
 	}
-	return jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobSync, WorkspaceID: &ws, Payload: payload{Integration: integrationID},
+	return jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobSync, WorkspaceID: &ws, Payload: payload{Integration: integrationID, Now: now},
 		IdempotencyKey: key, MaxAttempts: 3})
 }
 
@@ -186,6 +190,9 @@ func (s *Syncer) job(ctx context.Context, job jobs.Job) error {
 	var p payload
 	if err := json.Unmarshal(job.Payload, &p); err != nil || job.WorkspaceID == nil {
 		return nil
+	}
+	if p.Now {
+		ctx = AskedNow(ctx)
 	}
 	_, err := s.SyncOnce(ctx, *job.WorkspaceID, p.Integration)
 	if errors.Is(err, connectors.ErrNotFound) {
@@ -197,6 +204,19 @@ func (s *Syncer) job(ctx context.Context, job jobs.Job) error {
 		return nil
 	}
 	return err
+}
+
+type askedNowKey struct{}
+
+// AskedNow marks a sync someone asked for, rather than a scheduled one: it
+// also re-reads what a scheduled run reads once a day (the sitemaps).
+func AskedNow(ctx context.Context) context.Context {
+	return context.WithValue(ctx, askedNowKey{}, true)
+}
+
+func askedNow(ctx context.Context) bool {
+	v, _ := ctx.Value(askedNowKey{}).(bool)
+	return v
 }
 
 // Result is what one run stored.
@@ -342,6 +362,14 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 			return res, err
 		}
 	}
+	// The sites that waited longest go first, so a run that is stopped
+	// part-way (a deploy, a lost lease) does not leave the same sites at the
+	// end of the list unsynced run after run.
+	waited, err := s.lastRuns(ctx, integrationID)
+	if err != nil {
+		return res, err
+	}
+	sort.SliceStable(plan, func(a, b int) bool { return waited[plan[a].ID].Before(waited[plan[b].ID]) })
 	for _, p := range plan {
 		if !p.Sync {
 			continue
@@ -383,6 +411,31 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 		}
 	}
 	return res, firstErr
+}
+
+// lastRuns is when each site of a connection last finished a sync: the
+// older of its analytics and Search Console runs. A site that never ran is
+// missing, which sorts first.
+func (s *Syncer) lastRuns(ctx context.Context, integrationID string) (map[string]time.Time, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT site, min(last_run_at) FROM (
+			SELECT site, last_run_at FROM analytics_syncs WHERE integration_id = $1
+			UNION ALL SELECT site, last_run_at FROM search_syncs WHERE integration_id = $1) x
+		WHERE last_run_at IS NOT NULL GROUP BY site`, integrationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var site string
+		var at time.Time
+		if err := rows.Scan(&site, &at); err != nil {
+			return nil, err
+		}
+		out[site] = at
+	}
+	return out, rows.Err()
 }
 
 // dbError is Outflare's own database failing, which stops the run.

@@ -57,6 +57,7 @@ func (s *Server) routesOwnPlaybooks(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base, s.onBrand(auth.ScopeCustomersRead, s.listOwnPlaybooks))
 	mux.HandleFunc("POST "+base, s.onBrand(auth.ScopeCatalogManage, s.createOwnPlaybook))
 	mux.HandleFunc("GET "+base+"/{id}", s.onBrand(auth.ScopeCustomersRead, s.getOwnPlaybook))
+	mux.HandleFunc("GET "+base+"/{id}/lift", s.onBrand(auth.ScopeAnalyticsRead, s.getOwnPlaybookLift))
 	mux.HandleFunc("PATCH "+base+"/{id}", s.onBrand(auth.ScopeCatalogManage, s.updateOwnPlaybook))
 	mux.HandleFunc("DELETE "+base+"/{id}", s.onBrand(auth.ScopeCatalogManage, s.deleteOwnPlaybook))
 }
@@ -108,6 +109,26 @@ func ownPlaybookHome(r *http.Request, tx pgx.Tx, a *access, p *ownPlaybook, part
 	if err := add("signal_type", `SELECT t.key, NULL::text, t.label, CASE WHEN t.archived_at IS NULL THEN 'active' ELSE 'archived' END,
 			(SELECT count(*)::int FROM signals g WHERE g.workspace_id = t.workspace_id AND g.brand_id = t.brand_id AND g.type = t.key AND g.status IN ('open', 'accepted'))
 		FROM signal_types t WHERE t.workspace_id = $1 AND t.brand_id = $2 AND t.key = ANY ($3)`); err != nil {
+		return err
+	}
+	if err := add("score", `SELECT x.id::text, x.id::text, x.label, x.status,
+			(SELECT count(*)::int FROM records r WHERE r.workspace_id = x.workspace_id AND r.brand_id = x.brand_id AND r.record_type = x.record_type
+				AND r.attributes->'scores' ? x.key AND r.merged_into IS NULL AND r.archived_at IS NULL AND r.deleted_at IS NULL)
+		FROM score_definitions x WHERE x.workspace_id = $1 AND x.brand_id = $2 AND x.id::text = ANY ($3)`); err != nil {
+		return err
+	}
+	if err := add("routing_rule", `SELECT x.id::text, x.id::text, x.name, x.status, LEAST(x.assigned, 2147483647)::int
+		FROM routing_rules x WHERE x.workspace_id = $1 AND x.brand_id = $2 AND x.id::text = ANY ($3)`); err != nil {
+		return err
+	}
+	if err := add("email", `SELECT x.id::text, x.id::text, x.name, x.status,
+			(SELECT count(*)::int FROM emails e WHERE e.workspace_id = x.workspace_id AND e.template_id = x.id AND e.created_at > now() - interval '30 days')
+		FROM email_templates x WHERE x.workspace_id = $1 AND x.brand_id = $2 AND x.id::text = ANY ($3)`); err != nil {
+		return err
+	}
+	if err := add("metric", `SELECT x.id::text, x.id::text, x.name, x.status,
+			(SELECT count(DISTINCT v.record_id)::int FROM metric_values v WHERE v.metric_id = x.id)
+		FROM metric_definitions x WHERE x.workspace_id = $1 AND x.brand_id = $2 AND x.id::text = ANY ($3)`); err != nil {
 		return err
 	}
 	// In the order the playbook lists them.
@@ -210,7 +231,7 @@ func checkOwnPlaybookParts(r *http.Request, tx pgx.Tx, a *access, parts []ownPla
 	ids := map[string][]string{}
 	for _, part := range parts {
 		switch part.Kind {
-		case "rule", "journey", "smart_list":
+		case "rule", "journey", "smart_list", "score", "routing_rule", "email", "metric":
 			if !validUUID(part.ID) {
 				return errInvalid("a " + strings.ReplaceAll(part.Kind, "_", " ") + " part's id is its id")
 			}
@@ -219,7 +240,7 @@ func checkOwnPlaybookParts(r *http.Request, tx pgx.Tx, a *access, parts []ownPla
 				return errInvalid("a signal_type part's id is the type's key, such as churn_risk")
 			}
 		default:
-			return errInvalid("a part's kind is rule, journey, smart_list or signal_type")
+			return errInvalid("a part's kind is rule, journey, smart_list, signal_type, score, routing_rule, email or metric")
 		}
 		if seen[part.Kind+" "+part.ID] {
 			return errInvalid("each part is listed once")
@@ -228,10 +249,14 @@ func checkOwnPlaybookParts(r *http.Request, tx pgx.Tx, a *access, parts []ownPla
 		ids[part.Kind] = append(ids[part.Kind], part.ID)
 	}
 	for kind, sql := range map[string]string{
-		"rule":        `SELECT count(*) FROM rules WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3) AND status <> 'archived'`,
-		"journey":     `SELECT count(*) FROM journeys WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3) AND status <> 'archived'`,
-		"smart_list":  `SELECT count(*) FROM smart_lists WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3)`,
-		"signal_type": `SELECT count(*) FROM signal_types WHERE workspace_id = $1 AND brand_id = $2 AND key = ANY ($3)`,
+		"rule":         `SELECT count(*) FROM rules WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3) AND status <> 'archived'`,
+		"journey":      `SELECT count(*) FROM journeys WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3) AND status <> 'archived'`,
+		"smart_list":   `SELECT count(*) FROM smart_lists WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3)`,
+		"signal_type":  `SELECT count(*) FROM signal_types WHERE workspace_id = $1 AND brand_id = $2 AND key = ANY ($3)`,
+		"score":        `SELECT count(*) FROM score_definitions WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3) AND status <> 'archived'`,
+		"routing_rule": `SELECT count(*) FROM routing_rules WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3)`,
+		"email":        `SELECT count(*) FROM email_templates WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3) AND status <> 'archived'`,
+		"metric":       `SELECT count(*) FROM metric_definitions WHERE workspace_id = $1 AND brand_id = $2 AND id::text = ANY ($3) AND status <> 'archived'`,
 	} {
 		if len(ids[kind]) == 0 {
 			continue
@@ -385,4 +410,46 @@ func (s *Server) deleteOwnPlaybook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// getOwnPlaybookLift answers "did it work?" for one of the brand's own
+// playbooks: each journey in it that holds some people back at random is
+// compared with the ones it held back (playbook_lift.go).
+func (s *Server) getOwnPlaybookLift(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	id := r.PathValue("id")
+	var raw []byte
+	if validUUID(id) {
+		err := s.pool.QueryRow(r.Context(), `SELECT parts FROM own_playbooks WHERE id = $1 AND workspace_id = $2 AND brand_id = $3`, id, a.WorkspaceID, a.Brand).Scan(&raw)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			s.internal(w, r, err)
+			return
+		}
+	}
+	if raw == nil {
+		writeError(w, r, http.StatusNotFound, "not_found", "this brand has no playbook of its own with that id")
+		return
+	}
+	var parts []ownPlaybookPart
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	ids := []string{}
+	for _, part := range parts {
+		if part.Kind == "journey" {
+			ids = append(ids, part.ID)
+		}
+	}
+	days, event, ok := liftQuery(w, r)
+	if !ok {
+		return
+	}
+	list, measured, err := s.journeysLift(r.Context(), a, `id::text = ANY ($3)`, ids, days, event)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"playbook_id": id, "days": days, "event": event, "measured": measured,
+		"min_people": liftMinPeople, "journeys": list})
 }

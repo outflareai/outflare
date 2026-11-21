@@ -3,6 +3,9 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
+	salesDraftResults = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "sales", Name: "draft_results_total", Help: "Committed personal AI preview results, without workspace or person labels."}, []string{"status"})
+	salesDraftAge     = desc("sales", "oldest_draft_seconds", "Age of the oldest queued or running personal AI preview, by status.", "status")
+
 	salesSendResults = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "sales", Name: "send_results_total",
 		Help: "Committed Sales send results, by status: accepted, failed or uncertain. Uncertain means reconciliation is required, never safe to resend.",
@@ -28,5 +31,12 @@ func SalesMessageStored(direction string) {
 	switch direction {
 	case "incoming", "outgoing":
 		salesStoredMessages.WithLabelValues(direction).Inc()
+	}
+}
+
+// SalesDraftResult counts committed previews, not sent messages.
+func SalesDraftResult(status string) {
+	if status == "ready" || status == "failed" {
+		salesDraftResults.WithLabelValues(status).Inc()
 	}
 }

@@ -25,6 +25,10 @@ func (s *Server) routesLinkOrders(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/catalog", s.onBrand(auth.ScopeCoverageRead, s.listLinkOrderCatalog))
 	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/catalog", s.onBrand(auth.ScopeCoverageManage, s.createLinkOrderCatalog))
 	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/catalog/import", s.onBrand(auth.ScopeCoverageManage, s.importLinkOrderCatalog))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/catalog/table", s.onBrand(auth.ScopeCoverageManage, s.readLinkOrderCatalogTable))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/catalog/find-emails", s.onBrand(auth.ScopeCoverageManage, s.findLinkOrderDonorEmails))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/catalog/ahrefs-check", s.onBrand(auth.ScopeCoverageManage, s.checkLinkOrderDonorsInAhrefs))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-orders/catalog/copy", s.onBrand(auth.ScopeCoverageManage, s.copyLinkOrderCatalog))
 	mux.HandleFunc("GET /v1/brands/{brand}/link-orders/catalog/items/{id}", s.onBrand(auth.ScopeCoverageRead, s.getLinkOrderCatalogItem))
 	mux.HandleFunc("PATCH /v1/brands/{brand}/link-orders/catalog/items/{id}", s.onBrand(auth.ScopeCoverageManage, s.updateLinkOrderCatalogItem))
 

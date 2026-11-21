@@ -116,3 +116,59 @@ func TestPaymentChecks(t *testing.T) {
 	pay(201, map[string]any{"amount_minor": 49, "source_id": "tiny_1", "user_id": "u7"})
 	want("amounts", "warning", "50 or more times smaller")
 }
+
+func TestPaymentRetryChecksSkipHistory(t *testing.T) {
+	e := freshEnv(t)
+	admin, ws := setupOwner(t, e.h)
+	ctx := context.Background()
+	firstReceived := time.Now().UTC().Add(-5 * time.Minute)
+	secondReceived := firstReceived.Add(3 * time.Minute)
+	for _, source := range []string{"api", "events"} {
+		for _, tc := range []struct {
+			name                    string
+			firstDelay, secondDelay time.Duration
+			want                    int
+		}{
+			{name: "live", want: 1},
+			{name: "history", firstDelay: 90 * 24 * time.Hour, secondDelay: 90 * 24 * time.Hour},
+			{name: "live_then_history", secondDelay: 90 * 24 * time.Hour},
+			{name: "history_then_live", firstDelay: 90 * 24 * time.Hour},
+			{name: "at_one_day", firstDelay: 24 * time.Hour, secondDelay: 24 * time.Hour, want: 1},
+			// These mixed pairs are still within the occurrence-time window:
+			// each side of the pair must satisfy the arrival limit separately.
+			{name: "earlier_payment_over_one_day", firstDelay: 24*time.Hour + time.Second, secondDelay: 24 * time.Hour},
+			{name: "later_payment_over_one_day", firstDelay: 24 * time.Hour, secondDelay: 24*time.Hour + time.Second},
+		} {
+			t.Run(source+"/"+tc.name, func(t *testing.T) {
+				owner := *admin
+				owner.t = t
+				brand := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": source + " " + tc.name})["id"].(string)
+				base := "/v1/brands/" + brand
+				person := owner.must(201, "POST", base+"/records", map[string]any{"type": "person"})["id"].(string)
+				if _, err := e.pool.Exec(ctx, `INSERT INTO transactions
+					(workspace_id, brand_id, record_id, kind, amount_minor, currency, source, source_id, occurred_at, created_at)
+					VALUES ($1, $2, $3, 'payment', 4900, 'USD', $4, 'first', $5, $6),
+					       ($1, $2, $3, 'payment', 4900, 'USD', $4, 'second', $7, $8)`,
+					ws, brand, person, source, firstReceived.Add(-tc.firstDelay), firstReceived,
+					secondReceived.Add(-tc.secondDelay), secondReceived); err != nil {
+					t.Fatal(err)
+				}
+				for _, item := range owner.must(200, "GET", base+"/developer-setup", nil)["checks"].([]any) {
+					check := item.(map[string]any)
+					if check["key"] != "retries" {
+						continue
+					}
+					status := "ok"
+					if tc.want > 0 {
+						status = "warning"
+					}
+					if check["count"] != float64(tc.want) || check["status"] != status {
+						t.Fatalf("retries = %v, want count %d and status %s", check, tc.want, status)
+					}
+					return
+				}
+				t.Fatal("no retries check")
+			})
+		}
+	}
+}

@@ -125,6 +125,64 @@ func TestSupportInbox(t *testing.T) {
 	if c := owner.must(200, "PATCH", cb, map[string]any{"assignee_id": me, "tags": []string{"Billing", "billing", "refund"}}); c["assignee"] == nil || len(c["tags"].([]any)) != 2 {
 		t.Fatalf("assigned: %v", c)
 	}
+	// Loop a teammate in: it shows under their Watching view until they
+	// are taken off.
+	fb := "/v1/brands/" + brandOf(t, e, `SELECT brand_id::text FROM support_conversations WHERE id = $1`, conv) + "/support/conversations/" + conv + "/followers/"
+	owner.must(400, "PUT", fb+"00000000-0000-0000-0000-000000000000", nil)
+	for range 2 {
+		if f := owner.must(200, "PUT", fb+me, nil)["followers"].([]any); len(f) != 1 || f[0].(map[string]any)["id"] != me {
+			t.Fatalf("looped in: %v", f)
+		}
+	}
+	if l := owner.must(200, "GET", base+"/support/conversations?following=me&status=all", nil); l["total"] != 1.0 {
+		t.Fatalf("watching: %v", l)
+	}
+	if f := owner.must(200, "GET", cb, nil)["followers"].([]any); len(f) != 1 {
+		t.Fatalf("followers on the conversation: %v", f)
+	}
+	if f := owner.must(200, "DELETE", fb+me, nil)["followers"].([]any); len(f) != 0 {
+		t.Fatalf("taken off: %v", f)
+	}
+	if l := owner.must(200, "GET", base+"/support/conversations?following=me&status=all", nil); l["total"] != 0.0 {
+		t.Fatalf("still watching: %v", l)
+	}
+	if n := len(named(got(), "support.follower_added")) + len(named(got(), "support.follower_removed")); n != 2 {
+		t.Fatalf("%d follower events, want 2", n)
+	}
+
+	// Hand it to another team in one step: it moves there unassigned,
+	// with a note, whoever handed it over keeps watching, and the
+	// customer's owner gets a signal.
+	ho := "/v1/brands/" + brandOf(t, e, `SELECT brand_id::text FROM support_conversations WHERE id = $1`, conv) + "/support/conversations/" + conv + "/hand-off"
+	sales := owner.must(201, "POST", base+"/teams", map[string]any{"name": "Sales"})["id"].(string)
+	owner.must(400, "POST", ho, map[string]any{})
+	owner.must(400, "POST", ho, map[string]any{"team_id": "00000000-0000-0000-0000-000000000000"})
+	owner.must(400, "POST", ho, map[string]any{"team_id": sales, "signal": "no_such_type"})
+	h := owner.must(200, "POST", ho, map[string]any{"team_id": sales, "note": "Wants ten more seats.", "signal": "upsell"})
+	if hc := h["conversation"].(map[string]any); h["signal"] != "raised" || hc["assignee"] != nil || hc["team"].(map[string]any)["id"] != sales || hc["unread"] != true {
+		t.Fatalf("handed off: %v", h)
+	}
+	if h := owner.must(200, "POST", ho, map[string]any{"team_id": sales, "signal": "upsell"}); h["signal"] != "duplicate" {
+		t.Fatalf("handed off twice: %v", h)
+	}
+	if h := owner.must(200, "POST", ho, map[string]any{"team_id": sales}); h["signal"] != "none" {
+		t.Fatalf("handed off without a signal: %v", h)
+	}
+	after := owner.must(200, "GET", cb, nil)
+	if f := after["followers"].([]any); len(f) != 1 || f[0].(map[string]any)["id"] != me {
+		t.Fatalf("not watching after the hand-off: %v", f)
+	}
+	var handNote bool
+	for _, x := range after["messages"].([]any) {
+		if m := x.(map[string]any); m["kind"] == "note" && m["body"] == "Handed to Sales. Wants ten more seats." {
+			handNote = true
+		}
+	}
+	if !handNote || len(named(got(), "support.conversation_handed_off")) != 3 || len(named(got(), "signal.raised")) != 1 {
+		t.Fatalf("hand-off note %v, events %d and %d", handNote, len(named(got(), "support.conversation_handed_off")), len(named(got(), "signal.raised")))
+	}
+	owner.must(200, "PATCH", cb, map[string]any{"assignee_id": me, "team_id": nil})
+	owner.must(200, "DELETE", fb+me, nil)
 	if l := owner.must(200, "GET", base+"/support/conversations?assignee=me", nil); l["total"] != 1.0 || l["counts"].(map[string]any)["mine"] != 1.0 {
 		t.Fatalf("mine: %v", l)
 	}
@@ -154,8 +212,8 @@ func TestSupportInbox(t *testing.T) {
 
 	// The mailbox is the workspace's only brand's, so a second brand
 	// doesn't see its conversations.
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket", "website": "https://repocket.com"})
-	if l := owner.must(200, "GET", base+"/support/conversations?status=all&brand=repocket", nil); l["total"] != 0.0 {
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "handle": "summitly", "website": "https://summitly.example"})
+	if l := owner.must(200, "GET", base+"/support/conversations?status=all&brand=summitly", nil); l["total"] != 0.0 {
 		t.Fatalf("other brand: %v", l)
 	}
 

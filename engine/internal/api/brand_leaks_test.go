@@ -16,6 +16,7 @@ import (
 	"go.yaml.in/yaml/v4"
 
 	spec "github.com/outflareai/outflare/api"
+	"github.com/outflareai/outflare/engine/internal/db"
 )
 
 // brandWide lists the GET endpoints that answer for the whole workspace on
@@ -87,8 +88,20 @@ func TestNoBrandLeaks(t *testing.T) {
 			s.seed(tbl)
 		}
 	}
+	// A table a newer version added is left alone: CI also runs this
+	// version's tests on the next one's schema (the rollback check), where
+	// this seeder can't know the new table's rules and this version has no
+	// endpoint that reads it. The newer version's own run fills it.
+	known, err := db.KnownTables()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var missed []string
 	for tbl, why := range s.failed {
+		if !known[tbl] {
+			t.Logf("%s was added by a newer version and couldn't be filled; left out: %s", tbl, why)
+			continue
+		}
 		if s.branded[tbl] && !slices.Contains(skipSeed, tbl) {
 			missed = append(missed, tbl+": "+why)
 		}
@@ -363,6 +376,7 @@ func (s *seeder) wanted() []string {
 var seedValues = map[string]string{
 	"insights.spec":                     `{"steps": [{"kind": "visit"}, {"kind": "page"}]}`,
 	"insights.kind":                     "funnel",
+	"event_destinations.kind":           "webhook",
 	"partner_reward_rules.kind":         "fixed",
 	"partner_reward_rules.amount_cents": "100",
 	"partner_reward_rules.trigger":      "payment",
@@ -449,18 +463,32 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 		return cast, `{"base": "linear"}`
 	case "tracking_link_clicks.click_key", "tracking_click_claims.click_key":
 		return cast, "bravo00000000000"
-	case "sales_quotas.period":
+	case "sales_quotas.period", "revenue_forecast_history.quarter":
 		return cast, "2026-Q4"
 	case "commission_statements.month":
 		return cast, "2026-11"
+	case "ad_holdouts.countries":
+		return cast, "{DE}"
 	case "visitor_alerts.kind":
 		return cast, "hot"
 	case "partner_flags.signal":
 		return cast, "fast_conversion"
 	case "tracker_network_costs.network":
 		return cast, "zeropark"
+	case "error_issue_merges.fingerprint":
+		return cast, "bravo0000000001"
+	case "error_issue_merges.into_fingerprint":
+		return cast, "bravo0000000002"
+	case "brand_assets.sha256":
+		return cast, strings.Repeat("0", 64)
 	case "support_chat_widgets.key":
 		return cast, "ofw_bravobravobravobravobrav"
+	case "mention_videos.video_id":
+		return cast, "bravo000000"
+	case "brand_mentions.about":
+		// The seeder points competitor_id at a competitor, and a mention
+		// with one is about that competitor.
+		return cast, "competitor"
 	}
 	if tbl == "rules" && c.name == "trigger" {
 		return cast, `{"kind": "event", "event": "bravo.happened"}`
@@ -469,6 +497,10 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 	// the spec allows.
 	if tbl == "review_request_campaigns" && c.name == "config" {
 		return cast, `{"name": "bravo", "mode": "manual", "from": "leak@bravo.example", "reply_to": "leak@bravo.example", "subject": "bravo", "body": "bravo", "platforms": [], "audience": {"kind": "records", "record_ids": []}}`
+	}
+	// A saved offer template is returned as stored, and an offer always has a deliverable.
+	if tbl == "partner_offer_templates" && c.name == "config" {
+		return cast, `{"title": "bravo", "brief": "bravo", "deliverables": [{"id": "bravo", "title": "bravo", "channel": "Website"}], "milestones": []}`
 	}
 	if c.typ == "ARRAY" {
 		return cast, "{}"

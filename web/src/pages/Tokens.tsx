@@ -33,6 +33,9 @@ export function Snippet({ title, code }: { title: string; code: string }) {
 }
 
 type Access = "read" | "write" | "custom";
+
+// A token made by another token, or by a person whose account is gone, has no creator: say so rather than guess.
+const creatorName = (t: APIToken) => t.created_by?.name || "Unknown";
 const accessOf = (scopes: Scope[]): Access => (same(scopes, readOnly) ? "read" : same(scopes, canChange) ? "write" : "custom");
 const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.includes(x));
 const expiries = [{ days: 30, label: "30 days" }, { days: 90, label: "90 days" }, { days: 365, label: "1 year" }, { days: 0, label: "Never" }];
@@ -111,7 +114,7 @@ export function Tokens({ ws, open, setOpen, go }: { ws: string; open?: string; s
           mobile={(t) => (
             <span className="block">
               <span className="block font-medium">{t.name}</span>
-              <span className="block text-[12px] text-muted-foreground">{summary(t.scopes ?? [])} · last used {ago(t.last_used_at)} · {expiresPhrase(t)}</span>
+              <span className="block text-[12px] text-muted-foreground">{summary(t.scopes ?? [])} · created by {creatorName(t)} · last used {ago(t.last_used_at)} · {expiresPhrase(t)}</span>
             </span>
           )}
           columns={[
@@ -140,6 +143,7 @@ export function Tokens({ ws, open, setOpen, go }: { ws: string; open?: string; s
             { id: "used", header: "Last used", accessorFn: (t) => t.last_used_at ?? "", cell: ({ row: { original: t } }) => <span className="whitespace-nowrap text-muted-foreground" title={t.last_used_at ? stamp(t.last_used_at) : undefined}>{t.last_used_at ? ago(t.last_used_at) : "Never"}</span> },
             { id: "expires", header: "Expires", accessorFn: (t) => t.expires_at ?? "9", cell: ({ row: { original: t } }) => <span className={`whitespace-nowrap ${expiresLabel(t) === "Expired" ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`} title={t.expires_at ? stamp(t.expires_at) : undefined}>{expiresLabel(t)}</span> },
             { id: "created", header: "Created", accessorFn: (t) => t.created_at ?? "", cell: ({ row: { original: t } }) => <span className="whitespace-nowrap text-muted-foreground" title={t.created_at ? stamp(t.created_at) : undefined}>{ago(t.created_at)}</span> },
+            { id: "creator", header: "Created by", accessorFn: (t) => creatorName(t), cell: ({ row: { original: t } }) => <span className={`whitespace-nowrap ${t.created_by ? "" : "text-muted-foreground"}`} title={t.created_by ? undefined : "Made by another token or an agent, or by someone whose account was deleted"}>{creatorName(t)}</span> },
             { id: "open", header: () => <span className="sr-only">Edit</span>, enableSorting: false, meta: { align: "right" }, cell: ({ row: { original: t } }) => <Button variant="ghost" onClick={() => setOpen(t.id)}>Edit</Button> },
           ]}
         />
@@ -225,7 +229,7 @@ function TokenSheet({ ws, teams, token: t, onClose, onDone, onRevoked }: { ws: s
       <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>{t ? t.name : "New API token"}</SheetTitle>
-          <SheetDescription>{t ? <>Created {ago(t.created_at)}, last used {ago(t.last_used_at)}, {expiresPhrase(t)}.</> : "You'll see the token once, right after you create it."}</SheetDescription>
+          <SheetDescription>{t ? <>Created by {creatorName(t)} {ago(t.created_at)}, last used {ago(t.last_used_at)}, {expiresPhrase(t)}.</> : "You'll see the token once, right after you create it."}</SheetDescription>
         </SheetHeader>
         <form onSubmit={submit} className="space-y-5 px-4 pb-6">
           <Input label="Name" placeholder="e.g. n8n, CRM sync" hint="Shows in the audit log next to everything it does." value={name} onChange={(e) => setName(e.target.value)} required autoFocus={!t} />

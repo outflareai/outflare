@@ -293,8 +293,8 @@ func (s *Server) queuePartnershipSyncs(ctx context.Context) error {
 	})
 }
 
-// Affiliates join the partner program outside the pipeline: Geonode-style
-// products add a partner through the API when someone makes their
+// Affiliates join the partner program outside the pipeline: a product
+// adds a partner through the API when someone makes their
 // affiliate link in the product. So the pipeline follows the program, and
 // sends nothing: a new partner whose customer record is an affiliate
 // partnership's contact, or whose work email's domain is its company's,

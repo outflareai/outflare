@@ -13,6 +13,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/lifecycle"
+	"github.com/outflareai/outflare/engine/internal/recmetrics"
 )
 
 // Products a brand sells, and the names its events and billing system use
@@ -41,6 +42,7 @@ type productView struct {
 	BrandID    string     `json:"brand_id"`
 	Key        string     `json:"key"`
 	Name       string     `json:"name"`
+	Category   string     `json:"category"`
 	ChurnMode  string     `json:"churn_mode"`
 	AtRiskDays int        `json:"at_risk_days"`
 	ChurnDays  int        `json:"churn_days"`
@@ -51,23 +53,24 @@ type productView struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
-const productColumns = `p.id::text, p.brand_id::text, p.key, p.name, p.churn_mode, p.at_risk_days, p.churn_days,
+const productColumns = `p.id::text, p.brand_id::text, p.key, p.name, p.category, p.churn_mode, p.at_risk_days, p.churn_days,
 	COALESCE((SELECT array_agg(a.source || ':' || a.value ORDER BY a.source, a.value) FROM product_aliases a WHERE a.product_id = p.id), '{}'),
 	p.archived_at, p.version, p.created_at, p.updated_at`
 
 func scanProduct(row pgx.CollectableRow) (productView, error) {
 	var v productView
-	err := row.Scan(&v.ID, &v.BrandID, &v.Key, &v.Name, &v.ChurnMode, &v.AtRiskDays, &v.ChurnDays, &v.Aliases, &v.ArchivedAt, &v.Version, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &v.BrandID, &v.Key, &v.Name, &v.Category, &v.ChurnMode, &v.AtRiskDays, &v.ChurnDays, &v.Aliases, &v.ArchivedAt, &v.Version, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
 }
 
 func (s *Server) listProducts(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	archived := r.URL.Query().Get("archived") == "true"
+	category := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("category")))
 	var list []productView
 	err := s.readTx(r.Context(), func(tx pgx.Tx) error {
 		rows, err := tx.Query(r.Context(), `SELECT `+productColumns+` FROM products p WHERE p.workspace_id = $1 AND p.brand_id = $2
-			AND (p.archived_at IS NOT NULL) = $3 ORDER BY lower(p.name), p.id`, a.WorkspaceID, a.Brand, archived)
+			AND (p.archived_at IS NOT NULL) = $3 AND ($4 = '' OR p.category = $4) ORDER BY lower(p.category), lower(p.name), p.id`, a.WorkspaceID, a.Brand, archived, category)
 		if err != nil {
 			return err
 		}
@@ -111,8 +114,10 @@ func (s *Server) getProduct(w http.ResponseWriter, r *http.Request) {
 }
 
 type productFields struct {
-	Key        *string `json:"key"`
-	Name       *string `json:"name"`
+	Key  *string `json:"key"`
+	Name *string `json:"name"`
+	// Category groups products into a family, such as proxies; "" is none.
+	Category   *string `json:"category"`
 	ChurnMode  *string `json:"churn_mode"`
 	AtRiskDays *int    `json:"at_risk_days"`
 	ChurnDays  *int    `json:"churn_days"`
@@ -129,6 +134,13 @@ func (f productFields) check() ([][2]string, error) {
 	}
 	if f.Name != nil && (strings.TrimSpace(*f.Name) == "" || len(*f.Name) > 200) {
 		return nil, errInvalid("name is 1 to 200 characters")
+	}
+	if f.Category != nil {
+		c := strings.ToLower(strings.TrimSpace(*f.Category))
+		if c != "" && !recmetrics.CategoryRE.MatchString(c) {
+			return nil, errInvalid("category is lowercase letters, digits, dots, dashes and underscores, such as proxies, or empty for none")
+		}
+		*f.Category = c
 	}
 	if f.ChurnMode != nil && *f.ChurnMode != "cancellation" && *f.ChurnMode != "inactivity" {
 		return nil, errInvalid("churn_mode is cancellation or inactivity")
@@ -210,7 +222,7 @@ func (s *Server) productError(w http.ResponseWriter, r *http.Request, err error)
 }
 
 func productData(v productView) map[string]any {
-	return map[string]any{"churn_mode": v.ChurnMode, "at_risk_days": v.AtRiskDays, "churn_days": v.ChurnDays, "aliases": len(v.Aliases)}
+	return map[string]any{"has_category": v.Category != "", "churn_mode": v.ChurnMode, "at_risk_days": v.AtRiskDays, "churn_days": v.ChurnDays, "aliases": len(v.Aliases)}
 }
 
 func (s *Server) createProduct(w http.ResponseWriter, r *http.Request) {
@@ -239,9 +251,9 @@ func (s *Server) createProduct(w http.ResponseWriter, r *http.Request) {
 			createdBy = &a.ActorID
 		}
 		var id string
-		if err := tx.QueryRow(ctx, `INSERT INTO products (workspace_id, brand_id, key, name, churn_mode, at_risk_days, churn_days, created_by)
-			VALUES ($1, $2, $3, $4, COALESCE($5, 'cancellation'), COALESCE($6, 14), COALESCE($7, 30), $8) RETURNING id::text`,
-			a.WorkspaceID, a.Brand, *f.Key, strings.TrimSpace(*f.Name), f.ChurnMode, f.AtRiskDays, f.ChurnDays, createdBy).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO products (workspace_id, brand_id, key, name, churn_mode, at_risk_days, churn_days, created_by, category)
+			VALUES ($1, $2, $3, $4, COALESCE($5, 'cancellation'), COALESCE($6, 14), COALESCE($7, 30), $8, COALESCE($9, '')) RETURNING id::text`,
+			a.WorkspaceID, a.Brand, *f.Key, strings.TrimSpace(*f.Name), f.ChurnMode, f.AtRiskDays, f.ChurnDays, createdBy, f.Category).Scan(&id); err != nil {
 			return err
 		}
 		if err := setAliases(r, tx, a, id, aliases); err != nil {
@@ -308,8 +320,8 @@ func (s *Server) updateProduct(w http.ResponseWriter, r *http.Request) {
 			return errConflictMsg("the product changed since you read it (version " + strconv.Itoa(cur.Version) + "); read it again")
 		}
 		if _, err := tx.Exec(ctx, `UPDATE products SET name = COALESCE($2, name), churn_mode = COALESCE($3, churn_mode),
-				at_risk_days = COALESCE($4, at_risk_days), churn_days = COALESCE($5, churn_days), version = version + 1, updated_at = now()
-			WHERE id = $1`, cur.ID, trimmed(f.Name), f.ChurnMode, f.AtRiskDays, f.ChurnDays); err != nil {
+				at_risk_days = COALESCE($4, at_risk_days), churn_days = COALESCE($5, churn_days), category = COALESCE($6, category), version = version + 1, updated_at = now()
+			WHERE id = $1`, cur.ID, trimmed(f.Name), f.ChurnMode, f.AtRiskDays, f.ChurnDays, f.Category); err != nil {
 			return err
 		}
 		if f.Aliases != nil {

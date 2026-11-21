@@ -168,7 +168,7 @@ func TestTrackerLanders(t *testing.T) {
 	owner.must(400, "PATCH", base+"/landers/"+l["id"].(string), map[string]any{"status": "archived"})
 
 	// Another brand sees none of it.
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	obase := "/v1/brands/" + other["id"].(string)
 	if n := len(owner.must(200, "GET", obase+"/landers", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("another brand sees %d landers", n)
@@ -177,12 +177,33 @@ func TestTrackerLanders(t *testing.T) {
 		t.Fatalf("another brand sees %d lander clicks", n)
 	}
 	owner.must(404, "GET", obase+"/landers/"+l["id"].(string), nil)
+	owner.must(404, "DELETE", obase+"/landers/"+l["id"].(string), nil)
+
+	// Deleting a lander in use takes it off its links and archives it; its
+	// clicks stay, and it can be restored.
+	deleted := owner.must(200, "DELETE", base+"/landers/"+l["id"].(string), nil)
+	if deleted["status"] != "archived" || deleted["destinations"] != float64(0) {
+		t.Fatalf("deleted lander: %v", deleted)
+	}
+	for _, d := range owner.must(200, "GET", dpath, nil)["destinations"].([]any) {
+		if d.(map[string]any)["lander_id"] == l["id"] {
+			t.Fatalf("the deleted lander is still a destination: %v", d)
+		}
+	}
+	if n := len(owner.must(200, "GET", base+"/landers", nil)["data"].([]any)); n != 0 {
+		t.Fatalf("active landers after the delete: %d, want 0", n)
+	}
+	if n := len(owner.must(200, "GET", base+"/lander-clicks?lander="+l["id"].(string), nil)["data"].([]any)); n == 0 {
+		t.Fatal("the deleted lander's clicks are gone")
+	}
+	owner.must(404, "DELETE", base+"/landers/00000000-0000-4000-8000-000000000000", nil)
+	owner.must(200, "PATCH", base+"/landers/"+l["id"].(string), map[string]any{"status": "active"})
 
 	found := map[string]bool{}
 	for _, ev := range events() {
 		found[ev.Name] = true
 	}
-	for _, name := range []string{"tracker_lander.created", "tracker_lander.updated"} {
+	for _, name := range []string{"tracker_lander.created", "tracker_lander.updated", "tracker_lander.deleted", "tracker_lander.restored"} {
 		if !found[name] {
 			t.Errorf("no %s event", name)
 		}

@@ -99,8 +99,57 @@ func TestAdKeywordSuggestions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A person excludes a search directly: one queued negative, for the
+	// campaign or for one ad group, refused when it says nothing.
+	var brand string
+	if err := e.pool.QueryRow(ctx, `SELECT COALESCE(e.brand_id, a.brand_id)::text FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id WHERE e.id = $1`, camp).Scan(&brand); err != nil {
+		t.Fatal(err)
+	}
+	neg2 := "/v1/brands/" + brand + "/ads/campaigns/" + camp + "/negative-keywords"
+	owner.must(400, "POST", neg2, map[string]any{"keyword": "  "})
+	owner.must(400, "POST", neg2, map[string]any{"keyword": "crm jobs", "match_type": "broad"})
+	owner.must(400, "POST", neg2, map[string]any{"keyword": "crm jobs", "ad_group_id": camp})
+	owner.must(404, "POST", "/v1/brands/"+brand+"/ads/campaigns/00000000-0000-0000-0000-000000000000/negative-keywords", map[string]any{"keyword": "crm jobs"})
+	direct := owner.must(202, "POST", neg2, map[string]any{"keyword": " crm   jobs ", "match_type": "phrase"})
+	dch := direct["change"].(map[string]any)
+	if direct["queued"] != true || dch["kind"] != "negative_add" || dch["status"] != "queued" || dch["after"].(map[string]any)["keyword"] != "crm jobs" {
+		t.Fatalf("queued negative: %v", direct)
+	}
+	owner.must(409, "POST", neg2, map[string]any{"keyword": "CRM jobs", "match_type": "phrase"})
+	// A person adds a search as a keyword of one ad group; it needs the ad
+	// group, and the same keyword isn't queued twice.
+	addKw := "/v1/brands/" + brand + "/ads/campaigns/" + camp + "/keywords"
+	owner.must(400, "POST", addKw, map[string]any{"keyword": "crm for lawyers"})
+	owner.must(400, "POST", addKw, map[string]any{"keyword": "crm for lawyers", "ad_group_id": camp})
+	added := owner.must(202, "POST", addKw, map[string]any{"keyword": "crm for lawyers", "match_type": "phrase", "ad_group_id": group})
+	if ach := added["change"].(map[string]any); ach["kind"] != "keyword_add" || ach["after"].(map[string]any)["match_type"] != "phrase" {
+		t.Fatalf("queued keyword: %v", added)
+	}
+	owner.must(409, "POST", addKw, map[string]any{"keyword": "CRM for lawyers", "match_type": "phrase", "ad_group_id": group})
+	if err := e.ads.ApplyChange(ctx, ws, added["change"].(map[string]any)["id"].(string), false); err != nil {
+		t.Fatal(err)
+	}
+	inGroup := owner.must(202, "POST", neg2, map[string]any{"keyword": "crm salary", "ad_group_id": group})
+	for _, id := range []string{dch["id"].(string), inGroup["change"].(map[string]any)["id"].(string)} {
+		if err := e.ads.ApplyChange(ctx, ws, id, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	googleSuffix.Lock()
+	directCalls := strings.Join(googleSuffix.mutates, "\n")
+	googleSuffix.Unlock()
+	for _, want := range []string{
+		`campaignCriteria:mutate {"operations":[{"create":{"campaign":"customers/123/campaigns/7","keyword":{"matchType":"PHRASE","text":"crm jobs"},"negative":true}}]}`,
+		`"adGroup":"customers/123/adGroups/71","keyword":{"matchType":"EXACT","text":"crm salary"},"negative":true`,
+		`{"create":{"adGroup":"customers/123/adGroups/71","keyword":{"matchType":"PHRASE","text":"crm for lawyers"},"status":"ENABLED"}}`,
+	} {
+		if !strings.Contains(directCalls, want) {
+			t.Fatalf("no call %s in:\n%s", want, directCalls)
+		}
+	}
+
 	changes := owner.must(200, "GET", base+"/ads/changes?campaign_id="+camp+"&status=applied", nil)["data"].([]any)
-	if len(changes) != 2 {
+	if len(changes) != 5 {
 		t.Fatalf("changes: %v", changes)
 	}
 	googleSuffix.Lock()

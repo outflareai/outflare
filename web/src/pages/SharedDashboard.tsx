@@ -100,9 +100,14 @@ export function SharedDashboard({ token }: { token: string }) {
   }
   const tiles: Tile[] = d.tile_list.map((t) => ({
     id: t.id,
-    insight_id: t.kind ? t.id : null,
-    insight: t.kind
-      ? { id: t.id, brand_id: "", kind: t.kind, name: t.name ?? "", description: "", spec: { display: t.display ?? undefined } as Schemas["InsightSpec"], created_by: null, created_at: "", updated_at: "" }
+    // The server applies a tile's own dates when it runs it.
+    own_dates: false,
+    // A saved report is named here and never run from a link.
+    report_view_id: t.kind === "report" ? t.id : null,
+    report_view: t.kind === "report" ? { id: t.id, name: t.name ?? "A saved report", source: "site" as const, group_by: [] } : null,
+    insight_id: t.kind && t.kind !== "report" ? t.id : null,
+    insight: t.kind && t.kind !== "report"
+      ? { id: t.id, brand_id: "", kind: t.kind, name: t.name ?? "", description: "", spec: { ...(t.view ?? {}), display: t.display ?? undefined } as unknown as Schemas["InsightSpec"], created_by: null, created_at: "", updated_at: "" }
       : null,
     note: t.note,
     x: t.x,

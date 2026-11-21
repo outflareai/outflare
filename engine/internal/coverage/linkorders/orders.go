@@ -161,7 +161,7 @@ func listOrdersQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 			o.currency, o.guarantee_days, o.guarantee_until, o.published_url, o.proof_url,
 			o.published_at, o.placement_id, o.agreement_id, o.invoice_id, o.payment_id,
 			o.credit_payment_id, o.replaces_order_id, o.owner_user_id, o.last_check_at, o.last_check_live,
-			o.last_check_target_match, o.last_check_rel, o.last_check_anchor,
+			o.last_check_target_match, o.last_check_rel, o.last_check_anchor, o.last_check_anchor_match,
 			o.approved_by, o.approved_at, o.paid_by, o.paid_at,
 			o.lost_at, o.lost_reason, o.notes, o.created_at, o.updated_at,
 			o.quoted_invoice_currency, o.quoted_invoice_amount_minor, o.quoted_invoice_date, o.quoted_usd_minor,
@@ -191,7 +191,7 @@ func listOrdersQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 			&o.Currency, &o.GuaranteeDays, &o.GuaranteeUntil, &o.PublishedURL, &o.ProofURL,
 			&o.PublishedAt, &o.PlacementID, &o.AgreementID, &o.InvoiceID, &o.PaymentID,
 			&o.CreditPaymentID, &o.ReplacesOrderID, &o.OwnerUserID, &o.LastCheckAt, &o.LastCheckLive,
-			&o.LastCheckTargetMatch, &o.LastCheckRel, &o.LastCheckAnchor,
+			&o.LastCheckTargetMatch, &o.LastCheckRel, &o.LastCheckAnchor, &o.LastCheckAnchorMatch,
 			&o.ApprovedBy, &o.ApprovedAt, &o.PaidBy, &o.PaidAt,
 			&o.LostAt, &o.LostReason, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
 		}

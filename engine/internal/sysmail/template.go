@@ -20,6 +20,9 @@ type Email struct {
 	Button  string // label for URL
 	URL     string
 	Note    string // small print under the button, such as who can ignore it
+	// A link after the note, such as Manage notifications.
+	LinkLabel string
+	LinkURL   string
 }
 
 //go:embed email.html
@@ -39,6 +42,9 @@ func (e Email) Message() Message {
 	}
 	if e.Note != "" {
 		t.WriteString(e.Note + "\n\n")
+	}
+	if e.LinkURL != "" {
+		t.WriteString(e.LinkLabel + ":\n" + e.LinkURL + "\n\n")
 	}
 	t.WriteString("-- \nOutflare · https://outflare.ai\n")
 

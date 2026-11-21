@@ -11,7 +11,13 @@ A flag is off until you turn it on. When it is off, every visitor gets `false`, 
 
 ## Who gets it
 
-- **Rules.** Conditions every one of which must hold: the page's path, site (host), full address, a parameter of the address (`query.utm_source`), where the visitor came from (referrer), their device (desktop, mobile, tablet) and browser language. Servers can also send `signed_in` (true when they pass a `user_id`) and their own properties (`property.plan`). Each rule is `is`, `is_not`, `contains`, `not_contains`, `starts_with`, `ends_with` (any of its values, case ignored), `exists` or `not_exists`.
+- **Rules.** Conditions every one of which must hold: the page's path, site (host), full address, a parameter of the address (`query.utm_source`), where the visitor came from (referrer), their device (desktop, mobile, tablet) and browser language. `signed_in` is true on a site once your app has called `outflare.signedIn(true)` in that browser (see [Website tracking](website-tracking.md), "Signed-in visitors"), and for a server when it passes a `user_id`. Servers can also send their own properties (`property.plan`). Each rule is `is`, `is_not`, `contains`, `not_contains`, `starts_with`, `ends_with` (any of its values, case ignored), `exists` or `not_exists`.
+- **People.** A rule can also be about who the visitor is, so a feature opens for staff, pilot users or one plan only:
+  - `list`: they are (`is`) or aren't (`is_not`) in a [People list](lists.md) of the flag's brand, by the list's id. In the app, pick the list by name.
+  - `person.<field>`: a field of their record, compared as text, such as `person.plan` is `pro` or `person.billing_status` is `past_due`.
+  - `user_id`: your own id for them, to name a few people outright.
+
+  Outflare finds the person from what it already knows: the brand's person whose record holds the visitor's anonymous id (linked when your product [identifies](customers.md) them with it) or the `user_id` a server sends. A visitor nobody knows is in no list and has no fields, so they fail `is` rules and pass `is_not` ones. A change to a list or a field counts from the next page. A flag only hides or shows things in the page: anything that must stay private is checked on your server too.
 - **Rollout.** Of the visitors who pass the rules, the share that gets the flag at all, 0 to 100%. Raising it only adds visitors; nobody who had it loses it.
 - **Brand.** A flag for one brand reaches only that brand's site (the brand on its site key); a flag with no brand reaches every site.
 - **Website or servers only.** A flag with `on_site` false is never sent to the website script, so visitors can't see it exists. Servers still read it.
@@ -73,7 +79,7 @@ The script loads without holding up the page, so the original can show for a mom
 <script type="application/json" id="outflare-flags">{"anonymousId":"the visitor's id","flags":{"pricing-headline":"faster"},"payloads":{}}</script>
 ```
 
-Decide for the `of_aid` cookie when the browser has one. Without it, make an id (8 to 64 letters, digits and dashes): the script takes the server's id on the visit's first page and keeps it for the visit (in the cookie only when the visitor's consent allows, as it does its own). On later pages without the cookie, the script already has the visit's id and versions, so it ignores answers for a new id. An answer decided for a different id than the browser's is ignored, and the script asks as usual. The SDKs build the tag, escaped so content in a payload can't break out of it:
+Decide for the `of_aid` cookie when the browser has one. On a first visit there is no cookie yet, so make the id yourself (8 to 64 letters, digits and dashes; a UUID works): the script takes the server's id on the visit's first page and keeps it for the visit (in the cookie only when the visitor's consent allows, as it does its own). On later pages without the cookie, the script already has the visit's id and versions, so it ignores answers for a new id. An answer decided for a different id than the browser's is ignored, and the script asks as usual. The SDKs build the tag, escaped so content in a payload can't break out of it:
 
 ```ts
 import { createClient, flagsBootstrapTag } from "@outflare/sdk";
@@ -86,7 +92,7 @@ const { data } = await gtm.POST("/v1/brands/{brand}/flags/evaluate", {
 html = html.replace("</head>", flagsBootstrapTag(data!, anonymousId) + "</head>");
 ```
 
-In Python, `outflare.flags_bootstrap_tag(client.evaluate_flags(...), anonymous_id)`. The same works at the edge (a Cloudflare Worker or Next.js middleware in front of a static site): decide, rewrite the HTML for the version, and add the tag. Keep the API token on the server: the evaluate call needs `analytics.read`, never something the browser sees.
+In Python, `outflare.flags_bootstrap_tag(client.evaluate_flags(...), anonymous_id)`. To skip the request on every page, [decide in your own server's memory](#decide-in-your-own-servers-memory). The same works at the edge (a Cloudflare Worker or Next.js middleware in front of a static site): decide, rewrite the HTML for the version, and add the tag. Keep the API token on the server: the evaluate call needs `analytics.read`, never something the browser sees.
 
 **Hide the page until the flags arrive.** On a static site with no server of your own, put this in `<head>` before anything else: the page stays hidden until the flags arrive, and never longer than one and a half seconds.
 
@@ -160,10 +166,62 @@ The edit link (`POST .../flags/{flag}/edit-link`, `analytics.manage`) is for a p
 
 It returns every flag that is on, with the version or `false`, any content, and why (`match`, `rules`, `rollout`). `keys` limits it to some flags. Nothing is stored.
 
+One call decides every flag for a page. It counts against the token's [rate limit](api-conventions.md) (600 requests a minute by default), so a busy site decides in its own memory instead.
+
+### Decide in your own server's memory
+
+`LocalFlags` in the TypeScript and Python libraries reads the brand's flag definitions once, then again every 30 seconds, and decides each visitor's flags in your process: no request to Outflare per page, and a slow or unreachable Outflare never holds a page up, since deciding carries on with the last definitions. A change to a flag reaches your server within the refresh time. It gives the same answer as the website script and `evaluate`, visitor for visitor (the libraries are tested against the engine's own decisions).
+
+```ts
+import { createClient, LocalFlags, flagsBootstrapTag } from "@outflare/sdk";
+
+const flags = new LocalFlags(createClient({ baseUrl: "https://app.outflare.ai", token }), { brand });
+
+const anonymousId = cookies.get("of_aid") ?? crypto.randomUUID();
+const decisions = await flags.decide({ anonymousId, url: request.url, userAgent: request.headers.get("user-agent") ?? "" });
+if (decisions.flags["pricing-headline"] === "faster") { /* render that version */ }
+html = html.replace("</head>", flagsBootstrapTag(decisions, anonymousId) + "</head>");
+```
+
+```python
+from outflare import LocalFlags, flags_bootstrap_tag
+
+flags = LocalFlags(client, brand=brand)
+decisions = flags.decide(anonymous_id=anonymous_id, url=str(request.url), user_agent=request.headers.get("user-agent", ""))
+```
+
+Make one `LocalFlags` per process and keep it. Only the first `decide` waits for Outflare; `refresh()` at start-up moves that wait out of the first page. Pass the same things you would send to `evaluate`: rules on the page, device, language, `signed_in` (true when you pass a user id) and `property.<name>` are decided from what you pass. Deciding in memory can't look a person up, so for rules about people pass what your server knows: `lists` (the ids of the People lists they are in) and `person` (their fields). Without them the visitor counts as unknown.
+
+For one flag, `variant`, `isEnabled` and `payload` (`variant`, `is_enabled` and `payload` in Python) answer from the same memory: the version's key or false, whether the flag is on for the visitor, and the version's content. When your server shows a version itself, tell the flag's [A/B test](ab-tests.md) with the event library's `exposed`, so the visitor is counted from then:
+
+```ts
+const who = { anonymousId, url: request.url };
+if (await flags.isEnabled("new-checkout", who)) { /* ... */ }
+const headline = await flags.variant("pricing-headline", who);   // "faster", or false
+tracker.exposed("pricing-headline", headline, { anonymousId });   // sends Experiment Viewed; nothing when false
+```
+
+```python
+if flags.is_enabled("new-checkout", anonymous_id=anonymous_id): ...
+headline = flags.variant("pricing-headline", anonymous_id=anonymous_id)
+tracker.exposed(None, "pricing-headline", headline, anonymous_id=anonymous_id)
+```
+
+The definitions come from `GET /v1/brands/{brand}/flags/definitions` (`analytics.read`): every flag that is on, with its versions and their content, rules, rollout, exclusion group and salt. It answers `304` to an `If-None-Match` with the last `ETag`, so a refresh with nothing new carries no body. Keep the token on your server.
+
+To decide in another language, follow the same steps for each flag, where `bucket(text)` is the first 8 bytes of `sha256(text)` read as a big-endian number, modulo 10,000, and the subject is the anonymous id (or the user id without one):
+
+1. A rule that doesn't match gives `false`.
+2. In an exclusion group, `bucket("group:<group>:<subject>")` outside `group_from` up to, not including, `group_to` gives `false`.
+3. `bucket("<salt>:rollout:<subject>")` at or above `rollout × 100` gives `false`.
+4. Otherwise lay the versions out in order across the 10,000 buckets by their share of the weights: the visitor gets the one that holds `bucket("<salt>:<subject>")`.
+
+[`engine/internal/flags/testdata/vectors.json`](../engine/internal/flags/testdata/vectors.json) holds worked cases to test against.
+
 ## Managing flags
 
 **Analytics → Feature flags** lists them with a switch to turn each on or off. The API (`GET/POST .../flags`, `GET/PATCH/DELETE .../flags/{id or key}`) needs `analytics.read` to read and `analytics.manage` to change; the MCP tools are `list_flags`, `get_flag`, `create_flag`, `update_flag` and `archive_flag`. A flag's key can't change, since code asks for it. Archiving turns a flag off for good and frees its key; archived flags stay listed with `status=archived`. A workspace can have 200 live flags.
 
 ## Limits
 
-The website asks `POST /v1/site/flags` with its site key, from the key's allowed origins, at most 6,000 times a minute per key. Each server process keeps a workspace's flags in memory for 10 seconds, so a page view costs no database query. Requests, their time and the share answered from memory are on the Feature flags row of the [Grafana dashboard](monitoring.md).
+The website asks `POST /v1/site/flags` with its site key, from the key's allowed origins, at most 6,000 times a minute per key. Each server process keeps a workspace's flags in memory for 10 seconds, so a page view costs no database query. A server's `evaluate` calls count against its token's rate limit; reading the definitions is one request every 30 seconds per process. Requests, their time and the share answered from memory are on the Feature flags row of the [Grafana dashboard](monitoring.md).

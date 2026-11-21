@@ -80,6 +80,23 @@ func runSavedInsight(ctx context.Context, q insights.Querier, ws, brand, kind st
 			return nil, err
 		}
 		return c.Run(ctx, q)
+	case "stickiness":
+		var l stickinessSpec
+		if err := json.Unmarshal(spec, &l); err != nil {
+			return nil, err
+		}
+		if rng != nil {
+			l.DateRange = *rng
+		}
+		st, err := l.stickiness(now)
+		if err != nil {
+			return nil, err
+		}
+		c, err := insights.CompileStickiness(ctx, q, ws, brand, st)
+		if err != nil {
+			return nil, err
+		}
+		return c.Run(ctx, q)
 	case "paths":
 		var p pathsSpec
 		if err := json.Unmarshal(spec, &p); err != nil {

@@ -29,14 +29,21 @@ func unknownSalesAttribution(status string) salesAttribution {
 	return salesAttribution{ID: "unknown", Name: "Unknown", Kind: "unknown", Status: status}
 }
 
-// Source IDs are taken from already-authorized native leads, never from a caller's
+// Source IDs are taken from already-authorized native conversations, never from a caller's
 // arbitrary lookup. Batch reads also resolve historical imports without changing
 // their CRM records or requiring the outbound bridge to be switched on.
 func (s *Server) salesAttributions(ctx context.Context, a *access, ids []string, connection *connectors.Integration) map[string]salesAttribution {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	failed := func(phase string, count int, err error) {
-		track.Fail(ctx, s.log, track.Event{Name: "sales.origin_lookup_failed", WorkspaceID: a.WorkspaceID, UserID: a.UserID, Props: map[string]any{"phase": phase, "requested": count}}, "connector_unavailable", err)
+		// The code says why, so a refused key or a spent quota (the
+		// workspace's to fix) isn't taken for a portal that is down.
+		ev := track.Event{Name: "sales.origin_lookup_failed", WorkspaceID: a.WorkspaceID, UserID: a.UserID, Props: map[string]any{"phase": phase, "requested": count}}
+		kind := connectors.KindOf(err)
+		if kind != connectors.ErrUnavailable {
+			ev.Outcome = track.Failure
+		}
+		track.Fail(ctx, s.log, ev, "connector_"+kind, err)
 	}
 	out := map[string]salesAttribution{}
 	unique := []string{}
@@ -91,7 +98,12 @@ func (s *Server) salesAttributions(ctx context.Context, a *access, ids []string,
 				if ctx.Err() != nil {
 					return
 				}
-				result, err := (leadportal.Connector{}).Read(ctx, opened.Client, opened.Creds, url.Values{"lead_ids": {strings.Join(batch, ",")}})
+				q := url.Values{"lead_ids": {strings.Join(batch, ",")}}
+				result, err := (leadportal.Connector{}).Read(ctx, opened.Client, opened.Creds, q)
+				if err != nil && connectors.KindOf(err) == connectors.ErrUnavailable && ctx.Err() == nil {
+					// A portal that failed for a moment is asked once more.
+					result, err = (leadportal.Connector{}).Read(ctx, opened.Client, opened.Creds, q)
+				}
 				if err != nil {
 					failed("read", len(batch), err)
 					continue

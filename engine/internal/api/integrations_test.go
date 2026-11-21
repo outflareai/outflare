@@ -215,3 +215,73 @@ func TestConnectRequestLink(t *testing.T) {
 	ro := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Reader", "scopes": []string{"integrations.read"}})["token"].(string)
 	(&client{t: t, h: e.h, bearer: ro}).must(403, "POST", base+"/connect-requests", map[string]any{"connector": "zerobounce"})
 }
+
+// A Treg connection finds emails and can also be the workspace's
+// verification service, chosen the same way as any other.
+func TestTregAsTheVerificationService(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	treg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Treg-Token") != "trg_test_not_a_real_token" {
+			w.WriteHeader(401)
+			return
+		}
+		switch r.URL.Path {
+		case "/auth/me":
+			fmt.Fprint(w, `{"org_id":42}`)
+		case "/orgs/42/balance":
+			fmt.Fprint(w, `{"balance_micro":5000000}`)
+		case "/call/filtrat.people.email.verify.resolve_catchall":
+			var body struct {
+				Email string `json:"email"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			status := "catch_all"
+			if strings.HasSuffix(body.Email, "@ok.example") {
+				status = "verified"
+			}
+			fmt.Fprintf(w, `{"status":%q,"confidence":96,"domain_intelligence":{"catch_all":%t}}`, status, status == "catch_all")
+		case "/call/bounceban.people.email.verify":
+			result := "undeliverable"
+			if strings.HasPrefix(r.URL.Query().Get("email"), "cat@") {
+				result = "risky"
+			}
+			fmt.Fprintf(w, `{"id":"bb_1","status":"success","result":%q,"score":40}`, result)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(treg.Close)
+	e.integrations.Client.BaseURLs["treg"] = treg.URL
+
+	i := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "treg", "credentials": map[string]string{"api_key": "trg_test_not_a_real_token"}})
+	id := i["id"].(string)
+	caps := fmt.Sprint(i["capabilities"])
+	if !strings.Contains(caps, "data.find_email") || !strings.Contains(caps, "verify") {
+		t.Fatalf("capabilities: %v", caps)
+	}
+	if set := owner.must(200, "PUT", base+"/verification-settings", map[string]any{"integration_id": id}); set["provider"] != "treg" {
+		t.Fatalf("settings: %v", set)
+	}
+	if _, err := e.verify.Verify(context.Background(), ws, []string{"ana@ok.example", "bob@bad.example", "cat@bad.example"}, false); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]map[string]any{}
+	for _, v := range owner.must(200, "GET", base+"/verifications", nil)["data"].([]any) {
+		got[v.(map[string]any)["email"].(string)] = v.(map[string]any)
+	}
+	for email, want := range map[string]struct {
+		status, providerStatus string
+		catchAll               bool
+	}{
+		"ana@ok.example":  {"deliverable", "filtrat:verified", false},
+		"bob@bad.example": {"undeliverable", "filtrat:catch_all/bounceban:undeliverable", true},
+		"cat@bad.example": {"risky", "filtrat:catch_all/bounceban:risky", true},
+	} {
+		v := got[email]
+		if v["status"] != want.status || v["provider"] != "treg" || v["provider_status"] != want.providerStatus || v["catch_all"] != want.catchAll {
+			t.Errorf("%s: %v", email, v)
+		}
+	}
+}

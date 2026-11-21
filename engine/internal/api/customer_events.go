@@ -225,6 +225,10 @@ type seenName struct {
 	kind        string
 	count       int
 	first, last time.Time
+	// How many of the track events carried each property (a null one
+	// doesn't count), out of checked events, for the tracking plan.
+	props   map[string]int
+	checked int
 }
 
 // eventEnvelope is a call's events as sent: the batch's own context and
@@ -440,7 +444,13 @@ func saveEventNames(ctx context.Context, tx pgx.Tx, ws, brand string, names map[
 			fresh = true
 		}
 	}
-	if !fresh || brand == "" {
+	if brand == "" {
+		return nil
+	}
+	if err := savePlanProblems(ctx, tx, ws, brand, names); err != nil {
+		return err
+	}
+	if !fresh {
 		return nil
 	}
 	return enqueueEventNameCheck(ctx, tx, ws, brand)
@@ -600,7 +610,7 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 			a.WorkspaceID, brand, rec).Scan(&pb); err != nil {
 			return err
 		}
-		if product, err = customers.ResolveProduct(ctx, tx, a.WorkspaceID, pb, ref, customers.ProductFromEvent, at); err != nil {
+		if product, err = productFromEvent(ctx, tx, a, pb, ref, eventProductCategory(props), at); err != nil {
 			return err
 		}
 	}
@@ -620,7 +630,7 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 		}
 		if pb != "" {
 			start := time.Now()
-			link, err := orderPayment(ctx, tx, a.WorkspaceID, pb, *rec, props, messageID, at)
+			link, err := orderPayment(ctx, tx, a.WorkspaceID, pb, *rec, product, props, messageID, at)
 			if err != nil {
 				metrics.TransactionSaved(orderSource, "error", time.Since(start))
 				return err
@@ -652,6 +662,9 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 		}
 	}
 
+	if kind == "track" && name == errorEvent {
+		enrichError(props, ctxObj, source)
+	}
 	var id, eventBrand string
 	err = tx.QueryRow(ctx, `INSERT INTO customer_events (workspace_id, record_id, account_id, brand_id, kind, name, raw_name, user_id, anonymous_id,
 			properties, traits, context, source, message_id, occurred_at, request_id, product_id, usage)
@@ -667,6 +680,11 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 		return err
 	}
 	res.EventID, res.RecordID, res.ProductID = &id, rec, product
+	if kind == "track" && name == errorEvent {
+		if err := errorStored(ctx, tx, a.WorkspaceID, eventBrand, id, props, ctxObj, at); err != nil {
+			return err
+		}
+	}
 	// Anyone can send a browser event, so one never starts a journey.
 	if rec != nil && source != siteSource {
 		if err := customers.EventAdded(ctx, tx, a.WorkspaceID, id, name); err != nil {
@@ -692,6 +710,9 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 		totals.names[name] = n
 	}
 	n.count++
+	if kind == "track" {
+		n.sawProperties(props)
+	}
 	if at.Before(n.first) {
 		n.first = at
 	}
@@ -1054,13 +1075,38 @@ func (s *Server) aliasPerson(ctx context.Context, tx pgx.Tx, a *access, c *catal
 	return err
 }
 
-// resolveAccount finds or makes the company a group call names, applies
-// its traits and adds it to the person's companies.
+// resolveAccount finds or makes the record a group call names, applies its
+// traits and links the person to it. For a brand whose product has
+// accounts (people setup), that is a customer account: the person becomes
+// a member, and a website or domain trait links the account to its company,
+// never the person. Otherwise it is a company, added to the person's
+// companies. A group id already on a record keeps it, whichever it is.
 func (s *Server) resolveAccount(ctx context.Context, tx pgx.Tx, a *access, c *catalog, brand *string, groupID string, traits map[string]any,
 	person *string, res *eventResult, totals *ingestTotals) (string, error) {
 	acct, _, err := ownerOf(ctx, tx, a, c.Brand, "group_id", groupID)
 	if err != nil {
 		return "", err
+	}
+	if acct != nil {
+		var typ string
+		if err := tx.QueryRow(ctx, `SELECT record_type FROM records WHERE id = $1`, *acct).Scan(&typ); err != nil {
+			return "", err
+		}
+		if typ == "customer_account" {
+			return s.resolveCustomerAccount(ctx, tx, a, c, brand, *acct, groupID, traits, person, res, totals)
+		}
+	} else {
+		var brandID string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE($2::uuid, outflare_first_brand($1))::text`, a.WorkspaceID, brand).Scan(&brandID); err != nil {
+			return "", err
+		}
+		setup, err := loadPeopleSetup(ctx, tx, a.WorkspaceID, brandID)
+		if err != nil {
+			return "", err
+		}
+		if setup.Accounts {
+			return s.resolveCustomerAccount(ctx, tx, a, c, brand, "", groupID, traits, person, res, totals)
+		}
 	}
 	if acct == nil {
 		var id string
@@ -1118,6 +1164,90 @@ func (s *Server) resolveAccount(ctx context.Context, tx pgx.Tx, a *access, c *ca
 		}
 	}
 	return *acct, nil
+}
+
+// resolveCustomerAccount is resolveAccount for a customer account: made
+// when id is "", its traits applied, linked to the company its website or
+// domain trait names (found or added; the person's own company is left as
+// it is), and the person added to its members.
+func (s *Server) resolveCustomerAccount(ctx context.Context, tx pgx.Tx, a *access, c *catalog, brand *string, id, groupID string, traits map[string]any,
+	person *string, res *eventResult, totals *ingestTotals) (string, error) {
+	if id == "" {
+		if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, created_by) VALUES ($1, 'customer_account', COALESCE($2, outflare_first_brand($1)), 'first_party', $3) RETURNING id::text`,
+			a.WorkspaceID, brand, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+			return "", err
+		}
+		totals.created++
+		if _, err := attach(ctx, tx, a, id, "group_id", groupID, true, totals); err != nil {
+			return "", err
+		}
+	}
+	if err := applyTraits(ctx, tx, c, a, id, "customer_account", traits, res); err != nil {
+		return "", err
+	}
+	addRef := func(rec, typ, key, to string, multiple bool) error {
+		r, err := lockRecord(ctx, tx, a, rec)
+		if err != nil {
+			return err
+		}
+		var raw []byte
+		if multiple {
+			list := []any{}
+			if cur, ok := r.Attributes[key].([]any); ok {
+				list = cur
+			}
+			if slices.Contains(list, any(to)) {
+				return nil
+			}
+			raw, _ = json.Marshal(append(list, to))
+		} else {
+			if cur, _ := r.Attributes[key].(string); cur != "" {
+				return nil // set already: a person's own choice is kept
+			}
+			raw, _ = json.Marshal(to)
+		}
+		if r.Attributes == nil {
+			r.Attributes = map[string]any{}
+		}
+		if r.AttributeSources == nil {
+			r.AttributeSources = map[string]string{}
+		}
+		changed, err := applyAttributes(ctx, tx, c, c.recordType(typ), a, &r, map[string]json.RawMessage{key: raw}, "first_party")
+		if err != nil || !changed {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE records SET attributes = $2, attribute_sources = $3, version = version + 1, updated_at = now() WHERE id = $1`,
+			r.ID, r.Attributes, r.AttributeSources)
+		return err
+	}
+	for _, k := range []string{"website", "domain"} {
+		v, _ := traits[k].(string)
+		d := customers.CompanyDomain(v)
+		if d == "" {
+			continue
+		}
+		got, err := customers.EnsureCompanies(ctx, tx, a.WorkspaceID, brand, "product", []customers.Company{{Domain: d, Name: stringTrait(traits, "name")}})
+		if err != nil {
+			return "", err
+		}
+		if co := got[d]; co != "" {
+			if err := addRef(id, "customer_account", "company", co, false); err != nil {
+				return "", err
+			}
+		}
+		break
+	}
+	if person != nil {
+		if err := addRef(*person, "person", "accounts", id, true); err != nil {
+			return "", err
+		}
+	}
+	return id, nil
+}
+
+func stringTrait(traits map[string]any, key string) string {
+	v, _ := traits[key].(string)
+	return v
 }
 
 // applyTraits writes the traits that match the record type's fields, with
@@ -1359,7 +1489,7 @@ type timelineItem struct {
 	RecordID string `json:"record_id"`
 }
 
-var timelineKinds = []string{"event", "attribute_change", "identity", "identified", "consent", "message", "meeting", "deal", "visit", "opt_out", "journey", "list", "support", "task", "note"}
+var timelineKinds = []string{"event", "attribute_change", "identity", "identified", "consent", "message", "meeting", "deal", "visit", "opt_out", "journey", "list", "support", "task", "note", "feed"}
 
 // timelinePeople caps how many of a company's people its timeline reads.
 const timelinePeople = 5000
@@ -1475,6 +1605,14 @@ var timelineBranches = map[string]string{
 	"note": `SELECT 'note', t.id::text, t.created_at, t.title,
 			jsonb_build_object('created_by', t.created_by), 'crm', t.record_id
 		FROM crm_activities t WHERE t.workspace_id = $1 AND t.record_id = ANY($2) AND t.kind = 'note' {brand:t.brand_id}`,
+	// A post about them in one of the brand's Sales channels in Slack: the
+	// channel and what became of it, never the post (the Sales page shows it
+	// to those who may see it). Spam, posts set aside and posts deleted in
+	// Slack stay off.
+	"feed": `SELECT 'feed', f.id::text, f.occurred_at, c.channel_name,
+			jsonb_build_object('kind', f.kind, 'status', f.status, 'feed_channel_id', f.feed_channel_id, 'lead_id', f.lead_id), 'slack', f.record_id
+		FROM sales_feed_items f JOIN sales_feed_channels c ON c.id = f.feed_channel_id AND c.workspace_id = f.workspace_id
+		WHERE f.workspace_id = $1 AND f.record_id = ANY($2) AND f.status NOT IN ('spam', 'ignored') AND NOT f.deleted_in_slack {brand:f.brand_id}`,
 }
 
 // timelineBrand is the brand condition on col: items for the chosen brand
@@ -1583,9 +1721,9 @@ func (s *Server) recordTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.ViewID != "" {
 		// A support view sees that an email was sent or received, not
-		// its subject.
+		// its subject, and that a Slack post named them, not the channel.
 		for i := range list {
-			if list[i].Kind == "message" {
+			if list[i].Kind == "message" || list[i].Kind == "feed" {
 				list[i].Title = ""
 			}
 		}

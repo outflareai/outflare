@@ -6,6 +6,8 @@ import { ago, plural, stamp } from "../format";
 import { useBrand } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 import { nameItem } from "@/lib/records";
+import { EventDictionary, sourceLabel } from "./EventDictionary";
+import { EventDestinations } from "./EventDestinations";
 
 // Events: every event a brand stored, from any source (the website script,
 // the events API, the workspace route, a connector), newest first, with
@@ -22,15 +24,8 @@ type Detail = Schemas["BrandEventDetail"];
 type Summary = Schemas["BrandEventsSummary"];
 type Status = Event["status"];
 type Stored = Schemas["CustomerEvent"];
-type View = "all" | "api";
+type View = "all" | "api" | "dictionary" | "destinations";
 
-// sourceLabel names where an event came from in plain words.
-function sourceLabel(source: string): string {
-  if (source === "browser") return "Website";
-  if (source === "api") return "API";
-  if (source === "outflare") return "Outflare";
-  return source.charAt(0).toUpperCase() + source.slice(1);
-}
 
 const statuses: Record<Status, { label: string; tone: "green" | "amber" | "red" | "grey" | "blue"; help: string }> = {
   pending: { label: "Waiting", tone: "blue", help: "Saved, waiting to be processed. Usually seconds." },
@@ -46,12 +41,12 @@ export function BrandEvents({ ws, canManage, tabs, onOpen }: { ws: string; canMa
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Product events"
+        title="Customer data"
         description="Every event this brand received: from your website, your product's servers and anything else that sends them. They're usable in segments, lists, journeys and reports as they arrive."
       />
       {tabs}
       {brand ? (
-        <BrandEventsFor key={brand.id} brand={brand.id} canManage={canManage} onOpen={onOpen} />
+        <BrandEventsFor key={brand.id} ws={ws} brand={brand.id} canManage={canManage} onOpen={onOpen} />
       ) : (
         <Empty title="Pick a brand">
           Events belong to one brand. Pick {active.length > 1 ? `one of your ${active.length} brands` : "your brand"} in the brand switcher to see its events.
@@ -61,7 +56,7 @@ export function BrandEvents({ ws, canManage, tabs, onOpen }: { ws: string; canMa
   );
 }
 
-function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage: boolean; onOpen: (item: string) => void }) {
+function BrandEventsFor({ ws, brand, canManage, onOpen }: { ws: string; brand: string; canManage: boolean; onOpen: (item: string) => void }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [list, setList] = useState<Event[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
@@ -72,7 +67,9 @@ function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [view, setView] = useState<View>("all");
+  // The event list opens first: it is what people look for here (every
+  // name, what it means, how many arrived).
+  const [view, setView] = useState<View>("dictionary");
 
   const loadSummary = useCallback(async () => {
     const { data, error } = await api.GET("/v1/brands/{brand}/events/summary", { params: { path: { brand } } });
@@ -156,7 +153,7 @@ function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-1 rounded-lg bg-muted/50 p-1 text-[13px]" role="tablist">
-        {([["all", "All events"], ["api", "Sent to the events API"]] as const).map(([v, label]) => (
+        {([["dictionary", "Event list"], ["all", "Latest events"], ["api", "Sent to the events API"], ["destinations", "Destinations"]] as const).map(([v, label]) => (
           <button
             key={v}
             role="tab"
@@ -259,6 +256,8 @@ function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage
         </Card>
       )}
 
+      {view === "dictionary" && <EventDictionary brand={brand} canManage={canManage} />}
+      {view === "destinations" && <EventDestinations ws={ws} brand={brand} canManage={canManage} />}
       {view === "all" && <AllEvents brand={brand} sources={summary?.sources.map((x) => x.source) ?? []} onOpen={onOpen} />}
       {view === "api" && (
         <>

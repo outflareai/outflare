@@ -4,6 +4,7 @@ import type { Fix, FixGuideline, FixTicket, FixTicketDetail, SEOSite } from "@ou
 import { useBrand, pickedBrandId } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 import { BrandBadge } from "@/components/brand-badge";
+import { Markdown } from "@/components/markdown-editor";
 import { DataTable } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, errorMessage } from "../api";
@@ -22,7 +23,8 @@ import { FixAutonomy } from "./FixAutonomy";
 // written up by the workspace's AI model and reviewed by a person.
 
 type Tone = keyof typeof tones;
-type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
+// open is the ticket whose page is showing, from the URL (/fixes/{ticket}).
+type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void; open: string; onOpen: (ticket: string) => void };
 type Status = Fix["status"];
 
 const statusLabel: Record<Status, string> = { open: "Open", in_progress: "In progress", done: "Done", ignored: "Ignored" };
@@ -39,14 +41,13 @@ export function Fixes(props: Props) {
   return <FixesPage key={brand.id} {...props} />;
 }
 
-function FixesPage({ ws, canManage, go }: Props) {
+function FixesPage({ ws, canManage, go, open, onOpen }: Props) {
   const [tickets, setTickets] = useState<FixTicket[] | null>(null);
   const [sites, setSites] = useState<SEOSite[]>([]);
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("todo");
   const [severity, setSeverity] = useState("");
   const [site, setSite] = useState("");
-  const [picked, setPicked] = useState<string>("");
   const [autonomy, setAutonomy] = useState(false);
   const [rules, setRules] = useState(false);
   const { query: brandQuery, brand } = useBrand(ws);
@@ -68,7 +69,6 @@ function FixesPage({ ws, canManage, go }: Props) {
 
   const hosts = useMemo(() => Object.fromEntries(sites.map((s) => [s.id, s.host])), [sites]);
   const shown = useMemo(() => (tickets ?? []).filter((t) => !severity || t.rule.severity === severity), [tickets, severity]);
-  const current = tickets?.find((t) => t.id === picked);
   const changed = (t: FixTicket) => setTickets((all) => all?.map((x) => (x.id === t.id ? { ...x, ...t } : x)) ?? null);
 
   const header = (
@@ -98,6 +98,15 @@ function FixesPage({ ws, canManage, go }: Props) {
       {rules && <GuidelinesSheet ws={ws} sites={sites} brandId={brand?.id} brandName={brand?.name} canManage={canManage} onClose={() => setRules(false)} />}
     </>
   );
+  // One ticket is a page of its own, inside the app like any other.
+  if (open) {
+    return (
+      <>
+        {sheets}
+        <TicketPage ws={ws} id={open} ticket={tickets?.find((t) => t.id === open)} hosts={hosts} canManage={canManage} onBack={() => { onOpen(""); load(); }} onChange={changed} reload={load} go={go} />
+      </>
+    );
+  }
   if (error && !tickets) return <div className="space-y-6">{header}<ErrorText>{error}</ErrorText></div>;
   if (!tickets) return <div className="space-y-6">{header}<Loading /></div>;
 
@@ -147,7 +156,7 @@ function FixesPage({ ws, canManage, go }: Props) {
           <DataTable
             data={shown}
             rowId={(t) => t.id}
-            onRowClick={(t) => setPicked(t.id)}
+            onRowClick={(t) => onOpen(t.id)}
             searchPlaceholder="Search fixes"
             toolbar={toolbar}
             empty="Nothing matches these filters."
@@ -185,7 +194,6 @@ function FixesPage({ ws, canManage, go }: Props) {
           />
         </>
       )}
-      {current && <TicketSheet ws={ws} ticket={current} host={hosts[current.subject.id]} canManage={canManage} onClose={() => setPicked("")} onChange={changed} onPick={setPicked} reload={load} go={go} />}
     </div>
   );
 }
@@ -212,44 +220,71 @@ function TicketState({ t }: { t: FixTicket }) {
   return <Badge tone={st.tone}>{st.label}</Badge>;
 }
 
-function TicketSheet({
+// What each label means, so nobody has to guess.
+const severityMeans: Record<string, string> = {
+  error: "Breaks the page for visitors or search engines. Fix these first.",
+  warning: "Hurts how the page is found or shown. Fix it soon.",
+  notice: "Minor. Worth tidying, not urgent.",
+};
+const statusMeans: Record<Status, string> = {
+  open: "Nobody has picked it up yet.",
+  in_progress: "Someone is working on it.",
+  done: "Fixed. The next crawl confirms it, or opens it again.",
+  ignored: "Set aside. Its pages won't come back as fixes.",
+};
+const ticketMeans: Record<string, string> = {
+  Approved: "You agreed with the write-up. It's ready to hand on.",
+  Rejected: "You turned it down.",
+  Writing: "Your AI model is writing it up now.",
+  "Couldn't write": "Your AI model couldn't write it up. Try again.",
+  "Needs review": "Your AI model wrote it up. Read it and approve or reject it.",
+  "Not written": "Only the audit's short note so far. Your AI model can write the full ticket.",
+};
+
+// One ticket as a page: what is wrong and what to do on the left, its
+// labels explained and what you can do with it on the right.
+function TicketPage({
   ws,
+  id,
   ticket,
-  host,
+  hosts,
   canManage,
-  onClose,
+  onBack,
   onChange,
-  onPick,
   reload,
   go,
 }: {
   ws: string;
-  ticket: FixTicket;
-  host?: string;
+  id: string;
+  // The list's row, shown while the full ticket loads; absent on a direct link.
+  ticket?: FixTicket;
+  hosts: Record<string, string>;
   canManage: boolean;
-  onClose: () => void;
+  onBack: () => void;
   onChange: (t: FixTicket) => void;
-  onPick: (id: string) => void;
   reload: () => void;
   go: Props["go"];
 }) {
   const [d, setD] = useState<FixTicketDetail | null>(null);
   const [error, setError] = useState("");
+  const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"" | "feedback" | "reject">("");
   const [text, setText] = useState("");
   const [remember, setRemember] = useState<"" | "site" | "brand" | "workspace">("");
 
   const fetchDetail = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/brands/{brand}/fix-tickets/{ticket}", { params: { path: { brand: pickedBrandId(), ticket: ticket.id } } });
+    const { data, error, response } = await api.GET("/v1/brands/{brand}/fix-tickets/{ticket}", { params: { path: { brand: pickedBrandId(), ticket: id } } });
+    if (response.status === 404) return setMissing(true);
     if (error || !data) return setError(errorMessage(error));
     setError("");
     setD(data);
     onChange(data);
-  }, [ws, ticket.id]); // onChange only updates the list row
+  }, [ws, id]); // eslint-disable-line react-hooks/exhaustive-deps -- onChange only updates the list row
 
   useEffect(() => {
     setD(null);
+    setMissing(false);
     setMode("");
     setText("");
     setRemember("");
@@ -265,7 +300,7 @@ function TicketSheet({
 
   async function write(feedback?: string) {
     setBusy(true);
-    const { error } = await api.POST("/v1/brands/{brand}/fix-tickets/{ticket}/write", { params: { path: { brand: pickedBrandId(), ticket: ticket.id } }, body: feedback ? { feedback } : {} });
+    const { error } = await api.POST("/v1/brands/{brand}/fix-tickets/{ticket}/write", { params: { path: { brand: pickedBrandId(), ticket: id } }, body: feedback ? { feedback } : {} });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     setMode("");
@@ -276,7 +311,7 @@ function TicketSheet({
 
   async function review(body: Review, done: string) {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/brands/{brand}/fix-tickets/{ticket}/review", { params: { path: { brand: pickedBrandId(), ticket: ticket.id } }, body });
+    const { data, error } = await api.POST("/v1/brands/{brand}/fix-tickets/{ticket}/review", { params: { path: { brand: pickedBrandId(), ticket: id } }, body });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     setMode("");
@@ -328,60 +363,84 @@ function TicketSheet({
     reload();
   }
 
-  async function copy() {
+  // Two ways to hand a ticket on: as an issue a developer or a tracker
+  // takes, or as instructions a coding agent can act on alone.
+  async function copy(as: "issue" | "agent") {
     setBusy(true);
-    const { data, error } = await api.GET("/v1/brands/{brand}/fix-tickets/{ticket}/prompt", { params: { path: { brand: pickedBrandId(), ticket: ticket.id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/fix-tickets/{ticket}/prompt", { params: { path: { brand: pickedBrandId(), ticket: id }, query: { for: as } } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     await navigator.clipboard?.writeText(data.prompt);
-    track("ui.copied");
-    toast("Copied as an issue. Paste it into GitHub, Linear or your coding agent.");
+    track("ui.fix_ticket_copied", { as });
+    toast(as === "agent" ? "Copied. Paste it into Claude Code, Cursor or Codex, in your website's repository." : "Copied. Paste it into GitHub, Linear or a message to your developer.");
+  }
+
+  async function copyLink(url: string) {
+    await navigator.clipboard?.writeText(url);
+    track("ui.fix_ticket_copied", { as: "link" });
+    toast("Link copied.");
   }
 
   const t = d ?? ticket;
+  // The breadcrumb names the ticket rather than its ID.
+  const name = t ? ticketTitle(t) : "";
+  useEffect(() => {
+    if (name) window.dispatchEvent(new CustomEvent("outflare:item-name", { detail: { id, name } }));
+  }, [id, name]);
+
+  const back = { label: "Fixes", onClick: onBack };
+  if (missing) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Fix not found" back={back} />
+        <Empty title="This fix isn't here" action={<Button onClick={onBack}>See every fix</Button>}>It may belong to another brand, or the issue went away and the ticket with it.</Empty>
+      </div>
+    );
+  }
+  if (!t) return <div className="space-y-6"><PageHeader title="Fix" back={back} />{error ? <ErrorText>{error}</ErrorText> : <Loading />}</div>;
+
   const b = t.brief_status === "ready" ? t.brief : null;
   const active = t.status === "open" || t.status === "in_progress";
-  const where = t.source === "social" ? "A social watch" : host ?? "A site";
+  const where = subjectName(t, hosts);
+  const thing = t.unit.replace(/s$/, "");
+  const state = ticketState(t);
+  // A few pages shown with what the audit read on them, before the full list.
+  const examples = (d?.pages ?? []).filter((p) => p.detail).slice(0, 3);
   return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
-        <SheetHeader>
-          <SheetTitle>{ticketTitle(t)}</SheetTitle>
-          <SheetDescription>
-            {where} · {plural(t.count, t.unit.replace(/s$/, ""))}
-            {t.parts > 1 && ` across ${plural(t.parts, "URL template")}`}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="space-y-6 px-4 pb-8 text-[13px]">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge tone={severityTone[t.rule.severity]}>{severityLabel[t.rule.severity]}</Badge>
-            <Badge tone={statusTone[t.status]}>{statusLabel[t.status]}</Badge>
-            <TicketState t={t} />
-            {b && <Badge>{kindLabel[b.kind]}</Badge>}
-            <BrandBadge id={t.brand_id} />
-            <span className="text-xs text-muted-foreground">Found {ago(t.created_at)}</span>
-          </div>
-          {error && <ErrorText>{error}</ErrorText>}
-          {t.impact && (t.impact.clicks > 0 || t.impact.impressions > 0) && (
-            <p className="rounded-lg bg-muted/50 px-3 py-2">
-              These pages got <span className="font-medium">{t.impact.clicks.toLocaleString()} clicks</span> and <span className="font-medium">{t.impact.impressions.toLocaleString()} impressions</span> from Google search in the last 28 days.
-            </p>
-          )}
-
+    <div>
+      <PageHeader
+        title={<>{name}{t.number > 0 && <span className="font-mono text-[13px] font-normal text-muted-foreground">#{t.number}</span>}<BrandBadge id={t.brand_id} /></>}
+        back={back}
+        description={
+          <>
+            {plural(t.count, thing)} on {where}
+            {t.parts > 1 && `, in ${plural(t.parts, "URL template")} (pages built the same way)`}. Found {ago(t.created_at)}.
+          </>
+        }
+        action={
+          t.source !== "social" && t.status !== "ignored" && (
+            <>
+              <Button variant="ghost" disabled={busy} onClick={() => copy("issue")}>Copy</Button>
+              <Button disabled={busy} onClick={() => copy("agent")}>Give to agent</Button>
+            </>
+          )
+        }
+      />
+      {error && <ErrorText>{error}</ErrorText>}
+      <div className="grid gap-8 text-[13px] lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="min-w-0 space-y-6">
           {b ? (
             <div className="space-y-4">
-              <p className="text-[14px] leading-relaxed">{b.summary}</p>
-              <Section title="Why it matters">{b.why}</Section>
-              <Section title="The change">
-                <div className="whitespace-pre-wrap">{b.change}</div>
-              </Section>
+              <Markdown text={b.summary} className={`${prose} text-[14px]`} />
+              <Section title="Why it matters"><Markdown text={b.why} className={prose} /></Section>
+              <Section title="What to change"><Markdown text={b.change} className={prose} /></Section>
               {b.done_when.length > 0 && (
                 <Section title="Done when">
                   <ul className="space-y-1">
                     {b.done_when.map((x, i) => (
                       <li key={i} className="flex gap-2">
                         <span aria-hidden className="mt-0.5 size-3.5 shrink-0 rounded border" />
-                        <span>{x}</span>
+                        <Markdown text={x} className={prose} />
                       </li>
                     ))}
                   </ul>
@@ -390,7 +449,7 @@ function TicketSheet({
               {b.dont.length > 0 && (
                 <Section title="Don't">
                   <ul className="list-disc space-y-1 pl-4">
-                    {b.dont.map((x, i) => <li key={i}>{x}</li>)}
+                    {b.dont.map((x, i) => <li key={i}><Markdown text={x} className={prose} /></li>)}
                   </ul>
                 </Section>
               )}
@@ -399,22 +458,95 @@ function TicketSheet({
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              <Section title="Why it matters">{t.rule.why}</Section>
+            <div className="space-y-4">
+              <Section title="What's wrong">
+                <p className="text-[14px] leading-relaxed">{t.rule.why}</p>
+              </Section>
+              {examples.length > 0 && (
+                <Section title="For example">
+                  <ul className="space-y-1.5">
+                    {examples.map((p, i) => (
+                      <li key={i}>
+                        <a className="font-mono text-[12px] break-all underline-offset-2 hover:underline" href={p.url} target="_blank" rel="noreferrer noopener">{p.url}</a>
+                        <div className="text-[12px] break-all text-muted-foreground">{p.detail}</div>
+                      </li>
+                    ))}
+                  </ul>
+                </Section>
+              )}
               <Section title="How to fix it">{t.rule.fix}</Section>
               {writing && <p className="text-muted-foreground">Your AI model is writing this ticket from the pages, your brand, the other fixes and your guidelines…</p>}
               {t.brief_status === "failed" && <ErrorText>{t.brief_error || "The AI model couldn't write it."}</ErrorText>}
               {canManage && !writing && (
                 <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium">Write it up as a ticket</div>
-                    <p className="text-muted-foreground">Your own AI model turns this into an issue a developer or coding agent can pick up: what to change, why, and how to know it's done.</p>
+                    <div className="font-medium">Want the full picture? Write it up as a ticket</div>
+                    <p className="text-muted-foreground">This is only the audit's short note. Your own AI model reads these pages and writes what exactly to change, why, and how to know it's done, ready for a developer or coding agent.</p>
                   </div>
                   <Button disabled={busy} onClick={() => write()}>{t.brief_status === "failed" ? "Try again" : "Write ticket"}</Button>
                 </div>
               )}
             </div>
           )}
+
+          {t.impact && (t.impact.clicks > 0 || t.impact.impressions > 0) && (
+            <p className="rounded-lg bg-muted/50 px-3 py-2">
+              In the last 28 days Google showed these pages in search <span className="font-medium">{plural(t.impact.impressions, "time")}</span>, and people clicked through <span className="font-medium">{plural(t.impact.clicks, "time")}</span>.
+            </p>
+          )}
+
+          {!d && !error && <Loading />}
+          {d && d.fixes.length > 0 && (
+            <Section
+              title={t.unit === "pages" ? "Every page it affects" : "Where"}
+              action={t.source === "seo_audit" && <button className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => go("audits", t.subject.id)}>Open the site's audit</button>}
+            >
+              {d.fixes.length > 1 && <p className="mb-3 text-muted-foreground">Grouped by URL template. Pages that share one are usually built by the same code, so one change fixes the whole group.</p>}
+              <div className="space-y-3">
+                {d.fixes.map((f) => {
+                  const pages = d.pages.filter((p) => p.fix_id === f.id);
+                  return (
+                    <div key={f.id} className="space-y-1">
+                      {(d.fixes.length > 1 || f.group) && (
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-mono">{f.group || "Everywhere"}</span>
+                          <span className="text-muted-foreground">{plural(f.count, f.unit.replace(/s$/, ""))}</span>
+                          <Badge tone={statusTone[f.status]}>{statusLabel[f.status]}</Badge>
+                          {f.assignee && <span className="text-muted-foreground">{f.assignee.name}</span>}
+                        </div>
+                      )}
+                      {pages.length > 0 && (
+                        <ul className="space-y-0.5 pl-3">
+                          {pages.map((p, i) => (
+                            <li key={i} className="flex flex-wrap items-baseline gap-2">
+                              <a className="font-mono text-[12px] break-all underline-offset-2 hover:underline" href={p.url} target="_blank" rel="noreferrer noopener">{p.url}</a>
+                              {p.detail && <span className="text-[12px] break-all text-muted-foreground">{p.detail}</span>}
+                            </li>
+                          ))}
+                          {f.unit === "pages" && f.count > pages.length && <li className="text-[12px] text-muted-foreground">And {plural(f.count - pages.length, "more page")}.</li>}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <dl className="space-y-3 rounded-lg border p-3">
+            {t.number > 0 && (
+              <Fact label="Ticket" badge={<span className="font-mono">#{t.number}</span>}>
+                Write "{`Outflare fix #${t.number}`}" in the pull request or commit that fixes it, so the change leads back here.{" "}
+                <button className="underline underline-offset-2 hover:text-foreground" onClick={() => copyLink(t.url)}>Copy the link to this ticket</button>
+              </Fact>
+            )}
+            <Fact label="Severity" badge={<Badge tone={severityTone[t.rule.severity]}>{severityLabel[t.rule.severity]}</Badge>}>{severityMeans[t.rule.severity]}</Fact>
+            <Fact label="Status" badge={<Badge tone={statusTone[t.status]}>{statusLabel[t.status]}</Badge>}>{statusMeans[t.status]}</Fact>
+            <Fact label="Write-up" badge={<Badge tone={state.tone}>{state.label}</Badge>}>{ticketMeans[state.label]}</Fact>
+            {b && <Fact label="Kind of work" badge={<Badge>{kindLabel[b.kind]}</Badge>} />}
+          </dl>
 
           {canManage && (b || t.review) && (
             <div className="space-y-3 rounded-lg border p-3">
@@ -479,59 +611,31 @@ function TicketSheet({
           )}
 
           {t.source !== "social" && t.status !== "ignored" && (
-            <div className="space-y-2 rounded-lg border p-3">
-              <div className="font-medium">{t.source === "seo_links" ? "A suggestion, not a task Outflare runs" : "Hand it on"}</div>
-              <p className="text-muted-foreground">
-                {t.source === "seo_links"
-                  ? "Outflare never contacts a site, asks for a link or disavows anything for you. Copy it for your own agent, or look at the links yourself."
-                  : "Copy it as an issue for GitHub, Linear or a coding agent, with every page and your guidelines. Once the change is live, check it: a fresh crawl confirms it or opens it again."}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="ghost" disabled={busy} onClick={copy}>Copy as issue</Button>
-                {canManage && active && t.status !== "in_progress" && <Button variant="ghost" disabled={busy} onClick={take}>Take it</Button>}
-                {canManage && active && t.source === "seo_audit" && <Button variant="ghost" disabled={busy || !d} onClick={live}>It's live, check it</Button>}
-                {t.source === "seo_links" && <Button variant="ghost" onClick={() => go(t.rule.id === "link_gap_domain" ? "competitors" : "backlinks")}>{t.rule.id === "link_gap_domain" ? "Open Competitors" : "Open Backlinks"}</Button>}
+            <div className="space-y-3 rounded-lg border p-3">
+              <div>
+                <div className="font-medium">{t.source === "seo_links" ? "A suggestion, not a task Outflare runs" : "Hand it on"}</div>
+                {t.source === "seo_links" && <p className="text-muted-foreground">Outflare never contacts a site, asks for a link or disavows anything for you. Copy it for your own agent, or look at the links yourself.</p>}
               </div>
+              <HandOn title="Give to agent" action="Copy for an agent" primary disabled={busy} onClick={() => copy("agent")}>
+                Instructions for Claude Code, Cursor or Codex. Paste them in your website's repository: the agent finds the code, makes the change and opens a pull request that names this ticket.
+              </HandOn>
+              <HandOn title="Give to a developer" action="Copy" disabled={busy} onClick={() => copy("issue")}>
+                The ticket as an issue for GitHub or Linear, with every page, your guidelines and the link back here.
+              </HandOn>
+              {canManage && active && t.status !== "in_progress" && (
+                <HandOn title="Doing it yourself?" action="Take it" disabled={busy} onClick={take}>
+                  Puts your name on it, so nobody else starts the same work.
+                </HandOn>
+              )}
+              {canManage && active && t.source === "seo_audit" && (
+                <HandOn title="Is the change live?" action="Check it" disabled={busy || !d} onClick={live}>
+                  Outflare crawls the site again and closes the ticket, or opens it again if the problem is still there.
+                </HandOn>
+              )}
+              {t.source === "seo_links" && <Button variant="ghost" onClick={() => go(t.rule.id === "link_gap_domain" ? "competitors" : "backlinks")}>{t.rule.id === "link_gap_domain" ? "Open Competitors" : "Open Backlinks"}</Button>}
             </div>
           )}
           {t.source === "social" && <Button variant="ghost" onClick={() => go("reddit")}>Open Reddit</Button>}
-
-          {!d && !error && <Loading />}
-          {d && d.fixes.length > 0 && (
-            <Section
-              title={t.unit === "pages" ? "Pages" : "Where"}
-              action={t.source === "seo_audit" && <button className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => go("audits", t.subject.id)}>Open the site's audit</button>}
-            >
-              <div className="space-y-3">
-                {d.fixes.map((f) => {
-                  const pages = d.pages.filter((p) => p.fix_id === f.id);
-                  return (
-                    <div key={f.id} className="space-y-1">
-                      {(d.fixes.length > 1 || f.group) && (
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <span className="font-mono">{f.group || "Everywhere"}</span>
-                          <span className="text-muted-foreground">{plural(f.count, f.unit.replace(/s$/, ""))}</span>
-                          <Badge tone={statusTone[f.status]}>{statusLabel[f.status]}</Badge>
-                          {f.assignee && <span className="text-muted-foreground">{f.assignee.name}</span>}
-                        </div>
-                      )}
-                      {pages.length > 0 && (
-                        <ul className="space-y-0.5 pl-3">
-                          {pages.map((p, i) => (
-                            <li key={i} className="flex flex-wrap items-baseline gap-2">
-                              <a className="font-mono text-[12px] break-all underline-offset-2 hover:underline" href={p.url} target="_blank" rel="noreferrer noopener">{p.url}</a>
-                              {p.detail && <span className="text-[12px] text-muted-foreground">{p.detail}</span>}
-                            </li>
-                          ))}
-                          {f.unit === "pages" && f.count > pages.length && <li className="text-[12px] text-muted-foreground">And {plural(f.count - pages.length, "more page")}.</li>}
-                        </ul>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </Section>
-          )}
 
           {d && d.guidelines.length > 0 && (
             <Section title="Guidelines it follows">
@@ -545,25 +649,36 @@ function TicketSheet({
               </ul>
             </Section>
           )}
-
-          {d && d.related.length > 0 && (
-            <Section title="Other fixes on this site">
-              <ul className="space-y-1">
-                {d.related.map((r) => (
-                  <li key={r.id}>
-                    <button className="flex w-full flex-wrap items-center gap-2 text-left hover:underline" onClick={() => onPick(r.id)}>
-                      <span className="min-w-0 flex-1">{r.title}</span>
-                      {r.review && <Badge tone={r.review === "approved" ? "green" : "red"}>{r.review === "approved" ? "Approved" : "Rejected"}</Badge>}
-                      <Badge tone={statusTone[r.status]}>{statusLabel[r.status]}</Badge>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          )}
         </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </div>
+  );
+}
+
+// The write-up's own formatting, sized like the text around it.
+const prose = "min-w-0 text-[13px] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
+
+// One way to hand a ticket on: what it is for, then the button.
+function HandOn({ title, action, primary, disabled, onClick, children }: { title: string; action: string; primary?: boolean; disabled?: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <div className="space-y-1.5 border-t pt-3">
+      <div className="font-medium">{title}</div>
+      <p className="text-muted-foreground">{children}</p>
+      <Button variant={primary ? undefined : "ghost"} disabled={disabled} onClick={onClick}>{action}</Button>
+    </div>
+  );
+}
+
+// One label of a ticket, with what it means in plain words.
+function Fact({ label, badge, children }: { label: string; badge: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <dt className="text-muted-foreground">{label}</dt>
+        <dd>{badge}</dd>
+      </div>
+      {children && <dd className="text-xs text-muted-foreground">{children}</dd>}
+    </div>
   );
 }
 

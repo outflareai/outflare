@@ -92,6 +92,17 @@ type (
 	EmailItemResult    = emailfind.ItemResult
 )
 
+// EnrollLater is the error PeopleSteps.Campaign returns for a person it
+// can't decide about yet (a check that got no answer): the item stays at
+// enroll and is asked about again after After, without being added and
+// without counting an attempt.
+type EnrollLater = peoplesteps.Later
+
+// EnrollRecheckEmail is the error PeopleSteps.Campaign returns for a
+// person whose address must be checked again before they are added: the
+// item goes back to StepFindEmail and through the steps again.
+var EnrollRecheckEmail = peoplesteps.ErrRecheckEmail
+
 // What the email finder says about one address (EmailItemResult.Code).
 const (
 	EmailFound         = emailfind.CodeFound
@@ -118,6 +129,9 @@ const (
 	EnrollCampaignUnavailable = peoplesteps.CampaignUnavailable
 	EnrollCampaignReady       = peoplesteps.CampaignReady
 	EnrollSequencerRefused    = peoplesteps.SequencerRefused
+	EnrollCampaignNotReady    = peoplesteps.CampaignNotReady
+	EnrollDailyCapacity       = peoplesteps.CampaignDailyCapacity
+	EnrollPushFailed          = peoplesteps.PushFailed
 )
 
 // RegisterPeopleSteps adds the shared people steps to c.Pipeline. Call it

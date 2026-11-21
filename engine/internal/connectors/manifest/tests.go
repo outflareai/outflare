@@ -137,6 +137,10 @@ func runCase(ctx context.Context, x *Connector, tc Case) []string {
 		return append(problems, fmt.Sprintf("unexpected error: %v", err))
 	}
 	have := asMap(result)
+	// Not part of the stored result, so a test names it apart.
+	if v, ok := result.(c.Verification); ok {
+		have["not_catch_all"] = v.NotCatchAll
+	}
 	keys := make([]string, 0, len(tc.Expect))
 	for k := range tc.Expect {
 		keys = append(keys, k)

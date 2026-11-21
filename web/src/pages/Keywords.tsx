@@ -677,7 +677,8 @@ const moved = (t: TrackedKeyword) => {
 
 // Rankings: where the site ranks on Google for the keywords it tracks,
 // checked through the workspace's own DataForSEO or Geonode connection.
-type RankConnection = { integration_id: string; name: string; connector: string };
+type RankImport = { ran_at: string; outcome: "imported" | "no_project" | "failed"; project: string; keywords: number; added: number; skipped: string[]; projects_seen: string[]; error_code: string; error: string };
+type RankConnection = { integration_id: string; name: string; connector: string; last_import?: RankImport };
 
 function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] }) {
   const [rows, setRows] = useState<TrackedKeyword[] | null>(null);
@@ -800,6 +801,12 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
           : imports.length === 0 ? "The rank tracking connection was removed, so checks have stopped." : ""}
         {imports.length > 0 && ` Keywords tracked in a ${imports[0].name} project for this site come in from it each day, at no cost here.`} Agents use list_rankings and track_keywords.
       </p>
+      {imports.map((im) => (
+        <p key={im.integration_id} className="text-xs" role="status">
+          <span className="font-medium">{im.name}: </span>
+          <span className={im.last_import && im.last_import.outcome !== "imported" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}>{importStatus(im)}</span>
+        </p>
+      ))}
       <DataTable
         data={rows}
         rowId={(r) => r.id}
@@ -1053,4 +1060,23 @@ function Drops({ ws, site, go }: { ws: string; site: string; go: Props["go"] }) 
       )}
     </div>
   );
+}
+
+// What the last import from a rank tracker's own projects did, in plain
+// words: an import that brought nothing in says why.
+function importStatus(im: RankConnection): string {
+  const li = im.last_import;
+  if (!li) return "no import has run yet; it runs once a day, or press Check now.";
+  const when = new Date(li.ran_at).toLocaleString();
+  const skipped = li.skipped.length ? ` Skipped: ${li.skipped.slice(0, 3).join("; ")}${li.skipped.length > 3 ? ` and ${li.skipped.length - 3} more` : ""}.` : "";
+  switch (li.outcome) {
+    case "imported":
+      return li.keywords > 0
+        ? `project "${li.project}", ${li.keywords.toLocaleString()} keyword${li.keywords === 1 ? "" : "s"} imported${li.added ? ` (${li.added} new)` : ""}, ${when}.${skipped}`
+        : `project "${li.project}" matched, but no keyword positions came in (${when}). Check that the project tracks keywords on a search engine with a country.${skipped}`;
+    case "no_project":
+      return `no project in this account is for this site (${when}). ${li.projects_seen.length ? `Its projects are for: ${li.projects_seen.slice(0, 12).join(", ")}${li.projects_seen.length > 12 ? "…" : ""}.` : "The API key sees no projects at all: use a key from the account that owns the projects."}`;
+    default:
+      return `the import failed (${li.error_code || "error"}, ${when}).${li.error ? ` ${li.error}` : ""} ${li.error_code === "auth" ? "The API key was refused: reconnect it under Connectors." : li.error_code === "quota" ? "The account's API limit was reached." : "It is tried again at the next daily import."}`;
+  }
 }

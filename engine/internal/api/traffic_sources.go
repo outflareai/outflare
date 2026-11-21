@@ -428,7 +428,7 @@ const (
 // fields of the same number, as most trackers do.
 func (src *campaignSource) capture(q url.Values) (fields map[string]string, clickID, cost string) {
 	set := func(n int, v string) {
-		if v = strings.TrimSpace(v); v != "" {
+		if v = strings.TrimSpace(storable(v)); v != "" {
 			if fields == nil {
 				fields = map[string]string{}
 			}
@@ -451,7 +451,7 @@ func (src *campaignSource) capture(q url.Values) (fields map[string]string, clic
 		set(p.Field, v)
 	}
 	if src.clickID.Param != "" {
-		clickID = cutUTF8(strings.TrimSpace(q.Get(src.clickID.Param)), maxSourceClickIDLen)
+		clickID = cutUTF8(strings.TrimSpace(storable(q.Get(src.clickID.Param))), maxSourceClickIDLen)
 	}
 	if src.cost.Param != "" {
 		cost = strings.TrimSpace(q.Get(src.cost.Param))

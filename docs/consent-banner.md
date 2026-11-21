@@ -11,7 +11,7 @@ Every law and framework is on by default, and you can turn each one off per site
 
 ## Turn it on
 
-In the web app, open **Analytics → Website tracking**, choose the site and open **Consent banner**. You can also use the API (`PUT /v1/brands/{brand}/site-keys/{id}/consent-banner`) or MCP (`update_consent_banner`):
+In the web app, open **Settings → Website tracking**, choose the site and open **Consent banner**. You can also use the API (`PUT /v1/brands/{brand}/site-keys/{id}/consent-banner`) or MCP (`update_consent_banner`):
 
 ```json
 { "enabled": true, "policy_url": "/cookies" }
@@ -109,7 +109,7 @@ Each one is matched to Outflare's catalogue of known vendors (Google, Meta, TikT
 
 **Reviewing**
 
-Open **Cookies** next to the site on **Analytics → Website tracking** (or use `GET .../site-keys/{id}/cookies` or MCP `list_site_cookies`).
+Open **Cookies** next to the site on **Settings → Website tracking** (or use `GET .../site-keys/{id}/cookies` or MCP `list_site_cookies`).
 
 - Known items go into the policy straight away.
 - Items the catalogue doesn't know wait under **To review**. Give them a category and a purpose to list them, or choose **Leave out** (`PATCH .../cookies/{cookie}`, MCP `classify_site_cookie`). A person's answer always overrides the catalogue's.

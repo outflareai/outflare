@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -72,6 +73,11 @@ func TestFixTickets(t *testing.T) {
 		t.Fatalf("ticket: %v", ticket)
 	}
 	tid := ticket["id"].(string)
+	// A short number and a link back, for pull requests and chats.
+	if n, _ := ticket["number"].(float64); n < 1 || !strings.HasSuffix(ticket["url"].(string), "/fixes/"+tid) {
+		t.Fatalf("number and url: %v %v", ticket["number"], ticket["url"])
+	}
+	ref := fmt.Sprintf("Outflare fix #%d", int(ticket["number"].(float64)))
 	d := owner.must(200, "GET", base+"/fix-tickets/"+tid, nil)
 	if len(d["fixes"].([]any)) != 2 || len(d["pages"].([]any)) != 4 || len(d["related"].([]any)) == 0 {
 		t.Fatalf("detail: %v", d)
@@ -81,7 +87,15 @@ func TestFixTickets(t *testing.T) {
 	// The plain prompt works before any AI is connected.
 	if p := owner.must(200, "GET", base+"/fix-tickets/"+tid+"/prompt", nil)["prompt"].(string); !strings.Contains(p, "/p/*:") || !strings.Contains(p, "/verify") {
 		t.Fatalf("plain prompt: %s", p)
+	} else if !strings.Contains(p, ref+" · "+ticket["url"].(string)) {
+		t.Fatalf("the prompt doesn't say where it came from: %s", p)
 	}
+	// The same ticket as instructions for a coding agent.
+	if p := owner.must(200, "GET", base+"/fix-tickets/"+tid+"/prompt?for=agent", nil)["prompt"].(string); !strings.HasPrefix(p, "You are working in the repository") ||
+		!strings.Contains(p, "open a pull request") || !strings.Contains(p, ref) || !strings.Contains(p, "# Missing title") {
+		t.Fatalf("agent prompt: %s", p)
+	}
+	owner.must(400, "GET", base+"/fix-tickets/"+tid+"/prompt?for=nobody", nil)
 
 	// Writing needs the workspace's own AI model.
 	if c := owner.must(409, "POST", base+"/fix-tickets/"+tid+"/write", nil)["error"].(map[string]any)["code"]; c != "connector_needed" {
@@ -121,6 +135,10 @@ func TestFixTickets(t *testing.T) {
 		if !strings.Contains(sent, want) {
 			t.Errorf("brief context lacks %q", want)
 		}
+	}
+	// The writer gets no ids or API calls to copy into the ticket.
+	if strings.Contains(sent, "/verify") || strings.Contains(sent, "verify_fix") {
+		t.Errorf("brief context carries how to report back: %s", sent)
 	}
 	p := owner.must(200, "GET", base+"/fix-tickets/"+tid+"/prompt", nil)["prompt"].(string)
 	if !strings.Contains(p, "# Add titles to 3 product pages") || !strings.Contains(p, "- [ ] Every page under /p/") || !strings.Contains(p, "Use sentence case") {

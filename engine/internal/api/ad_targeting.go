@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -30,6 +31,11 @@ func (s *Server) routesAdTargeting(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/audiences", s.onBrand(manage, s.setAdAudience))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/campaigns/{id}/audiences", s.inBrand(manage, s.setAdAudience))
 	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/countries", s.onBrand(manage, s.setAdCountry))
+	// The campaign's places set together, with a preview that only reads
+	// (ad_locations.go), and the campaign renamed.
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/locations/preview", s.onBrand(auth.ScopeAnalyticsRead, s.previewAdLocations))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/locations", s.onBrand(manage, s.setAdLocations))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/rename", s.onBrand(manage, s.renameAdCampaign))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/campaigns/{id}/countries", s.inBrand(manage, s.setAdCountry))
 }
 
@@ -99,7 +105,9 @@ func (s *Server) getAdTargeting(w http.ResponseWriter, r *http.Request) {
 	if methods == nil {
 		methods = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"supported": true, "targeting": got, "bidding_methods": methods})
+	// Read live just now, so a caller can tell a fresh read from a stored one.
+	writeJSON(w, http.StatusOK, map[string]any{"supported": true, "targeting": got, "bidding_methods": methods,
+		"observed_at": time.Now().UTC(), "provider_campaign_resource_name": got.ResourceName, "location_fingerprint": got.LocationFingerprint()})
 }
 
 // queueAdTargeting checks the campaign and the platform, then records the
@@ -140,8 +148,28 @@ func (s *Server) setAdBidding(w http.ResponseWriter, r *http.Request) {
 		TargetCPAMicros   *int64   `json:"target_cpa_micros"`
 		TargetROAS        *float64 `json:"target_roas"`
 		BiddingStrategyID string   `json:"bidding_strategy_id"`
+		// Target impression share: where on the page, the share of
+		// searches (0 to 1) and the most paid for a click; the last is
+		// also Maximise clicks' optional ceiling.
+		ImpressionShareLocation string   `json:"impression_share_location"`
+		ImpressionShare         *float64 `json:"impression_share"`
+		MaxCPCMicros            *int64   `json:"max_cpc_micros"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	in.ImpressionShareLocation = strings.ToLower(strings.TrimSpace(in.ImpressionShareLocation))
+	share := in.ImpressionShareLocation != "" || in.ImpressionShare != nil
+	if in.Strategy != connectors.BidImpressionShare && share {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "impression_share and impression_share_location go with strategy target_impression_share")
+		return
+	}
+	if in.MaxCPCMicros != nil && in.Strategy != connectors.BidImpressionShare && in.Strategy != connectors.BidMaxClicks {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "max_cpc_micros goes with strategy target_impression_share or target_spend")
+		return
+	}
+	if in.MaxCPCMicros != nil && (*in.MaxCPCMicros < 10_000 || *in.MaxCPCMicros > adBudgetMax) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "max_cpc_micros is at least 10000 (a cent) and at most 1000000000000 (a million)")
 		return
 	}
 	b := connectors.AdBidding{Strategy: strings.TrimSpace(in.Strategy), BiddingStrategyID: strings.TrimSpace(in.BiddingStrategyID)}
@@ -184,8 +212,21 @@ func (s *Server) setAdBidding(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b.TargetROAS = in.TargetROAS
+	case connectors.BidImpressionShare, connectors.BidMaxClicks:
+		if in.TargetCPAMicros != nil || in.TargetROAS != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", b.Strategy+" takes no target_cpa_micros or target_roas")
+			return
+		}
+		if b.Strategy == connectors.BidImpressionShare {
+			if err := connectors.CheckImpressionShare(in.ImpressionShareLocation, in.ImpressionShare, in.MaxCPCMicros); err != nil {
+				writeError(w, r, http.StatusBadRequest, "invalid_request", err.(*connectors.Error).Message)
+				return
+			}
+			b.ImpressionShareLocation, b.ImpressionShare = in.ImpressionShareLocation, in.ImpressionShare
+		}
+		b.MaxCPCMicros = in.MaxCPCMicros
 	default:
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "strategy is maximize_conversions, maximize_conversion_value or portfolio (with bidding_strategy_id)")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "strategy is maximize_conversions, maximize_conversion_value, target_impression_share, target_spend (Maximise clicks) or portfolio (with bidding_strategy_id)")
 		return
 	}
 	s.queueAdTargeting(w, r, adsync.ChangeBidding, adsync.ChangeState{Bidding: &b}, func(t connectors.AdTargetingManager) bool {

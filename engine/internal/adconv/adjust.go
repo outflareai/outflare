@@ -2,8 +2,12 @@ package adconv
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/conversions"
@@ -136,9 +140,13 @@ func (s *Sender) AdjustRule(ctx context.Context, ws, ruleID string) (Result, err
 		if !at.After(a.convAt) {
 			at = a.convAt.Add(time.Second)
 		}
-		adjs[i] = connectors.AdConversionAdjustment{EventID: a.eventID, Retract: a.kind == "retraction", Currency: a.currency, Time: at, Index: i}
+		adjs[i] = connectors.AdConversionAdjustment{EventID: a.eventID, Retract: a.kind == "retraction", Currency: a.currency, Time: at, Index: i,
+			ConversionTime: a.convAt}
 		if a.value != nil {
 			adjs[i].ValueMicros = *a.value
+		}
+		if err := s.adjustmentKeys(ctx, ws, a, &adjs[i]); err != nil {
+			return res, dbError{err}
 		}
 	}
 	target := connectors.ConversionTarget{ID: r.targetID, Name: r.targetName}
@@ -160,6 +168,13 @@ func (s *Sender) AdjustRule(ctx context.Context, ws, ruleID string) (Result, err
 		}
 		answered[cr.Index] = true
 		a := list[cr.Index]
+		if cr.Skipped {
+			if err := s.markAdjustment(ctx, a.id, "skipped", cr.Reason); err != nil {
+				return res, dbError{err}
+			}
+			res.Skipped++
+			continue
+		}
 		if cr.OK {
 			if err := s.markAdjustment(ctx, a.id, "sent", ""); err != nil {
 				return res, dbError{err}
@@ -185,6 +200,34 @@ func (s *Sender) AdjustRule(ctx context.Context, ws, ruleID string) (Result, err
 		}
 	}
 	return res, nil
+}
+
+// adjustmentKeys gives an adjustment what its conversion was matched on:
+// the click ids of the conversion's event and of the person's visits before
+// it, and their hashed emails and phones, gathered as the send gathered
+// them. A platform that finds a conversion by these needs them again.
+func (s *Sender) adjustmentKeys(ctx context.Context, ws string, a adjustment, adj *connectors.AdConversionAdjustment) error {
+	q := queued{occurred: a.convAt}
+	var props []byte
+	err := s.Pool.QueryRow(ctx, `SELECT x.record_id::text, e.anonymous_id, e.properties
+		FROM ad_conversion_sends x JOIN customer_events e ON e.id = x.event_row_id
+		WHERE x.id = $1 AND x.workspace_id = $2`, a.sendID, ws).Scan(&q.recordID, &q.anonID, &props)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // the event is gone; the platform's own id may still find it
+	}
+	if err != nil {
+		return err
+	}
+	_ = json.Unmarshal(props, &q.props)
+	cv := connectors.AdConversion{ClickIDs: map[string]string{}}
+	if err := s.clicks(ctx, ws, q, &cv); err != nil {
+		return err
+	}
+	if err := s.identities(ctx, ws, q.recordID, &cv); err != nil {
+		return err
+	}
+	adj.ClickIDs, adj.Emails, adj.Phones = cv.ClickIDs, cv.Emails, cv.Phones
+	return nil
 }
 
 // retryAdjustment tries a refused adjustment again later, or fails it after

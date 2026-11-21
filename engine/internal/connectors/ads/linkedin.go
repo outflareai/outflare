@@ -197,8 +197,30 @@ func liDate(s string) string {
 }
 
 func (l LinkedInAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdDay, error) {
+	rows, err := l.analytics(ctx, cl, creds, acct, "CAMPAIGN", from, to)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]c.AdDay, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, c.AdDay{CampaignID: r.id, Date: r.date, SpendMicros: r.spend, Impressions: r.impressions, Clicks: r.clicks,
+			Conversions: ptrF(r.conversions), ConversionValueMicros: ptrI(r.value)})
+	}
+	return out, nil
+}
+
+// liDay is one campaign's or creative's numbers for a day.
+type liDay struct {
+	id, date                          string
+	spend, impressions, clicks, value int64
+	conversions                       float64
+}
+
+// analytics reads the account's numbers by day and pivot (CAMPAIGN or
+// CREATIVE).
+func (l LinkedInAds) analytics(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, pivot, from, to string) ([]liDay, error) {
 	// Rest.li wants its own syntax left as is; only the URN is escaped.
-	q := "q=analytics&pivot=CAMPAIGN&timeGranularity=DAILY" +
+	q := "q=analytics&pivot=" + pivot + "&timeGranularity=DAILY" +
 		"&dateRange=(start:" + liDate(from) + ",end:" + liDate(to) + ")" +
 		"&accounts=List(" + url.QueryEscape(sponsoredAccount+acct.ID) + ")" +
 		"&fields=dateRange,pivotValues,costInLocalCurrency,impressions,clicks,externalWebsiteConversions,conversionValueInLocalCurrency"
@@ -222,16 +244,95 @@ func (l LinkedInAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, ac
 	if err := l.call(cl, creds).get(ctx, l.base(cl)+"/adAnalytics?"+q, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]c.AdDay, 0, len(resp.Elements))
+	out := make([]liDay, 0, len(resp.Elements))
 	for _, e := range resp.Elements {
 		if len(e.PivotValues) == 0 {
 			continue
 		}
-		id := e.PivotValues[0][strings.LastIndexByte(e.PivotValues[0], ':')+1:]
 		s := e.DateRange.Start
-		out = append(out, c.AdDay{CampaignID: id, Date: fmt.Sprintf("%04d-%02d-%02d", s.Year, s.Month, s.Day),
-			SpendMicros: c.MicrosOf(e.Cost), Impressions: int64(e.Impressions), Clicks: int64(e.Clicks),
-			Conversions: ptrF(float64(e.Conversions)), ConversionValueMicros: ptrI(c.MicrosOf(e.Value))})
+		out = append(out, liDay{id: liID(e.PivotValues[0]), date: fmt.Sprintf("%04d-%02d-%02d", s.Year, s.Month, s.Day),
+			spend: c.MicrosOf(e.Cost), impressions: int64(e.Impressions), clicks: int64(e.Clicks),
+			conversions: float64(e.Conversions), value: c.MicrosOf(e.Value)})
 	}
 	return out, nil
+}
+
+// liID is the id at the end of a URN.
+func liID(urn string) string { return urn[strings.LastIndexByte(urn, ':')+1:] }
+
+// ---- ads (creatives) ----
+
+var _ c.AdCampaignAdsReader = LinkedInAds{}
+
+// liCreativeDays is how many days one analytics call by creative covers:
+// LinkedIn returns at most 15,000 rows a call, with no next page.
+const liCreativeDays = 31
+
+// CampaignAds reads the account's ads. What Outflare calls a LinkedIn
+// campaign holds its ads (LinkedIn's creatives) directly, so there is no
+// ad group between. A creative carries its name, status and review; what
+// it shows is on the post it sponsors, which isn't read.
+func (l LinkedInAds) CampaignAds(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdItem, []c.AdItemDay, error) {
+	var items []c.AdItem
+	parent := map[string]string{}
+	names := map[string]string{}
+	token := ""
+	for i := 0; i < maxPages; i++ {
+		u := l.base(cl) + "/adAccounts/" + esc(acct.ID) + "/creatives?q=criteria&pageSize=100"
+		if token != "" {
+			u += "&pageToken=" + url.QueryEscape(token)
+		}
+		var resp struct {
+			Elements []struct {
+				ID             string `json:"id"`
+				Campaign       string `json:"campaign"`
+				Name           string `json:"name"`
+				IntendedStatus string `json:"intendedStatus"`
+				Review         *struct {
+					Status string `json:"status"`
+				} `json:"review"`
+			} `json:"elements"`
+			Metadata struct {
+				NextPageToken string `json:"nextPageToken"`
+			} `json:"metadata"`
+		}
+		if err := l.call(cl, creds).set("X-RestLi-Method", "FINDER").get(ctx, u, &resp); err != nil {
+			return nil, nil, err
+		}
+		for _, e := range resp.Elements {
+			id, camp := liID(e.ID), liID(e.Campaign)
+			if id == "" || camp == "" {
+				continue
+			}
+			it := c.AdItem{ID: id, ParentID: camp, Name: e.Name, Status: status(e.IntendedStatus), ProviderStatus: e.IntendedStatus}
+			if e.Review != nil {
+				policy := map[string]string{"APPROVED": "approved", "REJECTED": "disapproved", "PENDING": "under_review", "NEEDS_REVIEW": "under_review"}[e.Review.Status]
+				it.Details = adDetails(map[string]string{c.AdDetailPolicy: policy})
+			}
+			items = append(items, it)
+			parent[id], names[id] = camp, e.Name
+		}
+		if token = resp.Metadata.NextPageToken; token == "" {
+			break
+		}
+	}
+	var out []c.AdItemDay
+	all := days(from, to)
+	for start := 0; start < len(all); start += liCreativeDays {
+		window := all[start:min(start+liCreativeDays, len(all))]
+		rows, err := l.analytics(ctx, cl, creds, acct, "CREATIVE", window[0], window[len(window)-1])
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, r := range rows {
+			// A creative the list doesn't have has no campaign to go under.
+			camp, ok := parent[r.id]
+			if !ok || r.spend == 0 && r.impressions == 0 && r.clicks == 0 {
+				continue
+			}
+			out = append(out, c.AdItemDay{ID: r.id, ParentID: camp, Name: names[r.id], Date: r.date, SpendMicros: r.spend, Impressions: r.impressions,
+				Clicks: r.clicks, Conversions: ptrF(r.conversions), ConversionValueMicros: ptrI(r.value)})
+		}
+	}
+	return items, out, nil
 }

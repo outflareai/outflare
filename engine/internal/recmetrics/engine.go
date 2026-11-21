@@ -136,7 +136,7 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 		defs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (def, error) {
 			var d def
 			err := row.Scan(&d.ID, &d.Key, &d.Name, &d.Description, &d.Levels, &d.Aggregate, &d.Events, &d.Usage, &d.Property, &d.WindowDays,
-				&d.OffsetDays, &d.PerProduct, &d.Version, &d.backfilled)
+				&d.OffsetDays, &d.PerProduct, &d.Version, &d.ProductCategory, &d.backfilled)
 			return d, err
 		})
 		if err != nil || len(defs) == 0 {
@@ -144,6 +144,14 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 		}
 		props := map[string]any{}
 		_ = json.Unmarshal(raw, &props)
+		// The category of the event's product, for metrics that count one
+		// category only.
+		category := ""
+		if product != nil {
+			if err := tx.QueryRow(ctx, `SELECT category FROM products WHERE id = $1`, *product).Scan(&category); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		list, err := targets(ctx, tx, ws, brand, rec, recordType, account)
 		if err != nil {
 			return err
@@ -153,6 +161,10 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 		for _, d := range defs {
 			if d.backfilled == nil || !received.After(*d.backfilled) {
 				metrics.RecordMetricUpdated("backfilled") // counted by the backfill
+				continue
+			}
+			if d.ProductCategory != "" && d.ProductCategory != category {
+				metrics.RecordMetricUpdated("other_category")
 				continue
 			}
 			if day.Before(time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -(d.span() - 1))) {
@@ -377,7 +389,8 @@ func (s *Service) backfillJob(ctx context.Context, job jobs.Job) error {
 		// Each matching event, for the person and for their company.
 		value := `CASE WHEN e.properties->>$5 ~ '^\s*-?[0-9]+(\.[0-9]+)?\s*$' THEN (e.properties->>$5)::numeric END`
 		match := `e.workspace_id = $1 AND e.brand_id = $2 AND ($3::text[] && ARRAY[e.name] OR ($4 AND e.usage))
-			AND e.occurred_at >= (now() AT TIME ZONE 'UTC')::date - $6::int + 1 AND e.received_at < (SELECT backfilled_at FROM metric_definitions WHERE id = $7)`
+			AND e.occurred_at >= (now() AT TIME ZONE 'UTC')::date - $6::int + 1 AND e.received_at < (SELECT backfilled_at FROM metric_definitions WHERE id = $7)
+			AND ($8 = '' OR e.product_id IN (SELECT p.id FROM products p WHERE p.brand_id = $2 AND p.category = $8))`
 		needValue := d.Aggregate == Sum || d.Aggregate == Min || d.Aggregate == Max || d.Aggregate == Latest
 		// A day keeps the sum of its values, or for latest its last one.
 		total := `COALESCE(sum(v), 0)`
@@ -411,7 +424,7 @@ func (s *Service) backfillJob(ctx context.Context, job jobs.Job) error {
 			INSERT INTO metric_buckets (workspace_id, brand_id, metric_id, record_id, product_id, day, n, total, lo, hi, last_at)
 			SELECT $1, $2, $7, rec, product_id, (occurred_at AT TIME ZONE 'UTC')::date, count(*), `+total+`, min(v), max(v), max(occurred_at)
 			FROM split GROUP BY rec, product_id, (occurred_at AT TIME ZONE 'UTC')::date`,
-			ws, brand, d.Events, d.Usage, d.Property, d.span(), d.ID)
+			ws, brand, d.Events, d.Usage, d.Property, d.span(), d.ID, d.ProductCategory)
 		if err != nil {
 			return err
 		}
@@ -520,7 +533,7 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 		list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (due, error) {
 			var x due
 			err := row.Scan(&x.ws, &x.brand, &x.rec, &x.product, &x.d.ID, &x.d.Key, &x.d.Name, &x.d.Description, &x.d.Levels, &x.d.Aggregate, &x.d.Events,
-				&x.d.Usage, &x.d.Property, &x.d.WindowDays, &x.d.OffsetDays, &x.d.PerProduct, &x.d.Version)
+				&x.d.Usage, &x.d.Property, &x.d.WindowDays, &x.d.OffsetDays, &x.d.PerProduct, &x.d.Version, &x.d.ProductCategory)
 			return x, err
 		})
 		if err != nil {
@@ -552,5 +565,5 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 // prefixed is Columns with each column qualified by p.
 func prefixed(p string) string {
 	return p + `id::text, ` + p + `key, ` + p + `name, ` + p + `description, ` + p + `levels, ` + p + `aggregate, ` + p + `events, ` + p + `usage, COALESCE(` +
-		p + `property, ''), ` + p + `window_days, ` + p + `offset_days, ` + p + `per_product, ` + p + `version`
+		p + `property, ''), ` + p + `window_days, ` + p + `offset_days, ` + p + `per_product, ` + p + `version, ` + p + `product_category`
 }

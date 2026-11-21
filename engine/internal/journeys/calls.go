@@ -200,7 +200,7 @@ func templateData(ctx context.Context, q jobs.Querier, ws string, r run) (map[st
 	var attrs []byte
 	err := q.QueryRow(ctx, `SELECT r.name, COALESCE(i.value, ''), r.attributes FROM records r
 		LEFT JOIN LATERAL (SELECT value FROM record_identities i WHERE i.record_id = r.id AND i.namespace = 'email' AND i.valid_to IS NULL
-			ORDER BY i.verified DESC, i.valid_from, i.id LIMIT 1) i ON true
+			ORDER BY i.preferred DESC, i.verified DESC, i.valid_from DESC, i.id LIMIT 1) i ON true
 		WHERE r.workspace_id = $1 AND r.id = $2`, ws, r.recordID).Scan(&name, &address, &attrs)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err

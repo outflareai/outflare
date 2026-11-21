@@ -7,7 +7,7 @@ Two versions of the code always share one database for a while:
 - **During a deploy**, the new version migrates and starts while the old one is still serving.
 - **After a rollback**, the previous version runs on the schema the newer one left behind. Migrations never run backwards: the older binary skips the ones it doesn't know.
 
-So every migration must leave a schema that the version before it still works on. CI checks this on every pull request (the `migrations` job): `scripts/checkmigrations` reads the files the branch adds, and the base branch's tests then run on a database migrated by the branch.
+So every migration must leave a schema that the version before it still works on. CI checks this (the `migrations` job): on every pull request, `scripts/checkmigrations` reads the files the branch adds. The merge queue's batch then runs the base branch's tests on a database migrated by the batch, whenever a new migration does more than create tables and plain indexes (`checkmigrations -additive`): such a migration can't change anything the previous version sees.
 
 ## Rules
 

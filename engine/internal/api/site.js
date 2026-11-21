@@ -72,6 +72,63 @@
 // them at once, with no request. ?of_flag=key:variant on any page
 // shows that variant to you alone for the rest of the visit, to preview it.
 //
+// Session recordings and heatmaps: turned on for the brand in Outflare
+// (Recordings, Heatmaps), with nothing on the tag. Recordings load a
+// second script only for the visits that are recorded, and only with the
+// visitor's consent to analytics where consent is needed. What a visitor
+// types is never recorded: every field is masked in the page. Give an
+// element data-of-mask to hide its text too, or data-of-block to leave it
+// out altogether. Heatmaps count where a page is clicked and how far it
+// is scrolled, with no visitor id. data-replay="off" stops both.
+//
+// Autocapture: turned on for the site key in Outflare (Website tracking,
+// "Capture clicks" and "Capture form submits"), with nothing on the tag.
+// A click on a link or button is sent as Element Clicked with the
+// element's tag, its label, id, classes and where a link goes (no query
+// string); a form submit as Form Submitted with the form's id, name and
+// address. What a visitor typed is never read: no field values, and a
+// label that looks like an email address, a number or a key is left out.
+// data-outflare-event="Plan Chosen" on an element names its click
+// yourself, with or without the switch. data-outflare-ignore leaves an
+// element and everything in it out; data-autocapture="off" on the tag
+// stops it all.
+//
+// Ad pixels: with the site key's "Load the ChatGPT Ads pixel" switch on
+// (Website tracking), the script loads OpenAI's Measurement Pixel for the
+// Pixel ID on the brand's ChatGPT Ads connection, counts each page view
+// with it, and gives it the signed-in visitor's hashed email, phone and
+// id, so the site needs no pixel snippet and no code that passes user
+// data. The hashes come from Outflare's server, for a browser your product
+// identified (outflare.identify, or identify from your server with the
+// visitor's anonymousId); the script never sees an email address. Nothing
+// loads without the visitor's consent to marketing, and withdrawing it
+// tells the pixel. A page that still carries OpenAI's own snippet keeps
+// it: the script then only adds the user data. Sign-ups and purchases
+// still go from Outflare's server, not from the page. data-pixels="off"
+// on the tag stops it.
+//
+// With "Load the Meta pixel" or "Load the TikTok pixel" on, the script
+// loads the pixel the brand's conversions for that platform already go
+// to, counts each page view, and gives it the signed-in visitor's hashes
+// the same way. When a track call is one of those conversions, the script
+// also sends it to the pixel with the id Outflare's server sends it with,
+// so the platform counts it once and can match it on the browser's own
+// cookies. A page that carries the platform's own snippet keeps it, and
+// the script then does nothing for that platform.
+//
+// Errors: with the site key's "Capture errors" switch on, uncaught errors
+// and rejected promises are sent as Error Caught (type, message, stack,
+// where it was thrown), and Outflare's Errors page groups them into
+// issues. outflare.captureException(err, {step: "checkout"}) sends one the
+// page caught itself, with or without the switch. Email addresses and long
+// keys are taken out of the message and stack before anything is sent, and
+// query strings out of the stack's addresses. data-release="1.4.2" (or
+// outflare.setRelease) sends your version or commit with each error, so
+// the Errors page shows the release an error first appeared in. Errors
+// thrown in browser extensions and on pages opened from a file aren't
+// sent. Each error also carries the window's size and the visitor's
+// light or dark and reduced-motion settings; never anything typed.
+//
 // A visitor joins a flag's A/B test when the page shows them its version:
 // when the page reads it (outflare.flag, outflare.flagPayload, or a flag
 // in what onFlags gives), or, with data-flags, when its class goes on
@@ -85,7 +142,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "17";
+  var VERSION = "25";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -140,6 +197,27 @@
       d.cookie = name + "=" + value + attrs + (i < parts.length - 1 ? "; domain=" + domain : "");
       if (keep ? readCookie(name, "[^;]*") === value : !readCookie(name, "[^;]*")) return;
     }
+  }
+  // The signed-in hint: your app calls outflare.signedIn(true) after
+  // sign-in and outflare.signedIn(false) on sign-out. It is kept as a
+  // cookie that only ever holds "1", on the widest domain, so the
+  // marketing site knows a visitor has an account without knowing who
+  // they are. It needs no consent: it names nobody and is set by the
+  // site's own sign-in. It is a hint for what to show, never proof:
+  // anyone can set it in their own browser, so the server must still
+  // check access.
+  var SIGNED = "of_signed_in";
+  function isSignedIn() { return readCookie(SIGNED, "1(?=;|$)") === "1"; }
+  // Elements marked data-outflare-signed-in="show" are shown only to
+  // signed-in visitors, and "hide" only to the others.
+  function showSignedIn() {
+    var inn = isSignedIn();
+    [["show", inn], ["hide", !inn]].forEach(function (p) {
+      try {
+        var els = d.querySelectorAll('[data-outflare-signed-in="' + p[0] + '"]');
+        for (var i = 0; i < els.length; i++) els[i].style.setProperty("display", p[1] ? "" : "none");
+      } catch (e) {}
+    });
   }
   var VISIT = "of_vid";
   function keepVisit(id) { try { sessionStorage.setItem(VISIT, id); } catch (e) {} }
@@ -450,7 +528,11 @@
     }
     try {
       fetch(url, { method: "POST", body: body, keepalive: true, headers: { "Content-Type": "text/plain" } })
-        .then(function (res) { if (res.status >= 500) retry(); }, retry);
+        .then(function (res) {
+          if (res.status >= 500) return retry();
+          // The answer says whether this brand records visits or draws heatmaps.
+          if (res.ok && res.json) res.json().then(function (o) { if (o) { gotReplay(o.replay || null); gotCapture(o.capture || null); gotPixels(o.pixels || null); } }, function () {});
+        }, retry);
     } catch (e) { retry(); }
   }
   function context(q) {
@@ -461,6 +543,7 @@
     try { c.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) {}
     var camp = campaign(q);
     if (camp) c.campaign = camp;
+    if (isSignedIn()) c.signed_in = true;
     return c;
   }
   function page(name, properties) {
@@ -469,10 +552,12 @@
     for (var k in properties || {}) props[k] = properties[k];
     if (visitToken) { props.ofvisit = visitToken; visitToken = ""; }
     if (flagsWanted && lastURL && lastURL !== location.href) loadFlags();
+    if (lastURL && lastURL !== location.href) heatPage();
     var e = { type: "page", anonymousId: anon, messageId: uuid(), properties: props, context: context(q) };
     if (name) e.name = String(name);
     send([e]);
     lastURL = location.href;
+    if (pixelOn) applyPixels();
   }
   // track returns the event's messageId: pass it to an ad pixel as its
   // event id (Meta's eventID), so a conversion Outflare also sends back
@@ -488,6 +573,7 @@
     // A conversion carries the ad pixels' cookies, for sending it back.
     if (!props.click_ids && cookieIDs(ids)) props.click_ids = ids;
     send([{ type: "track", event: String(event), anonymousId: anon, messageId: id, properties: props, context: context(q) }]);
+    pixelEvent(event, props, id);
     return id;
   }
 
@@ -785,7 +871,7 @@
     // The server already decided this page.
     if (bootURL && bootURL === location.href) return applyFlags(flagState, "bootstrap");
     if (!w.fetch) return applyFlags({ anon: anon, flags: {}, payloads: {} });
-    var body = JSON.stringify({ key: key, anonymousId: anon, url: location.href, referrer: lastURL || d.referrer, language: navigator.language || "", preview: previewed() });
+    var body = JSON.stringify({ key: key, anonymousId: anon, url: location.href, referrer: lastURL || d.referrer, language: navigator.language || "", signedIn: isSignedIn(), preview: previewed() });
     fetch(api + "/v1/site/flags", { method: "POST", body: body, headers: { "Content-Type": "text/plain" } })
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (out) {
@@ -871,6 +957,7 @@
     if (on() && !decided() && rule() !== "none") showBanner(false);
     else if (on() && rule() !== "none") showReopen();
     else hideBanner();
+    if (pixelCfg) whenLoaded(applyPixels);
     listeners.forEach(function (fn) { try { fn(choices()); } catch (e) {} });
   }
   function choices() {
@@ -1137,13 +1224,705 @@
     if (d.readyState === "complete") fn();
     else w.addEventListener("load", fn);
   }
-  whenLoaded(function () { showPolicy(); setTimeout(reportCookies, 3000); });
+  whenLoaded(function () { showPolicy(); showSignedIn(); setTimeout(reportCookies, 3000); });
+
+  // ---- Session recordings and heatmaps ----
+  // What to do comes with the answer to this page's events and is kept for
+  // the visit, so the next page starts at once. A recording is one per
+  // visit in this tab: REC keeps its id, the next part's number and
+  // whether this visit was picked (the brand may record only a share).
+  var REPLAY = "of_replay", REC = "of_rec", replayOff = script.getAttribute("data-replay") === "off", replayCfg = null, rec = null;
+  var recStop = null, recLoading = false, recBuf = [], recSize = 0, recTimer = 0, heatOn = false, heatClicks = [], heatDepth = 0, heatAt = "", heatScreen = "", heatHooked = false, heatSent = false, snapAt = "", snapOn = false, snapKeep = null, recWait = [];
+  try { replayCfg = JSON.parse(sessionStorage.getItem(REPLAY) || "null"); } catch (e) {}
+  if (!replayCfg || replayCfg.key !== key) replayCfg = null;
+  setShapes(replayCfg && replayCfg.hide);
+  function pageHeight() {
+    var e = d.documentElement, b = d.body || e;
+    return Math.max(e.scrollHeight || 0, b.scrollHeight || 0, e.clientHeight || 0, 1);
+  }
+  function noteDepth() {
+    var t = Math.max(1, Math.min(10, Math.ceil(((w.scrollY || w.pageYOffset || 0) + (w.innerHeight || 0)) / pageHeight() * 10)));
+    if (t > heatDepth) heatDepth = t;
+  }
+  // What the page shows now, for a page whose address stays the same
+  // while its content changes (the steps of a sign-up, a wizard): the
+  // step marked as current, or the first heading in view. Each screen
+  // gets its own heatmap. Hidden text is named by a number instead.
+  function screenName() {
+    try {
+      var el = d.querySelector('[aria-current="step"]'), hs, i, r, t, n = 0;
+      if (!el) {
+        hs = d.querySelectorAll("h1, h2, [role=heading]");
+        for (i = 0; i < hs.length && i < 30 && !el; i++) {
+          r = hs[i].getBoundingClientRect();
+          if (r.width > 0 && r.height > 0 && (hs[i].textContent || "").replace(/\s+/g, "")) el = hs[i];
+        }
+      }
+      if (!el) return "";
+      t = (el.textContent || "").replace(/[#\s]+/g, " ").replace(/^ | $/g, "").slice(0, 60);
+      if (!t) return "";
+      if ((replayCfg && replayCfg.mask_text) || (el.closest && el.closest("[data-of-mask], [data-of-block]"))) {
+        for (i = 0; i < t.length; i++) n = (n * 31 + t.charCodeAt(i)) % 100000;
+        return "Screen " + n;
+      }
+      return hideSecrets(t);
+    } catch (e) { return ""; }
+  }
+  function noteClick(e) {
+    if (!heatOn || typeof e.pageX !== "number") return;
+    // A click on another screen of the same page: the last screen's
+    // clicks are sent first, so each lands on its own heatmap.
+    var sc = screenName();
+    if (sc !== heatScreen && heatClicks.length) replaySend(false);
+    heatScreen = sc;
+    if (heatClicks.length >= 50) return;
+    var wide = Math.max(d.documentElement.scrollWidth || 0, w.innerWidth || 0, 1);
+    var x = Math.floor(e.pageX / wide * 100), y = Math.floor(e.pageY / 10);
+    if (x >= 0 && x <= 99 && y >= 0 && y <= 5000) heatClicks.push([x, y]);
+  }
+  // The brand may record only some pages, or leave some out: a path, with
+  // * for any run of characters.
+  function pathIn(list, p) {
+    for (var i = 0; list && i < list.length; i++) {
+      var q = list[i];
+      if (q === p) return true;
+      if (q.indexOf("*") < 0) continue;
+      try {
+        if (new RegExp("^" + q.split("*").map(function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join(".*") + "$").test(p)) return true;
+      } catch (e) {}
+    }
+    return false;
+  }
+  function pageOn() {
+    if (!replayCfg) return false;
+    var p = location.pathname.replace(/(.)\/+$/, "$1");
+    if (pathIn(replayCfg.exclude, p)) return false;
+    return !(replayCfg.include && replayCfg.include.length) || pathIn(replayCfg.include, p);
+  }
+  function keepRec() { try { sessionStorage.setItem(REC, JSON.stringify(rec)); } catch (e) {} }
+  function stopRec() {
+    if (recStop) { try { recStop(); } catch (e) {} }
+    recStop = null; recBuf = []; recSize = 0;
+  }
+  // Sends what has gathered: the recording's next part, and the page's
+  // clicks. leaving adds how far down the page the visitor got, once.
+  // The depth is sent once per page view, the first time the visitor
+  // leaves or hides the page: on phones that is often the last chance.
+  function replaySend(leaving) {
+    var events = recStop && consented ? recBuf : [], clicks = heatOn ? heatClicks : [], depth = leaving && heatOn && !heatSent ? heatDepth : 0;
+    if (recStop && !consented) stopRec();
+    if (!events.length && !clicks.length && !depth) return;
+    var body = { key: key, path: heatAt || location.pathname, width: w.innerWidth || 0, height: w.innerHeight || 0 };
+    if (clicks.length || depth) body.screen = clicks.length ? heatScreen : screenName();
+    if (clicks.length) body.clicks = clicks;
+    if (depth) { body.depth = depth; body.page_height = pageHeight(); heatSent = true; }
+    heatClicks = [];
+    if (events.length) {
+      // A leaving page's counts go on their own, so they arrive even
+      // when the recording's part is too big to send while leaving.
+      if (leaving && (clicks.length || depth)) {
+        replayPost(body, true);
+        body = { key: key, path: body.path, width: body.width, height: body.height };
+      }
+      body.session = rec.id; body.anonymousId = anon; body.part = rec.part++; body.events = events;
+      keepRec();
+    }
+    recBuf = []; recSize = 0;
+    replayPost(body, leaving);
+  }
+  function replayPost(body, leaving) {
+    var text = JSON.stringify(body), url = api + "/v1/site/replay", small;
+    // A last pass over what is sent, for a key in a place the others missed.
+    if (body.events || body.snapshot) text = text.replace(SECRET_KNOWN, stars);
+    small = text.length < 60000;
+    try {
+      if (leaving && small && navigator.sendBeacon && navigator.sendBeacon(url, text)) return;
+      fetch(url, { method: "POST", body: text, keepalive: small, headers: { "Content-Type": "text/plain" } })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (o) {
+          if (!o) return;
+          if (o.recording === false && recStop) { stopRec(); rec.on = false; keepRec(); }
+          if (o.heatmaps === false) heatOn = false;
+          if (o.snapshot === true) takeSnap();
+        }, function () {});
+    } catch (e) {}
+  }
+  // The page changed inside an app: the last page's heatmap is closed.
+  function heatPage() {
+    if (heatOn) { noteDepth(); replaySend(true); }
+    else if (recStop) replaySend(false);
+    heatAt = location.pathname; heatSent = false; heatDepth = 0;
+    heatOn = !!(replayCfg && replayCfg.heatmaps) && !replayOff && pageOn();
+    // A page the brand leaves out is not recorded; the next one is.
+    if (recStop && !pageOn()) stopRec();
+  }
+  // secrets:start
+  // Keys, tokens and passwords are hidden before a recording or a
+  // heatmap's picture leaves the browser, whatever the brand's settings:
+  // known key formats, sign-in tokens, user:password@host, anything after
+  // a label such as "API key" or "Password", and any long run of mixed
+  // letters and digits (which covers ids too: better hidden than leaked).
+  var SECRET_KNOWN = /sk-ant-[A-Za-z0-9_-]{16,}|sk-(?:proj-|live-|test-)?[A-Za-z0-9_-]{20,}|[sprk]k_(?:live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|glpat-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|A[KS]IA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|of[tsi]_[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+\/=\\nr\s]*(?:-----END [A-Z ]*PRIVATE KEY-----)?/g;
+  var SECRET_LOGIN = /(^|[\s"'\/])([^\s:@\/"']{1,80}):([^\s:@\/"']{3,120})@(?=[A-Za-z0-9])/g;
+  var SECRET_LABEL = /\b((?:api|access|secret|private|auth)[ _-]?key|secret|token|password|passwd|pwd|credentials?)(["']?\s*[:=]\s*["']?)([^\s"'<>,;]{4,})/gi;
+  var SECRET_BEARER = /\b(bearer|basic)(\s+)([A-Za-z0-9_\-+\/=.~]{12,})/gi;
+  var SECRET_LONG = /[A-Za-z0-9_\-+\/=]{16,}/g;
+  var SECRET_PARAM = /([?&](?:[a-z0-9_.-]*(?:key|token|secret|password|passwd|pwd|auth|signature|sig|session|code)[a-z0-9_.-]*)=)([^&#\s"']+)/gi;
+  // The brand's own key shapes (Recordings, Settings): x is any letter or
+  // digit, anything else is itself. Hidden wherever one stands on its own.
+  var secretShapes;
+  function setShapes(list) {
+    secretShapes = [];
+    for (var i = 0; list && i < list.length && i < 20; i++) {
+      try {
+        if (!/^[x\-_.:+\/=~]{8,100}$/.test(list[i])) continue;
+        secretShapes.push(new RegExp("(^|[^A-Za-z0-9])(" + list[i].replace(/x+|[^x]/g, function (m) {
+          return m.charAt(0) === "x" ? "[A-Za-z0-9]{" + m.length + "}" : "\\" + m;
+        }) + ")(?![A-Za-z0-9])", "g"));
+      } catch (e) {}
+    }
+  }
+  function hideShapes(t) {
+    for (var i = 0; secretShapes && i < secretShapes.length; i++) t = t.replace(secretShapes[i], function (m, a, k) { return a + stars(k); });
+    return t;
+  }
+  function stars(t) { return t.replace(/[^\s]/g, "*"); }
+  function looksSecret(t) {
+    var digits = (t.match(/[0-9]/g) || []).length, letters = (t.match(/[A-Za-z]/g) || []).length;
+    if (digits < 2 || letters < 2) return false;
+    // A path of plain words is left alone; a mixed-case run is not.
+    if (t.indexOf("/") >= 0 && !(/[a-z]/.test(t) && /[A-Z]/.test(t))) return false;
+    return true;
+  }
+  // Formats that are a key wherever they are found.
+  function hideKnown(t) {
+    return hideShapes(t).replace(SECRET_KNOWN, stars)
+      .replace(SECRET_LOGIN, function (m, a, u, p) { return a + u + ":" + stars(p) + "@"; });
+  }
+  // Everything, for text a visitor sees and attributes that carry text.
+  function hideSecrets(t) {
+    if (!t || t.length < 6) return t;
+    return hideKnown(t)
+      .replace(SECRET_LABEL, function (m, l, sep, v) { return l + sep + stars(v); })
+      .replace(SECRET_BEARER, function (m, l, sp, v) { return l + sp + stars(v); })
+      .replace(SECRET_LONG, function (m) { return looksSecret(m) ? stars(m) : m; });
+  }
+  function hideInAddress(t) {
+    return hideKnown(t).replace(SECRET_PARAM, function (m, k, v) { return k + stars(v); });
+  }
+  var SECRET_TEXT_ATTR = /^(value|title|alt|placeholder|label|content|aria-label|aria-description|aria-valuetext)$|^data-/;
+  var SECRET_URL_ATTR = /^(href|src|action|formaction|poster|xlink:href)$/;
+  function hideInAttributes(a) {
+    for (var k in a) {
+      if (typeof a[k] !== "string" || k.indexOf("rr_") === 0) continue;
+      if (SECRET_TEXT_ATTR.test(k)) a[k] = hideSecrets(a[k]);
+      else if (SECRET_URL_ATTR.test(k) && a[k].indexOf("data:") !== 0) a[k] = hideInAddress(a[k]);
+    }
+  }
+  function hideInNode(n, depth) {
+    if (!n || depth > 400) return;
+    if (n.attributes) hideInAttributes(n.attributes);
+    if (typeof n.textContent === "string" && !n.isStyle) n.textContent = hideSecrets(n.textContent);
+    for (var i = 0; n.childNodes && i < n.childNodes.length; i++) hideInNode(n.childNodes[i], depth + 1);
+  }
+  // One recorded event: the whole page, or what changed on it.
+  function hideInEvent(ev) {
+    try {
+      var x = ev && ev.data, i;
+      if (!x) return;
+      if (ev.type === 2) hideInNode(x.node, 0);
+      else if (ev.type === 4 && typeof x.href === "string") x.href = hideInAddress(x.href);
+      else if (ev.type === 3 && x.source === 0) {
+        for (i = 0; x.adds && i < x.adds.length; i++) hideInNode(x.adds[i].node, 0);
+        for (i = 0; x.attributes && i < x.attributes.length; i++) if (x.attributes[i].attributes) hideInAttributes(x.attributes[i].attributes);
+        for (i = 0; x.texts && i < x.texts.length; i++) if (typeof x.texts[i].value === "string") x.texts[i].value = hideSecrets(x.texts[i].value);
+      }
+    } catch (e) {}
+  }
+  // secrets:end
+  // The recorder: its script is loaded once, when first needed.
+  function withRecorder(done) {
+    var lib = w.rrwebRecord, record = lib && (lib.record || lib);
+    if (typeof record === "function") return done(record);
+    recWait.push(done);
+    if (recLoading) return;
+    recLoading = true;
+    var el = d.createElement("script");
+    el.async = true;
+    el.src = api + "/v1/site/replay.js";
+    el.onload = el.onerror = function () {
+      var wait = recWait;
+      recLoading = false; recWait = [];
+      lib = w.rrwebRecord; record = lib && (lib.record || lib);
+      for (var i = 0; i < wait.length; i++) {
+        if (typeof record === "function") wait[i](record); else wait[i](null);
+      }
+    };
+    (d.head || d.documentElement).appendChild(el);
+  }
+  function recOptions(emit) {
+    var all = !!replayCfg.mask_text;
+    return {
+      emit: function (ev) { hideInEvent(ev); emit(ev); },
+      maskAllInputs: true,
+      // Every piece of text passes through: hidden whole where the brand
+      // or the page asks, and otherwise only what looks like a secret.
+      maskTextSelector: "*",
+      maskTextFn: function (t, el) {
+        try {
+          if (all || (el && el.closest && el.closest("[data-of-mask]"))) return stars(t);
+          return hideSecrets(t);
+        } catch (e) { return stars(t); }
+      },
+      blockSelector: "[data-of-block]",
+      sampling: { mousemove: 100, scroll: 200, input: "last" },
+      slimDOMOptions: "all",
+      recordCanvas: false,
+      collectFonts: false
+    };
+  }
+  // A heatmap's picture of this page, when Outflare asks for one (a page
+  // with no picture, or an old one): the page as the recorder first sees
+  // it, with the same masking as a recording and no visitor id. Once per
+  // page, and only from a visitor who allows analytics.
+  function takeSnap() {
+    var path = heatAt || location.pathname, screen = screenName(), at = path + "#" + screen;
+    if (!heatOn || !consented || snapOn || snapAt === at || !replayCfg || !w.fetch || !w.MutationObserver) return;
+    snapOn = true;
+    withRecorder(function (record) {
+      if (!record) { snapOn = false; return; }
+      var got = [], stop = null, done = false;
+      function finish() {
+        if (stop) { try { stop(); } catch (e) {} stop = null; }
+        snapOn = false;
+      }
+      function keep(ev) {
+        if (done) return;
+        if (ev.type === 4) got = [ev];
+        else if (ev.type === 2 && got.length === 1) {
+          got.push(ev); done = true; snapAt = at;
+          if ((heatAt || location.pathname) === path && screenName() === screen) replayPost({ key: key, path: path, screen: screen, width: w.innerWidth || 0, height: w.innerHeight || 0, snapshot: got }, false);
+          w.setTimeout(finish, 0);
+        }
+      }
+      try {
+        if (recStop) {
+          // A recording is running: its next whole picture is copied.
+          snapKeep = keep;
+          if (typeof record.takeFullSnapshot === "function") record.takeFullSnapshot(true);
+          snapKeep = null; snapOn = false;
+        } else {
+          stop = record(recOptions(keep)) || null;
+          w.setTimeout(function () { if (!done) finish(); }, 10000);
+        }
+      } catch (e) { snapKeep = null; finish(); }
+    });
+  }
+  function startRec() {
+    if (recStop || recLoading || !replayCfg || !replayCfg.record || !consented || !w.fetch || !w.MutationObserver || !pageOn()) return;
+    if (!rec) {
+      try { rec = JSON.parse(sessionStorage.getItem(REC) || "null"); } catch (e) {}
+      if (!rec || rec.key !== key || !/^[A-Za-z0-9-]{8,64}$/.test(rec.id) || Date.now() - rec.at > 14400000) {
+        rec = { key: key, id: uuid(), part: 0, at: Date.now(), on: Math.random() * 100 < (replayCfg.sample || 100) };
+        keepRec();
+      }
+    }
+    if (!rec.on) return;
+    withRecorder(function (record) {
+      if (!record || recStop || !consented || !replayCfg || !replayCfg.record) return;
+      try {
+        recStop = record(recOptions(function (ev) {
+          if (snapKeep) snapKeep(ev);
+          recBuf.push(ev);
+          // A rough size, so a busy page is sent before it grows too big.
+          recSize += ev.type === 2 ? 200000 : 300;
+          // The whole page goes at once: a visitor who leaves within
+          // seconds is still recorded, and what is left to send when
+          // they do is small.
+          if (ev.type === 2) w.setTimeout(function () { replaySend(false); }, 0);
+          else if (recSize > 800000) replaySend(false);
+        })) || null;
+      } catch (e) { recStop = null; }
+    });
+  }
+  function applyReplay() {
+    heatOn = !!(replayCfg && replayCfg.heatmaps) && !replayOff && pageOn();
+    if (replayOff || !replayCfg) return stopRec();
+    if (!heatAt) heatAt = location.pathname;
+    if (!heatHooked) {
+      heatHooked = true;
+      d.addEventListener("click", noteClick, true);
+      w.addEventListener("scroll", noteDepth, { passive: true });
+      w.addEventListener("pagehide", function () { noteDepth(); replaySend(true); }, true);
+      d.addEventListener("visibilitychange", function () { if (d.visibilityState === "hidden") { noteDepth(); replaySend(true); } });
+      recTimer = w.setInterval(function () { replaySend(false); if (!recStop) startRec(); }, 5000);
+    }
+    noteDepth();
+    if (replayCfg.record && pageOn()) startRec(); else stopRec();
+  }
+  function gotReplay(r) {
+    var next = r ? { key: key, record: !!r.record, heatmaps: !!r.heatmaps, sample: r.sample, mask_text: !!r.mask_text, include: r.include || [], exclude: r.exclude || [], hide: r.hide || [] } : null;
+    if (JSON.stringify(next) === JSON.stringify(replayCfg)) return;
+    replayCfg = next;
+    setShapes(next && next.hide);
+    try { if (next) sessionStorage.setItem(REPLAY, JSON.stringify(next)); else sessionStorage.removeItem(REPLAY); } catch (e) {}
+    applyReplay();
+  }
+  if (replayCfg) applyReplay();
+
+  // ---- Autocapture: clicks and form submits ----
+  // What to capture comes with the answer to this page's events and is
+  // kept for the visit. At most 100 captured events a page, so a page
+  // that fires clicks in a loop can't flood the site's events.
+  var CAPTURE = "of_capture", captureOff = script.getAttribute("data-autocapture") === "off", captureCfg = null, captured = 0, capturedAt = "";
+  try { captureCfg = JSON.parse(sessionStorage.getItem(CAPTURE) || "null"); } catch (e) {}
+  if (!captureCfg || captureCfg.key !== key) captureCfg = null;
+  function gotCapture(c) {
+    captureCfg = c && (c.clicks || c.forms || c.errors) ? { key: key, clicks: !!c.clicks, forms: !!c.forms, errors: !!c.errors } : null;
+    // Errors that happened before the first answer are sent now, or dropped.
+    var held = heldErrors; heldErrors = null;
+    for (var i = 0; held && captureCfg && captureCfg.errors && i < held.length; i++) sendError(held[i]);
+    try { if (captureCfg) sessionStorage.setItem(CAPTURE, JSON.stringify(captureCfg)); else sessionStorage.removeItem(CAPTURE); } catch (e) {}
+  }
+  function attr(el, name) { return el && el.getAttribute ? el.getAttribute(name) : null; }
+  // A label is short, and never something a person typed or a secret: an
+  // email address, a long number or a run of letters and digits that
+  // looks like a key is left out.
+  function label(t) {
+    t = String(t || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    return /@|\d{6,}|[A-Za-z0-9_\-]{24,}/.test(t) ? "" : t;
+  }
+  // The link's address without its query string or fragment.
+  function bare(u) {
+    try { var x = new URL(u, location.href); return /^https?:$/.test(x.protocol) ? x.origin + x.pathname : x.protocol; } catch (e) { return ""; }
+  }
+  function clickable(el) {
+    var tag = (el.tagName || "").toLowerCase(), type = (attr(el, "type") || "").toLowerCase();
+    return tag === "a" || tag === "button" || tag === "summary" || attr(el, "role") === "button" || (tag === "input" && (type === "submit" || type === "button"));
+  }
+  function capRoom() {
+    if (capturedAt !== location.pathname) { capturedAt = location.pathname; captured = 0; }
+    return captured++ < 100;
+  }
+  function captureClick(e) {
+    if (captureOff) return;
+    var el = e.target, hit = null, named = "", hidden = false, n = 0;
+    for (var p = el; p && n < 30; p = p.parentNode, n++) {
+      if (!p.getAttribute) continue;
+      if (attr(p, "data-outflare-ignore") !== null) return;
+      if (attr(p, "data-of-mask") !== null || attr(p, "data-of-block") !== null) hidden = true;
+      if (!hit && (attr(p, "data-outflare-event") || clickable(p))) { hit = p; named = attr(p, "data-outflare-event") || ""; }
+    }
+    if (!hit || (!named && !(captureCfg && captureCfg.clicks)) || !capRoom()) return;
+    var tag = (hit.tagName || "").toLowerCase(), props = { tag: tag, path: location.pathname };
+    var text = hidden ? "" : label(tag === "input" ? hit.value : (attr(hit, "aria-label") || hit.innerText || hit.textContent || attr(hit, "title")));
+    if (text) props.text = text;
+    if (hit.id) props.id = String(hit.id).slice(0, 80);
+    var cls = String(attr(hit, "class") || "").split(/\s+/).filter(Boolean).slice(0, 5).join(" ").slice(0, 200);
+    if (cls) props.classes = cls;
+    if (tag === "a" && attr(hit, "href")) { var to = bare(attr(hit, "href")); if (to) props.href = to; }
+    track(named.slice(0, 100) || "Element Clicked", props);
+  }
+  function captureSubmit(e) {
+    var f = e.target, n = 0;
+    if (captureOff || !captureCfg || !captureCfg.forms || !f || (f.tagName || "").toLowerCase() !== "form") return;
+    for (var p = f; p && n < 30; p = p.parentNode, n++) if (attr(p, "data-outflare-ignore") !== null) return;
+    if (!capRoom()) return;
+    var props = { path: location.pathname, method: (attr(f, "method") || "get").toLowerCase().slice(0, 10) };
+    if (f.id) props.id = String(f.id).slice(0, 80);
+    if (attr(f, "name")) props.name = String(attr(f, "name")).slice(0, 80);
+    if (attr(f, "action")) { var to = bare(attr(f, "action")); if (to) props.action = to; }
+    if (f.elements && typeof f.elements.length === "number") props.fields = f.elements.length;
+    track("Form Submitted", props);
+  }
+  if (!captureOff) {
+    d.addEventListener("click", captureClick, true);
+    d.addEventListener("submit", captureSubmit, true);
+  }
+
+  // ---- Ad pixels ----
+  // Which pixel to load comes with the answer to this page's events and is
+  // kept for the visit, with the signed-in visitor's hashed email, phone
+  // and id when Outflare's server knows them. The pixel starts once the
+  // page has loaded, so a snippet the page carries itself is seen first:
+  // then the script loads nothing and only passes the user data on.
+  var PIXELS = "of_pixels", pixelOff = script.getAttribute("data-pixels") === "off", pixelCfg = null, pixelOn = false, pixelOurs = false, pixelUser = "", pixelSeen = "", pixelConsent = null;
+  // Meta's and TikTok's pixels: whether each was started here, the choice
+  // it was last told and the page it last counted.
+  var metaOn = false, metaConsent = null, metaSeen = "", tiktokOn = false, tiktokConsent = null, tiktokSeen = "";
+  try { pixelCfg = JSON.parse(sessionStorage.getItem(PIXELS) || "null"); } catch (e) {}
+  if (!pixelCfg || pixelCfg.key !== key) pixelCfg = null;
+  function keepPixels() {
+    try { if (pixelCfg) sessionStorage.setItem(PIXELS, JSON.stringify(pixelCfg)); else sessionStorage.removeItem(PIXELS); } catch (e) {}
+  }
+  function onePixel(c) {
+    return c && /^[A-Za-z0-9_-]{1,80}$/.test(c.id || "") ? { id: c.id, user: c.user || null, events: c.events || null } : null;
+  }
+  function gotPixels(p) {
+    var c = onePixel(p && p.chatgpt), me = onePixel(p && p.meta), tt = onePixel(p && p.tiktok);
+    pixelCfg = c || me || tt ? { key: key, id: c ? c.id : "", user: c ? c.user : null } : null;
+    if (me) pixelCfg.meta = me;
+    if (tt) pixelCfg.tiktok = tt;
+    keepPixels();
+    whenLoaded(applyPixels);
+  }
+  function applyPixels() {
+    if (pixelOff || !pixelCfg) return;
+    var m = cats.marketing;
+    try { applyMeta(m); } catch (e) {}
+    try { applyTikTok(m); } catch (e) {}
+    if (!pixelCfg.id) return;
+    if (!pixelOn) {
+      if (!m) return;
+      pixelOn = true;
+      pixelOurs = typeof w.oaiq !== "function";
+      if (pixelOurs) {
+        // OpenAI's own loader: calls wait in the queue until the SDK is in.
+        var q = function () { q.q.push(arguments); };
+        q.q = [];
+        w.oaiq = q;
+        var js = d.createElement("script");
+        js.async = true;
+        js.src = "https://bzrcdn.openai.com/sdk/oaiq.min.js";
+        (d.head || d.documentElement).appendChild(js);
+      }
+    }
+    try {
+      // The visitor's choice goes to a pixel this script loaded, and to
+      // the page's own when Outflare's banner asks for consent.
+      if ((pixelOurs || on()) && pixelConsent !== m) { w.oaiq("consent", m); pixelConsent = m; }
+      var user = m && pixelCfg.user ? pixelCfg.user : null, sig = JSON.stringify(user);
+      if (pixelUser === "" || (user && sig !== pixelUser)) {
+        if (user) w.oaiq("init", { pixelId: pixelCfg.id, user: user });
+        else if (pixelOurs) w.oaiq("init", { pixelId: pixelCfg.id });
+        pixelUser = sig;
+      }
+      if (pixelOurs && m && pixelSeen !== location.href) {
+        pixelSeen = location.href;
+        w.oaiq("measure", "page_viewed", { type: "contents" });
+      }
+    } catch (e) {}
+  }
+  // Meta's pixel, with Meta's own loader. A page that already carries
+  // Meta's snippet keeps it and this does nothing: its events are the
+  // page's to send, and sending them twice would count them twice. The
+  // signed-in visitor's hashes go in when the pixel starts, so someone
+  // who signs in is known to it from the next page.
+  function applyMeta(m) {
+    var c = pixelCfg.meta;
+    if (!c) return;
+    if (!metaOn) {
+      if (!m || typeof w.fbq === "function") return;
+      metaOn = true;
+      var n = w.fbq = function () { if (n.callMethod) n.callMethod.apply(n, arguments); else n.queue.push(arguments); };
+      if (!w._fbq) w._fbq = n;
+      n.push = n;
+      n.loaded = true;
+      n.version = "2.0";
+      n.queue = [];
+      var js = d.createElement("script");
+      js.async = true;
+      js.src = "https://connect.facebook.net/en_US/fbevents.js";
+      (d.head || d.documentElement).appendChild(js);
+      w.fbq("init", c.id, c.user || {});
+    }
+    if (metaConsent !== m) { w.fbq("consent", m ? "grant" : "revoke"); metaConsent = m; }
+    if (m && metaSeen !== location.href) {
+      metaSeen = location.href;
+      w.fbq("trackSingle", c.id, "PageView");
+    }
+  }
+  // TikTok's pixel, with TikTok's own loader; a page that carries
+  // TikTok's snippet keeps it, as with Meta's.
+  function applyTikTok(m) {
+    var c = pixelCfg.tiktok;
+    if (!c) return;
+    if (!tiktokOn) {
+      if (!m || w.ttq) return;
+      tiktokOn = true;
+      var t = w.ttq = [], names = ["page", "track", "identify", "instances", "debug", "on", "off", "once", "ready", "alias", "group", "enableCookie", "disableCookie", "holdConsent", "revokeConsent", "grantConsent"];
+      w.TiktokAnalyticsObject = "ttq";
+      t.methods = names;
+      t.setAndDefer = function (o, name) { o[name] = function () { o.push([name].concat(Array.prototype.slice.call(arguments, 0))); }; };
+      for (var i = 0; i < names.length; i++) t.setAndDefer(t, names[i]);
+      t.instance = function (id) {
+        var o = t._i[id] || [];
+        for (var k = 0; k < names.length; k++) t.setAndDefer(o, names[k]);
+        return o;
+      };
+      t._i = {};
+      t._i[c.id] = [];
+      t._i[c.id]._u = "https://analytics.tiktok.com/i18n/pixel/events.js";
+      t._t = {};
+      t._t[c.id] = +new Date();
+      t._o = {};
+      t._o[c.id] = {};
+      var js = d.createElement("script");
+      js.async = true;
+      js.src = "https://analytics.tiktok.com/i18n/pixel/events.js?sdkid=" + encodeURIComponent(c.id) + "&lib=ttq";
+      (d.head || d.documentElement).appendChild(js);
+      if (c.user) w.ttq.identify(c.user);
+    }
+    if (tiktokConsent !== m) {
+      if (m) w.ttq.grantConsent(); else w.ttq.revokeConsent();
+      tiktokConsent = m;
+    }
+    if (m && tiktokSeen !== location.href) {
+      tiktokSeen = location.href;
+      w.ttq.page();
+    }
+  }
+  // A track call's event as Outflare's catalog names it (Order Completed
+  // is order_completed), the way the server does.
+  function catalogName(raw) {
+    var s = String(raw).trim().replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase().replace(/[^a-z0-9.]+/g, "_").replace(/_*\._*/g, ".").replace(/\.{2,}/g, ".").replace(/^[_.]+|[_.]+$/g, "");
+    return s && (s.charAt(0) < "a" || s.charAt(0) > "z") ? "event_" + s : s;
+  }
+  // The value a conversion carries, read as the server reads it for the
+  // same rule: a property of the event or a fixed amount, in the rule's
+  // currency, then the event's, then the ad account's.
+  function pixelValue(e, props) {
+    var v = null;
+    if (e.value_property) {
+      var raw = props[e.value_property];
+      if (typeof raw === "number" && isFinite(raw) && raw >= 0) v = e.value_unit === "minor" ? raw / 100 : raw;
+    } else if (typeof e.value === "number") v = e.value;
+    if (v === null) return {};
+    var own = typeof props.currency === "string" && props.currency.trim().length === 3 ? props.currency.trim().toUpperCase() : "";
+    var cur = e.currency || own || e.account_currency || "";
+    return cur ? { value: v, currency: cur } : {};
+  }
+  var META_EVENTS = " AddPaymentInfo AddToCart AddToWishlist CompleteRegistration Contact CustomizeProduct Donate FindLocation InitiateCheckout Lead Purchase Schedule Search StartTrial SubmitApplication Subscribe ViewContent ";
+  // A conversion the page caused goes to the pixels this script started,
+  // with the id the server sends the same conversion with, so the
+  // platform counts the two as one.
+  function pixelEvent(name, props, id) {
+    if (pixelOff || !pixelCfg || !cats.marketing || !(metaOn || tiktokOn)) return;
+    var n = catalogName(name), e;
+    try {
+      e = metaOn && pixelCfg.meta && pixelCfg.meta.events && pixelCfg.meta.events[n];
+      if (e && e.type) w.fbq(META_EVENTS.indexOf(" " + e.type + " ") >= 0 ? "trackSingle" : "trackSingleCustom", pixelCfg.meta.id, e.type, pixelValue(e, props), { eventID: id });
+    } catch (x) {}
+    try {
+      e = tiktokOn && pixelCfg.tiktok && pixelCfg.tiktok.events && pixelCfg.tiktok.events[n];
+      if (e && e.type) w.ttq.track(e.type, pixelValue(e, props), { event_id: id });
+    } catch (x) {}
+  }
+  if (pixelCfg) whenLoaded(applyPixels);
+
+  // ---- Errors ----
+  // An error is sent as the track event Error Caught, which the Errors
+  // page groups into issues by fingerprint: the error's type, its message
+  // with numbers and ids taken out, and the first place in its stack.
+  // Uncaught errors and rejected promises are sent when the site key's
+  // "Capture errors" switch is on; outflare.captureException(err) sends
+  // one the page caught itself, with or without the switch. At most 20 a
+  // page, and each issue at most 5 times, so a loop can't flood events.
+  // Email addresses and long keys in a message or stack are taken out.
+  var heldErrors = captureCfg ? null : [], errorsSent = 0, errorTimes = {}, release = (script.getAttribute("data-release") || "").slice(0, 100);
+  // Errors that aren't the site's: thrown in a browser extension, or on a
+  // copy of the page opened from a file. Outflare filters more on its side.
+  var FOREIGN = /(chrome|moz|safari|safari-web)-extension:\/\/|webkit-masked-url:\/\//;
+  function foreign(p) {
+    if (location.protocol === "file:" || FOREIGN.test(p.source || "")) return true;
+    var files = (p.stack || "").match(/[a-z][a-z0-9+.-]*:\/\/[^\s()]+/g);
+    if (!files) return false;
+    for (var i = 0; i < files.length; i++) if (!FOREIGN.test(files[i])) return false;
+    return true;
+  }
+  function media(q) { try { return w.matchMedia && w.matchMedia(q).matches; } catch (e) { return false; } }
+  function scrub(t, max) {
+    return String(t == null ? "" : t).replace(/[^\s@"'<>()]+@[^\s@"'<>()]+\.[A-Za-z]{2,}/g, "[email]").replace(/[A-Za-z0-9_\-]{32,}/g, "[key]").slice(0, max);
+  }
+  function hash(t) {
+    var h1 = 5381, h2 = 52711;
+    for (var i = 0; i < t.length; i++) { var c = t.charCodeAt(i); h1 = (h1 * 33) ^ c; h2 = (h2 * 33) ^ c; }
+    return ("0000000" + (h1 >>> 0).toString(16)).slice(-8) + ("0000000" + (h2 >>> 0).toString(16)).slice(-8);
+  }
+  // describe turns whatever was thrown into what is sent.
+  function describe(err, handled, extra) {
+    var isErr = err && typeof err === "object" && ("message" in err || "stack" in err);
+    var type = scrub(isErr ? (err.name || "Error") : "Error", 100), message = scrub(isErr ? err.message : (typeof err === "string" ? err : (function () { try { return JSON.stringify(err); } catch (e) { return String(err); } })()), 500);
+    var stack = isErr && err.stack ? scrub(String(err.stack).replace(/\?[^\s):]*/g, ""), 4000) : "";
+    // The first line of the stack that names a file, without line and
+    // column, so the same bug in a new build is still the same issue.
+    var top = "", lines = stack.split("\n");
+    for (var i = 0; i < lines.length && !top; i++) if (/(https?:|\/)[^\s]*\.\w+/.test(lines[i]) && lines[i].indexOf(message) < 0) top = lines[i].replace(/:\d+(:\d+)?\)?\s*$/, "").trim();
+    var p = { type: type, message: message, handled: !!handled, path: location.pathname };
+    if (stack) p.stack = stack;
+    if (release) p.release = release;
+    // The window's size and the visitor's settings, which some bugs
+    // depend on. Nothing they typed or chose on the page.
+    p.viewport = (w.innerWidth || 0) + "x" + (w.innerHeight || 0);
+    p.color_scheme = media("(prefers-color-scheme: dark)") ? "dark" : "light";
+    p.reduced_motion = media("(prefers-reduced-motion: reduce)") ? "reduce" : "no-preference";
+    if (extra && extra.handled === false) p.handled = false;
+    p.fingerprint = hash(type + "|" + message.replace(/\d+/g, "0").replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, "id") + "|" + top);
+    for (var k in extra || {}) if (!(k in p)) p[k] = extra[k];
+    return p;
+  }
+  function sendError(p) {
+    if (foreign(p)) return;
+    var n = errorTimes[p.fingerprint] || 0;
+    if (errorsSent >= 20 || n >= 5) return;
+    errorsSent++; errorTimes[p.fingerprint] = n + 1;
+    return track("Error Caught", p);
+  }
+  function uncaught(err, extra) {
+    if (captureOff) return;
+    var p = describe(err, false, extra);
+    if (heldErrors) { if (heldErrors.length < 10) heldErrors.push(p); return; }
+    if (captureCfg && captureCfg.errors) sendError(p);
+  }
+  function captureException(err, extra) { return sendError(describe(err, true, extra)); }
+  if (!captureOff) {
+    w.addEventListener("error", function (e) {
+      // A script from another site that hides its error says only "Script error.".
+      if (!e || (!e.error && (!e.message || e.message === "Script error."))) return;
+      var extra = {};
+      if (e.filename) extra.source = bare(e.filename);
+      if (e.lineno) extra.line = e.lineno;
+      if (e.colno) extra.column = e.colno;
+      uncaught(e.error || e.message, extra);
+    });
+    w.addEventListener("unhandledrejection", function (e) { if (e) uncaught(e.reason, { rejection: true }); });
+  }
 
   var queued = Array.isArray(w.outflare) ? w.outflare : [];
   w.outflare = {
     loaded: true,
     page: page,
     track: track,
+    // Send an error the page caught itself to the Errors page:
+    // try { ... } catch (err) { outflare.captureException(err, { step: "checkout" }); }
+    captureException: captureException,
+    // The release (your version or commit) errors are sent with, when the
+    // tag's data-release can't say it: outflare.setRelease("2026.11.18").
+    setRelease: function (r) { release = String(r == null ? "" : r).slice(0, 100); },
+    // Say whether this browser is signed in to your app: true after
+    // sign-in, false on sign-out. Pages on every subdomain can then ask
+    // outflare.isSignedIn(), flags can have a "Signed in" rule, and page
+    // views carry signed_in. Only a hint: never rely on it for access.
+    signedIn: function (yes) {
+      var was = isSignedIn();
+      setCookie(SIGNED, "1", !!yes);
+      showSignedIn();
+      if (was !== isSignedIn() && flagsWanted) loadFlags();
+      return isSignedIn();
+    },
+    isSignedIn: isSignedIn,
+    // Join this browser's visits to a person your server vouched for.
+    // Your server signs the user id with the site's identify secret,
+    // hex(HMAC-SHA256(secret, userId)), and gives the page both:
+    //   outflare.identify(user.id, user.outflareSignature)
+    // Resolves to true when Outflare took it. A browser can't name a
+    // person on its own word, so without the signature this does nothing.
+    identify: function (userId, signature) {
+      if (!userId || !signature || !w.fetch) return Promise.resolve(false);
+      return fetch(api + "/v1/site/identify", { method: "POST", keepalive: true, headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify({ key: key, anonymousId: anon, userId: String(userId), signature: String(signature) }) })
+        .then(function (res) { return res.ok; }, function () { return false; });
+    },
     // The visitor's id, to send with identify from your server when they
     // sign up or sign in, so their earlier visits join their record.
     anonymousId: function () { return anon; },
@@ -1185,8 +1964,11 @@
     },
     // Forget the visitor, such as on sign-out on a shared computer.
     reset: function () {
+      setCookie(SIGNED, "1", false);
+      showSignedIn();
       anon = uuid();
       if (consented) writeCookie(anon);
+      if (pixelCfg) { pixelCfg.user = null; if (pixelCfg.meta) pixelCfg.meta.user = null; if (pixelCfg.tiktok) pixelCfg.tiktok.user = null; keepPixels(); }
       seen = {};
       try { sessionStorage.removeItem(FLAGS); sessionStorage.removeItem(SEEN); } catch (e) {}
       if (flagsWanted) loadFlags();

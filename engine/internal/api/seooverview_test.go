@@ -30,8 +30,8 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	owner.must(400, "GET", base+"/seo/overview?weeks=3", nil)
 	owner.must(404, "GET", base+"/seo/overview?brand=nope", nil)
 
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})
 	sc := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "plausible", "name": "Search Console", "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}})["id"].(string)
 	pl := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "plausible", "name": "Plausible", "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}})["id"].(string)
 	dfs := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "dataforseo", "credentials": map[string]string{"login": "jo", "password": "pw"}})["id"].(string)
@@ -41,11 +41,11 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	to := today.AddDate(0, 0, -int((today.Weekday()+6)%7)-1)
 	day := func(n int) string { return to.AddDate(0, 0, -n).Format(time.DateOnly) }
 	for _, id := range []string{sc, pl} {
-		exec(`INSERT INTO analytics_syncs (integration_id, workspace_id, site, host, first_day, last_day, backfilled) VALUES ($1, $2, 'repocket.com', 'repocket.com', $3, $4, true)`, id, ws, day(83), day(0))
+		exec(`INSERT INTO analytics_syncs (integration_id, workspace_id, site, host, first_day, last_day, backfilled) VALUES ($1, $2, 'summitly.example', 'summitly.example', $3, $4, true)`, id, ws, day(83), day(0))
 	}
 	exec(`INSERT INTO analytics_syncs (integration_id, workspace_id, site, host, first_day, last_day, backfilled) VALUES ($1, $2, 'example.com', 'example.com', $3, $4, true)`, owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "plausible", "name": "Other", "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}})["id"], ws, day(83), day(0))
 	row := `INSERT INTO analytics_daily (workspace_id, integration_id, connector, site, host, report, day, key, visitors, sessions, clicks, impressions)
-		VALUES ($1, $2, $3, 'repocket.com', 'repocket.com', $4, $5, $6, $7, $8, $9, $10)`
+		VALUES ($1, $2, $3, 'summitly.example', 'summitly.example', $4, $5, $6, $7, $8, $9, $10)`
 	for n := 0; n < 56; n++ {
 		// Branded searches doubled in the last four weeks; the rest did not.
 		branded := 10.0
@@ -53,14 +53,14 @@ func TestSEOOverviewByBrand(t *testing.T) {
 			branded = 20
 		}
 		exec(row, ws, sc, "google_search_console", "traffic", day(n), "", nil, nil, branded+50, (branded+50)*10)
-		exec(row, ws, sc, "google_search_console", "search_queries", day(n), "Repocket app", nil, nil, branded, branded*10)
+		exec(row, ws, sc, "google_search_console", "search_queries", day(n), "Summitly app", nil, nil, branded, branded*10)
 		exec(row, ws, sc, "google_search_console", "search_queries", day(n), "passive income", nil, nil, 50.0, 500.0)
 		exec(row, ws, pl, "plausible", "traffic", day(n), "", 100.0, 120.0, nil, nil)
 	}
-	snap := `INSERT INTO seo_snapshots (workspace_id, integration_id, connector, host, report, day, key, metrics) VALUES ($1, $2, $3, 'repocket.com', 'overview', $4, '', $5)`
+	snap := `INSERT INTO seo_snapshots (workspace_id, integration_id, connector, host, report, day, key, metrics) VALUES ($1, $2, $3, 'summitly.example', 'overview', $4, '', $5)`
 	exec(snap, ws, dfs, "ahrefs", day(35), `{"domain_rating": 40, "backlinks": 1000, "referring_domains": 100}`)
 	exec(snap, ws, dfs, "ahrefs", day(0), `{"domain_rating": 44, "backlinks": 900, "referring_domains": 101}`)
-	owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://repocket.com/", "brand_id": "repocket"})
+	owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://summitly.example/", "brand_id": "summitly"})
 
 	// Connecting an SEO tool reads it straight away, not at the next
 	// weekly snapshot.
@@ -69,7 +69,7 @@ func TestSEOOverviewByBrand(t *testing.T) {
 		t.Fatalf("first read queued on connect: %d %v", queued, err)
 	}
 
-	res := owner.must(200, "GET", base+"/seo/overview?brand=repocket", nil)
+	res := owner.must(200, "GET", base+"/seo/overview?brand=summitly", nil)
 	if res["to"] != day(0) {
 		t.Fatalf("to: %v", res["to"])
 	}
@@ -78,7 +78,7 @@ func TestSEOOverviewByBrand(t *testing.T) {
 		t.Fatalf("one brand: %v", list)
 	}
 	rp := list[0].(map[string]any)
-	if rp["brand"].(map[string]any)["name"] != "Repocket" || !hasString(rp["terms"], "repocket") || !hasString(rp["hosts"], "repocket.com") {
+	if rp["brand"].(map[string]any)["name"] != "Summitly" || !hasString(rp["terms"], "summitly") || !hasString(rp["hosts"], "summitly.example") {
 		t.Fatalf("brand: %v %v %v", rp["brand"], rp["terms"], rp["hosts"])
 	}
 	weeks := rp["weeks"].([]any)
@@ -119,7 +119,7 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	}
 	// A period of its own: the weeks picked against as many before them.
 	for _, q := range []string{"weeks=4", "from=" + day(27) + "&to=" + day(3), "from=" + day(25) + "&to=" + today.AddDate(1, 0, 0).Format(time.DateOnly)} {
-		res := owner.must(200, "GET", base+"/seo/overview?brand=repocket&"+q, nil)
+		res := owner.must(200, "GET", base+"/seo/overview?brand=summitly&"+q, nil)
 		if res["from"] != day(27) || res["to"] != day(0) || res["previous_from"] != day(55) || res["previous_to"] != day(28) {
 			t.Fatalf("%s: period %v to %v, before %v to %v", q, res["from"], res["to"], res["previous_from"], res["previous_to"])
 		}
@@ -140,42 +140,42 @@ func TestSEOOverviewByBrand(t *testing.T) {
 		}
 	}
 	// An earlier period ends where it was asked to.
-	if res := owner.must(200, "GET", base+"/seo/overview?brand=repocket&from="+day(55)+"&to="+day(29), nil); res["to"] != day(28) || len(res["data"].([]any)[0].(map[string]any)["weeks"].([]any)) != 4 {
+	if res := owner.must(200, "GET", base+"/seo/overview?brand=summitly&from="+day(55)+"&to="+day(29), nil); res["to"] != day(28) || len(res["data"].([]any)[0].(map[string]any)["weeks"].([]any)) != 4 {
 		t.Fatalf("earlier period: %v to %v", res["from"], res["to"])
 	}
 	for _, q := range []string{"weeks=105", "from=" + day(0) + "&to=" + day(7), "from=2020-01-01", "from=yesterday"} {
-		owner.must(400, "GET", base+"/seo/overview?brand=repocket&"+q, nil)
+		owner.must(400, "GET", base+"/seo/overview?brand=summitly&"+q, nil)
 	}
 	if sites := rp["sites"].([]any); len(sites) != 1 || rp["open_fixes"] != 0.0 {
 		t.Fatalf("sites: %v fixes %v", sites, rp["open_fixes"])
 	}
 	// The brand's websites are read first, then its analytics domains.
-	srcs := owner.must(200, "GET", base+"/seo?brand=repocket", nil)["data"].([]any)
+	srcs := owner.must(200, "GET", base+"/seo?brand=summitly", nil)["data"].([]any)
 	var followed []string
 	for _, d := range srcs[0].(map[string]any)["domains"].([]any) {
 		followed = append(followed, d.(map[string]any)["host"].(string))
 	}
-	if strings.Join(followed, " ") != "repocket.com" {
+	if strings.Join(followed, " ") != "summitly.example" {
 		t.Fatalf("domains read: %v", followed)
 	}
 	status := func(c *client, brand string) map[string]any {
 		t.Helper()
 		return c.must(200, "GET", base+"/seo/overview?brand="+brand, nil)["data"].([]any)[0].(map[string]any)["seo_status"].(map[string]any)
 	}
-	if st := status(owner, "repocket"); st["state"] != "reading" || st["integration_id"] != dfs || st["connector"] != "dataforseo" || !strings.Contains(st["message"].(string), "repocket.com") {
+	if st := status(owner, "summitly"); st["state"] != "reading" || st["integration_id"] != dfs || st["connector"] != "dataforseo" || !strings.Contains(st["message"].(string), "summitly.example") {
 		t.Fatalf("first read: %v", st)
 	}
-	exec(`INSERT INTO seo_syncs (integration_id, host, workspace_id, last_run_at, last_ok_at, last_cost) VALUES ($1, 'repocket.com', $2, now(), now(), 1)`, dfs, ws)
-	if st := status(owner, "repocket"); st["state"] != "ready" || st["last_ok_at"] == nil {
+	exec(`INSERT INTO seo_syncs (integration_id, host, workspace_id, last_run_at, last_ok_at, last_cost) VALUES ($1, 'summitly.example', $2, now(), now(), 1)`, dfs, ws)
+	if st := status(owner, "summitly"); st["state"] != "ready" || st["last_ok_at"] == nil {
 		t.Fatalf("read: %v", st)
 	}
 	exec(`UPDATE seo_syncs SET last_error = 'DataForSEO''s monthly budget is $10.00 and $10.00 is spent.' WHERE integration_id = $1`, dfs)
-	if st := status(owner, "repocket"); st["state"] != "failed" || !strings.Contains(st["message"].(string), "monthly budget") || st["last_ok_at"] == nil {
+	if st := status(owner, "summitly"); st["state"] != "failed" || !strings.Contains(st["message"].(string), "monthly budget") || st["last_ok_at"] == nil {
 		t.Fatalf("failed: %v", st)
 	}
 	// A domain the connection was told not to read says so.
 	owner.must(200, "PUT", base+"/seo/"+dfs+"/settings", map[string]any{"domains": []string{"example.com"}})
-	if st := status(owner, "repocket"); st["state"] != "not_followed" || !strings.Contains(st["message"].(string), "example.com") {
+	if st := status(owner, "summitly"); st["state"] != "not_followed" || !strings.Contains(st["message"].(string), "example.com") {
 		t.Fatalf("not followed: %v", st)
 	}
 	owner.must(200, "PUT", base+"/seo/"+dfs+"/settings", map[string]any{"domains": nil})
@@ -186,7 +186,7 @@ func TestSEOOverviewByBrand(t *testing.T) {
 
 	// A snapshot taken this week shows straight away, before the week ends.
 	exec(snap, ws, dfs, "ahrefs", today.Format(time.DateOnly), `{"domain_rating": 45, "backlinks": 950, "referring_domains": 102, "organic_traffic": 3000, "organic_keywords": 120}`)
-	rp = owner.must(200, "GET", base+"/seo/overview?brand=repocket", nil)["data"].([]any)[0].(map[string]any)
+	rp = owner.must(200, "GET", base+"/seo/overview?brand=summitly", nil)["data"].([]any)[0].(map[string]any)
 	if seo := rp["seo"].([]any); seo[len(seo)-1].(map[string]any)["day"] != today.Format(time.DateOnly) {
 		t.Fatalf("this week's snapshot: %v", seo)
 	}
@@ -198,7 +198,7 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	dfs2 := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "dataforseo", "credentials": map[string]string{"login": "jo", "password": "pw"}})["id"].(string)
 	exec(snap, ws, dfs2, "dataforseo", today.AddDate(0, 0, 1).Format(time.DateOnly), `{"domain_rating": 20, "organic_traffic": 1, "top3": 9}`)
 	exec(`UPDATE seo_snapshots SET metrics = metrics || '{"top3": 80}' WHERE connector = 'ahrefs' AND day = $1`, today.Format(time.DateOnly))
-	rp = owner.must(200, "GET", base+"/seo/overview?brand=repocket", nil)["data"].([]any)[0].(map[string]any)
+	rp = owner.must(200, "GET", base+"/seo/overview?brand=summitly", nil)["data"].([]any)[0].(map[string]any)
 	tr = rp["trends"].(map[string]any)
 	if tr["domain_rating"].(map[string]any)["current"] != 45.0 || tr["keywords_top3"].(map[string]any)["current"] != 80.0 {
 		t.Fatalf("one connector: %v", tr)
@@ -215,9 +215,9 @@ func TestSEOOverviewByBrand(t *testing.T) {
 		}
 		return l[0]
 	}
-	all := []any{one("geonode"), one("repocket")}
-	if gn := all[0].(map[string]any); gn["brand"].(map[string]any)["name"] != "Geonode" || gn["trends"].(map[string]any)["branded_search"].(map[string]any)["direction"] != "unknown" {
-		t.Fatalf("geonode: %v", gn)
+	all := []any{one("northpeak"), one("summitly")}
+	if gn := all[0].(map[string]any); gn["brand"].(map[string]any)["name"] != "Northpeak" || gn["trends"].(map[string]any)["branded_search"].(map[string]any)["direction"] != "unknown" {
+		t.Fatalf("northpeak: %v", gn)
 	}
 	// Search and visitor numbers for other websites only: say which, not
 	// "connect a tool".
@@ -226,17 +226,17 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	}
 	for _, kind := range []string{"search", "traffic"} {
 		if s := source(all[1], kind); s["state"] != "ready" {
-			t.Fatalf("repocket %s: %v", kind, s)
+			t.Fatalf("summitly %s: %v", kind, s)
 		}
-		if s := source(all[0], kind); s["state"] != "other_sites" || !hasString(s["hosts"], "repocket.com") {
-			t.Fatalf("geonode %s: %v", kind, s)
+		if s := source(all[0], kind); s["state"] != "other_sites" || !hasString(s["hosts"], "summitly.example") {
+			t.Fatalf("northpeak %s: %v", kind, s)
 		}
 	}
 	// An SEO tool shared with other brands only is "not shared", not
 	// "not connected".
-	owner.must(200, "PATCH", base+"/integrations/"+dfs, map[string]any{"brand_ids": []string{"repocket"}})
-	owner.must(200, "PATCH", base+"/integrations/"+dfs2, map[string]any{"brand_ids": []string{"repocket"}})
-	if st := status(owner, "geonode"); st["state"] != "not_shared" || st["integration_id"] != dfs && st["integration_id"] != dfs2 {
+	owner.must(200, "PATCH", base+"/integrations/"+dfs, map[string]any{"brand_ids": []string{"summitly"}})
+	owner.must(200, "PATCH", base+"/integrations/"+dfs2, map[string]any{"brand_ids": []string{"summitly"}})
+	if st := status(owner, "northpeak"); st["state"] != "not_shared" || st["integration_id"] != dfs && st["integration_id"] != dfs2 {
 		t.Fatalf("not shared: %v", st)
 	}
 	owner.must(200, "PATCH", base+"/integrations/"+dfs, map[string]any{"brand_ids": []string{}})
@@ -245,21 +245,21 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	// A token that may read analytics but not SEO sites gets no audits.
 	secret := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Reports", "scopes": []string{"analytics.read"}})["token"].(string)
 	bot := &client{t: t, h: e.h, bearer: secret}
-	got := bot.must(200, "GET", base+"/seo/overview?brand=repocket", nil)["data"].([]any)[0].(map[string]any)
+	got := bot.must(200, "GET", base+"/seo/overview?brand=summitly", nil)["data"].([]any)[0].(map[string]any)
 	if len(got["sites"].([]any)) != 0 || got["open_fixes"] != nil {
 		t.Fatalf("no seo.read: %v %v", got["sites"], got["open_fixes"])
 	}
 	// Search totals without query rows are not zero branded clicks.
 	exec(`INSERT INTO analytics_daily (workspace_id, integration_id, connector, site, host, report, day, key, clicks, impressions)
-		VALUES ($1, $2, 'google_search_console', 'geonode.com', 'geonode.com', 'traffic', $3, '', 100, 1000)`, ws, sc, day(0))
-	gn := owner.must(200, "GET", base+"/seo/overview?brand=geonode", nil)["data"].([]any)[0].(map[string]any)
+		VALUES ($1, $2, 'google_search_console', 'northpeak.example', 'northpeak.example', 'traffic', $3, '', 100, 1000)`, ws, sc, day(0))
+	gn := owner.must(200, "GET", base+"/seo/overview?brand=northpeak", nil)["data"].([]any)[0].(map[string]any)
 	lastGN := gn["weeks"].([]any)[len(gn["weeks"].([]any))-1].(map[string]any)
 	if lastGN["search_clicks"] != 100.0 || lastGN["branded_clicks"] != nil || lastGN["non_branded_clicks"] != nil {
 		t.Fatalf("missing queries are unknown: %v", lastGN)
 	}
 
 	// Nor why a read failed: that is in the SEO settings.
-	if st := status(bot, "repocket"); st["state"] != "failed" || strings.Contains(st["message"].(string), "budget") {
+	if st := status(bot, "summitly"); st["state"] != "failed" || strings.Contains(st["message"].(string), "budget") {
 		t.Fatalf("failure reason without seo.read: %v", st)
 	}
 }

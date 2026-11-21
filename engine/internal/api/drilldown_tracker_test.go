@@ -2,6 +2,9 @@ package api_test
 
 import (
 	"context"
+	"io"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,6 +79,74 @@ func TestDrilldownTrackerSource(t *testing.T) {
 	}
 	if tot := r["totals"]; metric(tot, "visits") != float64(3) || metric(tot, "revenue") != 3.5 {
 		t.Fatalf("totals: %v", tot)
+	}
+	// No click went to a lander yet: the lander numbers are zero, with no
+	// click-through rate; the site source has none at all.
+	if metric(us, "lander_views") != float64(0) || metric(us, "lander_clicks") != float64(0) || metric(us, "lander_ctr") != nil {
+		t.Fatalf("US before landers: %v", us)
+	}
+	if site := owner.must(200, "GET", base+"/drilldown?from=2026-10-01&to=2026-10-10&timezone=UTC&group_by=country", nil)["totals"]; metric(site, "lander_views") != nil || metric(site, "lander_ctr") != nil {
+		t.Fatalf("site totals: %v", site)
+	}
+	// Landers: both US clicks and the bot's went to one. The first clicked
+	// through twice (counted once), the second only as a likely bot, and the
+	// bot's click isn't in the report at all.
+	lander := "60000000-0000-0000-0000-00000000000a"
+	if _, err := e.pool.Exec(ctx, `UPDATE tracking_link_clicks SET lander_id = $2 WHERE workspace_id = $1 AND country = 'US'`, ws, lander); err != nil {
+		t.Fatal(err)
+	}
+	through := func(clickID int64, key string, bot bool) {
+		t.Helper()
+		if _, err := e.pool.Exec(ctx, `INSERT INTO tracker_lander_clicks (workspace_id, brand_id, click_id, click_key, cta, likely_bot, clicked_at)
+			VALUES ($1, $2, $3, $4, 1, $5, $6)`, ws, brand, clickID, key, bot, day1.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	through(k1, "aaaaaaaaaaaaaaa1", false)
+	through(k1, "aaaaaaaaaaaaaaa1", false)
+	through(k2, "aaaaaaaaaaaaaaa2", true)
+	through(0, "aaaaaaaaaaaaaaa3", false)
+	r = owner.must(200, "GET", base+"/drilldown?source=tracker&from=2026-10-01&to=2026-10-10&timezone=UTC&group_by=country&sort=-lander_ctr&column=lpshare:lander_clicks/visits", nil)
+	first := r["rows"].([]any)[0].(map[string]any)
+	if m := first["metrics"]; first["keys"].([]any)[0] != "US" || metric(m, "lander_views") != float64(2) || metric(m, "lander_clicks") != float64(1) || metric(m, "lander_ctr") != 0.5 ||
+		metric(m, "custom").(map[string]any)["lpshare"] != 0.5 {
+		t.Fatalf("US with landers: %v", first)
+	}
+	if tot := r["totals"]; metric(tot, "lander_views") != float64(2) || metric(tot, "lander_clicks") != float64(1) || metric(tot, "lander_ctr") != 0.5 {
+		t.Fatalf("totals with landers: %v", tot)
+	}
+	if m := r["rows"].([]any)[1].(map[string]any)["metrics"]; metric(m, "lander_views") != float64(0) || metric(m, "lander_ctr") != nil {
+		t.Fatalf("DE with landers: %v", m)
+	}
+	// By lander, its own row; and the CSV has the lander columns for the
+	// tracker source only.
+	r = owner.must(200, "GET", base+"/drilldown?source=tracker&from=2026-10-01&to=2026-10-10&timezone=UTC&group_by=lander", nil)
+	found := false
+	for _, row := range r["rows"].([]any) {
+		if rm := row.(map[string]any); rm["keys"].([]any)[0] == lander {
+			found = metric(rm["metrics"], "lander_ctr") == 0.5
+		}
+	}
+	if !found {
+		t.Fatalf("by lander: %v", r["rows"])
+	}
+	csv := func(query string) string {
+		t.Helper()
+		req := httptest.NewRequest("GET", base+"/drilldown?from=2026-10-01&to=2026-10-10&timezone=UTC&group_by=country&format=csv"+query, nil)
+		req.AddCookie(owner.cookie)
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, req)
+		body, _ := io.ReadAll(rec.Body)
+		if rec.Code != 200 {
+			t.Fatalf("csv: %d %s", rec.Code, body)
+		}
+		return strings.SplitN(string(body), "\n", 2)[0]
+	}
+	if h := csv("&source=tracker"); !strings.HasSuffix(strings.TrimSpace(h), "cpa,lander_views,lander_clicks,lander_ctr") {
+		t.Fatalf("tracker csv header: %q", h)
+	}
+	if h := csv(""); !strings.HasSuffix(strings.TrimSpace(h), ",cpa") {
+		t.Fatalf("site csv header: %q", h)
 	}
 	// The tracker's own levels: campaign, then offer.
 	r = owner.must(200, "GET", base+"/drilldown?source=tracker&from=2026-10-01&to=2026-10-10&timezone=UTC&group_by=tracking_campaign,offer&filter=suspect:no", nil)

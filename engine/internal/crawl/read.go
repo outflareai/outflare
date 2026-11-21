@@ -40,7 +40,8 @@ type Read struct {
 	Noindex   bool
 	WordCount int
 	Links     []Link
-	// Emails are the addresses its mailto links show, lowercase.
+	// Emails are the addresses its mailto links show, lowercase, also
+	// those Cloudflare's email obfuscation hid.
 	Emails []string
 	// Text is the start of its visible text, for the AI page reader.
 	Text string
@@ -52,6 +53,7 @@ type Read struct {
 const readText = 6000
 
 var mailto = regexp.MustCompile(`(?i)href\s*=\s*["']mailto:([^"'?\s]+)`)
+var cfMailto = regexp.MustCompile(`(?i)(?:` + cloudflareEmailPath + `#|data-cfemail\s*=\s*["'])([0-9a-f]+)`)
 var emailShape = regexp.MustCompile(`^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$`)
 var tags = regexp.MustCompile(`(?is)<(script|style|noscript|svg)[^>]*>.*?</(script|style|noscript|svg)>|<[^>]+>`)
 var spaces = regexp.MustCompile(`\s+`)
@@ -150,8 +152,17 @@ func ReadPage(ctx context.Context, f Fetcher, wait func(context.Context, time.Du
 			}
 			read.H1, read.Lang, read.Noindex, read.WordCount, read.Links = pg.H1, pg.Lang, pg.Noindex, pg.WordCount, pg.Links
 			seen := map[string]bool{}
+			found := [][]byte{}
 			for _, m := range mailto.FindAllSubmatch(resp.Body, -1) {
-				e := strings.ToLower(strings.TrimSpace(string(m[1])))
+				found = append(found, m[1])
+			}
+			for _, m := range cfMailto.FindAllSubmatch(resp.Body, -1) {
+				if e, ok := cloudflareEmail(string(m[1])); ok {
+					found = append(found, []byte(e))
+				}
+			}
+			for _, m := range found {
+				e := strings.ToLower(strings.TrimSpace(string(m)))
 				if emailShape.MatchString(e) && !seen[e] && len(read.Emails) < 20 {
 					seen[e] = true
 					read.Emails = append(read.Emails, e)

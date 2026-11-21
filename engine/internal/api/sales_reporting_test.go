@@ -173,3 +173,46 @@ func TestSalesAttributionSourceLookup(t *testing.T) {
 		t.Fatal("outage confused with unknown origin")
 	}
 }
+
+func TestSalesDiscoveryTraceConnectionAndIsolation(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	rec := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Example"})
+	brand := rec["brand_id"].(string)
+	root := "/v1/brands/" + brand + "/sales/reporting/lanes"
+	owner.must(400, "GET", root+"?trace=wrong", nil)
+	owner.must(400, "GET", root+"?trace=true&lane=bad", nil)
+	missing := owner.must(200, "GET", root+"?trace=true", nil)
+	if missing["trace"] != nil {
+		t.Fatal("invented receipts")
+	}
+	var calls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("check") == "1" {
+			w.Write([]byte(`{"schema_version":1}`))
+			return
+		}
+		calls.Add(1)
+		if r.URL.Query().Get("trace") != "1" || r.URL.Query().Get("lane") != "00000000-0000-4000-8000-000000000001" || r.URL.Query().Get("offset") != "50" {
+			t.Error("lost trace filters", r.URL.RawQuery)
+		}
+		w.Write([]byte(`{"trace":{"scope":"latest_20_runs","total":0,"offset":50,"summary":{"calls":0,"errors":0,"recorded_cents":null,"unknown_cost_calls":0},"runs":[],"tools":[],"lanes":[],"rows":[]}}`))
+	}))
+	defer provider.Close()
+	e.integrations.Client.BaseURLs["leadportal"] = provider.URL
+	conn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "leadportal", "brand_id": brand, "credentials": map[string]string{"base_url": "https://portal.example", "api_key": "lp_test_not_a_real_key"}})
+	report := owner.must(200, "GET", root+"?trace=true&lane=00000000-0000-4000-8000-000000000001&offset=50", nil)
+	if report["trace"].(map[string]any)["offset"] != float64(50) {
+		t.Fatal("trace missing", report)
+	}
+	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Other Example", "handle": "other-trace"})["id"].(string)
+	before := calls.Load()
+	owner.must(404, "GET", "/v1/brands/"+other+"/sales/reporting/lanes?trace=true&integration="+conn["id"].(string), nil)
+	token := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Read example", "scopes": []string{"customers.read"}})
+	reader := &client{t: t, h: e.h, bearer: token["token"].(string)}
+	reader.must(403, "GET", root+"?trace=true", nil)
+	if calls.Load() != before {
+		t.Fatal("queried before authorization")
+	}
+}

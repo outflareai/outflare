@@ -7,40 +7,46 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
 import { ProposalDocument } from "@/portal/ProposalDocument";
+import { CounterHistory, LockedTerms } from "@/portal/CounterOffer";
 import {
   blankProposal,
   milestoneDue,
+  pendingCounter,
   proposalStage,
   type Proposal,
   type ProposalConfig,
 } from "@/portal/proposals";
+import { toast } from "sonner";
+
+type OfferTemplate = { id: string; name: string; config: ProposalConfig };
 import { money } from "./Partners";
 import { track } from "@/lib/analytics";
 export function PartnerProposals({
   ws,
   program,
   canManage,
+  open = "",
+  compose = false,
 }: {
   ws: string;
   program: PartnerProgram;
   canManage: boolean;
+  // open shows one proposal straight away; compose opens a new one
+  // (Partnerships → Deals links here).
+  open?: string;
+  compose?: boolean;
 }) {
   const [rows, setRows] = useState<Proposal[]>([]),
-    [selected, setSelected] = useState(""),
-    [composer, setComposer] = useState(false),
+    [selected, setSelected] = useState(open),
+    [composer, setComposer] = useState(compose),
     [editing, setEditing] = useState<Proposal | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [invite, setInvite] = useState(""),
     [filter, setFilter] = useState("all");
+  // Opened from Partnerships → Deals, which already shows the page's title.
+  const fromDeals = Boolean(open) || compose;
   const load = useCallback(async () => {
     const { data, error } = await api.GET(
       "/v1/brands/{brand}/partner-programs/{id}/proposals",
@@ -54,7 +60,7 @@ export function PartnerProposals({
   }, [load]);
   const p = rows.find((x) => x.id === selected);
   async function act(
-    action: "invite" | "verify" | "approve" | "complete",
+    action: "invite" | "accept_counter" | "verify" | "approve" | "complete",
     extra: { deliverable_id?: string; milestone_id?: string } = {},
   ) {
     if (!p) return;
@@ -63,7 +69,9 @@ export function PartnerProposals({
     const { data, error } = await api.POST(
       "/v1/brands/{brand}/partner-programs/{id}/proposals/{proposal}",
       {
-        params: { path: { brand: pickedBrandId(), id: program.id, proposal: p.id } },
+        params: {
+          path: { brand: pickedBrandId(), id: program.id, proposal: p.id },
+        },
         body: { action, version: p.version, ...extra },
       },
     );
@@ -77,33 +85,35 @@ export function PartnerProposals({
   }
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold">Partnership proposals</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            One recipient. A clear agreement. Every payment approved by your
-            team.
-          </p>
+      {!fromDeals && (
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">Partnership proposals</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              One recipient. A clear agreement. Every payment approved by your
+              team.
+            </p>
+          </div>
+          {canManage && (
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setComposer(true);
+                track("ui.partner_proposal_composer_opened");
+              }}
+            >
+              <Plus className="size-4" />
+              New proposal
+            </Button>
+          )}
         </div>
-        {canManage && (
-          <Button
-            onClick={() => {
-              setEditing(null);
-              setComposer(true);
-              track("ui.partner_proposal_composer_opened");
-            }}
-          >
-            <Plus className="size-4" />
-            New proposal
-          </Button>
-        )}
-      </div>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       )}
-      {p ? (
+      {composer ? null : p ? (
         <>
           <div className="flex flex-wrap gap-3">
             <Button
@@ -124,9 +134,11 @@ export function PartnerProposals({
                   setComposer(true);
                 }}
               >
-                {p.status === "quote_received"
-                  ? "Prepare priced offer"
-                  : "Edit proposal"}
+                {p.status !== "quote_received"
+                  ? "Edit proposal"
+                  : pendingCounter(p)
+                    ? "Answer with other terms"
+                    : "Prepare priced offer"}
               </Button>
             )}
             {canManage &&
@@ -178,7 +190,32 @@ export function PartnerProposals({
               </div>
             </Card>
           )}
-          {p.status === "quote_received" && (
+          {pendingCounter(p) && (
+            <Card className="gap-4 p-5 shadow-none">
+              <div>
+                <h3 className="text-sm font-semibold">
+                  {p.recipient} suggested changes
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Accepting makes these terms the agreement. To answer with
+                  other terms, use Answer with other terms and invite them
+                  again.
+                </p>
+              </div>
+              <CounterHistory proposal={p} currency={program.currency} />
+              <LockedTerms rule={p.config.removal} />
+              {canManage && (
+                <Button
+                  className="w-fit"
+                  disabled={busy}
+                  onClick={() => act("accept_counter")}
+                >
+                  Accept these terms
+                </Button>
+              )}
+            </Card>
+          )}
+          {p.status === "quote_received" && !pendingCounter(p) && (
             <Card className="gap-3 p-5 shadow-none">
               <h3 className="text-sm font-semibold">
                 Quote received:{" "}
@@ -392,6 +429,7 @@ export function PartnerProposals({
       {composer && (
         <ProposalComposer
           ws={ws}
+          titled={!fromDeals}
           program={program}
           existing={editing}
           onClose={() => setComposer(false)}
@@ -407,12 +445,14 @@ export function PartnerProposals({
   );
 }
 function ProposalComposer({
+  titled,
   program,
   existing,
   onClose,
   onSaved,
 }: {
   ws: string;
+  titled: boolean;
   program: PartnerProgram;
   existing: Proposal | null;
   onClose: () => void;
@@ -430,10 +470,36 @@ function ProposalComposer({
     }),
     [email, setEmail] = useState(""),
     [name, setName] = useState(""),
+    [templates, setTemplates] = useState<OfferTemplate[]>([]),
+    [templateName, setTemplateName] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const set = (v: Partial<ProposalConfig>) =>
     setConfig((c) => ({ ...c, ...v }));
+  useEffect(() => {
+    void api
+      .GET("/v1/brands/{brand}/partner-offer-templates", {
+        params: { path: { brand: pickedBrandId() } },
+      })
+      .then(({ data }) => setTemplates((data?.data as OfferTemplate[]) || []));
+  }, []);
+  async function saveTemplate() {
+    setError("");
+    const { data, error } = await api.POST(
+      "/v1/brands/{brand}/partner-offer-templates",
+      {
+        params: { path: { brand: pickedBrandId() } },
+        body: { name: templateName, config },
+      },
+    );
+    if (error || !data) {
+      setError(errorMessage(error));
+      return;
+    }
+    setTemplates((t) => [...t, data as OfferTemplate]);
+    setTemplateName("");
+    toast.success("Template saved");
+  }
   const text = (
     label: string,
     key: "title" | "reply_to" | "brand_kit_url" | "product_url",
@@ -474,136 +540,240 @@ function ProposalComposer({
     await onSaved(res.data.id);
   }
   return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
-        <SheetHeader>
-          <SheetTitle>
-            {existing ? "Revise proposal" : "A proposal for one partner"}
-          </SheetTitle>
-          <SheetDescription>
-            Save a draft, review it, then generate its private invitation link.
-            Changes are discussed by email.
-          </SheetDescription>
-        </SheetHeader>
-        <form onSubmit={save} className="space-y-7 px-5 pb-8">
-          {!existing && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="space-y-2 text-xs font-medium">
-                Recipient email
-                <Input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </label>
-              <label className="space-y-2 text-xs font-medium">
-                Recipient name (optional)
-                <Input value={name} onChange={(e) => setName(e.target.value)} />
-              </label>
-            </div>
-          )}
-          <Card className="gap-4 p-4 shadow-none">
-            <div>
-              <h3 className="text-sm font-semibold">Invitation teaser</h3>
-              <p className="mt-2 text-xs leading-6 text-muted-foreground">
-                Partners see this website or channel before signing in. The
-                brief, price and agreement stay private.
-              </p>
-            </div>
-            {(
-              [
-                "partner_site_name",
-                "partner_site_url",
-                "partner_site_icon_url",
-              ] as const
-            ).map((k) => (
-              <label key={k} className="space-y-2 text-xs">
-                {
-                  {
-                    partner_site_name: "Website or channel name (optional)",
-                    partner_site_url: "Website or channel URL (optional)",
-                    partner_site_icon_url: "Custom favicon URL (optional)",
-                  }[k]
-                }
-                <Input
-                  type={k === "partner_site_name" ? "text" : "url"}
-                  maxLength={k === "partner_site_name" ? 160 : 2000}
-                  placeholder={
-                    k === "partner_site_name"
-                      ? "Fieldnotes"
-                      : k === "partner_site_url"
-                        ? "https://fieldnotes.example"
-                        : "https://…"
-                  }
-                  value={config[k] || ""}
-                  onChange={(e) => set({ [k]: e.target.value })}
-                />
-              </label>
-            ))}
-          </Card>
-          {text("Proposal title", "title")}
+    <Card className="mx-auto w-full max-w-3xl gap-6 p-6 shadow-none sm:p-8">
+      <div className="space-y-2">
+        <Button variant="ghost" className="-ml-3" onClick={onClose}>
+          <ArrowLeft className="size-4" />
+          Back without saving
+        </Button>
+        {titled && (
+          <h3 className="text-xl font-semibold">
+            {existing ? "Revise offer" : "New offer"}
+          </h3>
+        )}
+        <p className="text-sm text-muted-foreground">
+          Save a draft, review it, then create its private invitation link. The
+          site owner can accept, decline or suggest changes to the price, their
+          page, the link text and the publish date.
+        </p>
+      </div>
+      <form onSubmit={save} className="space-y-7">
+        {!existing && templates.length > 0 && (
           <label className="block space-y-2 text-xs font-medium">
-            The brief
-            <Textarea
-              required
-              rows={4}
-              maxLength={10000}
-              placeholder="What are we making, and why is this a good fit for their audience?"
-              value={config.brief}
-              onChange={(e) => set({ brief: e.target.value })}
-            />
+            Start from a template
+            <select
+              className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+              defaultValue=""
+              onChange={(e) => {
+                const t = templates.find((x) => x.id === e.target.value);
+                if (!t) return;
+                const c = structuredClone(t.config);
+                if (!c.reply_to)
+                  c.reply_to = program.portal.support_email || "";
+                setConfig(c);
+                track("ui.partner_offer_template_used");
+              }}
+            >
+              <option value="" disabled>
+                Choose a template
+              </option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
           </label>
-          {text("Reply-to email for changes", "reply_to", "email")}
+        )}
+        {!existing && (
           <div className="grid gap-4 sm:grid-cols-2">
-            {text("Brand kit (optional)", "brand_kit_url", "url")}
-            {text("Product or pricing page (optional)", "product_url", "url")}
+            <label className="space-y-2 text-xs font-medium">
+              Recipient email
+              <Input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </label>
+            <label className="space-y-2 text-xs font-medium">
+              Recipient name (optional)
+              <Input value={name} onChange={(e) => setName(e.target.value)} />
+            </label>
           </div>
-          <section className="space-y-4">
-            <h3 className="text-sm font-semibold">Deliverables</h3>
-            {config.deliverables.map((d, i) => (
-              <Card key={d.id} className="gap-4 p-4 shadow-none">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold">Deliverable {i + 1}</h4>
-                  {config.deliverables.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
+        )}
+        <Card className="gap-4 p-4 shadow-none">
+          <div>
+            <h3 className="text-sm font-semibold">Invitation teaser</h3>
+            <p className="mt-2 text-xs leading-6 text-muted-foreground">
+              Partners see this website or channel before signing in. The brief,
+              price and agreement stay private.
+            </p>
+          </div>
+          {(
+            [
+              "partner_site_name",
+              "partner_site_url",
+              "partner_site_icon_url",
+            ] as const
+          ).map((k) => (
+            <label key={k} className="space-y-2 text-xs">
+              {
+                {
+                  partner_site_name: "Website or channel name (optional)",
+                  partner_site_url: "Website or channel URL (optional)",
+                  partner_site_icon_url: "Custom favicon URL (optional)",
+                }[k]
+              }
+              <Input
+                type={k === "partner_site_name" ? "text" : "url"}
+                maxLength={k === "partner_site_name" ? 160 : 2000}
+                placeholder={
+                  k === "partner_site_name"
+                    ? "Fieldnotes"
+                    : k === "partner_site_url"
+                      ? "https://fieldnotes.example"
+                      : "https://…"
+                }
+                value={config[k] || ""}
+                onChange={(e) => set({ [k]: e.target.value })}
+              />
+            </label>
+          ))}
+        </Card>
+        {text("Proposal title", "title")}
+        <label className="block space-y-2 text-xs font-medium">
+          The brief
+          <Textarea
+            required
+            rows={4}
+            maxLength={10000}
+            placeholder="What are we making, and why is this a good fit for their audience?"
+            value={config.brief}
+            onChange={(e) => set({ brief: e.target.value })}
+          />
+        </label>
+        {text("Reply-to email for changes", "reply_to", "email")}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {text("Brand kit (optional)", "brand_kit_url", "url")}
+          {text("Product or pricing page (optional)", "product_url", "url")}
+        </div>
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold">Deliverables</h3>
+          {config.deliverables.map((d, i) => (
+            <Card key={d.id} className="gap-4 p-4 shadow-none">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-semibold">Deliverable {i + 1}</h4>
+                {config.deliverables.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      set({
+                        deliverables: config.deliverables.filter(
+                          (x) => x.id !== d.id,
+                        ),
+                        milestones: config.milestones.filter(
+                          (m) => m.deliverable_id !== d.id,
+                        ),
+                      })
+                    }
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+              {(["title", "channel", "format", "deadline"] as const).map(
+                (k) => (
+                  <label key={k} className="block space-y-2 text-xs">
+                    {
+                      {
+                        title: "What will they publish?",
+                        channel: "Channel or platform",
+                        format: "Format / placement",
+                        deadline: "Deadline or timing",
+                      }[k]
+                    }
+                    <Input
+                      required={k === "title"}
+                      value={d[k]}
+                      placeholder={
+                        k === "channel"
+                          ? "Any website, social platform, newsletter, event…"
+                          : ""
+                      }
+                      onChange={(e) =>
                         set({
-                          deliverables: config.deliverables.filter(
-                            (x) => x.id !== d.id,
-                          ),
-                          milestones: config.milestones.filter(
-                            (m) => m.deliverable_id !== d.id,
+                          deliverables: config.deliverables.map((x) =>
+                            x.id === d.id ? { ...x, [k]: e.target.value } : x,
                           ),
                         })
                       }
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </div>
-                {(["title", "channel", "format", "deadline"] as const).map(
-                  (k) => (
-                    <label key={k} className="block space-y-2 text-xs">
+                    />
+                  </label>
+                ),
+              )}
+              <label className="block space-y-2 text-xs">
+                Requirements & guidance
+                <Textarea
+                  rows={3}
+                  maxLength={10000}
+                  value={d.requirements}
+                  onChange={(e) =>
+                    set({
+                      deliverables: config.deliverables.map((x) =>
+                        x.id === d.id
+                          ? { ...x, requirements: e.target.value }
+                          : x,
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <label className="block space-y-2 text-xs">
+                Minimum live duration (days; 0 = unspecified)
+                <Input
+                  type="number"
+                  min={0}
+                  max={3650}
+                  value={d.live_days}
+                  onChange={(e) =>
+                    set({
+                      deliverables: config.deliverables.map((x) =>
+                        x.id === d.id
+                          ? { ...x, live_days: Number(e.target.value) }
+                          : x,
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <details className="text-xs">
+                <summary className="cursor-pointer font-medium">
+                  Placement and link requirements (optional)
+                </summary>
+                <div className="mt-4 space-y-4">
+                  {(
+                    [
+                      "placement_url",
+                      "link_url",
+                      "link_text",
+                      "link_attribute",
+                    ] as const
+                  ).map((k) => (
+                    <label className="block space-y-2" key={k}>
                       {
                         {
-                          title: "What will they publish?",
-                          channel: "Channel or platform",
-                          format: "Format / placement",
-                          deadline: "Deadline or timing",
+                          placement_url: "Placement website or channel URL",
+                          link_url: "Required destination link",
+                          link_text: "Anchor or link text",
+                          link_attribute: "Link type (follow is a normal link)",
                         }[k]
                       }
                       <Input
-                        required={k === "title"}
+                        type={k.endsWith("url") ? "url" : "text"}
                         value={d[k]}
-                        placeholder={
-                          k === "channel"
-                            ? "Any website, social platform, newsletter, event…"
-                            : ""
-                        }
                         onChange={(e) =>
                           set({
                             deliverables: config.deliverables.map((x) =>
@@ -613,286 +783,231 @@ function ProposalComposer({
                         }
                       />
                     </label>
-                  ),
-                )}
-                <label className="block space-y-2 text-xs">
-                  Requirements & guidance
-                  <Textarea
-                    rows={3}
-                    maxLength={10000}
-                    value={d.requirements}
+                  ))}
+                  <p className="leading-6 text-muted-foreground">
+                    The site owner can't change where the link points or its
+                    type, and the link stays up for good. They may suggest
+                    another of their pages, other link text and a publish date.
+                  </p>
+                </div>
+              </details>
+            </Card>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            disabled={config.deliverables.length >= 30}
+            onClick={() => {
+              const d = blankProposal().deliverables[0];
+              set({
+                deliverables: [
+                  ...config.deliverables,
+                  {
+                    ...d,
+                    id:
+                      "d_" +
+                      crypto.randomUUID().replaceAll("-", "").slice(0, 16),
+                  },
+                ],
+              });
+            }}
+          >
+            <Plus className="size-4" />
+            Add deliverable
+          </Button>
+        </section>
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold">Compensation & milestones</h3>
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={config.request_quote}
+              onChange={(e) => set({ request_quote: e.target.checked })}
+            />
+            Ask for a quote before making a priced offer
+          </label>
+          <p className="text-xs leading-6 text-muted-foreground">
+            Mix cash, product benefits and commission. No cash or benefits means
+            an unpaid collaboration. Every milestone requires manual approval.
+          </p>
+          {config.milestones.map((m, i) => (
+            <Card className="gap-4 p-4 shadow-none" key={m.id}>
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-semibold">Milestone {i + 1}</h4>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    set({
+                      milestones: config.milestones.filter(
+                        (x) => x.id !== m.id,
+                      ),
+                    })
+                  }
+                >
+                  Remove
+                </Button>
+              </div>
+              {(["title", "benefit"] as const).map((k) => (
+                <label className="block space-y-2 text-xs" key={k}>
+                  {k === "title"
+                    ? "Milestone name"
+                    : "Product or credit benefit (optional)"}
+                  <Input
+                    value={m[k]}
+                    required={k === "title"}
                     onChange={(e) =>
                       set({
-                        deliverables: config.deliverables.map((x) =>
-                          x.id === d.id
-                            ? { ...x, requirements: e.target.value }
-                            : x,
+                        milestones: config.milestones.map((x) =>
+                          x.id === m.id ? { ...x, [k]: e.target.value } : x,
                         ),
                       })
                     }
                   />
                 </label>
-                <label className="block space-y-2 text-xs">
-                  Minimum live duration (days; 0 = unspecified)
+              ))}
+              <label className="block space-y-2 text-xs">
+                Linked deliverable
+                <select
+                  className="h-10 w-full rounded-md border bg-background px-3"
+                  value={m.deliverable_id}
+                  onChange={(e) =>
+                    set({
+                      milestones: config.milestones.map((x) =>
+                        x.id === m.id
+                          ? { ...x, deliverable_id: e.target.value }
+                          : x,
+                      ),
+                    })
+                  }
+                >
+                  {config.deliverables.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.title || "Untitled deliverable"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="space-y-2 text-xs">
+                  Cash amount ({program.currency})
                   <Input
                     type="number"
                     min={0}
-                    max={3650}
-                    value={d.live_days}
-                    onChange={(e) =>
-                      set({
-                        deliverables: config.deliverables.map((x) =>
-                          x.id === d.id
-                            ? { ...x, live_days: Number(e.target.value) }
-                            : x,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <details className="text-xs">
-                  <summary className="cursor-pointer font-medium">
-                    Placement and link requirements (optional)
-                  </summary>
-                  <div className="mt-4 space-y-4">
-                    {(
-                      [
-                        "placement_url",
-                        "link_url",
-                        "link_text",
-                        "link_attribute",
-                      ] as const
-                    ).map((k) => (
-                      <label className="block space-y-2" key={k}>
-                        {
-                          {
-                            placement_url: "Placement website or channel URL",
-                            link_url: "Required destination link",
-                            link_text: "Anchor or link text",
-                            link_attribute: "Link attributes / disclosure",
-                          }[k]
-                        }
-                        <Input
-                          type={k.endsWith("url") ? "url" : "text"}
-                          value={d[k]}
-                          onChange={(e) =>
-                            set({
-                              deliverables: config.deliverables.map((x) =>
-                                x.id === d.id
-                                  ? { ...x, [k]: e.target.value }
-                                  : x,
-                              ),
-                            })
-                          }
-                        />
-                      </label>
-                    ))}
-                    <p className="leading-6 text-muted-foreground">
-                      Paid web links generally need sponsorship disclosure and
-                      rel="sponsored". Specify requirements that fit the
-                      platform.
-                    </p>
-                  </div>
-                </details>
-              </Card>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              disabled={config.deliverables.length >= 30}
-              onClick={() => {
-                const d = blankProposal().deliverables[0];
-                set({
-                  deliverables: [
-                    ...config.deliverables,
-                    {
-                      ...d,
-                      id:
-                        "d_" +
-                        crypto.randomUUID().replaceAll("-", "").slice(0, 16),
-                    },
-                  ],
-                });
-              }}
-            >
-              <Plus className="size-4" />
-              Add deliverable
-            </Button>
-          </section>
-          <section className="space-y-4">
-            <h3 className="text-sm font-semibold">Compensation & milestones</h3>
-            <label className="flex items-center gap-3 text-sm">
-              <input
-                type="checkbox"
-                checked={config.request_quote}
-                onChange={(e) => set({ request_quote: e.target.checked })}
-              />
-              Ask for a quote before making a priced offer
-            </label>
-            <p className="text-xs leading-6 text-muted-foreground">
-              Mix cash, product benefits and commission. No cash or benefits
-              means an unpaid collaboration. Every milestone requires manual
-              approval.
-            </p>
-            {config.milestones.map((m, i) => (
-              <Card className="gap-4 p-4 shadow-none" key={m.id}>
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold">Milestone {i + 1}</h4>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      set({
-                        milestones: config.milestones.filter(
-                          (x) => x.id !== m.id,
-                        ),
-                      })
-                    }
-                  >
-                    Remove
-                  </Button>
-                </div>
-                {(["title", "benefit"] as const).map((k) => (
-                  <label className="block space-y-2 text-xs" key={k}>
-                    {k === "title"
-                      ? "Milestone name"
-                      : "Product or credit benefit (optional)"}
-                    <Input
-                      value={m[k]}
-                      required={k === "title"}
-                      onChange={(e) =>
-                        set({
-                          milestones: config.milestones.map((x) =>
-                            x.id === m.id ? { ...x, [k]: e.target.value } : x,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                ))}
-                <label className="block space-y-2 text-xs">
-                  Linked deliverable
-                  <select
-                    className="h-10 w-full rounded-md border bg-background px-3"
-                    value={m.deliverable_id}
+                    step="0.01"
+                    value={m.amount_cents / 100}
                     onChange={(e) =>
                       set({
                         milestones: config.milestones.map((x) =>
                           x.id === m.id
-                            ? { ...x, deliverable_id: e.target.value }
+                            ? {
+                                ...x,
+                                amount_cents: Math.round(
+                                  Number(e.target.value) * 100,
+                                ),
+                              }
                             : x,
                         ),
                       })
                     }
-                  >
-                    {config.deliverables.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.title || "Untitled deliverable"}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </label>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-2 text-xs">
-                    Cash amount ({program.currency})
-                    <Input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={m.amount_cents / 100}
-                      onChange={(e) =>
-                        set({
-                          milestones: config.milestones.map((x) =>
-                            x.id === m.id
-                              ? {
-                                  ...x,
-                                  amount_cents: Math.round(
-                                    Number(e.target.value) * 100,
-                                  ),
-                                }
-                              : x,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="space-y-2 text-xs">
-                    Wait after brand verification (days)
-                    <Input
-                      type="number"
-                      min={0}
-                      max={3650}
-                      value={m.wait_days}
-                      onChange={(e) =>
-                        set({
-                          milestones: config.milestones.map((x) =>
-                            x.id === m.id
-                              ? { ...x, wait_days: Number(e.target.value) }
-                              : x,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                </div>
-              </Card>
-            ))}
-            <Button
-              variant="outline"
-              type="button"
-              disabled={config.milestones.length >= 30}
-              onClick={() =>
-                set({
-                  milestones: [
-                    ...config.milestones,
-                    {
-                      id:
-                        "m_" +
-                        crypto.randomUUID().replaceAll("-", "").slice(0, 16),
-                      title: "",
-                      deliverable_id: config.deliverables[0].id,
-                      amount_cents: 0,
-                      benefit: "",
-                      wait_days: 0,
-                    },
-                  ],
-                })
-              }
-            >
-              <Plus className="size-4" />
-              Add milestone
-            </Button>
-            <label className="block space-y-2 text-xs">
-              Commission arrangement (optional)
-              <Textarea
-                value={config.commission_terms}
-                maxLength={2000}
-                placeholder="Describe the program's commission rules. Configure the actual rates in Flows."
-                onChange={(e) => set({ commission_terms: e.target.value })}
-              />
-            </label>
-          </section>
-          <label className="block space-y-2 text-xs font-medium">
-            Additional terms
+                <label className="space-y-2 text-xs">
+                  Wait after brand verification (days)
+                  <Input
+                    type="number"
+                    min={0}
+                    max={3650}
+                    value={m.wait_days}
+                    onChange={(e) =>
+                      set({
+                        milestones: config.milestones.map((x) =>
+                          x.id === m.id
+                            ? { ...x, wait_days: Number(e.target.value) }
+                            : x,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            </Card>
+          ))}
+          <Button
+            variant="outline"
+            type="button"
+            disabled={config.milestones.length >= 30}
+            onClick={() =>
+              set({
+                milestones: [
+                  ...config.milestones,
+                  {
+                    id:
+                      "m_" +
+                      crypto.randomUUID().replaceAll("-", "").slice(0, 16),
+                    title: "",
+                    deliverable_id: config.deliverables[0].id,
+                    amount_cents: 0,
+                    benefit: "",
+                    wait_days: 0,
+                  },
+                ],
+              })
+            }
+          >
+            <Plus className="size-4" />
+            Add milestone
+          </Button>
+          <label className="block space-y-2 text-xs">
+            Commission arrangement (optional)
             <Textarea
-              rows={5}
-              maxLength={10000}
-              value={config.terms}
-              placeholder="Payment timing, content usage rights, cancellation and any other agreed terms."
-              onChange={(e) => set({ terms: e.target.value })}
+              value={config.commission_terms}
+              maxLength={2000}
+              placeholder="Describe the program's commission rules. Configure the actual rates in Flows."
+              onChange={(e) => set({ commission_terms: e.target.value })}
             />
           </label>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
-          <Button disabled={busy}>
-            {busy ? "Saving…" : "Save proposal draft"}
+        </section>
+        <label className="block space-y-2 text-xs font-medium">
+          Additional terms
+          <Textarea
+            rows={5}
+            maxLength={10000}
+            value={config.terms}
+            placeholder="Payment timing, content usage rights, cancellation and any other agreed terms."
+            onChange={(e) => set({ terms: e.target.value })}
+          />
+        </label>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <div className="sticky bottom-0 -mx-6 flex gap-3 border-t bg-card px-6 py-4 sm:-mx-8 sm:px-8">
+          <Button disabled={busy}>{busy ? "Saving…" : "Save draft"}</Button>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
           </Button>
-        </form>
-      </SheetContent>
-    </Sheet>
+          <div className="ml-auto flex gap-2">
+            <Input
+              aria-label="Template name"
+              className="w-48"
+              placeholder="Template name"
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || !templateName.trim()}
+              onClick={() => void saveTemplate()}
+            >
+              Save as template
+            </Button>
+          </div>
+        </div>
+      </form>
+    </Card>
   );
 }

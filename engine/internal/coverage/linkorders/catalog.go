@@ -18,6 +18,7 @@ type DonorWrite struct {
 	Domain        string
 	Name          string
 	PBN           *bool
+	BestLink      *bool
 	Country       **string
 	Languages     *[]string
 	Niches        *[]string
@@ -113,9 +114,12 @@ func UpsertDonor(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID,
 	}
 
 	if created {
-		pbn := false
+		pbn, best := false, false
 		if in.PBN != nil {
 			pbn = *in.PBN
+		}
+		if in.BestLink != nil {
+			best = *in.BestLink
 		}
 		metrics, err := metricsJSON(in.Metrics)
 		if err != nil {
@@ -129,7 +133,7 @@ func UpsertDonor(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID,
 				tat_days, guarantee_days, vendor_id, source,
 				domain_rating, traffic, spam_score, metrics_at,
 				metrics_source, notes, intermediary, theme,
-				site_since, metrics
+				site_since, metrics, best_link
 			) VALUES (
 				$1, $2, $3, $4,
 				$5, $6, $7, $8,
@@ -137,7 +141,7 @@ func UpsertDonor(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID,
 				$13, $14, $15, $16,
 				$17, $18, $19, $20,
 				$21, $22, $23, $24,
-				$25, jsonb_strip_nulls($26::jsonb)
+				$25, jsonb_strip_nulls($26::jsonb), $27
 			)
 			RETURNING id
 		`,
@@ -147,7 +151,7 @@ func UpsertDonor(ctx context.Context, tx pgx.Tx, workspaceID, brandID uuid.UUID,
 			derefInt(in.TATDays), derefInt(in.GuaranteeDays), strOrEmpty(in.VendorID), source,
 			derefInt(in.DomainRating), derefInt64(in.Traffic), derefFloat(in.SpamScore), derefTime(in.MetricsAt),
 			strOrEmpty(in.MetricsSource), strOrEmpty(in.Notes), strOrEmpty(in.Intermediary), strOrEmpty(in.Theme),
-			derefTime(in.SiteSince), metrics,
+			derefTime(in.SiteSince), metrics, best,
 		).Scan(&existingID)
 		if err != nil {
 			return nil, false, err
@@ -177,6 +181,9 @@ func patchDonor(ctx context.Context, tx pgx.Tx, id uuid.UUID, source string, in 
 	}
 	if in.PBN != nil {
 		add("pbn", *in.PBN)
+	}
+	if in.BestLink != nil {
+		add("best_link", *in.BestLink)
 	}
 	if in.Country != nil {
 		add("country", strOrEmpty(in.Country))
@@ -392,7 +399,9 @@ func listDonorsQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 			p.casino_allowed, p.rel_offered, p.slot_types, p.duration, p.duration_days,
 			p.tat_days, p.guarantee_days, p.vendor_id, p.source, p.domain_rating,
 			p.traffic, p.spam_score, p.metrics_at, p.metrics_source, p.notes, p.archived_at,
-			p.created_at, p.updated_at, p.intermediary, p.theme, p.site_since, p.metrics,
+			p.created_at, p.updated_at, p.intermediary, p.theme, p.site_since, p.metrics, p.best_link,
+			p.email_search_at, p.email_search_status, p.email_search_emails,
+			p.ahrefs_checked_at, p.ahrefs_check_status,
 			COALESCE((
 				SELECT jsonb_agg(jsonb_build_object('currency', r.currency, 'amount_minor', r.amount_minor) ORDER BY r.currency)
 				FROM coverage_rates r
@@ -415,15 +424,26 @@ func listDonorsQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 	for rows.Next() {
 		var d Donor
 		var prices, metrics []byte
-		var since *time.Time
+		var since, searchedAt *time.Time
+		var searchStatus string
+		var searchEmails []string
+		var checkedAt *time.Time
+		var checkStatus string
 		if err := rows.Scan(
 			&d.ID, &d.PublisherID, &d.Domain, &d.PBN, &d.Country, &d.Languages, &d.Niches,
 			&d.CasinoAllowed, &d.RelOffered, &d.SlotTypes, &d.Duration, &d.DurationDays,
 			&d.TATDays, &d.GuaranteeDays, &d.VendorID, &d.Source, &d.DomainRating,
 			&d.Traffic, &d.SpamScore, &d.MetricsAt, &d.MetricsSource, &d.Notes, &d.ArchivedAt,
-			&d.CreatedAt, &d.UpdatedAt, &d.Intermediary, &d.Theme, &since, &metrics, &prices,
+			&d.CreatedAt, &d.UpdatedAt, &d.Intermediary, &d.Theme, &since, &metrics, &d.BestLink,
+			&searchedAt, &searchStatus, &searchEmails, &checkedAt, &checkStatus, &prices,
 		); err != nil {
 			return nil, err
+		}
+		if searchedAt != nil {
+			if searchEmails == nil {
+				searchEmails = []string{}
+			}
+			d.EmailSearch = &EmailSearch{At: *searchedAt, Status: searchStatus, Emails: searchEmails}
 		}
 		if since != nil {
 			s := since.Format("2006-01-02")
@@ -435,6 +455,10 @@ func listDonorsQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 				return nil, err
 			}
 		}
+		if checkedAt != nil {
+			d.AhrefsCheck = &AhrefsCheck{At: *checkedAt, Status: checkStatus}
+		}
+		d.Quality = Assess(d)
 		if d.Languages == nil {
 			d.Languages = []string{}
 		}
@@ -463,6 +487,9 @@ func listDonorsQuery(ctx context.Context, q Querier, workspaceID, brandID uuid.U
 	}
 	rows.Close()
 	if err := fillDirectContact(ctx, q, workspaceID, brandID, out); err != nil {
+		return nil, err
+	}
+	if err := fillOutreach(ctx, q, workspaceID, brandID, out); err != nil {
 		return nil, err
 	}
 	return out, nil

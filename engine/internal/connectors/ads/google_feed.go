@@ -3,6 +3,7 @@ package ads
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -23,8 +24,13 @@ var (
 	_ c.ConversionFeedManager = GoogleAds{}
 	_ c.FeedSender            = GoogleAds{}
 	_ c.AudienceFeeder        = GoogleAds{}
+	_ c.AudienceCreator       = GoogleAds{}
+	_ c.AudienceSizer         = GoogleAds{}
 	_ c.ReconnectNeeder       = GoogleAds{}
 )
+
+// googleDigits is a Google Ads id.
+var googleDigits = regexp.MustCompile(`^[0-9]{1,30}$`)
 
 // gaqlString quotes a value for a GAQL string literal.
 func gaqlString(v string) string {
@@ -102,30 +108,9 @@ func (g GoogleAds) CreateConversionAction(ctx context.Context, cl *c.Client, cre
 // PURCHASERS, which the new customer goal reads as existing customers, or
 // finds the list with that name, and returns its id.
 func (g GoogleAds) CreateCustomerList(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, name string) (string, error) {
-	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
-		"SELECT user_list.id, user_list.name FROM user_list WHERE user_list.name = "+gaqlString(name))
+	id, err := g.CreateAudience(ctx, cl, creds, acct, name, "People who paid, kept current by Outflare.")
 	if err != nil {
 		return "", err
-	}
-	id := ""
-	for _, r := range rows {
-		if r.UserList.Name == name {
-			id = fmt.Sprint(int64(r.UserList.ID))
-		}
-	}
-	if id == "" {
-		rn, err := g.mutateOp(ctx, cl, creds, acct, "userLists", map[string]any{"create": map[string]any{
-			"name": name, "description": "People who paid, kept current by Outflare.",
-			"membershipStatus": "OPEN", "membershipLifeSpan": "540",
-			"crmBasedUserList": map[string]any{"uploadKeyType": "CONTACT_INFO", "dataSourceType": "FIRST_PARTY"},
-		}})
-		if err != nil {
-			return "", err
-		}
-		if !strings.HasPrefix(rn, "customers/"+acct.ID+"/userLists/") {
-			return "", c.Errf(c.ErrUnavailable, "Google Ads made no customer list")
-		}
-		id = lastPart(rn)
 	}
 	list := "customers/" + acct.ID + "/userLists/" + id
 	types, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
@@ -143,6 +128,63 @@ func (g GoogleAds) CreateCustomerList(ctx context.Context, cl *c.Client, creds c
 		return "", err
 	}
 	return id, nil
+}
+
+// CreateAudience makes a Customer Match list (contact info, the longest
+// membership Google allows), or finds the list with that name, and returns
+// its id.
+func (g GoogleAds) CreateAudience(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, name, description string) (string, error) {
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
+		"SELECT user_list.id, user_list.name FROM user_list WHERE user_list.name = "+gaqlString(name))
+	if err != nil {
+		return "", err
+	}
+	for _, r := range rows {
+		if r.UserList.Name == name {
+			return fmt.Sprint(int64(r.UserList.ID)), nil
+		}
+	}
+	rn, err := g.mutateOp(ctx, cl, creds, acct, "userLists", map[string]any{"create": map[string]any{
+		"name": name, "description": description,
+		"membershipStatus": "OPEN", "membershipLifeSpan": "540",
+		"crmBasedUserList": map[string]any{"uploadKeyType": "CONTACT_INFO", "dataSourceType": "FIRST_PARTY"},
+	}})
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(rn, "customers/"+acct.ID+"/userLists/") {
+		return "", c.Errf(c.ErrUnavailable, "Google Ads made no customer list")
+	}
+	return lastPart(rn), nil
+}
+
+// AudienceSize reads how many people Google matched in a Customer Match
+// list. Google reports nothing for a list under 1,000 people, and takes a
+// day or two to count a new one.
+func (g GoogleAds) AudienceSize(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, audienceID string) (c.AudienceSize, error) {
+	var out c.AudienceSize
+	if !googleDigits.MatchString(audienceID) {
+		return out, c.Errf(c.ErrInvalid, "the audience id is a number")
+	}
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
+		"SELECT user_list.id, user_list.size_for_search, user_list.size_for_display, user_list.match_rate_percentage FROM user_list WHERE user_list.id = "+audienceID)
+	if err != nil || len(rows) == 0 {
+		return out, err
+	}
+	u := rows[0].UserList
+	if u.SizeForSearch != nil {
+		n := int64(*u.SizeForSearch)
+		out.Search = &n
+	}
+	if u.SizeForDisplay != nil {
+		n := int64(*u.SizeForDisplay)
+		out.Display = &n
+	}
+	if u.MatchRatePercentage != nil {
+		f := float64(*u.MatchRatePercentage)
+		out.MatchRate = &f
+	}
+	return out, nil
 }
 
 var googleNCATargets = map[string]string{c.NCABidHigher: "TARGET_ALL", c.NCANewOnly: "TARGET_SPECIFIC"}

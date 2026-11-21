@@ -29,6 +29,7 @@ type usersFake struct {
 	denyGmail bool
 	fwdStatus string // verificationStatus Google gives a forwarding address
 	fwdExists bool   // the address was added before (409, then read)
+	userTaken bool   // creating the user answers 409
 }
 
 func newUsersFake(t *testing.T) *usersFake {
@@ -65,8 +66,14 @@ func newUsersFake(t *testing.T) *usersFake {
 			_ = json.Unmarshal(raw, &b)
 			f.bodies[r.Method+" "+r.URL.Path] = b
 			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/admin/directory/v1/users" && f.userTaken:
+				w.WriteHeader(409)
+			case r.Method == http.MethodPost && r.URL.Path == "/admin/directory/v1/users":
+				fmt.Fprintf(w, `{"id":"test-user-1","customerId":%q}`, f.customer)
+			case r.Method == http.MethodGet && r.URL.Path == "/admin/directory/v1/users":
+				fmt.Fprintf(w, `{"users":[{"customerId":%q}]}`, f.customer)
 			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/admin/directory/v1/users/"):
-				fmt.Fprintf(w, `{"customerId":%q}`, f.customer)
+				fmt.Fprintf(w, `{"id":"test-user-1","customerId":%q}`, f.customer)
 			case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/admin/directory/v1/users/") && f.failName:
 				w.WriteHeader(500)
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/settings/forwardingAddresses") && f.fwdExists:

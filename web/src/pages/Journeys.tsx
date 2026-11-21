@@ -1,3 +1,4 @@
+import { useUrlParam } from "@/lib/urlParam";
 import { PickBrand } from "@/components/pick-brand";
 // Journeys: if-this-then-that flows for people on customer records. An
 // event on someone's timeline (or a manual add) starts a run that sends
@@ -418,7 +419,11 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
   const [viewing, setViewing] = useState<JourneyVersion | null>(null);
   const [work, setWork] = useState<Work | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [panel, setPanel] = useState<{ step: string } | "trigger" | null>(null);
+  // The step being edited is in the URL (?step=), so Back closes its page
+  // and a link opens it.
+  const [stepParam, setStepParam] = useUrlParam("step");
+  const panel: { step: string } | "trigger" | null = stepParam === "" ? null : stepParam === "trigger" ? "trigger" : { step: stepParam };
+  const setPanel = (p: { step: string } | "trigger" | null) => setStepParam(p === null ? "" : p === "trigger" ? "trigger" : p.step);
   const [picker, setPicker] = useState<Slot | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [renaming, setRenaming] = useState(false);

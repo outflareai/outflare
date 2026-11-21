@@ -420,7 +420,7 @@ func ParsePage(base *url.URL, body []byte) Page {
 	seen := map[string]int{}
 	for _, l := range links {
 		u, ok := Normalize(base, l.href)
-		if !ok {
+		if !ok || cloudflareEmailLink(u) {
 			continue
 		}
 		if i, dup := seen[u]; dup {
@@ -587,6 +587,34 @@ func clip(s string, n int) string {
 		n--
 	}
 	return s[:n]
+}
+
+// cloudflareEmailPath is where Cloudflare's email obfuscation points a
+// mailto: link it has hidden from scrapers: the address is in the
+// fragment, and a script on the page puts the mailto: back. The path
+// itself answers 404 to anything that isn't a browser.
+const cloudflareEmailPath = "/cdn-cgi/l/email-protection"
+
+// cloudflareEmailLink tells whether a normalized URL is a mailto: link
+// that Cloudflare obfuscated, so not a page of the site.
+func cloudflareEmailLink(u string) bool {
+	p, err := url.Parse(u)
+	return err == nil && p.Path == cloudflareEmailPath
+}
+
+// cloudflareEmail decodes an address Cloudflare obfuscated: hex bytes, the
+// first the key the others are XORed with. It drops a ?subject= tail.
+func cloudflareEmail(enc string) (string, bool) {
+	b, err := hex.DecodeString(enc)
+	if err != nil || len(b) < 2 {
+		return "", false
+	}
+	out := make([]byte, len(b)-1)
+	for i, c := range b[1:] {
+		out[i] = c ^ b[0]
+	}
+	s, _, _ := strings.Cut(string(out), "?")
+	return s, utf8.ValidString(s)
 }
 
 // Normalize resolves ref against base and tidies it for the crawl queue:

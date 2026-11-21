@@ -12,7 +12,9 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.25.0
 	github.com/fxamacker/cbor/v2 v2.9.3
+	github.com/go-sourcemap/sourcemap v2.1.4+incompatible
 	github.com/go-webauthn/webauthn v0.18.0
+	github.com/google/uuid v1.6.0
 	github.com/gotd/td v0.163.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/maxmind/mmdbwriter v1.2.0
@@ -26,6 +28,7 @@ require (
 	github.com/yuin/goldmark v1.8.5
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/crypto v0.58.0
+	golang.org/x/image v0.48.0
 	golang.org/x/net v0.62.0
 	golang.org/x/term v0.47.0
 	rsc.io/qr v0.2.0
@@ -57,7 +60,6 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gotd/ige v0.3.0 // indirect
 	github.com/gotd/log v0.1.0 // indirect
 	github.com/gotd/neo v0.1.5 // indirect
@@ -99,9 +101,9 @@ require (
 	golang.org/x/exp v0.0.0-20230725093048-515e97ebf090 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect

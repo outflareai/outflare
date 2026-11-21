@@ -143,6 +143,15 @@ func TestRunAuditMoreRules(t *testing.T) {
 	if len(got["redirect_chain"]) != 0 {
 		t.Errorf("a loop is not also a chain: %v", got["redirect_chain"])
 	}
+	// A link without text names where it leads, so a reader can find it.
+	for _, is := range a.Issues {
+		if is.Rule == "link_no_text" && is.Detail != "1 link, to https://example.com/mixed" {
+			t.Errorf("link_no_text detail %q", is.Detail)
+		}
+	}
+	if got := linksTo([]string{"/a", "/b", "/a", "/c", "/d", "/e"}); got != "6 links, to /a, /b, /c and 2 more" {
+		t.Errorf("linksTo: %q", got)
+	}
 	if len(Rules) < 60 {
 		t.Errorf("%d rules", len(Rules))
 	}

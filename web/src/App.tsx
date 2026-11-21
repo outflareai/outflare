@@ -1,6 +1,9 @@
+import { pageParams } from "@/lib/urlParam";
+import { syncTableViews } from "@/lib/table-views";
 import { UnassignedNotice } from "@/components/connection-brands";
 import { SearchDashboard } from "./pages/SearchDashboard";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { ResizableSidePanel, usePanelWidth } from "@/components/resizable-side-panel";
 import { cn } from "@/lib/utils";
 import { salesPageName } from "@/lib/sales";
 import type { Workspace } from "@outflare/sdk";
@@ -11,7 +14,7 @@ import { appPath, isID, isItemSlug, itemKinds, itemOrPage, parsePath, rememberWo
 import { ask, DialogHost, Loading, toast, ToastHost } from "./ui";
 import { Icon, type IconName } from "./icons";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { ApiPanel, canOpen, CommandPalette, everyday, isSettings, modules, resetNav, SettingsFrame, settingsGroups, shortcuts, Sidebar, startNav, tabNames, TopBar, useTheme, type Command, type MenuLink } from "./shell";
+import { ApiPanel, canOpen, CommandPalette, everyday, isSettings, modules, resetNav, setNavVersion, SettingsFrame, settingsGroups, shortcuts, Sidebar, startNav, tabNames, TopBar, useNavPrefs, useTheme, type Command, type MenuLink } from "./shell";
 import { Setup } from "./pages/Setup";
 import { Login } from "./pages/Login";
 import { AppSignIn } from "./pages/AppSignIn";
@@ -38,10 +41,11 @@ import { Mailboxes } from "./pages/Mailboxes";
 import { Leads } from "./pages/Leads";
 import { People } from "./pages/People";
 import { Query } from "./pages/Query";
+import { QueryEndpoints } from "./pages/QueryEndpoints";
+import { DataCatalog } from "./pages/DataCatalog";
 import { Suppression } from "./pages/Suppression";
 import { Lists } from "./pages/Lists";
 import { Sequences } from "./pages/Sequences";
-import { Inbox } from "./pages/Inbox";
 import { Lifecycle, Providers } from "./pages/Lifecycle";
 import { Emails } from "./pages/Emails";
 import { Templates } from "./pages/EmailTemplates";
@@ -62,7 +66,7 @@ import { Servers } from "./pages/Servers";
 import { Connectors } from "./pages/Connectors";
 import { Connect, pendingConnectToken } from "./pages/Connect";
 import { Reports } from "./pages/Reports";
-import { Analytics } from "./pages/Analytics";
+import { Analytics, searchDrillName } from "./pages/Analytics";
 import { WebsiteTracking } from "./pages/WebsiteTracking";
 import { Flags } from "./pages/Flags";
 import { ABTests } from "./pages/ABTests";
@@ -79,10 +83,16 @@ import { Funnels } from "./pages/Funnels";
 import { Trends } from "./pages/Trends";
 import { Dashboards } from "./pages/Dashboards";
 import { Retention } from "./pages/Retention";
+import { Recordings } from "./pages/Recordings";
+import { Heatmaps } from "./pages/Heatmaps";
 import { Paths } from "./pages/Paths";
 import { Live } from "./pages/Live";
 import { PageSpeed } from "./pages/PageSpeed";
+import { Errors } from "./pages/Errors";
+import { NamedClicks } from "./pages/NamedClicks";
+import { InternalPeople } from "./pages/InternalPeople";
 import { IdealCustomers } from "./pages/IdealCustomers";
+import { BrandProfile } from "./pages/BrandProfile";
 import { LeadFinder } from "./pages/LeadFinder";
 import { EmailFinder } from "./pages/EmailFinder";
 import { CloudPage, CloudLocked } from "./pages/CloudLocked";
@@ -113,10 +123,12 @@ import { Keywords } from "./pages/Keywords";
 import { OrganicConversions } from "./pages/OrganicConversions";
 import { Reddit } from "./pages/Reddit";
 import { RedditCampaigns } from "./pages/RedditCampaigns";
+import { Mentions } from "./pages/Mentions";
 import { Social } from "./pages/Social";
 import { Reviews } from "./pages/Reviews";
 import { Ads } from "./pages/Ads";
 import { Partners } from "./pages/Partners";
+import { Partnerships } from "./pages/Partnerships";
 import { Visitors } from "./pages/Visitors";
 import { SEOOverview } from "./pages/SEOOverview";
 import { AIVisibility } from "./pages/ai-visibility/overview";
@@ -167,6 +179,13 @@ export type { Tab };
 
 const fromPath = () => parsePath(location.pathname);
 
+// A page's name for the browser tab: several modules call their first page
+// Overview, so those say whose ("AI visibility overview").
+const pageTitle = (t: Tab) => {
+  const m = tabNames[t] === "Overview" ? modules.find((x) => x.tabs.includes(t)) : undefined;
+  return m ? `${m.label} overview` : tabNames[t];
+};
+
 export function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
 
@@ -189,6 +208,8 @@ export function App() {
     if (setup.data?.needed) return setState({ kind: "setup" });
     const me = await api.GET("/v1/me");
     if (me.data) {
+      // The person's saved table columns, before any table draws.
+      await syncTableViews();
       const user = (me.data as Me).user;
       // Some servers (Outflare Cloud) open the app only once the address is confirmed.
       if (user.email_verified === false && user.email) {
@@ -293,7 +314,10 @@ export function App() {
 function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onReload: () => Promise<void> | void }) {
   // Something a link named that could not be opened, such as a workspace
   // this person is not in.
-  const [lost, setLost] = useState("");
+  // A link to a page that doesn't exist says so rather than quietly opening Home.
+  const [lost, setLost] = useState(() =>
+    location.pathname !== "/" && !parsePath(location.pathname).ws ? `Page not found: nothing is at ${location.pathname}. Showing Home instead.` : "",
+  );
   rememberWorkspaces(me.workspaces);
   startNav(me.user.id ?? "");
   // A workspace from the URL: its slug, or its ID in older links.
@@ -323,6 +347,12 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     setItem(it);
     setFindItem(undefined);
   }, []);
+
+  // Support conversations moved into the Inbox: an old Support address
+  // opens the same conversation there.
+  useEffect(() => {
+    if (tab === "support") setTab("inbox", item ? `support-${item}` : undefined);
+  }, [tab, item, setTab]);
 
   // A workspace slug that is not one of this person's current ones may be
   // an old slug of one of them.
@@ -442,9 +472,11 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     // An old link's ?brand= is in the path now.
     const query = new URLSearchParams(location.search);
     query.delete("brand");
+    // A page's own state (?view=, ?step=) belongs to the page it was set on.
+    if (location.pathname !== path) for (const name of pageParams) query.delete(name);
     const search = query.toString() ? `?${query}` : "";
     if (location.pathname !== path || location.search !== search) history[stale || otherBrand ? "replaceState" : "pushState"](null, "", path + search);
-    document.title = `${(tab === "crm" ? salesPageName(item) : undefined) ?? link?.name ?? (kind ? undefined : item) ?? tabNames[tab]} · ${ws.name} · Outflare`;
+    document.title = `${(tab === "crm" ? salesPageName(item) : undefined) ?? (tab === "analytics" ? searchDrillName(item) : undefined) ?? link?.name ?? (kind ? undefined : item) ?? pageTitle(tab)} · ${ws.name} · Outflare`;
   }, [ws?.id, ws?.slug, ws?.name, tab, item, link, findWs, findItem, pickedBrand, brandState.loaded, brandState.active.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Switching brand shows the new brand's records everywhere: the page
@@ -549,6 +581,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     }
   });
   const setAgentOpen = setAgentOpenState;
+  // The agent's chat is as wide as the person dragged it, on every page.
+  const [agentWidth, setAgentWidth] = usePanelWidth("agent-panel-width");
   useEffect(() => {
     if (apiOpen) setAgentOpenState(false);
   }, [apiOpen]);
@@ -617,13 +651,23 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   }, [go]);
 
   const agentReady = !!BrandAgentPage && !!ws && canOpen(ws, "agents");
+  // A page can ask the agent something (the "outflare:ask-agent" event,
+  // as on a Paid ads action): the panel opens and takes the question.
+  useEffect(() => {
+    const on = () => setAgentOpen(true);
+    window.addEventListener("outflare:ask-agent", on);
+    return () => window.removeEventListener("outflare:ask-agent", on);
+  }, []);
   const agentProps = ws ? { workspace: ws, brandId: brandState.brand?.id, onOpenDock: () => setAgentOpen(true), onClose: () => setAgentOpen(false), onOpenPage: () => setTab("agents") } : null;
   const settings = settingsGroups(isAdmin, ws);
   const goTo = (t: Tab, label = tabNames[t], group = "Go to"): Command => ({ id: `go-${t}`, label, group, icon: t as IconName, hint: shortcuts[t] ? `G ${shortcuts[t]!.toUpperCase()}` : undefined, run: () => go(t) });
+  const navVersion = useNavPrefs().version;
   const commands: Command[] = [
     ...everyday.filter((t) => canOpen(ws, t)).map((t) => goTo(t)),
     ...(canOpen(ws, "ai") ? [goTo("ai", "Connect Claude, ChatGPT or another AI app")] : []),
     ...(isAdmin ? [{ ...goTo("get-started", "Get started: set up the workspace", "Workspace"), run: () => { setOpenedFrom("palette"); go("get-started"); } }] : []),
+    // The menu's own links too (CRM's People, Companies, Deals and the like), so ⌘K finds them by name.
+    ...modules.flatMap((m) => (m.links ?? []).filter((l) => canOpen(ws, l.tab)).map((l): Command => ({ id: `go-${l.tab}-${l.item}`, label: l.label, group: m.label, icon: m.icon, run: () => { setTab(l.tab, l.item); setPalette(false); } }))),
     ...modules.flatMap((m) => m.tabs.filter((t) => canOpen(ws, t) && pageIsAvailable(t)).map((t) => goTo(t, t === "agent-mail" ? "Agent Mail" : tabNames[t], m.label))),
     ...(["tools", "connectors"] as const).filter((t) => canOpen(ws, t)).map((t) => goTo(t)),
     ...settings.flatMap((g) => g.tabs.map((t) => goTo(t, `${tabNames[t]}`, "Settings"))),
@@ -639,6 +683,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     { id: "new-ws", label: "Create a workspace", group: "Workspaces", icon: "plus", run: createWorkspace },
     { id: "feedback", label: "Send feedback about Outflare", group: "Help", icon: "feedback", run: openFeedback },
     { id: "github", label: "Discuss Outflare on GitHub", group: "Help", icon: "discuss", run: () => { track("ui.community_link_opened", { target: "discussions", from: "palette" }); open(github.discussions, "_blank", "noopener"); } },
+    { id: "menu-version", label: navVersion === "v2" ? "Go back to the old menu" : "Switch to the new menu", group: "Preferences", icon: "sparkles", run: () => { setNavVersion(navVersion === "v2" ? "v1" : "v2", "palette"); setPalette(false); } },
     { id: "theme", label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme", group: "Preferences", icon: theme === "dark" ? "sun" : "moon", run: toggleTheme },
     { id: "signout", label: "Sign out", group: "Account", icon: "logout", run: signOut },
   ];
@@ -653,7 +698,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   const OutreachMailboxesPage = pageExtension("outreach-mailboxes");
 
   return (
-    <SidebarProvider style={{ "--sidebar-width": "15rem" } as React.CSSProperties}>
+    <SidebarProvider style={(navVersion === "v2" ? { "--sidebar-width": "19.5rem", "--sidebar-width-icon": "4.5rem" } : { "--sidebar-width": "15rem" }) as unknown as React.CSSProperties}>
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:shadow-md focus:ring-2 focus:ring-ring">Skip to content</a>
       <Sidebar
         me={me.user}
@@ -673,7 +718,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         onSearch={() => setPalette(true)}
         onSignOut={signOut}
       />
-      <SidebarInset id="main" tabIndex={-1} className={cn("min-w-0 outline-none", (apiOpen || (agentOpen && agentReady)) && "xl:pr-[26rem]")}>
+      <SidebarInset id="main" tabIndex={-1} style={agentOpen && agentReady ? ({ "--agent-panel-w": `${agentWidth}px` } as CSSProperties) : undefined} className={cn("min-w-0 outline-none", apiOpen && "xl:pr-[26rem]", agentOpen && agentReady && "xl:pr-(--agent-panel-w)")}>
         <TopBar ws={ws} tab={tab} item={item} itemName={link?.name} onTab={go} onApi={() => setApiOpen((o) => !o)} apiOpen={apiOpen} onAgent={agentReady ? () => setAgentOpen((o) => !o) : undefined} agentOpen={agentOpen && agentReady} />
         {/* Every page uses the whole width beside the sidebar: tables and
             charts stretch, and forms and text cap themselves at a reading width. */}
@@ -700,25 +745,30 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "get-started" && !isAdmin && <p className="text-sm text-muted-foreground">An owner or admin of {ws.name} sets this up.</p>}
         {ready && ws && tab === "flags" && <Flags key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "ab-tests" && <ABTests key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} open={item} setOpen={setItem} />}
-        {ready && ws && tab === "funnels" && <Funnels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
-        {ready && ws && tab === "trends" && <Trends key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
-        {ready && ws && tab === "retention" && <Retention key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "funnels" && <Funnels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} item={item} onOpen={(id) => setItem(id || undefined)} />}
+        {ready && ws && tab === "trends" && <Trends key={ws.id} ws={ws.id} canManage={can("analytics.manage")} item={item} onOpen={(id) => setItem(id || undefined)} />}
+        {ready && ws && tab === "retention" && <Retention key={ws.id} ws={ws.id} canManage={can("analytics.manage")} item={item} onOpen={(id) => setItem(id || undefined)} />}
+        {ready && ws && tab === "recordings" && <Recordings key={ws.id} ws={ws.id} canManage={can("customers.manage")} go={setTab} item={item} />}
+        {ready && ws && tab === "heatmaps" && <Heatmaps key={ws.id} ws={ws.id} canManage={can("customers.manage")} go={setTab} item={item} />}
         {ready && ws && tab === "live" && <Live key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "errors" && <Errors key={ws.id} ws={ws.id} canManage={can("analytics.manage")} canSwitch={can("customers.manage")} canAlerts={can("workspace.manage")} go={setTab} item={item} />}
+        {ready && ws && tab === "named-clicks" && <NamedClicks key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
+        {ready && ws && tab === "internal-people" && <InternalPeople key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
         {ready && ws && tab === "page-speed" && <PageSpeed key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
-        {ready && ws && tab === "paths" && <Paths key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "paths" && <Paths key={ws.id} ws={ws.id} canManage={can("analytics.manage")} item={item} onOpen={(id) => setItem(id || undefined)} />}
         {ready && ws && tab === "dashboards" && <Dashboards key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
         {ready && ws && tab === "channels" && <Channels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "links" && <CampaignLinks key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "tracker" && <TrackerReport key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "tracker-campaigns" && <TrackerCampaigns key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
-        {ready && ws && tab === "tracker-offers" && <TrackerOffers key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} />}
-        {ready && ws && tab === "tracker-landers" && <TrackerLanders key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "tracker-offers" && <TrackerOffers key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
+        {ready && ws && tab === "tracker-landers" && <TrackerLanders key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
         {ready && ws && tab === "tracker-flows" && <TrackerFlows key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
         {ready && ws && tab === "tracker-sources" && <TrackerTrafficSources key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "tracker-networks" && <TrackerNetworks key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "tracker-setup" && <TrackerSetup key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "tracker-logs" && <TrackerLogs key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
-        {ready && ws && tab === "tracking" && <WebsiteTracking key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
+        {ready && ws && tab === "brand-profile" && <BrandProfile key={ws.id} ws={ws.id} canManage={can("context.manage")} open={item ?? ""} onOpen={(s) => setItem(s || undefined)} />}
         {ready && ws && tab === "ideal-customers" && <IdealCustomers key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "brand-accounts" && <BrandAccounts key={ws.id} ws={ws.id} canManage={can("accounts.manage")} />}
         {ready && ws && tab === "experiments" && <Experiments key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
@@ -737,15 +787,17 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "ai-perception" && <AIAccuracy key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-traffic" && <AITraffic key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-visibility-settings" && <AIVisibilitySettings key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
-        {ready && ws && tab === "fixes" && <Fixes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
+        {ready && ws && tab === "fixes" && <Fixes key={ws.id} ws={ws.id} canManage={writer} go={setTab} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} />}
         {ready && ws && tab === "backlinks" && <Backlinks key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "link-orders" && <LinkOrders key={ws.id} ws={ws.id} myId={me.user.id ?? ""} can={can} go={setTab} item={item} />}
         {ready && ws && tab === "link-roi" && <LinkROI key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "competition" && <Competition key={ws.id} ws={ws.id} go={setTab} item={item} />}
         {ready && ws && tab === "competitors" && <Competitors key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "social" && <Social key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
+        {ready && ws && tab === "mentions" && <Mentions key={ws.id} ws={ws.id} canManage={can("social.manage")} item={item} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "reviews" && <Reviews key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "ads" && <Ads key={ws.id} ws={ws.id} canManage={writer} go={setTab} item={item} />}
+        {ready && ws && tab === "partnerships" && <Partnerships key={ws.id} ws={ws.id} item={item} go={setTab} can={can} myId={me.user.id ?? ""} writer={writer} />}
         {ready && ws && tab === "partners" && <Partners key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "visitors" && <Visitors key={ws.id} ws={ws.id} canManage={writer} go={setTab} open={item} onOpen={(it) => setItem(it || undefined)} />}
         {ready && ws && tab === "reddit" && <Reddit key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
@@ -753,7 +805,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "seo" && <SEO key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "warmup" && <Warmup key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reports" && <Reports key={ws.id} ws={ws.id} />}
-        {ready && ws && tab === "analytics" && <Analytics key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
+        {ready && ws && tab === "analytics" && <Analytics key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} item={item} />}
         {ready && ws && tab === "lifecycle" && <Lifecycle key={ws.id} ws={ws.id} canManage={isAdmin} canSend={writer} myEmail={me.user.email ?? ""} go={setTab} />}
         {ready && ws && tab === "emails" && <Emails key={ws.id} ws={ws.id} canSend={writer} admin={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "templates" && <Templates key={ws.id} ws={ws.id} canManage={writer} canSend={writer} myEmail={me.user.email ?? ""} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
@@ -765,7 +817,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "automations" && <AutomationMap key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "topics" && <Topics key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "providers" && <Providers key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
-        {ready && ws && tab === "inbox" && <Inbox key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} onRead={() => setUnread((n) => Math.max(0, n - 1))} />}
+        {ready && ws && tab === "inbox" && <Support key={ws.id} unified ws={ws.id} canManage={writer} canSetUp={can("mailboxes.manage")} myId={me.user.id ?? ""} open={item} setOpen={setItem} go={setTab} onRead={() => setUnread((n) => Math.max(0, n - 1))} />}
         {ready && ws && tab === "playbooks" && <Playbooks key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "agents" && <Agents key={ws.id} ws={ws.id} brandAgent={BrandAgentPage ? <BrandAgentPage key={`${ws.id}:${brandState.brand?.id ?? "all"}`} workspace={ws} brandId={brandState.brand?.id} /> : undefined} canApprove={can("actions.approve")} canManage={can("actions.manage")} canTokens={can("tokens.manage")} canRun={can("agents.run")} open={item} setOpen={setItem} go={setTab} />}
@@ -794,7 +846,9 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "crm" && <Suspense fallback={<Loading />}><CRMWorkspace canManageMailPolicy={can("members.manage")} ws={ws.id} canManage={canEditRecords} canConfigure={can("catalog.manage")} myId={me.user.id} open={item} setOpen={setItem} go={setTab} /></Suspense>}
         {ready && ws && tab === "sales-reporting" && <Suspense fallback={<Loading />}><SalesReporting key={`${ws.id}:${pickedBrand ?? "all"}`} ws={ws.id} go={setTab} /></Suspense>}
         {ready && ws && tab === "people" && <People key={ws.id} ws={ws.id} canManage={canEditRecords} canConfigure={can("catalog.manage")} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
-        {ready && ws && tab === "query" && <Query key={ws.id} ws={ws.id} canManage={can("customers.manage")} canPublish={ws.role === "owner" || ws.role === "admin"} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} />}
+        {ready && ws && tab === "query" && <Query key={ws.id} ws={ws.id} canManage={can("customers.manage")} canPublish={ws.role === "owner" || ws.role === "admin"} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
+        {ready && ws && tab === "data-catalog" && <DataCatalog key={ws.id} ws={ws.id} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
+        {ready && ws && tab === "query-endpoints" && <QueryEndpoints key={ws.id} ws={ws.id} canPublish={ws.role === "owner" || ws.role === "admin"} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
         {ready && ws && tab === "leads" && <Leads key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "lists" && <Lists key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "lead-finder" && (
@@ -811,18 +865,19 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
           </CloudPage>
         )}
         {ready && ws && tab === "outreach-mailboxes" && OutreachMailboxesPage && <OutreachMailboxesPage key={`${ws.id}:${brandState.brand?.id ?? "all"}`} workspace={ws} brandId={brandState.brand?.id} />}
-        {ready && ws && tab === "support" && <Support key={ws.id} ws={ws.id} canManage={writer} canSetUp={can("mailboxes.manage")} myId={me.user.id ?? ""} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "knowledge" && <Knowledge key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "help-centre" && <HelpCentre key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "company" && <Company key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "brands" && <Brands key={ws.id} ws={ws.id} canManage={writer} canEdit={writer} canDelete={isAdmin} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "workspace-brands" && <Brands key={`list:${ws.id}`} list ws={ws.id} canManage={writer} canEdit={writer} canDelete={isAdmin} open={item} setOpen={setItem} go={setTab} />}
+        {/* Telegram is in the CRM menu, so it renders on its own page, not in the Settings frame. */}
+        {ready && ws && tab === "telegram" && <TelegramChats key={ws.id} ws={ws.id} canManage={can("members.manage")} item={item} setItem={setItem} />}
         {isSettings(tab) && (
           <SettingsFrame groups={settings} tab={tab} onTab={go}>
             {ready && ws && tab === "workspace" && <WorkspaceSettings key={ws.id} ws={ws} canManage={isAdmin} onSaved={onReload} />}
             {ready && ws && tab === "team-activity" && <TeamActivity key={ws.id} ws={ws.id} canApprove={can("actions.approve")} canManage={can("actions.manage")} canRun={can("agents.run")} canLogs={can("audit.read")} />}
+            {ready && ws && tab === "tracking" && <WebsiteTracking key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
             {ready && ws && tab === "members" && <Members key={ws.id} ws={ws.id} myId={me.user.id ?? ""} myScopes={scopes} myRole={ws.role} />}
-            {ready && ws && tab === "telegram" && <TelegramChats key={ws.id} ws={ws.id} canManage={can("members.manage")} item={item} setItem={setItem} />}
             {ready && ws && tab === "team" && <TeamDirectory key={ws.id} ws={ws.id} canManage={can("members.manage")} />}
             {ready && ws && tab === "alerts" && <Alerts key={ws.id} ws={ws.id} canManage={isAdmin} />}
             {ready && ws && tab === "digests" && <Digests key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
@@ -843,9 +898,9 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         </div>
       </SidebarInset>
       {agentOpen && agentReady && BrandAgentPage && agentProps && ws && (
-        <div className="fixed inset-y-0 right-0 z-30 w-full max-w-[26rem] border-l bg-background shadow-2xl xl:shadow-none">
+        <ResizableSidePanel width={agentWidth} onWidth={setAgentWidth} onResized={(w) => track("ui.agent_panel_resized", { width: w })} label="Resize the agent's chat: drag, or use the left and right arrow keys" className="border-l bg-background shadow-2xl xl:shadow-none">
           <BrandAgentPage key={`dock:${ws.id}:${brandState.brand?.id ?? "all"}`} {...agentProps} variant="dock" />
-        </div>
+        </ResizableSidePanel>
       )}
       {apiOpen && wsId && (
         <div className="fixed inset-y-0 right-0 z-30 w-full max-w-[26rem] shadow-2xl xl:shadow-none">

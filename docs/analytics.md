@@ -22,6 +22,16 @@ another), and it sits next to any connected tool so the two can be compared. Bot
 and crawlers are left out; a visitor who doesn't allow cookies counts once per
 visit.
 
+## The Website analytics page
+
+The page is one tab per question, each with its own address
+(`/analytics/pages`, `/analytics/search`): Overview, Pages, Sources, Websites,
+Countries and Devices show Outflare's own tracking; Search shows the brand's
+Google Search Console or Bing Webmaster Tools site (clicks, impressions,
+queries); Connected tools lines up every connected tool's totals per website,
+and opens one tool's own reports. Each tab shows one chart or one table, and
+names its source at the top, so it is always clear where a number comes from.
+
 ```sh
 # The last 28 days, or any range up to a year
 curl -H "Authorization: Bearer $OUTFLARE_TOKEN" \
@@ -69,6 +79,15 @@ Metrics are `visitors`, `pageviews`, `sessions` (visits), `bounce_rate` and
 does not measure is left out of the answer, never reported as zero. `notes`
 explains caveats in words, such as Search Console's two to three day delay.
 
+Search Console and Bing Webmaster Tools can narrow `traffic`, `pages` and
+`search_queries` to one page (`page`, the full URL as a `pages` row names
+it) and one search (`keyword`): `search_queries` with `page` lists the
+searches that showed that page, and `pages` with `keyword` the pages that
+search showed. In the web app, Website analytics, Search: click a row of
+Pages or Search queries to open that page's searches or that search's
+pages, with their clicks, impressions, click-through and position over the
+same period. Other tools answer `422` when asked to narrow.
+
 ```sh
 # Connected analytics tools, their reports and default site
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/analytics"
@@ -78,6 +97,10 @@ curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/analytics/summary?
 
 # Top 50 search queries from one connection
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/analytics/$ID/reports/search_queries?limit=50"
+
+# The searches that showed one page, and the pages one search showed
+curl -G -H "Authorization: Bearer $TOKEN" --data-urlencode "page=https://example.com/pricing" "$URL/v1/workspaces/$WS/analytics/$ID/reports/search_queries"
+curl -G -H "Authorization: Bearer $TOKEN" --data-urlencode "keyword=acme pricing" "$URL/v1/workspaces/$WS/analytics/$ID/reports/pages"
 
 # Which sites a connection can read, the domain each counts under, and whether it syncs
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/analytics/$ID/sites"
@@ -93,6 +116,15 @@ have it). Changing sites needs `integrations.manage`. Dates are
 inclusive `YYYY-MM-DD`; the default range is the last 28 days. When a
 connection can read several sites and has no default, reports read the first
 site it syncs; name another with `site`.
+
+One sign-in reads every site of the account, and each site belongs to one
+brand, so live reports keep to a brand: with `?brand=` (the web app always
+sends the brand picked in the sidebar) or for someone kept to some brands, a
+report reads the brand's own site (the connection's default only when that
+site is the brand's), answers `404 site_not_in_brand` for another brand's
+`site`, and `400 pick_site` when the brand has no site in that connection
+yet. The app then offers "Pick {brand}'s {tool} site". `GET
+/v1/brands/{brand}/analytics` gives each connection's `site` the same way.
 
 Answers are kept for 15 minutes (an hour for Mixpanel and Amplitude, six
 hours for Clarity, which allows ten calls a day) so dashboards and agents do
@@ -179,7 +211,7 @@ sync shows why its last run failed, and **Sync now** runs it straight away.
   numbers are read under `/v1/brands/{brand}/analytics/...`. Right after an analytics tool is connected, the app
   asks what to import: every site the sign-in sees, with a tick for the ones
   to store and a brand for each. Brands are guessed from the site's address
-  or name ("zenshield-4fe59" is Zenshield) and test copies (staging, dev)
+  or name ("summitly-4fe59" is Summitly) and test copies (staging, dev)
   start unticked. Picking a brand gives the site the brand's website as its
   domain, so nobody types one; "Change" under it sets a subdomain such as
   `docs.example.com`. The same list is under "N sites in {tool}" on the
@@ -196,6 +228,14 @@ sync shows why its last run failed, and **Sync now** runs it straight away.
   in the sidebar and no analytics counting for it, Analytics offers "Pick
   from {connection}" for each analytics connection the brand uses, and lists
   only that brand's sites and the ones no brand has yet.
+- **A site counts once.** When two connections read the same site of the
+  same tool (one Google account connected twice), history, compare, changes
+  and the "All search engines" total use the connection whose sync worked
+  last. The overview lists both, and marks the other with `copy_of`
+  ("Same site as …, so it isn't counted twice"); disconnect it to tidy up.
+  Signing in again with an account the workspace already connected (More,
+  Sign in again) renews that connection instead of adding a copy, and
+  mends one the provider stopped accepting (HTTP 401).
 - **People kept to some brands** (and their API tokens) see and place only
   their brands' sites and the ones no brand has yet, into their own brands:
   never another brand's site, a shared one, or another brand's domain.
@@ -329,7 +369,10 @@ In the app it is **Tracker → Report** (`G` then `P`): pick up to five
 levels, filter, sort by a column header, expand a row or double-click it to
 drill in (the row becomes a filter), add custom columns, and save the view.
 The whole view is in the page's address, so a link opens the same report.
-**Report on** switches between site visits and **tracker clicks**.
+It opens on **tracker clicks**; **Report on** switches to site visits.
+Campaigns, sources, offers, landers and paths show by name, a filter on one
+of them is picked from a list, and a custom field is labelled with what your
+traffic sources call it ("Field 4 · Placement").
 
 With `source=tracker` the same report reads the tracker instead of the site:
 `visits` are redirect clicks (likely bots left out), `visitors` distinct
@@ -337,7 +380,11 @@ addresses, `conversions` and `revenue` the click ledger's conversions and
 payouts (declined ones left out; at the click's time unless
 `conversion_time=conversion`), and `cost` by each campaign's cost model,
 which splits by every level (see [campaign links](campaign-links.md), "Cost
-models"). It
+models"). It adds three metrics for landers: `lander_views` (the clicks
+sent to a lander), `lander_clicks` (those that went on from it by one of
+its calls to action, each click once, likely bots left out) and
+`lander_ctr`, their share; all three sort, work in custom columns and are
+in the CSV. It
 groups by `tracking_campaign` (the default), `traffic_source`, `offer`,
 `lander`, `path`, `destination`, place, network and device, `suspect`
 (whether a fraud signal flagged the click), `field1` to `field20`, and day,
@@ -367,6 +414,17 @@ subtotal:
 - `sort=-revenue`, `limit` (rows per parent), `conversion_time=conversion`
   to count conversions when they happened rather than at their visit, the
   attribution `model`, `timezone`, and `format=csv` for the deepest rows.
+- A value a level doesn't have (a click with no offer, a visit with no
+  country) is a row with the key `""`, so the rows always add up to the
+  totals, whatever the grouping. With `conversion_time=conversion`, the
+  day, hour and weekday levels and filters are the conversion's.
+- `unconverted_currencies` lists the currencies whose revenue or cost is
+  left out of every number because there is no exchange rate to the brand's
+  currency yet. The app shows it as a warning above the table.
+- `names` gives the name of every tracker campaign, traffic source, offer,
+  lander, path and destination the rows and filters mention, by id, so a
+  client needs no second call to show them. The CSV writes those names in
+  place of the ids.
 
 ### Custom columns and saved views
 
@@ -381,4 +439,5 @@ subtotal:
   dates), time zone, model and custom columns, plus the app's own display
   settings. A view is its maker's until `shared`; then the brand's team sees
   it, and only its maker can make it private again. `GET .../drilldown?view=`
-  reads a view, and anything the request says itself wins.
+  reads a view, and anything the request says itself wins. A shared view can
+  be put on a [dashboard](insights.md#a-saved-report-as-a-tile) as a tile.

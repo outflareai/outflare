@@ -164,13 +164,40 @@ func TestTrackerOffers(t *testing.T) {
 		t.Fatalf("all offers: %d, want 3", n)
 	}
 
+	// Deleting an offer in use takes it off its links, stops it being a
+	// fallback and archives it; it can be restored.
+	owner.must(200, "PATCH", base+"/offers/"+b["id"].(string), map[string]any{"fallback_offer_id": a["id"]})
+	before := len(owner.must(200, "GET", cpath+"/links/"+l["id"].(string)+"/destinations", nil)["destinations"].([]any))
+	deleted := owner.must(200, "DELETE", base+"/offers/"+a["id"].(string), nil)
+	if deleted["status"] != "archived" || deleted["destinations"] != float64(0) {
+		t.Fatalf("deleted offer: %v", deleted)
+	}
+	for _, d := range owner.must(200, "GET", cpath+"/links/"+l["id"].(string)+"/destinations", nil)["destinations"].([]any) {
+		if d.(map[string]any)["offer_id"] == a["id"] {
+			t.Fatalf("the deleted offer is still a destination: %v", d)
+		}
+		before--
+	}
+	if before < 1 {
+		t.Fatal("deleting the offer took nothing off the link")
+	}
+	if fb := owner.must(200, "GET", base+"/offers/"+b["id"].(string), nil)["fallback_offer_id"]; fb != nil {
+		t.Fatalf("the deleted offer is still a fallback: %v", fb)
+	}
+	if n := len(owner.must(200, "GET", base+"/offers", nil)["data"].([]any)); n != 1 {
+		t.Fatalf("active offers after the delete: %d, want 1", n)
+	}
+	owner.must(404, "DELETE", base+"/offers/00000000-0000-4000-8000-000000000000", nil)
+	owner.must(200, "PATCH", base+"/offers/"+a["id"].(string), map[string]any{"status": "active"})
+
 	// Another brand sees none of them, and can't use them.
-	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Repocket"})
+	other := owner.must(201, "POST", "/v1/workspaces/"+ws+"/brands", map[string]any{"name": "Summitly"})
 	obase := "/v1/brands/" + other["id"].(string)
 	if n := len(owner.must(200, "GET", obase+"/offers", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("another brand sees %d offers", n)
 	}
 	owner.must(404, "GET", obase+"/offers/"+a["id"].(string), nil)
+	owner.must(404, "DELETE", obase+"/offers/"+a["id"].(string), nil)
 	owner.must(400, "POST", obase+"/offers", map[string]any{"name": "Theirs", "url": "https://northpeak.example/x", "source_id": sid})
 	owner.must(400, "POST", obase+"/offers", map[string]any{"name": "Theirs", "url": "https://northpeak.example/x", "fallback_offer_id": b["id"]})
 
@@ -178,7 +205,7 @@ func TestTrackerOffers(t *testing.T) {
 	for _, ev := range events() {
 		found[ev.Name] = true
 	}
-	for _, name := range []string{"tracker_offer.created", "tracker_offer.updated", "tracker_offer.archived"} {
+	for _, name := range []string{"tracker_offer.created", "tracker_offer.updated", "tracker_offer.archived", "tracker_offer.deleted"} {
 		if !found[name] {
 			t.Errorf("no %s event", name)
 		}

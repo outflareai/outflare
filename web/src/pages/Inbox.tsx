@@ -1,13 +1,19 @@
 import { PickBrand } from "@/components/pick-brand";
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import type { InboundMessage, InboxTag, InboxView, Member, ThreadEntry } from "@outflare/sdk";
+import { useCallback, useEffect, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import type { InboundMessage, InboxNote, InboxTag, InboxView, Member, SupportPerson, ThreadEntry } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
-import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, toast } from "../ui";
+import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, toast, toastUndo } from "../ui";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { X } from "lucide-react";
 import { listTime, stamp } from "../format";
+import { cn } from "@/lib/utils";
+import { BulkBar, RowMore, useRowMenu, type RowAction } from "@/components/row-menu";
+import { askToWrite, neighbour, useInboxKeys, writeEvent } from "@/components/inbox-keys";
+import { SavedReplies } from "@/components/saved-replies";
+import { useViewers, ViewingNow } from "@/components/viewing";
+import { Icon } from "../icons";
 
 type Category = NonNullable<InboundMessage["category"]>;
 type Status = "open" | "snoozed" | "done" | "all";
@@ -96,11 +102,33 @@ type Kind = "" | "reply" | "auto_reply" | "bounce" | "other" | "all";
 const kinds: [Kind, string][] = [["", "Replies"], ["auto_reply", "Auto-replies"], ["bounce", "Bounces"], ["other", "Other mail"], ["all", "Everything"]];
 const kindLabel: Record<string, string> = { auto_reply: "Auto-reply", bounce: "Bounce", other: "Other" };
 
-type Props = { ws: string; canManage: boolean; open?: string; setOpen: (id: string | undefined) => void; onRead: () => void };
+type Props = { ws: string; canManage: boolean; myId?: string; open?: string; setOpen: (id: string | undefined) => void; onRead: () => void };
+// Inside the one Inbox the replies share a frame with support: the status
+// or saved view comes from the views column, and the page draws only its
+// list and the open conversation.
+type Embedded = { preset: Partial<Filters>; title: string; switcher?: ReactNode; onViews?: () => void };
+
+// The list's box: a card on its own page, flat inside the one Inbox.
+function ListBox({ flat, title, action, children }: { flat: boolean; title: ReactNode; action: ReactNode; children: ReactNode }) {
+  if (!flat) return <Card title={title} action={action}>{children}</Card>;
+  return (
+    <div className="p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="truncate text-[13px] font-medium">{title}</p>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export function SalesReplies(props: Props & { embedded: Embedded }) {
+  return <InboxPage {...props} />;
+}
 
 // The inbox's filters, as the API takes them; a saved view stores the same.
-type Filters = { status: Status; kind: Kind; category: string; group: string; source: string; tag: string; assigned_to: string; unread: string; needs_review: string; q: string };
-const noFilters: Filters = { status: "open", kind: "", category: "", group: "", source: "", tag: "", assigned_to: "", unread: "", needs_review: "", q: "" };
+type Filters = { status: Status; kind: Kind; category: string; group: string; source: string; tag: string; assigned_to: string; following: string; unread: string; needs_review: string; q: string };
+const noFilters: Filters = { status: "open", kind: "", category: "", group: "", source: "", tag: "", assigned_to: "", following: "", unread: "", needs_review: "", q: "" };
 
 // Replies belong to one brand (plans/brands/README.md): with all brands
 // picked the page asks for one, and switching brands opens it afresh.
@@ -110,12 +138,15 @@ export function Inbox(props: Props) {
   return <InboxPage key={brand.id} {...props} />;
 }
 
-function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
+function InboxPage({ ws, canManage, myId, open, setOpen, onRead, embedded }: Props & { embedded?: Embedded }) {
   const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<InboundMessage[] | null>(null);
-  const [f, setF] = useState<Filters>(noFilters);
+  const start: Filters = { ...noFilters, ...embedded?.preset };
+  const [f, setF] = useState<Filters>(start);
+  const [showFilters, setShowFilters] = useState(false);
   const set = (patch: Partial<Filters>) => setF((cur) => ({ ...cur, ...patch }));
   const [members, setMembers] = useState<Member[]>([]);
+  const [allTeams, setAllTeams] = useState<{ id: string; name: string }[]>([]);
   const [tags, setTags] = useState<InboxTag[]>([]);
   const [views, setViews] = useState<InboxView[]>([]);
   const [view, setView] = useState<InboxView | null>(null);
@@ -137,6 +168,7 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
 
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/members", { params: { path: { ws } } }).then(({ data }) => setMembers(data?.data ?? []));
+    api.GET("/v1/workspaces/{ws}/teams", { params: { path: { ws } } }).then(({ data }) => setAllTeams((data as { data?: { id: string; name: string }[] } | undefined)?.data ?? []));
     loadTags();
     loadViews();
   }, [ws, loadTags, loadViews]);
@@ -150,9 +182,90 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
     };
   }, [load]);
 
-  const changed = (Object.keys(noFilters) as (keyof Filters)[]).filter((k) => f[k] !== noFilters[k]);
+  // What a row offers on a right-click or from its More button, and what
+  // the ticked rows can have done to them together.
+  const rowMenu = useRowMenu();
+  const [sel, setSel] = useState<string[]>([]);
+  const tick = (id: string) => setSel((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  async function act(ids: string[], body: Record<string, unknown>, said: string, undo?: Record<string, unknown>) {
+    const res = await Promise.all(ids.map((id) => api.PATCH("/v1/brands/{brand}/inbox/{id}", { params: { path: { brand: brandId, id } }, body: body as never })));
+    const bad = res.find((r) => r.error);
+    if (bad) toast(errorMessage(bad.error), "error");
+    else if (undo) toastUndo(said, () => void act(ids, undo, "Undone."));
+    else toast(said);
+    setSel([]);
+    load();
+  }
+  async function loopInMany(ids: string[], m: Member) {
+    const res = await Promise.all(ids.map((id) => api.PUT("/v1/brands/{brand}/inbox/{id}/followers/{user}", { params: { path: { brand: brandId, id, user: m.user_id! } } })));
+    const bad = res.find((r) => r.error);
+    if (bad) toast(errorMessage(bad.error), "error");
+    else toast(`${m.name || m.email} is looped in${ids.length > 1 ? ` on ${ids.length}` : ""}. It shows under their Watching view.`);
+    setSel([]);
+    load();
+  }
+  // Choices that open inside the menu: who to assign to, which team, who
+  // to loop in. now is what one reply has, to tick and to undo to.
+  const people = members.filter((m) => m.user_id);
+  const assignTo = (ids: string[], now?: InboundMessage): RowAction[] => [
+    ...people.map((m) => ({ label: `${now?.assigned_to === m.user_id ? "✓ " : ""}${m.user_id === myId ? "Me" : m.name || m.email}`, onClick: () => act(ids, { assigned_to: m.user_id }, `Assigned${ids.length > 1 ? ` ${ids.length}` : ""} to ${m.user_id === myId ? "you" : m.name || m.email}.`, now ? { assigned_to: now.assigned_to ?? null } : undefined) })),
+    null,
+    { label: "Nobody", onClick: () => act(ids, { assigned_to: null }, "Unassigned.", now ? { assigned_to: now.assigned_to ?? null } : undefined) },
+  ];
+  const moveTo = (ids: string[], now?: InboundMessage): RowAction[] => [
+    ...allTeams.map((t) => ({ label: `${now?.team_id === t.id ? "✓ " : ""}${t.name}`, onClick: () => act(ids, { team_id: t.id }, `Moved${ids.length > 1 ? ` ${ids.length}` : ""} to ${t.name}.`, now ? { team_id: now.team_id ?? null } : undefined) })),
+    allTeams.length > 0 && null,
+    allTeams.length > 0 && { label: "No team", onClick: () => act(ids, { team_id: null }, "Moved out of its team.", now ? { team_id: now.team_id ?? null } : undefined) },
+  ];
+  const loopInTo = (ids: string[]): RowAction[] => people.filter((m) => m.user_id !== myId).map((m) => ({ label: m.name || m.email || "Teammate", onClick: () => void loopInMany(ids, m) }));
+  const linkTo = (id: string) => `${location.origin}${location.pathname.replace(/\/inbox(\/.*)?$/, "")}/inbox/${id}`;
+  function rowActions(m: InboundMessage): RowAction[] {
+    const snoozed = !!m.snoozed_until && new Date(m.snoozed_until) > new Date();
+    return [
+      { label: "Open in a new tab", onClick: () => window.open(linkTo(m.id), "_blank", "noopener") },
+      canManage && { label: m.read ? "Mark as unread" : "Mark as read", onClick: () => act([m.id], { read: !m.read }, m.read ? "Marked as unread." : "Marked as read.") },
+      canManage && !!myId && m.assigned_to !== myId && { label: "Assign to me", onClick: () => act([m.id], { assigned_to: myId }, "Assigned to you.", { assigned_to: m.assigned_to ?? null }) },
+      canManage && { label: "Assign to", items: assignTo([m.id], m) },
+      canManage && { label: "Move to team", items: moveTo([m.id], m) },
+      canManage && { label: "Loop in", items: loopInTo([m.id]) },
+      null,
+      ...(canManage && !m.done ? snoozeTimes().map((t) => ({ label: `Snooze ${t.label[0].toLowerCase()}${t.label.slice(1)}`, onClick: () => act([m.id], { snoozed_until: t.at.toISOString() }, "Snoozed.", { snoozed_until: m.snoozed_until ?? null }) })) : []),
+      canManage && snoozed && { label: "Wake it now", onClick: () => act([m.id], { snoozed_until: null }, "Back in the open inbox.") },
+      null,
+      canManage && (m.done ? { label: "Reopen", onClick: () => act([m.id], { done: false }, "Moved back to open.") } : { label: "Mark done", onClick: () => act([m.id], { done: true, snoozed_until: null }, "Marked done.", { done: false, snoozed_until: m.snoozed_until ?? null }) }),
+      null,
+      { label: "Copy link", onClick: () => void navigator.clipboard?.writeText(linkTo(m.id)).then(() => toast("Link copied.")) },
+    ];
+  }
+  const bulk = [
+    { label: "Mark done", onClick: () => act(sel, { done: true, snoozed_until: null }, `Marked ${sel.length} done.`, { done: false }) },
+    { label: "Snooze until tomorrow", onClick: () => act(sel, { snoozed_until: snoozeTimes()[1].at.toISOString() }, `Snoozed ${sel.length}.`, { snoozed_until: null }) },
+    { label: "Mark unread", onClick: () => act(sel, { read: false }, `Marked ${sel.length} as unread.`) },
+    ...(myId ? [{ label: "Assign to me", onClick: () => act(sel, { assigned_to: myId }, `Assigned ${sel.length} to you.`) }] : []),
+    { label: "Assign to", onClick: (e: ReactMouseEvent) => rowMenu.open(e, assignTo(sel)) },
+    { label: "Move to team", onClick: (e: ReactMouseEvent) => rowMenu.open(e, moveTo(sel)) },
+    { label: "Loop in", onClick: (e: ReactMouseEvent) => rowMenu.open(e, loopInTo(sel)) },
+  ];
+
+  const openMsg = list?.find((m) => m.id === open);
+  const keysHelp = useInboxKeys([
+    { key: "j", label: "Next conversation", run: () => setOpen(neighbour(list, open, 1)) },
+    { key: "k", label: "Previous conversation", run: () => setOpen(neighbour(list, open, -1)) },
+    { key: "r", label: "Write a reply", run: () => askToWrite("reply") },
+    { key: "n", label: "Write a private note", run: () => askToWrite("note") },
+    ...(canManage
+      ? [
+          { key: "e", label: "Mark done", run: () => openMsg && act([openMsg.id], { done: true, snoozed_until: null }, "Marked done.", { done: false, snoozed_until: openMsg.snoozed_until ?? null }) },
+          { key: "u", label: "Mark as unread", run: () => openMsg && (act([openMsg.id], { read: false }, "Marked as unread."), setOpen(undefined)) },
+          { key: "a", label: "Assign to me", run: () => openMsg && myId && act([openMsg.id], { assigned_to: myId }, "Assigned to you.", { assigned_to: openMsg.assigned_to ?? null }) },
+        ]
+      : []),
+    { key: "/", label: "Search", run: () => document.querySelector<HTMLInputElement>('input[aria-label="Search messages"]')?.focus() },
+  ]);
+
+  const changed = (Object.keys(noFilters) as (keyof Filters)[]).filter((k) => f[k] !== (embedded ? start : noFilters)[k]);
   const filtered = changed.length > 0;
-  const reset = () => { setF(noFilters); setView(null); };
+  const reset = () => { setF(start); setView(null); };
   const emptyText = { open: "Nothing waiting. New replies show up here within two minutes of arriving.", snoozed: "Nothing snoozed.", done: "Nothing marked done yet.", all: "No replies yet. They show up here within two minutes of arriving." }[f.status];
   const shownSources = [...new Set(["mailbox", "emailbison", ...(list ?? []).map((m) => m.source)])];
 
@@ -173,6 +286,7 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
     if (error || !data) return toast(errorMessage(error), "error");
     setView(data);
     loadViews();
+    embedded?.onViews?.();
     toast(`Saved "${data.name}".`);
   }
   async function updateView() {
@@ -190,17 +304,22 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
     if (error) return toast(errorMessage(error), "error");
     setView(null);
     loadViews();
+    embedded?.onViews?.();
   }
 
   return (
-    <div>
-      <div className={open ? "hidden md:block" : ""}>
-        <PageHeader title="Inbox" description="Replies from every mailbox and sequencer, labelled by what they mean. Answer them, mark them done or snooze them." />
-      </div>
-      <div className="grid gap-6 md:grid-cols-[24rem_1fr]">
+    <div className={embedded ? "flex min-w-0 flex-1" : undefined}>
+      {!embedded && (
         <div className={open ? "hidden md:block" : ""}>
-          <Card
-            title={view ? view.name : "Messages"}
+          <PageHeader title="Inbox" description="Replies from every mailbox and sequencer, labelled by what they mean. Answer them, mark them done or snooze them." />
+        </div>
+      )}
+      <div className={embedded ? "flex min-w-0 flex-1" : "grid gap-6 md:grid-cols-[24rem_1fr]"}>
+        <div className={embedded ? cn("w-full shrink-0 overflow-y-auto border-r md:w-[300px]", open && "hidden md:block") : open ? "hidden md:block" : ""}>
+          {embedded?.switcher}
+          <ListBox
+            flat={!!embedded}
+            title={view ? view.name : embedded ? embedded.title : "Messages"}
             action={
               <div className="flex gap-1">
                 <Menu
@@ -213,16 +332,24 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
                     !!view && { label: `Delete "${view.name}"`, onClick: deleteView, danger: true },
                   ]}
                 />
-                {canManage && <Button variant="ghost" onClick={() => setManagingTags(true)}>Tags</Button>}
-                {canManage && <Button variant="ghost" onClick={() => setManagingRules(true)}>Rules</Button>}
+                {!embedded && canManage && <Button variant="ghost" onClick={() => setManagingTags(true)}>Tags</Button>}
+                {!embedded && canManage && <Button variant="ghost" onClick={() => setManagingRules(true)}>Rules</Button>}
+                {embedded && canManage && <Menu label="Set up" items={[{ label: "Tags", onClick: () => setManagingTags(true) }, { label: "Rules for replies", onClick: () => setManagingRules(true) }]} />}
               </div>
             }
           >
-            <Tabs value={f.status} onValueChange={(v) => set({ status: v as Status })} className="mb-2">
+            <input type="search" aria-label="Search messages" className={`${field} mb-2 w-full`} placeholder="Search sender, subject or text" value={f.q} onChange={(e) => set({ q: e.target.value })} />
+            {embedded && (
+              <button type="button" aria-expanded={showFilters} onClick={() => setShowFilters((v) => !v)} className="mb-2 text-[12px] text-muted-foreground hover:text-foreground">
+                {showFilters ? "Hide filters" : changed.filter((k) => k !== "q").length ? `Filters (${changed.filter((k) => k !== "q").length} on)` : "Filters"}
+              </button>
+            )}
+            {!embedded && <Tabs value={f.status} onValueChange={(v) => set({ status: v as Status })} className="mb-2">
               <TabsList className="h-8 w-full">
                 {(["open", "snoozed", "done", "all"] as const).map((s) => <TabsTrigger key={s} value={s} className="px-2.5 text-[12px] capitalize">{s}</TabsTrigger>)}
               </TabsList>
-            </Tabs>
+            </Tabs>}
+            {(!embedded || showFilters) && <>
             <div role="group" aria-label="Label group" className="mb-2 flex gap-1">
               {[{ id: "", label: "All", help: "Every label" }, ...groups].map((g) => (
                 <button
@@ -263,17 +390,22 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
               </select>
               <label className="flex items-center gap-1"><input type="checkbox" checked={f.unread === "true"} onChange={(e) => set({ unread: e.target.checked ? "true" : "" })} />Unread only</label>
               <label className="flex items-center gap-1" title="Labels the AI wasn't sure of, and opt-outs to check"><input type="checkbox" checked={f.needs_review === "true"} onChange={(e) => set({ needs_review: e.target.checked ? "true" : "" })} />Needs review</label>
-              <input type="search" aria-label="Search messages" className={`${field} w-full`} placeholder="Search sender, subject or text" value={f.q} onChange={(e) => set({ q: e.target.value })} />
             </div>
+            </>}
+            {canManage && sel.length > 0 && <div className={embedded ? "-mx-3" : "-mx-4"}><BulkBar count={sel.length} onClear={() => setSel([])} actions={bulk} /></div>}
             {list === null && <Loading />}
             {list?.length === 0 && (
               <p className="py-6 text-center text-sm text-muted-foreground">
                 {changed.length === 1 && changed[0] === "status" ? emptyText : filtered ? <>Nothing matches. <button className="underline" onClick={reset}>Clear the filters</button></> : emptyText}
               </p>
             )}
-            <ul className="-mx-4 -mb-4 text-sm">
+            <ul className={embedded ? "-mx-3 -mb-3 text-sm" : "-mx-4 -mb-4 text-sm"}>
               {list?.map((m) => (
-                <li key={m.id}>
+                <li key={m.id} className="group relative" onContextMenu={(e) => rowMenu.open(e, rowActions(m))}>
+                  <span className={cn("absolute right-2 bottom-1.5 z-10 flex items-center gap-1.5", sel.length === 0 && "opacity-0 group-hover:opacity-100 focus-within:opacity-100")}>
+                    <RowMore name={m.lead_name || m.from_name || m.from} onOpen={(e) => rowMenu.open(e, rowActions(m))} />
+                    {canManage && <input type="checkbox" aria-label={`Select ${m.lead_name || m.from_name || m.from}`} checked={sel.includes(m.id)} onChange={() => tick(m.id)} />}
+                  </span>
                   <button onClick={() => setOpen(m.id)} aria-current={open === m.id ? "true" : undefined} className={`w-full border-t border-border px-4 py-2.5 text-left hover:bg-accent/50 ${open === m.id ? "bg-accent" : ""}`}>
                     <div className="flex items-center justify-between gap-2">
                       <span className={`flex min-w-0 items-center gap-1.5 ${m.read ? "" : "font-semibold"}`}>
@@ -297,25 +429,36 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
                 </li>
               ))}
             </ul>
-          </Card>
+          </ListBox>
         </div>
+        <div className={embedded ? cn("min-w-0 flex-1 overflow-y-auto p-4", !open && "hidden md:block") : "contents"}>
         {open ? (
-          <Conversation key={open} ws={ws} id={open} canManage={canManage} members={members} tags={tags} onBack={() => setOpen(undefined)} onChange={() => { load(); loadTags(); }} onRead={onRead} />
+          <Conversation key={open} details={!!embedded} ws={ws} id={open} canManage={canManage} myId={myId} members={members} tags={tags} onBack={() => setOpen(undefined)} onChange={() => { load(); loadTags(); }} onRead={onRead} />
         ) : (
           <div className="hidden md:block">{list && list.length > 0 && <Empty title="Pick a message to read it">The whole conversation shows here, and you can reply from the same mailbox.</Empty>}</div>
         )}
+        </div>
       </div>
+      {rowMenu.menu}
+      {keysHelp}
       {managingTags && <TagsDialog ws={ws} tags={tags} onChange={() => { loadTags(); load(); }} onClose={() => setManagingTags(false)} />}
       {managingRules && <RulesDialog ws={ws} onClose={() => setManagingRules(false)} />}
     </div>
   );
 }
 
-function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRead }: { ws: string; id: string; canManage: boolean; members: Member[]; tags: InboxTag[]; onBack: () => void; onChange: () => void; onRead: () => void }) {
+function Conversation({ ws, id, canManage, myId, members, tags, onBack, onChange, onRead, details }: { details?: boolean; ws: string; id: string; canManage: boolean; myId?: string; members: Member[]; tags: InboxTag[]; onBack: () => void; onChange: () => void; onRead: () => void }) {
+  const viewing = useViewers("reply", id, !!myId);
   const brandId = useBrand(ws).brand?.id ?? "";
   const [msg, setMsg] = useState<InboundMessage | null>(null);
   const [missing, setMissing] = useState(false);
   const [thread, setThread] = useState<ThreadEntry[]>([]);
+  // Working together: notes only the team sees, who is looped in, and
+  // the teams it can be moved to.
+  const [notes, setNotes] = useState<InboxNote[]>([]);
+  const [followers, setFollowers] = useState<SupportPerson[]>([]);
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [mode, setMode] = useState<"reply" | "note">("reply");
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -326,6 +469,8 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
     if (!data) return setMissing(true);
     setMsg(data.message);
     setThread(data.thread);
+    setNotes(data.notes);
+    setFollowers(data.followers);
     if (!data.message.read && canManage) {
       await api.PATCH("/v1/brands/{brand}/inbox/{id}", { params: { path: { brand: brandId, id } }, body: { read: true } });
       onRead();
@@ -336,10 +481,64 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
   useEffect(() => {
     load();
   }, [load]);
+  // "r" and "n" in the list put the cursor here.
+  useEffect(() => {
+    const write = (e: Event) => {
+      setMode((e as CustomEvent<"reply" | "note">).detail);
+      document.getElementById("reply")?.focus();
+    };
+    window.addEventListener(writeEvent, write);
+    return () => window.removeEventListener(writeEvent, write);
+  }, []);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/teams", { params: { path: { ws } } }).then(({ data }) => setTeams(((data as { data?: { id: string; name: string }[] } | undefined)?.data ?? [])));
+  }, [ws]);
+
+  // Draft with AI: an answer from the brand's knowledge, to edit before
+  // sending. Nothing is sent by asking.
+  const [drafting, setDrafting] = useState(false);
+  const [aiNote, setAiNote] = useState("");
+  async function draft() {
+    setDrafting(true);
+    setAiNote("");
+    const { data, error } = await api.POST("/v1/brands/{brand}/inbox/{id}/suggest-reply", { params: { path } });
+    setDrafting(false);
+    if (error || !data) return toast(errorMessage(error), "error");
+    if (data.ai.problem) return setAiNote(`${data.ai.problem.message.replace(/\s*\(connector ids[^)]*\)/, "")} Add it under Connectors, and this button drafts an answer from your knowledge.`);
+    if (!data.answered || !data.answer) return setAiNote("Your knowledge base doesn't cover this yet, so there is nothing to draft from. Add the answer under Knowledge and it will next time.");
+    setMode("reply");
+    setBody(data.answer);
+    document.getElementById("reply")?.focus();
+  }
+
+  async function addNote() {
+    setBusy(true);
+    const { data, error } = await api.POST("/v1/brands/{brand}/inbox/{id}/notes", { params: { path }, body: { body } });
+    setBusy(false);
+    if (error || !data) return setError(errorMessage(error));
+    setError("");
+    setBody("");
+    setNotes((cur) => [...cur, data]);
+    toast("Note added. Only your team sees it.");
+  }
+  // Looping someone in puts the reply under their Watching view; picking
+  // them again takes them off.
+  async function loopIn(m: Member) {
+    if (!m.user_id) return;
+    const on = followers.some((f) => f.id === m.user_id);
+    const params = { path: { ...path, user: m.user_id } };
+    const { data, error } = on
+      ? await api.DELETE("/v1/brands/{brand}/inbox/{id}/followers/{user}", { params })
+      : await api.PUT("/v1/brands/{brand}/inbox/{id}/followers/{user}", { params });
+    if (error || !data) return toast(errorMessage(error), "error");
+    setFollowers(data.followers);
+    toast(on ? `${m.name || m.email} is no longer looped in.` : `${m.name || m.email} is looped in. It shows under their Watching view.`);
+  }
 
   async function reply(e?: FormEvent) {
     e?.preventDefault();
     if (!body.trim() || busy) return;
+    if (mode === "note" || msg?.kind === "bounce" || msg?.opt_out) return addNote();
     setBusy(true);
     const { error } = await api.POST("/v1/brands/{brand}/inbox/{id}/reply", { params: { path }, body: { body } });
     setBusy(false);
@@ -361,7 +560,7 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
     onBack();
   }
 
-  type Patch = { category?: Category | null; assigned_to?: string | null; snoozed_until?: string | null; done?: boolean; tags?: string[]; needs_review?: boolean };
+  type Patch = { category?: Category | null; assigned_to?: string | null; team_id?: string | null; snoozed_until?: string | null; done?: boolean; tags?: string[]; needs_review?: boolean };
   async function triage(body: Patch, said?: string, close = false) {
     const { data, error } = await api.PATCH("/v1/brands/{brand}/inbox/{id}", { params: { path }, body });
     if (error || !data) return toast(errorMessage(error), "error");
@@ -381,8 +580,23 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
   if (!msg) return <Loading />;
   const name = msg.lead_name || msg.from_name || msg.from;
   const snoozed = msg.snoozed_until && new Date(msg.snoozed_until) > new Date();
+  // A bounce or an opt-out can't be answered, but can still carry notes.
+  const canReply = msg.kind !== "bounce" && !msg.opt_out;
+  const shownMode = canReply ? mode : "note";
+  const facts: [string, string | null | undefined][] = [
+    ["Company", msg.company],
+    ["Sequence", msg.sequence_name],
+    ["Wrote to", msg.mailbox_email || msg.to],
+    ["Came through", sourceName(msg.source)],
+    ["Received", stamp(msg.received_at)],
+    ["Assigned to", msg.assignee_name || "Nobody"],
+    ["Team", msg.team_name || "No team"],
+    ["Looped in", followers.map((f) => f.name).join(", ") || "Nobody"],
+    ["Label", categories.find((x) => x.id === msg.category)?.label ?? "Not labelled"],
+  ];
   return (
-    <div className="space-y-3">
+    <div className={details ? "flex items-start gap-4" : undefined}>
+    <div className="min-w-0 flex-1 space-y-3">
       <button onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground md:hidden">← Inbox</button>
       <Card
         title={msg.subject || "(no subject)"}
@@ -421,6 +635,17 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
               <option value="">Unassigned</option>
               {members.map((m) => <option key={m.user_id} value={m.user_id ?? ""}>{m.name || m.email}</option>)}
             </select>
+            {teams.length > 0 && (
+              <select aria-label="Team" className={field} value={msg.team_id ?? ""} onChange={(e) => triage({ team_id: e.target.value || null }, e.target.value ? `Moved to ${teams.find((t) => t.id === e.target.value)?.name}.` : "Moved out of its team.")}>
+                <option value="">No team</option>
+                {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            <Menu
+              label={followers.length ? `Looped in: ${followers.length}` : "Loop in"}
+              aria="Loop a teammate in"
+              items={members.filter((m) => m.user_id).map((m) => ({ label: `${followers.some((f) => f.id === m.user_id) ? "✓ " : ""}${m.name || m.email}`, onClick: () => void loopIn(m) }))}
+            />
             <TagPicker names={msg.tags} tags={tags} onChange={(names) => triage({ tags: names })} />
             {msg.category_source && (
               <span className="text-[12px] text-muted-foreground">
@@ -457,35 +682,98 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
         {msg.opt_out && <p className="mb-4 rounded-md bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">They asked to be removed, so they're on the suppression list and their sequences have stopped. If they didn't, pick another label above and the suppression is lifted.</p>}
         {msg.kind === "bounce" && <p className="mb-4 rounded-md bg-red-50 p-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">A bounce report: the address it names was suppressed so it isn't emailed again.</p>}
         <ol className="space-y-3">
-          {thread.map((t) => (
-            <li key={t.id} className={`rounded-md border p-3 text-sm ${t.direction === "out" ? "ml-6 border-border bg-muted/40 sm:ml-12 " : "mr-6 border-border sm:mr-12"}`}>
-              <div className="mb-1 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
-                <span>{t.direction === "out" ? `You, from ${t.from}` : t.from}</span>
-                <span>{stamp(t.at)}</span>
-              </div>
-              <pre className="whitespace-pre-wrap break-words font-sans">{t.body}</pre>
-            </li>
-          ))}
+          {[...thread.map((t) => ({ at: t.at, t, n: undefined })), ...notes.map((n) => ({ at: n.created_at, t: undefined, n }))]
+            .sort((a, b) => a.at.localeCompare(b.at))
+            .map(({ t, n }) =>
+              n ? (
+                <li key={n.id} className="rounded-md border border-amber-500/30 bg-amber-50 p-3 text-sm dark:bg-amber-500/10">
+                  <div className="mb-1 flex flex-wrap justify-between gap-2 text-xs text-amber-800 dark:text-amber-300">
+                    <span>Note by {n.author?.name ?? "someone"} · only your team sees this</span>
+                    <span>{stamp(n.created_at)}</span>
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words font-sans">{n.body}</pre>
+                </li>
+              ) : t && (
+                <li key={t.id} className={`rounded-md border p-3 text-sm ${t.direction === "out" ? "ml-6 border-border bg-muted/40 sm:ml-12 " : "mr-6 border-border sm:mr-12"}`}>
+                  <div className="mb-1 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+                    <span>{t.direction === "out" ? `You, from ${t.from}` : t.from}</span>
+                    <span>{stamp(t.at)}</span>
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words font-sans">{t.body}</pre>
+                </li>
+              ),
+            )}
         </ol>
-        {canManage && msg.kind !== "bounce" && !msg.opt_out && (
+        <div className="mt-4 overflow-hidden rounded-md empty:hidden"><ViewingNow viewers={viewing.viewers} /></div>
+        {canManage && (
           <form onSubmit={reply} className="mt-4 space-y-2">
-            <label htmlFor="reply" className="block text-sm font-medium">Reply from {msg.mailbox_email}</label>
+            <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Write">
+              {(["reply", "note"] as const).filter((k) => k === "note" || canReply).map((k) => (
+                <button key={k} type="button" role="tab" aria-selected={shownMode === k} onClick={() => setMode(k)} className={cn("rounded px-2 py-1 text-[13px] font-medium", shownMode === k ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>
+                  {k === "reply" ? "Reply" : "Private note"}
+                </button>
+              ))}
+              <label htmlFor="reply" className="ml-1 text-xs text-muted-foreground">{shownMode === "note" ? "Only your team sees notes. Nothing is sent." : `To ${name}, from ${msg.mailbox_email}`}</label>
+              <span className="flex-1" />
+              {shownMode === "reply" && (
+                <>
+                  <SavedReplies
+                    canManage={canManage}
+                    firstName={name.includes("@") ? "" : name.split(" ")[0]}
+                    myName={members.find((m) => m.user_id === myId)?.name ?? ""}
+                    draft={body}
+                    onPick={(text) => { setBody((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${text}` : text)); document.getElementById("reply")?.focus(); }}
+                  />
+                  <Button type="button" variant="ghost" disabled={drafting} onClick={draft}><Icon name="ai" className="size-3.5" />{drafting ? "Drafting…" : "Draft with AI"}</Button>
+                </>
+              )}
+            </div>
+            {aiNote && <p className="rounded-md bg-muted p-2 text-[13px] text-muted-foreground">{aiNote}</p>}
             <textarea
               id="reply"
-              className={`${field} min-h-32 w-full [field-sizing:content]`}
-              placeholder={`Write to ${name}…`}
+              className={cn(field, "min-h-32 w-full [field-sizing:content]", shownMode === "note" && "border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/5")}
+              placeholder={shownMode === "note" ? "Add a note for your team…" : `Write to ${name}…`}
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={(e) => { setBody(e.target.value); viewing.typing(); }}
               onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) reply(); }}
             />
             <div className="flex flex-wrap items-center gap-3">
-              <Button disabled={!body.trim() || busy}>{busy ? "Sending…" : "Send reply"}</Button>
-              <span className="text-xs text-muted-foreground">Sends now, in the same thread. Ctrl or ⌘ + Enter to send.</span>
+              <Button disabled={!body.trim() || busy}>{busy ? "Saving…" : shownMode === "note" ? "Add note" : "Send reply"}</Button>
+              <span className="text-xs text-muted-foreground">{shownMode === "note" ? "Ctrl or ⌘ + Enter to add it." : "Sends now, in the same thread. Ctrl or ⌘ + Enter to send."}</span>
             </div>
             <ErrorText>{error}</ErrorText>
           </form>
         )}
       </Card>
+    </div>
+    {details && (
+      <aside aria-label="Details" className="hidden w-[232px] shrink-0 space-y-4 text-[13px] xl:block">
+        <div>
+          <p className="truncate font-medium">{name}</p>
+          <p className="truncate text-xs text-muted-foreground">{msg.from}</p>
+        </div>
+        <dl className="space-y-2">
+          {facts.filter(([, v]) => v).map(([k, v]) => (
+            <div key={k} className="flex justify-between gap-3">
+              <dt className="shrink-0 text-muted-foreground">{k}</dt>
+              <dd className="min-w-0 truncate text-right" title={v ?? ""}>{v}</dd>
+            </div>
+          ))}
+        </dl>
+        {msg.category_reason && (
+          <div>
+            <p className="mb-1 font-mono text-[10px] tracking-wider text-muted-foreground uppercase">Why this label</p>
+            <p className="text-muted-foreground">{msg.category_reason}</p>
+          </div>
+        )}
+        {msg.tags.length > 0 && (
+          <div>
+            <p className="mb-1 font-mono text-[10px] tracking-wider text-muted-foreground uppercase">Tags</p>
+            <div className="flex flex-wrap gap-1">{msg.tags.map((t) => <Tag key={t} name={t} tags={tags} />)}</div>
+          </div>
+        )}
+      </aside>
+    )}
     </div>
   );
 }

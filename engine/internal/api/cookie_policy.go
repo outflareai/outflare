@@ -554,8 +554,9 @@ func (s *Server) siteCookieReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	added, _, err := s.cookieReports.Take(r.Context(), k.workspaceID, k.id, cookies.Report{
-		Cookies: in.Cookies, Local: in.Local, Session: in.Session, Scripts: in.Scripts, Iframes: in.Iframes,
-		Host: host, Path: in.Path, Granted: granted,
+		Cookies: dropNULsIn(in.Cookies), Local: dropNULsIn(in.Local), Session: dropNULsIn(in.Session),
+		Scripts: dropNULsIn(in.Scripts), Iframes: dropNULsIn(in.Iframes),
+		Host: host, Path: dropNUL(in.Path), Granted: granted,
 	}, time.Now())
 	if err != nil {
 		outcome = "error"

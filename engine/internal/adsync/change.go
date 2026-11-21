@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -45,6 +46,11 @@ const (
 	ChangeAudienceRemove = "audience_remove"
 	ChangeCountryAdd     = "country_add"
 	ChangeCountryRemove  = "country_remove"
+	// The campaign's places set together: every place it shows in and is
+	// kept out of, in one request the platform takes whole or not at all.
+	ChangeLocations = "locations"
+	// The campaign given another name.
+	ChangeRename = "rename"
 	// Removing a campaign, an ad or a keyword, which can't be undone on
 	// the platform: only a person's own session asks for one.
 	ChangeCampaignRemove = "campaign_remove"
@@ -61,7 +67,7 @@ func RemoveKind(k string) bool {
 // it reaches.
 func TargetingKind(k string) bool {
 	switch k {
-	case ChangeBidding, ChangeAudienceAdd, ChangeAudienceRemove, ChangeCountryAdd, ChangeCountryRemove:
+	case ChangeBidding, ChangeAudienceAdd, ChangeAudienceRemove, ChangeCountryAdd, ChangeCountryRemove, ChangeLocations:
 		return true
 	}
 	return false
@@ -106,11 +112,29 @@ type ChangeState struct {
 	AudienceID   string                `json:"audience_id,omitempty"`
 	AudienceName string                `json:"audience_name,omitempty"`
 	Country      string                `json:"country,omitempty"`
+	// The campaign's places set together: what each side becomes (nil
+	// leaves a side as it is), what that adds and takes out, and the mark
+	// of the places it was planned on.
+	Locations *connectors.AdLocationChange `json:"locations,omitempty"`
 	// A removal: the platform's ids of the ad or keyword (with AdGroupID),
 	// and the name of what was removed, as it was.
 	AdID      string `json:"ad_id,omitempty"`
 	KeywordID string `json:"keyword_id,omitempty"`
 	Name      string `json:"name,omitempty"`
+	// An exclusion added or taken out (the findings job's kinds), so the
+	// list of changes shows what it was.
+	Exclusion *connectors.AdExclusion `json:"exclusion,omitempty"`
+	// A bid set on the campaign or one of its placements (the findings
+	// job's kind), as adsuggest.BidChange writes it.
+	Bid *BidState `json:"bid,omitempty"`
+}
+
+// BidState is a bid in a change's before or after.
+type BidState struct {
+	Micros    int64  `json:"micros"`
+	Auto      bool   `json:"auto,omitempty"`
+	Placement string `json:"placement,omitempty"`
+	OnlyLower bool   `json:"only_lower,omitempty"`
 }
 
 func (s *Syncer) changeJob(ctx context.Context, job jobs.Job) error {
@@ -185,6 +209,9 @@ func (s *Syncer) ApplyChange(ctx context.Context, ws, changeID string, last bool
 	}
 	if RemoveKind(kind) {
 		return s.applyRemove(ctx, ws, changeID, kind, connector, o, acct, entityExternal, want, last, ev, fail)
+	}
+	if kind == ChangeRename {
+		return s.applyRename(ctx, ws, changeID, connector, o, acct, entityExternal, want, last, ev, fail)
 	}
 	m, ok := o.Connector.(connectors.AdsManager)
 	if !ok {
@@ -281,7 +308,7 @@ func budgetWord(b *int64) string {
 // ChangeKinds lists the kinds, for the API's checks.
 var ChangeKinds = []string{ChangePause, ChangeResume, ChangeBudget, ChangeKeywordAdd, ChangeNegativeAdd, ChangeKeywordSplit,
 	ChangeBidding, ChangeAudienceAdd, ChangeAudienceRemove, ChangeCountryAdd, ChangeCountryRemove,
-	ChangeCampaignRemove, ChangeAdRemove, ChangeKeywordRemove}
+	ChangeCampaignRemove, ChangeAdRemove, ChangeKeywordRemove, ChangeLocations, ChangeRename}
 
 // applyKeyword makes a keyword change. Keywords aren't read back here: the
 // next sync lists them.
@@ -327,6 +354,8 @@ func (s *Syncer) applyTargeting(ctx context.Context, ws, changeID, kind, connect
 	}
 	ad := acct.ad()
 	var err error
+	// wantMark is the mark the campaign's places should have afterwards.
+	var wantMark string
 	switch kind {
 	case ChangeBidding:
 		if want.Bidding == nil {
@@ -338,6 +367,8 @@ func (s *Syncer) applyTargeting(ctx context.Context, ws, changeID, kind, connect
 		err = t.SetCampaignAudience(ctx, o.Client, o.Creds, ad, campaignExternal, want.AudienceID, kind == ChangeAudienceAdd)
 	case ChangeCountryAdd, ChangeCountryRemove:
 		err = t.SetCampaignCountry(ctx, o.Client, o.Creds, ad, campaignExternal, want.Country, kind == ChangeCountryAdd)
+	case ChangeLocations:
+		wantMark, err = s.setLocations(ctx, o, t, ad, campaignExternal, want.Locations)
 	}
 	if err != nil {
 		if connectors.KindOf(err) == connectors.ErrUnavailable && !last {
@@ -345,9 +376,37 @@ func (s *Syncer) applyTargeting(ctx context.Context, ws, changeID, kind, connect
 		}
 		return fail("failed", "connector_"+connectors.KindOf(err), err)
 	}
+	// A bidding change is read back: what the platform shows is what counts.
+	now := s.now()
+	var verifiedAt *time.Time
+	note := "shows on the campaign's targeting now, and in its numbers after the next sync"
+	if kind == ChangeBidding {
+		got, readErr := t.CampaignTargeting(ctx, o.Client, o.Creds, ad, campaignExternal)
+		switch diff := biddingDiff(*want.Bidding, got.Bidding); {
+		case readErr != nil:
+			note = "could not read the bidding back: " + trim(readErr.Error(), 300)
+		case diff != "":
+			note = "the platform shows " + diff
+		default:
+			verifiedAt, note = &now, ""
+		}
+	}
+	// So are a campaign's places: the mark of what the platform shows now
+	// against the mark of what was asked for.
+	if kind == ChangeLocations {
+		got, readErr := t.CampaignTargeting(ctx, o.Client, o.Creds, ad, campaignExternal)
+		switch {
+		case readErr != nil:
+			note = "could not read the places back: " + trim(readErr.Error(), 300)
+		case got.LocationFingerprint() != wantMark:
+			note = fmt.Sprintf("the platform shows %d places shown in and %d kept out of, which is not what was asked for", len(got.IncludedLocations), len(got.ExcludedLocations))
+		default:
+			verifiedAt, note = &now, ""
+		}
+	}
 	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE ad_changes SET status = 'applied', applied_at = $3, verify_note = 'shows on the campaign''s targeting now, and in its numbers after the next sync'
-			WHERE workspace_id = $1 AND id = $2 AND status = 'queued'`, ws, changeID, s.now()); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE ad_changes SET status = 'applied', applied_at = $3, verified_at = $4, verify_note = $5
+			WHERE workspace_id = $1 AND id = $2 AND status = 'queued'`, ws, changeID, now, verifiedAt, note); err != nil {
 			return err
 		}
 		if kind != ChangeBidding {
@@ -361,6 +420,89 @@ func (s *Syncer) applyTargeting(ctx context.Context, ws, changeID, kind, connect
 		return fail("error", "internal", err)
 	}
 	metrics.AdChanged(connector, kind, "applied")
+	track.Emit(ctx, ev)
+	return nil
+}
+
+// setLocations reads the campaign's places, refuses when they are no
+// longer the ones the change was planned on, and makes what is left of the
+// change in one request. It answers the mark the places should have after.
+func (s *Syncer) setLocations(ctx context.Context, o *connectors.Opened, t connectors.AdTargetingManager, ad connectors.AdAccount, campaignExternal string, want *connectors.AdLocationChange) (string, error) {
+	ls, ok := o.Connector.(connectors.AdLocationSetter)
+	if !ok {
+		return "", connectors.Errf(connectors.ErrInvalid, "%s can't have a campaign's places set together", o.Connector.Definition().Name)
+	}
+	if want == nil {
+		return "", connectors.Errf(connectors.ErrInvalid, "the change names no places")
+	}
+	cur, err := t.CampaignTargeting(ctx, o.Client, o.Creds, ad, campaignExternal)
+	if err != nil {
+		return "", err
+	}
+	if want.Fingerprint != "" && cur.LocationFingerprint() != want.Fingerprint {
+		return "", connectors.Errf(connectors.ErrInvalid, "the campaign's places changed after this was planned, so nothing was changed: read the targeting again and plan it on what is there now")
+	}
+	plan, err := connectors.PlanLocations(cur, want.Included, want.Excluded)
+	if err != nil {
+		return "", err
+	}
+	after := connectors.AdTargeting{IncludedLocations: cur.IncludedLocations, ExcludedLocations: cur.ExcludedLocations}
+	if want.Included != nil {
+		after.IncludedLocations = want.Included
+	}
+	if want.Excluded != nil {
+		after.ExcludedLocations = want.Excluded
+	}
+	if plan.Empty() {
+		return after.LocationFingerprint(), nil
+	}
+	return after.LocationFingerprint(), ls.SetCampaignLocations(ctx, o.Client, o.Creds, ad, campaignExternal, plan)
+}
+
+// applyRename gives the campaign another name and reads it back; the
+// mirror takes the name the platform shows.
+func (s *Syncer) applyRename(ctx context.Context, ws, changeID, connector string, o *connectors.Opened, acct account, campaignExternal string,
+	want ChangeState, last bool, ev track.Event, fail func(outcome, code string, err error) error) error {
+	rn, ok := o.Connector.(connectors.AdCampaignRenamer)
+	if !ok {
+		return fail("failed", "connector_invalid", fmt.Errorf("%s campaigns can't be renamed here", o.Connector.Definition().Name))
+	}
+	ad := acct.ad()
+	if err := rn.RenameCampaign(ctx, o.Client, o.Creds, ad, campaignExternal, want.Name); err != nil {
+		if connectors.KindOf(err) == connectors.ErrUnavailable && !last {
+			return err
+		}
+		return fail("failed", "connector_"+connectors.KindOf(err), err)
+	}
+	now := s.now()
+	var verifiedAt *time.Time
+	note, name := "", want.Name
+	if m, ok := o.Connector.(connectors.AdsManager); !ok {
+		note = "the name was sent; it shows here after the next sync"
+	} else if got, readErr := m.AdCampaign(ctx, o.Client, o.Creds, ad, campaignExternal); readErr != nil {
+		note = "could not read the campaign back: " + trim(readErr.Error(), 300)
+	} else if got.Name != want.Name {
+		note, name = "the platform shows another name", got.Name
+	} else {
+		verifiedAt = &now
+	}
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE ad_changes SET status = 'applied', applied_at = $3, verified_at = $4, verify_note = $5
+			WHERE workspace_id = $1 AND id = $2 AND status = 'queued'`, ws, changeID, now, verifiedAt, note); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE ad_entities SET name = $3, updated_at = now() WHERE ad_account_id = $1 AND level = 'campaign' AND external_id = $2 AND $3 <> ''`, acct.id, campaignExternal, name)
+		return err
+	})
+	if err != nil {
+		return fail("error", "internal", err)
+	}
+	outcome := "applied"
+	if verifiedAt == nil {
+		outcome = "unverified"
+		ev.Props["unverified"] = true
+	}
+	metrics.AdChanged(connector, ChangeRename, outcome)
 	track.Emit(ctx, ev)
 	return nil
 }
@@ -448,4 +590,30 @@ func (s *Syncer) applyRemove(ctx context.Context, ws, changeID, kind, connector 
 	metrics.AdChanged(connector, kind, outcome)
 	track.Emit(ctx, ev)
 	return nil
+}
+
+// biddingDiff says how the bidding the platform shows differs from the
+// bidding asked for, in words; empty when it shows what was asked.
+func biddingDiff(want, got connectors.AdBidding) string {
+	sameI := func(a, b *int64) bool { return a == nil || (b != nil && *a == *b) }
+	sameF := func(a, b *float64) bool { return a == nil || (b != nil && math.Abs(*a-*b) < 1e-6) }
+	switch {
+	case want.Strategy == connectors.BidPortfolio:
+		if got.BiddingStrategyID != want.BiddingStrategyID {
+			return "the campaign on portfolio strategy " + got.BiddingStrategyID
+		}
+	case got.Strategy != want.Strategy:
+		return "the campaign bidding " + got.Strategy
+	case !sameI(want.TargetCPAMicros, got.TargetCPAMicros):
+		return fmt.Sprintf("a target cost per conversion of %s micros", budgetWord(got.TargetCPAMicros))
+	case !sameF(want.TargetROAS, got.TargetROAS):
+		return "another target return on spend"
+	case want.ImpressionShareLocation != "" && got.ImpressionShareLocation != want.ImpressionShareLocation:
+		return "the impression share at " + got.ImpressionShareLocation
+	case !sameF(want.ImpressionShare, got.ImpressionShare):
+		return "another impression share"
+	case !sameI(want.MaxCPCMicros, got.MaxCPCMicros):
+		return fmt.Sprintf("a most per click of %s micros", budgetWord(got.MaxCPCMicros))
+	}
+	return ""
 }

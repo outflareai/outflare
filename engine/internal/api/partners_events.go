@@ -123,7 +123,7 @@ func (s *Server) partnerEventConversionJob(ctx context.Context, job jobs.Job) er
 	if err != nil {
 		return err
 	}
-	at := c.At.UTC().Format(time.RFC3339)
+	at := c.At.UTC().Format(time.RFC3339Nano)
 	for _, p := range programs {
 		in := conversionInput{Type: c.Type, EventName: c.EventName, Program: p, RecordID: c.RecordID, Ref: c.Ref, PromoCode: c.PromoCode, OccurredAt: &at}
 		if c.Type == "custom" {

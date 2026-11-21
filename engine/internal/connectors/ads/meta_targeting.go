@@ -15,7 +15,10 @@ import (
 // its targeting as Meta returned it. Bidding is set per ad set on Meta and
 // isn't changed here.
 
-var _ c.AdTargetingManager = MetaAds{}
+var (
+	_ c.AdTargetingManager = MetaAds{}
+	_ c.AdExclusionManager = MetaAds{}
+)
 
 func (MetaAds) BiddingMethods() []string { return nil }
 
@@ -74,7 +77,8 @@ func (m MetaAds) CampaignTargeting(ctx context.Context, cl *c.Client, creds c.Cr
 	if err != nil {
 		return c.AdTargeting{}, err
 	}
-	t := c.AdTargeting{Bidding: c.AdBidding{Strategy: "set_per_ad_set"}, Audiences: []c.AdAudience{}, Countries: []string{}, Notes: []string{}}
+	t := c.AdTargeting{Bidding: c.AdBidding{Strategy: "set_per_ad_set"}, Audiences: []c.AdAudience{}, Countries: []string{}, Notes: []string{},
+		IncludedLocations: []c.AdLocation{}, ExcludedLocations: []c.AdLocation{}, ExcludedCountries: []string{}, ExcludedAudiences: []c.AdAudience{}}
 	audiences, countries := map[string]int{}, map[string]int{}
 	names := map[string]string{}
 	other := 0
@@ -113,6 +117,10 @@ func (m MetaAds) CampaignTargeting(ctx context.Context, cl *c.Client, creds c.Cr
 	sort.Slice(t.Audiences, func(i, j int) bool { return t.Audiences[i].ID < t.Audiences[j].ID })
 	sort.Strings(t.Countries)
 	sort.Strings(t.Notes)
+	// Meta names places per ad set; the countries are the ones read here.
+	for _, cc := range t.Countries {
+		t.IncludedLocations = append(t.IncludedLocations, c.AdLocation{CountryCode: cc, Name: cc, TargetType: "Country"})
+	}
 	return t, nil
 }
 
@@ -235,4 +243,55 @@ func metaOtherPlaces(geo map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// ---- exclusions ----
+
+// ExclusionKinds: Meta takes a customer list whose people a campaign
+// stops showing to. Everything else it excludes is set in Ads Manager.
+func (MetaAds) ExclusionKinds() []string { return []string{c.ExcludeAudience} }
+
+// AddExclusion puts a custom audience in excluded_custom_audiences on
+// each of the campaign's ad sets, leaving the rest of their targeting as
+// it was.
+func (m MetaAds) AddExclusion(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, x c.AdExclusion) error {
+	return m.excludeAudience(ctx, cl, creds, campaignID, x, true)
+}
+
+// RemoveExclusion is AddExclusion's inverse.
+func (m MetaAds) RemoveExclusion(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, x c.AdExclusion) error {
+	return m.excludeAudience(ctx, cl, creds, campaignID, x, false)
+}
+
+func (m MetaAds) excludeAudience(ctx context.Context, cl *c.Client, creds c.Creds, campaignID string, x c.AdExclusion, add bool) error {
+	if x.Kind != c.ExcludeAudience {
+		return c.Errf(c.ErrInvalid, "Meta takes no exclusion of kind %q", x.Kind)
+	}
+	if !metaID(x.Value) {
+		return c.Errf(c.ErrInvalid, "Meta audience ids are numbers")
+	}
+	return m.setTargeting(ctx, cl, creds, campaignID, func(t map[string]any) (bool, error) {
+		list, _ := t["excluded_custom_audiences"].([]any)
+		var kept []any
+		has := false
+		for _, v := range list {
+			a, _ := v.(map[string]any)
+			if id, _ := a["id"].(string); id == x.Value {
+				has = true
+				continue
+			}
+			kept = append(kept, v)
+		}
+		switch {
+		case add && has, !add && !has:
+			return false, nil
+		case add:
+			t["excluded_custom_audiences"] = append(list, map[string]any{"id": x.Value})
+		case len(kept) == 0:
+			delete(t, "excluded_custom_audiences")
+		default:
+			t["excluded_custom_audiences"] = kept
+		}
+		return true, nil
+	})
 }

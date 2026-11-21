@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -86,9 +87,56 @@ func TestAdRMF(t *testing.T) {
 	if row := sum["data"].([]any)[0].(map[string]any)["totals"].(map[string]any); row["all_conversions"] == nil {
 		t.Fatalf("summary: %v", sum)
 	}
+	if days := owner.must(200, "GET", bb+"/ads/performance"+rng, nil)["daily"].([]any); len(days) == 0 || days[0].(map[string]any)["spend_micros"] == nil {
+		t.Fatalf("performance per day: %v", days)
+	}
 	perf := owner.must(200, "GET", bb+"/ads/performance"+rng, nil)["data"].([]any)
 	if len(perf) == 0 || perf[0].(map[string]any)["platform_all_conversions"] == nil {
 		t.Fatalf("performance: %v", perf)
+	}
+	// An account billed in another currency is shown in the brand's: spend
+	// and costs are converted at the latest rate, the budget stays in the
+	// account's own.
+	if _, err := e.pool.Exec(ctx, `INSERT INTO exchange_rates (currency, day, usd_per_unit) VALUES ('XTS', current_date, 0.5)
+		ON CONFLICT (currency, day) DO UPDATE SET usd_per_unit = 0.5`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { e.pool.Exec(context.Background(), `DELETE FROM exchange_rates WHERE currency = 'XTS'`) })
+	var billed string
+	if err := e.pool.QueryRow(ctx, `SELECT currency FROM ad_accounts WHERE id = $1`, acct).Scan(&billed); err != nil {
+		t.Fatal(err)
+	}
+	spent := perf[0].(map[string]any)["spend_micros"].(float64)
+	if _, err := e.pool.Exec(ctx, `UPDATE ad_accounts SET currency = 'XTS' WHERE id = $1`, acct); err != nil {
+		t.Fatal(err)
+	}
+	conv := owner.must(200, "GET", bb+"/ads/performance"+rng, nil)
+	if row := conv["data"].([]any)[0].(map[string]any); conv["currency"] != "USD" || row["currency"] != "USD" || row["account_currency"] != "XTS" || row["spend_micros"] != math.Round(spent/2) {
+		t.Fatalf("performance in the brand's currency: %v, was %v", row, spent)
+	}
+	for _, d := range conv["daily"].([]any) {
+		if d.(map[string]any)["currency"] != "USD" {
+			t.Fatalf("a day in the brand's currency: %v", d)
+		}
+	}
+	if row := owner.must(200, "GET", bb+"/ads/summary"+rng+"&group=connector", nil)["data"].([]any)[0].(map[string]any); row["currency"] != "USD" || row["totals"].(map[string]any)["spend_micros"] != math.Round(spent/2) {
+		t.Fatalf("summary in the brand's currency: %v", row)
+	}
+	if c := owner.must(200, "GET", bb+"/ads/campaigns"+rng, nil)["data"].([]any)[0].(map[string]any); c["currency"] != "XTS" || c["report_currency"] != "USD" || c["exchange_rate"] != 0.5 ||
+		c["daily_budget_micros"] != camp["daily_budget_micros"] || c["totals"].(map[string]any)["spend_micros"] != math.Round(spent/2) {
+		t.Fatalf("campaign in the brand's currency: %v", c)
+	}
+	for _, path := range []string{"/ads/items", "/ads/keywords", "/ads/search-terms"} {
+		rows := owner.must(200, "GET", bb+path+rng, nil)["data"].([]any)
+		if len(rows) == 0 {
+			t.Fatalf("%s: no rows", path)
+		}
+		if x := rows[0].(map[string]any); x["currency"] != "XTS" || x["report_currency"] != "USD" || x["exchange_rate"] != 0.5 {
+			t.Fatalf("%s in the brand's currency: %v", path, x)
+		}
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE ad_accounts SET currency = $2 WHERE id = $1`, acct, billed); err != nil {
+		t.Fatal(err)
 	}
 	// R.50, R.70: bid estimates and quality score on keywords, the match
 	// type on search terms.
@@ -180,7 +228,10 @@ func TestAdRMF(t *testing.T) {
 	// R.130: the report.
 	rep := owner.must(200, "GET", bb+"/ads/bidding-strategies"+rng, nil)
 	row := rep["data"].([]any)[0].(map[string]any)
-	if row["type"] != "target_cpa" || row["clicks"] != 40.0 || row["cpc_micros"] != 2_000_000.0 || row["cost_per_conversion_micros"] != 20_000_000.0 || row["ad_account_id"] != acct ||
+	// Its money is in the brand's currency, like every other table's.
+	fx := row["exchange_rate"].(float64)
+	if row["type"] != "target_cpa" || row["clicks"] != 40.0 || row["cpc_micros"] != math.Round(2_000_000*fx) || row["cost_per_conversion_micros"] != math.Round(20_000_000*fx) || row["ad_account_id"] != acct ||
+		row["report_currency"] == "" || (fx == 1) != (row["report_currency"] == row["currency"]) ||
 		len(rep["errors"].([]any)) != 0 {
 		t.Fatalf("report: %v", rep)
 	}
@@ -194,26 +245,78 @@ func TestAdRMF(t *testing.T) {
 			t.Fatalf("agent %s %s: %d %v", x.method, x.path, st, res)
 		}
 	}
-	if st, res := agent.do("POST", bb+"/ads/campaigns/"+camp["id"].(string)+"/remove", map[string]any{"confirm": true}); st != 403 || res["error"].(map[string]any)["code"] != "person_only" {
-		t.Fatalf("agent removal: %d %v", st, res)
+	// Removing is a permission of its own. A broad run grant (ads/**)
+	// never covers a removal: the agent is told which permission it lacks.
+	refused := func(st int, res map[string]any, perm string) {
+		t.Helper()
+		if e, _ := res["error"].(map[string]any); st != 403 || e == nil || e["code"] != "permission_required" || e["permission"] != perm {
+			t.Fatalf("want permission_required %s: %d %v", perm, st, res)
+		}
 	}
+	st, res := agent.do("POST", bb+"/ads/campaigns/"+camp["id"].(string)+"/remove", map[string]any{"confirm": true})
+	refused(st, res, "ads.remove_campaign")
+	// An API token needs the scope ads.remove.
 	tok := &client{t: t, h: e.h, bearer: owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Script", "scopes": []string{"ads.manage", "analytics.read"}})["token"].(string)}
-	if st, res := tok.do("POST", bb+"/ads/campaigns/"+camp["id"].(string)+"/remove", map[string]any{"confirm": true}); st != 403 || res["error"].(map[string]any)["code"] != "person_only" {
-		t.Fatalf("token removal: %d %v", st, res)
+	st, res = tok.do("POST", bb+"/ads/campaigns/"+camp["id"].(string)+"/remove", map[string]any{"confirm": true})
+	refused(st, res, "ads.remove")
+	// So does a person's role: one that manages ads but may not remove.
+	role := owner.must(201, "POST", base+"/roles", map[string]any{"name": "Ads, no removing", "scopes": []string{"analytics.read", "ads.manage"}})
+	member, _ := joinAs(t, owner, ws, "mo@acme.example", map[string]any{"role": role["id"]})
+	st, res = member.do("POST", bb+"/ads/campaigns/"+camp["id"].(string)+"/remove", map[string]any{"confirm": true})
+	refused(st, res, "ads.remove")
+	// Off: a refuse grant names the permission too.
+	off := owner.must(201, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "method": "POST", "path": "brands/*/ads/campaigns/*/remove", "mode": "refuse"})
+	if off["permission"] != "ads.remove_campaign" {
+		t.Fatalf("grant: %v", off)
+	}
+	st, res = agent.do("POST", bb+"/ads/campaigns/"+camp["id"].(string)+"/remove", map[string]any{"confirm": true})
+	refused(st, res, "ads.remove_campaign")
+	// On, kept to paused campaigns: the campaign is active, so it is refused.
+	owner.must(400, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "path": "ads/**", "mode": "run", "conditions": map[string]any{"paused_campaign_only": true}})
+	owner.must(400, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "path": "brands/*/ads/keywords/*/remove", "mode": "run", "conditions": map[string]any{"older_than": 3}})
+	owner.must(201, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "method": "POST", "path": "brands/*/ads/keywords/*/remove", "mode": "run", "conditions": map[string]any{"paused_campaign_only": true}})
+	st, res = agent.do("POST", bb+"/ads/keywords/"+kw["id"].(string)+"/remove", map[string]any{"confirm": true})
+	refused(st, res, "ads.remove_keyword")
+	if !strings.Contains(res["error"].(map[string]any)["message"].(string), "paused campaign") {
+		t.Fatalf("why: %v", res)
 	}
 
-	// M.130, M.140: a person removes an ad and a keyword, M.110 the
-	// campaign; each is read back and marked removed.
+	// Ask: the agent's removal of an ad waits for a person, who approves
+	// it; it is queued and recorded with what was removed and the action.
+	owner.must(201, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "method": "POST", "path": "brands/*/ads/items/*/remove", "mode": "hold"})
 	var adID, kwID string
 	if err := e.pool.QueryRow(ctx, `SELECT id FROM ad_entities WHERE workspace_id = $1 AND level = 'ad' AND external_id = '81'`, ws).Scan(&adID); err != nil {
 		t.Fatal(err)
 	}
+	st, res = agent.do("POST", bb+"/ads/items/"+adID+"/remove", map[string]any{"confirm": true})
+	if st != 202 || res["approval_required"] != true {
+		t.Fatalf("agent removal held: %d %v", st, res)
+	}
+	act := owner.must(200, "POST", bb+"/actions/"+res["action"].(map[string]any)["id"].(string)+"/approve", nil)
+	if act["status"] != "executed" || act["result_status"] != 202.0 {
+		t.Fatalf("approved removal: %v", act)
+	}
+	var snap map[string]any
+	var actionID string
+	if err := e.pool.QueryRow(ctx, `SELECT data->'snapshot', data->>'action_id' FROM audit_events WHERE workspace_id = $1 AND action = 'ad_ad.removed'`, ws).Scan(&snap, &actionID); err != nil {
+		t.Fatal(err)
+	}
+	if actionID != act["id"] || snap["name"] == "" || snap["campaign_id"] != camp["id"] || snap["ad_group_name"] == nil || snap["spend_30d_micros"] == nil {
+		t.Fatalf("snapshot: %s %v", actionID, snap)
+	}
+	var changeID string
+	if err := e.pool.QueryRow(ctx, `SELECT id FROM ad_changes WHERE workspace_id = $1 AND kind = 'ad_remove'`, ws).Scan(&changeID); err != nil {
+		t.Fatal(err)
+	}
+
+	// M.130, M.140: a person removes an ad and a keyword, M.110 the
+	// campaign; each is read back and marked removed. The ad's removal is
+	// the one the person approved above.
 	kwID = kw["id"].(string)
-	owner.must(400, "POST", bb+"/ads/items/"+adID+"/remove", map[string]any{})
-	owner.must(400, "POST", bb+"/ads/items/"+adID+"/remove", map[string]any{"confirm": false})
-	res = owner.must(202, "POST", bb+"/ads/items/"+adID+"/remove", map[string]any{"confirm": true})
+	owner.must(400, "POST", bb+"/ads/keywords/"+kwID+"/remove", map[string]any{})
+	owner.must(400, "POST", bb+"/ads/keywords/"+kwID+"/remove", map[string]any{"confirm": false})
 	owner.must(409, "POST", bb+"/ads/items/"+adID+"/remove", map[string]any{"confirm": true})
-	if c := applyChange(res); c["kind"] != "ad_remove" || c["status"] != "applied" || c["verified_at"] == nil || c["after"].(map[string]any)["ad_id"] != "81" {
+	if c := applyChange(map[string]any{"change": map[string]any{"id": changeID}}); c["kind"] != "ad_remove" || c["status"] != "applied" || c["verified_at"] == nil || c["after"].(map[string]any)["ad_id"] != "81" {
 		t.Fatalf("ad removed: %v", c)
 	}
 	if c := applyChange(owner.must(202, "POST", bb+"/ads/keywords/"+kwID+"/remove", map[string]any{"confirm": true})); c["kind"] != "keyword_remove" || c["verified_at"] == nil {

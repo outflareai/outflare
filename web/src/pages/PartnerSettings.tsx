@@ -613,7 +613,7 @@ const reservedAddresses = new Set([
 ]);
 
 // portalAddressFor suggests a portal address from a program's name:
-// "Geonode customer referral" becomes geonode-customer-referral.
+// "Northpeak customer referral" becomes northpeak-customer-referral.
 export function portalAddressFor(name: string): string {
   const v = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63).replace(/-+$/, "");
   return reservedAddresses.has(v) ? "" : v;

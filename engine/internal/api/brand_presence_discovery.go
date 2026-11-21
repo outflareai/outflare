@@ -314,7 +314,13 @@ func (s *Server) coverageSearchJob(ctx context.Context, j jobs.Job) error {
 	res, err := ranks.Search(ctx, s.pool, s.integrations, o, ranks.SearchQuery{SERPQuery: connectors.SERPQuery{Keyword: query, Country: country, Device: "desktop", Depth: depth}})
 	if err != nil {
 		code := ranks.SearchErrorCode(err)
-		track.Fail(ctx, s.log, track.Event{Name: "coverage_search.failed", WorkspaceID: ws, ActorType: "system", Surface: "job", Props: map[string]any{"brand_id": req.Brand, "connector": o.Connector.Definition().ID}}, code, err)
+		// Out of credits, a refused key or a spent budget is the
+		// workspace's own account saying no, not something broken.
+		outcome := track.Failure
+		if code == "connector_unavailable" {
+			outcome = track.Error
+		}
+		track.Fail(ctx, s.log, track.Event{Name: "coverage_search.failed", WorkspaceID: ws, ActorType: "system", Surface: "job", Outcome: outcome, Props: map[string]any{"brand_id": req.Brand, "connector": o.Connector.Definition().ID}}, code, err)
 		return finish(code, 0)
 	}
 	added := 0

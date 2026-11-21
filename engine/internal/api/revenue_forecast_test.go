@@ -163,3 +163,80 @@ func nextQuarter(d time.Time) string {
 	first := time.Date(d.Year(), time.Month((int(d.Month())-1)/3*3+1), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 3, 0)
 	return first.Format("2006") + "-Q" + string(rune('1'+(int(first.Month())-1)/3))
 }
+
+// The forecast week by week: a reading is kept once a day per brand, the
+// last one of a week stands for it, and each week says how far it moved.
+func TestForecastHistory(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	ctx := context.Background()
+	var brand string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&brand); err != nil {
+		t.Fatal(err)
+	}
+	base := "/v1/brands/" + brand
+	now := time.Now().UTC()
+	day := now.Truncate(24 * time.Hour)
+	monday := day.AddDate(0, 0, -((int(day.Weekday()) + 6) % 7))
+	quarter := owner.must(200, "GET", base+"/revenue/forecast", nil)["quarter"].(string)
+	keep := func(at time.Time, want int) {
+		t.Helper()
+		n, err := e.srv.KeepForecasts(ctx, at)
+		if err != nil || n != want {
+			t.Fatalf("kept %d, want %d: %v", n, want, err)
+		}
+	}
+	history := func() []any {
+		t.Helper()
+		return owner.must(200, "GET", base+"/revenue/forecast", nil)["history"].([]any)
+	}
+
+	// A brand with no deals and no target has nothing to keep.
+	keep(now, 0)
+	if h := history(); len(h) != 0 {
+		t.Fatalf("empty: %v", h)
+	}
+
+	acme := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Acme"})["id"].(string)
+	if _, err := e.pool.Exec(ctx, `INSERT INTO deals (workspace_id, brand_id, record_id, source, name, stage, state, amount_cents, currency, closed_at)
+		VALUES ($1, $2, $3, 'manual', 'Acme pilot', 'won', 'won', 500000, 'USD', now())`, ws, brand, acme); err != nil {
+		t.Fatal(err)
+	}
+	keep(now, 1)
+	// The same day again: it already has its reading.
+	keep(now, 0)
+	h := history()
+	if len(h) != 1 {
+		t.Fatalf("one week: %v", h)
+	}
+	first := h[0].(map[string]any)
+	if first["forecast_minor"] != float64(500000) || first["won_minor"] != float64(500000) || first["change_minor"] != nil || first["target_minor"] != nil {
+		t.Fatalf("first week: %v", first)
+	}
+	if first["week"] != monday.Format(time.DateOnly) {
+		t.Fatalf("week: %v", first["week"])
+	}
+
+	// Last week's reading was lower: this week shows how far it moved.
+	if _, err := e.pool.Exec(ctx, `INSERT INTO revenue_forecast_history (workspace_id, brand_id, quarter, week, currency, won_minor,
+			renewals_expected_minor, deals_expected_minor, forecast_minor, best_case_minor, taken_at)
+		VALUES ($1, $2, $3, $4, 'USD', 100000, 0, 0, 100000, 100000, now() - interval '7 days')`,
+		ws, brand, quarter, monday.AddDate(0, 0, -7)); err != nil {
+		t.Fatal(err)
+	}
+	h = history()
+	if len(h) != 2 || h[1].(map[string]any)["change_minor"] != float64(400000) {
+		t.Fatalf("two weeks: %v", h)
+	}
+
+	// A day later the reading is replaced, not added: still one row for the week.
+	if _, err := e.pool.Exec(ctx, `UPDATE revenue_forecast_history SET taken_at = taken_at - interval '1 day' WHERE brand_id = $1`, brand); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(200, "PUT", base+"/revenue/forecast", map[string]any{"quarter": quarter, "target_minor": 900000})
+	keep(now, 1)
+	h = history()
+	if len(h) != 2 || h[1].(map[string]any)["target_minor"] != float64(900000) {
+		t.Fatalf("replaced: %v", h)
+	}
+}

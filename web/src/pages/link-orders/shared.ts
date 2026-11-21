@@ -245,6 +245,11 @@ export const metricFields: { key: keyof LinkOrderDonorMetrics; label: string; gr
   { key: "outgoing_domains_all_time", label: "Outgoing domains, all time", group: "Outgoing" },
   { key: "outgoing_links_followed", label: "Outgoing links, followed", group: "Outgoing" },
   { key: "outgoing_links_all_time", label: "Outgoing links, all time", group: "Outgoing" },
+  { key: "linked_domains_live", label: "Linked domains (Ahrefs, live)", group: "Outgoing" },
+  { key: "top_page_url", label: "Top page", group: "Traffic" },
+  { key: "top_page_traffic", label: "Top page traffic", group: "Traffic" },
+  { key: "top3_traffic", label: "Top 3 pages' traffic", group: "Traffic" },
+  { key: "home_traffic", label: "Home page traffic", group: "Traffic" },
 ];
 
 /** "Since 2012 · 14 years", or a dash. */

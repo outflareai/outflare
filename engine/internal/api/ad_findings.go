@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,8 @@ func (s *Server) routesAdFindings(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/ads/findings/{id}/dismiss", s.onBrand(manage, s.dismissAdFinding))
 	mux.HandleFunc("POST /v1/brands/{brand}/ads/findings/{id}/acknowledge", s.onBrand(manage, s.acknowledgeAdFinding))
 	mux.HandleFunc("POST /v1/brands/{brand}/ads/findings/{id}/revert", s.onBrand(manage, s.revertAdFinding))
+	mux.HandleFunc("GET /v1/brands/{brand}/ads/findings/{id}", s.onBrand(read, s.getAdFinding))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/findings/{id}/feedback", s.onBrand(manage, s.rateAdFinding))
 }
 
 // adFindingsOrder ranks the queue: open decisions by impact (negative is
@@ -92,13 +95,139 @@ func (s *Server) loadAdFinding(w http.ResponseWriter, r *http.Request, a *access
 	return v, false
 }
 
+// getAdFinding is one finding, whatever its status, for its own page.
+func (s *Server) getAdFinding(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	id := r.PathValue("id")
+	if !isUUID(id) {
+		writeError(w, r, http.StatusNotFound, "not_found", "finding not found")
+		return
+	}
+	v, err := scanAdSuggestion(s.pool.QueryRow(r.Context(), `SELECT `+adSuggestionCols+` `+adSuggestionFrom+` WHERE x.workspace_id = $1 AND x.id = $2`, a.WorkspaceID, id))
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
+		writeError(w, r, http.StatusNotFound, "not_found", "finding not found")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+// adFeedbackStatuses is every status: advice can be rated before or after
+// it is decided.
+var adFeedbackStatuses = []string{"open", "dismissed", "expired", "measuring", "testing", "judged", "acknowledged", "shadow"}
+
+// rateAdFinding records whether a finding was good or bad advice, and
+// why. The rating stays on the finding; it is also kept as one of the
+// brand's memories (kind feedback), which agents read with the brand's
+// context and search before advising, so the reason shapes what they
+// suggest next. Rating again replaces the rating and that memory.
+func (s *Server) rateAdFinding(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	var in struct {
+		Rating string `json:"rating"`
+		Note   string `json:"note"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	in.Note = strings.TrimSpace(in.Note)
+	if in.Rating != "good" && in.Rating != "bad" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "rating is good or bad")
+		return
+	}
+	if len([]rune(in.Note)) > 400 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "note is at most 400 characters")
+		return
+	}
+	v, ok := s.loadAdFinding(w, r, a, adFeedbackStatuses...)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	var out adSuggestionOut
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var memory *string
+		if err := tx.QueryRow(ctx, `SELECT feedback_memory_id FROM ad_suggestions WHERE id = $1 FOR UPDATE`, v.ID).Scan(&memory); err != nil {
+			return err
+		}
+		text := adFeedbackMemory(v, in.Rating, in.Note)
+		if memory != nil {
+			if _, err := tx.Exec(ctx, `UPDATE memories SET text = $3, updated_at = now() WHERE id = $1 AND workspace_id = $2`, *memory, a.WorkspaceID, text); err != nil {
+				return err
+			}
+		} else if v.BrandID != nil {
+			var n int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE workspace_id = $1`, a.WorkspaceID).Scan(&n); err != nil {
+				return err
+			}
+			// A workspace at its memory limit still keeps the rating.
+			if n < maxMemories {
+				var id string
+				if err := tx.QueryRow(ctx, `INSERT INTO memories (workspace_id, kind, text, created_by, brand_id) VALUES ($1, 'feedback', $2, $3, $4) RETURNING id`,
+					a.WorkspaceID, text, actorRef(a), *v.BrandID).Scan(&id); err != nil {
+					return err
+				}
+				if err := record(ctx, tx, &a.principal, a.WorkspaceID, "memory.created", "memory", id, map[string]any{"kind": "feedback", "text": text, "brand_id": v.BrandID, "mission_id": nil}); err != nil {
+					return err
+				}
+				memory = &id
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE ad_suggestions SET feedback = $2, feedback_note = $3, feedback_by = $4, feedback_at = now(), feedback_memory_id = $5, updated_at = now() WHERE id = $1`,
+			v.ID, in.Rating, in.Note, actorRef(a), memory); err != nil {
+			return err
+		}
+		if err := recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "ad_suggestion.rated", "ad_suggestion", v.ID,
+			map[string]any{"suggestion_id": v.ID, "campaign_id": v.CampaignID, "connector": v.Connector, "kind": v.Kind, "brand_id": v.BrandID, "rule": v.Rule, "rating": in.Rating, "note": in.Note, "memory_id": memory},
+			map[string]any{"connector": v.Connector, "kind": v.Kind, "rule": v.Rule, "rating": in.Rating, "has_note": in.Note != "", "status": v.Status}); err != nil {
+			return err
+		}
+		var err error
+		out, err = scanAdSuggestion(tx.QueryRow(ctx, `SELECT `+adSuggestionCols+` `+adSuggestionFrom+` WHERE x.id = $1`, v.ID))
+		return err
+	})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// adFeedbackMemory is the memory a rating leaves: what was advised, on
+// which campaign, what the person thought of it and why, in at most the
+// 500 characters a memory holds.
+func adFeedbackMemory(v adSuggestionOut, rating, note string) string {
+	what := v.Reason
+	if what == "" {
+		what = strings.ReplaceAll(v.Kind, "_", " ")
+	}
+	cut := func(s string, n int) string {
+		if r := []rune(s); len(r) > n {
+			return string(r[:n-1]) + "…"
+		}
+		return s
+	}
+	text := "Paid ads feedback, " + rating + " advice (" + v.Kind + ` on campaign "` + cut(v.CampaignName, 60) + `"): ` + cut(what, 160)
+	if note != "" {
+		text = strings.TrimRight(text, ". ") + ". Why: " + note
+	}
+	return cut(text, 500)
+}
+
 func (s *Server) approveAdFinding(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var in struct {
-		Test bool `json:"test"`
+		Test        bool `json:"test"`
+		OverCeiling bool `json:"over_ceiling"`
 	}
 	if r.ContentLength != 0 && !decode(w, r, &in) {
 		return
+	}
+	if in.OverCeiling {
+		r = r.WithContext(context.WithValue(r.Context(), overCeilingKey{}, true))
 	}
 	v, ok := s.loadAdFinding(w, r, a, "open")
 	if !ok {

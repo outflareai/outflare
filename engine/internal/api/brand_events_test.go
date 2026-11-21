@@ -24,7 +24,7 @@ func TestBrandEvents(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	acme := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
 	events := "/v1/brands/" + acme + "/events"
 
 	// Sending answers at once with a receipt per event, before any job
@@ -175,7 +175,7 @@ func TestBrandEvents(t *testing.T) {
 	owner.must(404, "GET", events+"/"+oid, nil)
 
 	// A token for one brand can't send to or read another's.
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly app", "scopes": []string{"customers.manage", "customers.read"}, "brand": "summitly"})
 	app := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	app.must(404, "POST", events, map[string]any{"type": "track", "userId": "u9", "event": "Signed Up"})
 	app.must(404, "GET", events, nil)

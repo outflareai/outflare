@@ -106,6 +106,13 @@ func SendToken(ctx context.Context, cl *c.Client, creds c.Creds, user string) (s
 	return t.AccessToken, err
 }
 
+// ReadSendToken is a token that may read and send mail as one Workspace
+// user, for flows that look for an earlier send before sending.
+func ReadSendToken(ctx context.Context, cl *c.Client, creds c.Creds, user string) (string, error) {
+	t, err := c.ServiceAccountToken(ctx, cl, creds["service_account_json"], []string{MailScope, SendScope}, user)
+	return t.AccessToken, err
+}
+
 // Allows reports whether a connection's account says Google lets it use
 // scope (read when it was connected or last checked).
 func Allows(account c.Account, scope string) bool {

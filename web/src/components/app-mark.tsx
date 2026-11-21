@@ -21,6 +21,8 @@ export function AppMark({ app, className }: { app: AgentAppKind | "other"; class
       return <ConnectorLogo id="openai" className={cn("size-9 rounded-lg p-1.5", className)} />;
     case "vscode":
       return <Logo light={vscode} dark={vscode} className={className} />;
+    case "extension":
+      return <span aria-hidden className={box}><Icon name="crm" className="size-5" /></span>;
     case "local":
       return <span aria-hidden className={box}><Icon name="terminal" className="size-5" /></span>;
     default:

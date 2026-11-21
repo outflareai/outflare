@@ -172,22 +172,57 @@ func (s *Syncer) syncSearch(ctx context.Context, o *connectors.Opened, r connect
 	if _, err := s.Pool.Exec(ctx, `DELETE FROM search_daily WHERE integration_id = $1 AND site = $2 AND day < $3`, id, site, floor); err != nil {
 		return out, dbError{err}
 	}
+	// The sitemaps are one call that needs none of the days above, so a day
+	// that failed does not keep them stale: only a refused sign-in skips
+	// them. A sync someone asked for reads them again whatever their age.
 	sitemapsAt := st.sitemapsAt
-	if runErr == nil && (sitemapsAt == nil || s.now().Sub(*sitemapsAt) >= sitemapsEvery) {
+	due := sitemapsAt == nil || s.now().Sub(*sitemapsAt) >= sitemapsEvery || askedNow(ctx)
+	if due && (runErr == nil || connectors.KindOf(runErr) != connectors.ErrAuth) {
 		res.Calls++
 		n, err := s.syncSitemaps(ctx, o, r, ws, id, site, host)
-		if err != nil {
-			var db dbError
-			if errors.As(err, &db) {
-				return out, err
+		var db dbError
+		switch {
+		case errors.As(err, &db):
+			return out, err
+		case err != nil:
+			_, code := failed(err)
+			syncRun("search_sitemaps", code)
+			if runErr == nil {
+				runErr = err
 			}
-			runErr = err
-		} else {
+		default:
+			syncRun("search_sitemaps", nil)
 			now := s.now()
 			sitemapsAt, out.Sitemaps = &now, n
 		}
 	}
+	// Store what the run read before inspecting pages: inspections are the
+	// slow part (up to inspectPerRun calls), and a run stopped during them (a
+	// deploy, a lost lease) must not lose its days, its sitemaps or its
+	// status, or the property looks days stale while it syncs every run.
+	// provisional leaves the failure count for the inspections to settle.
+	save := func(provisional bool) error {
+		msg, code := failed(runErr)
+		_, err := s.Pool.Exec(ctx, `
+			INSERT INTO search_syncs (integration_id, site, workspace_id, host, oldest_day, newest_day, backfilled_at, sitemaps_at, inspected_at, last_run_at, last_error,
+				failures, last_error_code)
+			VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() END, $8, CASE WHEN $9 > 0 THEN now() END, now(), $10,
+				CASE WHEN $10::text IS NULL THEN 0 ELSE 1 END, $11)
+			ON CONFLICT (integration_id, site) DO UPDATE SET host = EXCLUDED.host, oldest_day = EXCLUDED.oldest_day, newest_day = EXCLUDED.newest_day,
+				backfilled_at = COALESCE(search_syncs.backfilled_at, EXCLUDED.backfilled_at), sitemaps_at = EXCLUDED.sitemaps_at,
+				inspected_at = COALESCE(EXCLUDED.inspected_at, search_syncs.inspected_at), last_run_at = now(), last_error = EXCLUDED.last_error,
+				last_error_code = EXCLUDED.last_error_code,
+				failures = CASE WHEN $12 THEN search_syncs.failures WHEN EXCLUDED.last_error IS NULL THEN 0 ELSE search_syncs.failures + 1 END`,
+			id, site, ws, host, oldest, newest, backfilled, sitemapsAt, out.Inspected, msg, code, provisional)
+		if err != nil {
+			return dbError{err}
+		}
+		return nil
+	}
 	if runErr == nil {
+		if err := save(true); err != nil {
+			return out, err
+		}
 		n, err := s.inspect(ctx, o, r, ws, id, site, host, res)
 		out.Inspected = n
 		if err != nil {
@@ -198,21 +233,11 @@ func (s *Syncer) syncSearch(ctx context.Context, o *connectors.Opened, r connect
 			runErr = err
 		}
 	}
-	msg, code := failed(runErr)
-	_, err = s.Pool.Exec(ctx, `
-		INSERT INTO search_syncs (integration_id, site, workspace_id, host, oldest_day, newest_day, backfilled_at, sitemaps_at, inspected_at, last_run_at, last_error,
-			failures, last_error_code)
-		VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() END, $8, CASE WHEN $9 > 0 THEN now() END, now(), $10,
-			CASE WHEN $10::text IS NULL THEN 0 ELSE 1 END, $11)
-		ON CONFLICT (integration_id, site) DO UPDATE SET host = EXCLUDED.host, oldest_day = EXCLUDED.oldest_day, newest_day = EXCLUDED.newest_day,
-			backfilled_at = COALESCE(search_syncs.backfilled_at, EXCLUDED.backfilled_at), sitemaps_at = EXCLUDED.sitemaps_at,
-			inspected_at = COALESCE(EXCLUDED.inspected_at, search_syncs.inspected_at), last_run_at = now(), last_error = EXCLUDED.last_error,
-			last_error_code = EXCLUDED.last_error_code,
-			failures = CASE WHEN EXCLUDED.last_error IS NULL THEN 0 ELSE search_syncs.failures + 1 END`,
-		id, site, ws, host, oldest, newest, backfilled, sitemapsAt, out.Inspected, msg, code)
+	_, code := failed(runErr)
+	err = save(false)
 	syncRun("search_console", code)
 	if err != nil {
-		return out, dbError{err}
+		return out, err
 	}
 	ev := track.Event{Name: "search_console.synced", WorkspaceID: ws, ActorType: "system", Surface: "job",
 		Props: map[string]any{"integration_id": id, "days": out.Days, "rows": out.Rows, "inspected": out.Inspected, "sitemaps": out.Sitemaps, "backfilled": backfilled}}

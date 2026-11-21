@@ -57,7 +57,7 @@ func TestSalesContinuousCatchupAndConsent(t *testing.T) {
 				t.Error("catch-up has no start")
 			}
 			if r.URL.Query().Get("pageToken") == "older" {
-				json.NewEncoder(w).Encode(map[string]any{"messages": []map[string]string{{"id": "parent", "threadId": "own-thread"}, {"id": "unrelated", "threadId": "unrelated"}, {"id": "draft", "threadId": "own-thread"}}})
+				json.NewEncoder(w).Encode(map[string]any{"messages": []map[string]string{{"id": "parent", "threadId": "own-thread"}, {"id": "fresh", "threadId": "fresh-thread"}, {"id": "outsider", "threadId": "outsider-thread"}, {"id": "draft", "threadId": "own-thread"}}})
 				return
 			}
 			list := []map[string]string{{"id": "child", "threadId": "own-thread"}}
@@ -76,14 +76,21 @@ func TestSalesContinuousCatchupAndConsent(t *testing.T) {
 			from, to = to, from
 			millis += 2000
 		}
-		if name == "unrelated" {
-			parent = "<unrelated@other.example>"
+		// The rep wrote the person a new email instead of replying in the
+		// conversation's thread: it belongs to the conversation all the same.
+		// One that also includes somebody outside the conversation does not.
+		cc := "sender@outbound.example"
+		if name == "fresh" || name == "outsider" {
+			parent = "<another-thread@other.example>"
+		}
+		if name == "outsider" {
+			cc = "stranger@elsewhere.example"
 		}
 		labels := []string{"INBOX"}
 		if name == "draft" {
 			labels = []string{"DRAFT"}
 		}
-		headers := []map[string]string{{"name": "From", "value": from}, {"name": "To", "value": to}, {"name": "Cc", "value": "sender@outbound.example"}, {"name": "Subject", "value": "Conversation"}, {"name": "Message-ID", "value": "<" + name + "@customer.example>"}, {"name": "In-Reply-To", "value": parent}, {"name": "Date", "value": "Sat, 01 Nov 2025 12:00:00 +0000"}}
+		headers := []map[string]string{{"name": "From", "value": from}, {"name": "To", "value": to}, {"name": "Cc", "value": cc}, {"name": "Subject", "value": "Conversation"}, {"name": "Message-ID", "value": "<" + name + "@customer.example>"}, {"name": "In-Reply-To", "value": parent}, {"name": "Date", "value": "Sat, 01 Nov 2025 12:00:00 +0000"}}
 		json.NewEncoder(w).Encode(map[string]any{"labelIds": labels, "internalDate": fmt.Sprint(millis), "payload": map[string]any{"mimeType": "text/plain", "headers": headers, "body": map[string]any{"data": base64.RawURLEncoding.EncodeToString([]byte("Full fictional message " + name))}}})
 	}))
 	defer fake.Close()
@@ -122,8 +129,8 @@ func TestSalesContinuousCatchupAndConsent(t *testing.T) {
 			t.Fatalf("catch-up count: %v", detail["messages"])
 		}
 	}
-	run(3)
-	run(3) // pagination, parent closure and replay deduplication
+	run(4)
+	run(4) // pagination, a new thread, and replay deduplication
 	owner.must(200, "DELETE", root+"/mail/connection", nil)
 	catchup.Store(true)
 	// Reconsent gives a new grant id; the historical start stays on the lead.
@@ -132,7 +139,7 @@ func TestSalesContinuousCatchupAndConsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run(4)
+	run(5)
 	owner.must(200, "PUT", root+"/team/"+user, map[string]any{"role": "none"})
 	owner.must(404, "PUT", root+"/leads/"+id+"/draft", map[string]any{"revision": 0, "body": "Role was removed"})
 	var count int

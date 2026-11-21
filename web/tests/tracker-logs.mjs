@@ -35,6 +35,7 @@ try {
   for (let i = 0; i < 100 && !output.includes('ready in'); i++) await new Promise(r => setTimeout(r, 200));
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], executablePath: process.env.OUTFLARE_TEST_CHROMIUM || undefined });
   const calls = [];
+  const posted = [];
   const mock = (page) => page.route('**/v1/**', async route => {
     const req = route.request(); const u = new URL(req.url()); const p = u.pathname; const q = u.searchParams;
     calls.push(`${req.method()} ${p}${u.search}`);
@@ -51,10 +52,15 @@ try {
       else body = { data: [click('aaaaaaaaaaaaaaa1'), ...(q.get('bots') === 'true' ? [click('aaaaaaaaaaaaaaa2', { likely_bot: true })] : []), click('aaaaaaaaaaaaaaa3', { fraud_reasons: ['datacenter_network'], country: 'DE' })], next_cursor: 'next-1' };
     }
     else if (p === `${B}/tracker-lander-clicks`) body = { data: [{ click_key: 'aaaaaaaaaaaaaaa1', lander_id: 'ld', cta: 2, destination_id: null, offer_id: offer, likely_bot: false, clicked_at: ago(4) }], next_cursor: null };
-    else if (p === `${B}/tracker-conversions`) body = { data: [{ id: 'cv', source_id: net, click_key: 'aaaaaaaaaaaaaaa1', campaign_id: camp, link_id: null, offer_id: offer, fraud_reasons: [], clicked_at: ago(5), transaction_id: 't', type: 'sale', status: 'approved', payout: '2.5', currency: 'USD', params: {}, record_id: null, postbacks: 1, converted_at: ago(3), updated_at: ago(3) },
-      { id: 'old', source_id: net, click_key: 'zz', campaign_id: camp, link_id: null, offer_id: offer, fraud_reasons: [], clicked_at: ago(9000), transaction_id: 't2', type: 'sale', status: 'approved', payout: '1', currency: 'USD', params: {}, record_id: null, postbacks: 1, converted_at: ago(9000), updated_at: ago(9000) }] };
+    else if (p === `${B}/tracker-conversions`) body = { data: [{ id: 'cv', source_id: net, click_key: 'aaaaaaaaaaaaaaa1', campaign_id: camp, link_id: null, offer_id: offer, fraud_reasons: ['fast_conversion'], clicked_at: ago(5), transaction_id: 't', type: 'sale', status: 'approved', payout: '2.5', currency: 'USD', params: {}, record_id: null, postbacks: 1, network_postback: 'suspect', converted_at: ago(3), updated_at: ago(3) },
+      { id: 'old', source_id: net, click_key: 'zz', campaign_id: camp, link_id: null, offer_id: offer, fraud_reasons: [], clicked_at: ago(9000), transaction_id: 't2', type: 'sale', status: 'approved', payout: '1', currency: 'USD', params: {}, record_id: null, postbacks: 1, network_postback: 'sent', converted_at: ago(9000), updated_at: ago(9000) }] };
     else if (p === `${B}/tracker-conversion-log`) body = { data: [call('accepted', ''), call('unknown_click', 'no click has this key'), call('unknown_click', 'no click has this key'), call('expired_click', 'the click is older than 30 days')], next_cursor: null };
-    else if (p === `${B}/traffic-sources/${src}/postbacks`) body = { data: [{ id: 's1', conversion_id: 'cv', status: 'failed', payout: '2.00', url: 'https://ad.example/pb?x=1', http_status: 500, error: 'the network answered 500', attempts: 5, sent_at: null, created_at: ago(2) }] };
+    else if (p === `${B}/traffic-sources/${src}/postbacks`) body = { data: [{ id: 's1', conversion_id: 'cv', status: 'failed', payout: '2.00', url: 'https://ad.example/pb?x=1', http_status: 500, error: 'the network answered 500', attempts: 5, sent_at: null, created_at: ago(2), warning: 'no_source_click_id' }] };
+    else if (req.method() === 'POST' && p === `${B}/traffic-sources/${src}/postbacks/s1/resend`) { status = 202; body = { queued: true }; }
+    else if (p === `${B}/tracker-cost-updates` && req.method() === 'POST') { posted.push(req.postDataJSON()); status = 202; body = { queued: true, data: [] }; }
+    else if (p === `${B}/tracker-cost-updates`) body = { data: [
+      { id: 'u1', campaign_id: camp, from: '2026-10-01', to: '2026-10-07', mode: 'total', amount: '125.4', status: 'applied', clicks: 4200, error: '', created_at: ago(3), applied_at: ago(3) },
+      { id: 'u2', campaign_id: camp, from: '2026-10-08', to: '2026-10-08', mode: 'total', amount: '9', status: 'failed', clicks: 0, error: 'the campaign has no clicks in these days to carry the cost', created_at: ago(2), applied_at: null }], next_cursor: null };
     else { status = 404; body = { error: { code: 'not_found', message: 'nothing here', request_id: 'r' } }; }
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -70,6 +76,9 @@ try {
   assert.match(await table.innerText(), /Push US/);
   assert.match(await table.innerText(), /Sweeps offer/);
   assert.match(await table.innerText(), /Suspect/);
+  // Every log names its columns.
+  const headers = () => table.getByRole('columnheader').allTextContents();
+  assert.deepEqual(await headers(), ['Time', 'Click id', 'Campaign', 'Went to', 'Visitor', 'Flags']);
   assert.match(last(/tracker-clicks\?/), /since=/);
   assert.match(last(/tracker-clicks\?/), /bots=false/);
   await page.getByLabel('Time window').selectOption('15m');
@@ -87,21 +96,68 @@ try {
   // A click's detail, with its id to copy.
   await table.getByText('aaaaaaaaaaaaaaa3').click();
   assert.equal(await page.getByTestId('detail-click').innerText(), 'aaaaaaaaaaaaaaa3');
-  await page.getByRole('dialog').getByText('datacenter_network').waitFor();
-  await page.keyboard.press('Escape');
+  // It opens in the page, in place of the list, and Back returns to the
+  // same log with its rows.
+  const details = page.getByTestId('details');
+  await details.getByText('datacenter_network').waitFor();
+  assert.equal(await page.getByRole('dialog').count(), 0, 'no panel over the page');
+  await page.getByRole('button', { name: 'Back to clicks' }).click();
+  await table.getByText('aaaaaaaaaaaaaaa9').waitFor();
 
   // The other tabs.
   await page.getByRole('tab', { name: 'Lander clicks' }).click();
   await table.getByText('CTA 2 → Sweeps offer').waitFor();
   await page.getByRole('tab', { name: 'Conversions' }).click();
   await table.getByText('2.5 USD').waitFor();
+  assert.deepEqual(await headers(), ['Time', 'Click id', 'Campaign', 'Type', 'Payout', 'Status', 'Traffic source told', 'Flags']);
+  // Each conversion says what became of telling the traffic source.
+  await table.getByText('Held back').waitFor();
+  // A flagged conversion says so, and why: it is the reason nothing went
+  // back to the traffic source.
+  await table.getByText('Converted within 10 seconds of the click').waitFor();
   assert.equal(await table.getByText('zz', { exact: true }).count(), 0, 'a conversion outside the window is left out');
   await page.getByRole('tab', { name: 'Postbacks in' }).click();
   await table.getByText('unknown_click').first().waitFor();
   assert.match(await table.innerText(), /Everflow/);
   await page.getByRole('tab', { name: 'Postbacks out' }).click();
   await table.getByText('the network answered 500').waitFor();
+  await table.getByText('No network click id').waitFor();
+  await page.getByText('A conversion flagged as suspect is not sent back to the traffic source').waitFor();
+  // A row opens from the keyboard too.
+  await table.getByRole('row').nth(1).focus();
+  await page.keyboard.press('Enter');
+  await details.waitFor();
+  await page.getByRole('button', { name: 'Back to postbacks out' }).click();
   assert.match(await table.innerText(), /5 tries/);
+  // Send again queues the send and reads the list again, without opening
+  // the row.
+  const sends = calls.filter(c => c.startsWith('GET') && c.includes('/postbacks')).length;
+  await table.getByRole('button', { name: 'Send again' }).click();
+  for (let i = 0; i < 50 && calls.filter(c => c.startsWith('GET') && c.includes('/postbacks')).length === sends; i++) await page.waitForTimeout(100);
+  assert.ok(calls.some(c => c === `POST /v1/brands/${brand}/traffic-sources/${src}/postbacks/s1/resend`), 'Send again calls the re-send');
+  assert.ok(calls.filter(c => c.startsWith('GET') && c.includes('/postbacks')).length > sends, 'the list is read again after a re-send');
+  assert.equal(await details.count(), 0, 'Send again does not open the row');
+  // Cost updates: the list, a cost by hand, and a CSV of costs by campaign
+  // name; a bad line says which.
+  await page.getByRole('tab', { name: 'Cost updates' }).click();
+  await table.getByText('4,200 clicks').waitFor();
+  assert.match(await table.innerText(), /no clicks in these days/);
+  assert.match(await table.innerText(), /2026-10-01 to 2026-10-07/);
+  const save = page.getByRole('button', { name: 'Save cost' });
+  assert.ok(await save.isDisabled(), 'no campaign and no amount yet');
+  await page.getByLabel('Cost campaign').selectOption(camp);
+  await page.getByLabel('Cost from').fill('2026-10-01');
+  await page.getByLabel('Cost to').fill('2026-10-03');
+  await page.getByLabel('Cost amount').fill('12.5');
+  await save.click();
+  await page.getByText('Queued.').waitFor();
+  assert.deepEqual(posted[0], { updates: [{ campaign_id: camp, from: '2026-10-01', to: '2026-10-03', amount: 12.5 }] });
+  await page.getByLabel('Cost CSV').setInputFiles({ name: 'costs.csv', mimeType: 'text/csv', buffer: Buffer.from('campaign,from,to,amount\nPush US,2026-10-01,2026-10-01,3.20\npush us;2026-10-02;2026-10-02;4\n') });
+  await page.getByText('2 costs queued.').waitFor();
+  assert.deepEqual(posted[1], { updates: [{ campaign_id: camp, from: '2026-10-01', to: '2026-10-01', amount: 3.2 }, { campaign_id: camp, from: '2026-10-02', to: '2026-10-02', amount: 4 }] });
+  await page.getByLabel('Cost CSV').setInputFiles({ name: 'costs.csv', mimeType: 'text/csv', buffer: Buffer.from('Push US,2026-10-01,2026-10-01,3.20\nNobody,2026-10-01,2026-10-01,1\n') });
+  await page.getByText('Line 2: no campaign is called "Nobody".').waitFor();
+  assert.equal(posted.length, 2, 'a file with a bad line sends nothing');
   // Errors: grouped by why, most first, each with its fix.
   await page.getByRole('tab', { name: 'Errors' }).click();
   const groups = page.getByTestId('error-groups');

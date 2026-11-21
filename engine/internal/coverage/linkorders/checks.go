@@ -52,7 +52,7 @@ func ApplyPlacementCheck(ctx context.Context, tx pgx.Tx, workspaceID uuid.UUID, 
 		ev.At = time.Now().UTC()
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id, brand_id, target_url, status, last_check_at, last_check_live, last_check_target_match
+		SELECT id, brand_id, target_url, anchor_primary, anchor_secondary, status, last_check_at, last_check_live, last_check_target_match
 		FROM coverage_link_orders
 		WHERE workspace_id = $1 AND placement_id = $2
 		  AND status IN ($3, $4, $5)
@@ -64,6 +64,8 @@ func ApplyPlacementCheck(ctx context.Context, tx pgx.Tx, workspaceID uuid.UUID, 
 	type pending struct {
 		id, brand uuid.UUID
 		target    string
+		primary   string
+		secondary string
 		status    string
 		prevAt    *time.Time
 		prevLive  *bool
@@ -71,20 +73,20 @@ func ApplyPlacementCheck(ctx context.Context, tx pgx.Tx, workspaceID uuid.UUID, 
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (pending, error) {
 		var v pending
-		return v, row.Scan(&v.id, &v.brand, &v.target, &v.status, &v.prevAt, &v.prevLive, &v.prevMatch)
+		return v, row.Scan(&v.id, &v.brand, &v.target, &v.primary, &v.secondary, &v.status, &v.prevAt, &v.prevLive, &v.prevMatch)
 	})
 	if err != nil {
 		return nil, err
 	}
 	out := []AppliedCheck{}
 	for _, p := range list {
-		live, match, rel, anchor := scoreCheck(p.target, ev)
+		live, match, rel, anchor, anchorMatch := scoreCheck(p.target, ev, p.primary, p.secondary)
 		if ev.Conclusive() {
 			if _, err := tx.Exec(ctx, `
 				UPDATE coverage_link_orders
 				SET last_check_at = $2, last_check_live = $3, last_check_target_match = $4,
-				    last_check_rel = $5, last_check_anchor = $6, updated_at = now()
-				WHERE id = $1`, p.id, ev.At, live, match, rel, anchor); err != nil {
+				    last_check_rel = $5, last_check_anchor = $6, last_check_anchor_match = $7, updated_at = now()
+				WHERE id = $1`, p.id, ev.At, live, match, rel, anchor, anchorMatch); err != nil {
 				return nil, err
 			}
 		} else if _, err := tx.Exec(ctx, `
@@ -95,7 +97,7 @@ func ApplyPlacementCheck(ctx context.Context, tx pgx.Tx, workspaceID uuid.UUID, 
 		}
 		failed := ev.Conclusive() && (!live || !match)
 		prevFailed := p.prevAt != nil && p.prevLive != nil && p.prevMatch != nil && (!*p.prevLive || !*p.prevMatch)
-		data := map[string]any{"live": live, "target_match": match, "health": ev.Health, "conclusive": ev.Conclusive()}
+		data := map[string]any{"live": live, "target_match": match, "anchor_match": anchorMatch, "health": ev.Health, "conclusive": ev.Conclusive()}
 		if err := AppendEvent(ctx, tx, workspaceID, p.brand, p.id, uuid.Nil, "checked", &p.status, p.status, data); err != nil {
 			return nil, err
 		}
@@ -120,28 +122,34 @@ func ApplyPlacementCheck(ctx context.Context, tx pgx.Tx, workspaceID uuid.UUID, 
 	return out, nil
 }
 
-func scoreCheck(target string, ev CheckEvidence) (live, match bool, rel, anchor string) {
+// scoreCheck reads the evidence for one order: whether the page is up
+// with a link, whether a link goes to the target, its rel and anchor, and
+// how that anchor compares with the ordered ones. Among several links to
+// the target, the one closest to an ordered anchor is judged.
+func scoreCheck(target string, ev CheckEvidence, anchors ...string) (live, match bool, rel, anchor, anchorMatch string) {
 	if ev.Health != "up" {
-		return false, false, "", ""
+		return false, false, "", "", ""
 	}
 	live = ev.LinkPresent || len(ev.Links) > 0
-	var chosen *crawl.Link
+	var toTarget []*crawl.Link
 	for i := range ev.Links {
-		link := ev.Links[i]
-		if urlsEquivalent(link.URL, target) {
-			match = true
-			chosen = &ev.Links[i]
-			break
+		if urlsEquivalent(ev.Links[i].URL, target) {
+			toTarget = append(toTarget, &ev.Links[i])
 		}
 	}
+	match = len(toTarget) > 0
+	chosen := bestAnchorLink(toTarget, anchors...)
 	if chosen == nil && len(ev.Links) > 0 {
 		chosen = &ev.Links[0]
 	}
 	if chosen != nil {
 		rel = strings.Join(chosen.Rel, " ")
 		anchor = chosen.Anchor
+		if match {
+			anchorMatch = MatchAnchor(anchor, anchors...)
+		}
 	}
-	return live, match, rel, anchor
+	return live, match, rel, anchor, anchorMatch
 }
 
 func urlsEquivalent(a, b string) bool {

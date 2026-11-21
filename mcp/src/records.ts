@@ -15,7 +15,7 @@ type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Resp
 const id = z.string().uuid();
 const read = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
-export const brandRef = z.string().min(1).describe("The brand's handle (such as repocket) or id, from list_brands.");
+export const brandRef = z.string().min(1).describe("The brand's handle (such as summitly) or id, from list_brands.");
 const typeKey = z.string().min(1).describe("A record type's key: person, account, or one from get_catalog.");
 const valueTypes = z.enum(["text", "number", "currency", "date", "timestamp", "checkbox", "select", "status", "rating", "email", "phone", "url", "location", "record_reference", "actor_reference"]);
 const sources = z.enum(["manual", "first_party", "crm_sync", "enrichment", "import"]);
@@ -48,7 +48,16 @@ const identity = z.object({
 const attributes = z
   .record(z.string(), z.unknown())
   .describe("Values by field key, as get_catalog defines them; null clears one. Unknown keys are refused: add the field with create_field first.");
-const eventProperties = z.array(z.object({ key: z.string().min(1), value_type: valueTypes, description: z.string().optional() })).max(100);
+const eventProperties = z
+  .array(
+    z.object({
+      key: z.string().min(1),
+      value_type: valueTypes,
+      description: z.string().optional(),
+      required: z.boolean().optional().describe("Every event of this name must carry it (the tracking plan)."),
+    }),
+  )
+  .max(100);
 
 // brandCaller runs a call on a brand route (/v1/brands/{brand}/...), which
 // takes the brand's id: a handle is looked up first.
@@ -177,6 +186,26 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       annotations: read,
     },
     ({ brand, record_id, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/transactions", { params: { path: { brand: b }, query: { ...q, ...(record_id ? { record: record_id } : {}) } } }))),
+  );
+
+  server.registerTool(
+    "list_billing_subscriptions",
+    {
+      title: "List subscriptions",
+      description:
+        "A brand's customers' subscriptions, latest start first, from billing connectors (provider stripe and others) and save_billing_subscription (provider api): " +
+        "all, a person's or company's (record_id), or those in one status. monthly_minor is what each brings in a month, in minor units (cents).",
+      inputSchema: {
+        brand: brandRef,
+        record_id: id.optional(),
+        status: z.enum(["trialing", "active", "past_due", "canceled"]).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, record_id, ...q }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/billing-subscriptions", { params: { path: { brand: b }, query: { ...q, ...(record_id ? { record: record_id } : {}) } } }))),
   );
 
   server.registerTool(
@@ -557,6 +586,35 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       annotations: write,
     },
     ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/transactions", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "save_billing_subscription",
+    {
+      title: "Save a subscription from your own billing",
+      description:
+        "Saves a customer's subscription from the brand's own billing system: send it when it starts and again whenever it changes. source_id is its id there: " +
+        "sending it again updates the one saved, never a second. Its start, plan or price changes and cancellation are written on the person's timeline " +
+        "(subscription.started, subscription.changed, subscription.canceled), and their monthly revenue, billing status and plan follow it. amount_minor is " +
+        "what one interval costs, in the currency's minor unit (cents). For history, send each existing subscription once with its started_at.",
+      inputSchema: {
+        brand: brandRef,
+        source_id: z.string().min(1).max(200),
+        record_id: id.optional(),
+        user_id: z.string().max(200).optional().describe("Your own id for whose it is (the userId your events send), when you don't have record_id. They must already be known."),
+        status: z.enum(["trialing", "active", "past_due", "canceled"]).optional(),
+        plan: z.string().max(200).optional(),
+        product: z.string().optional().describe("One of the brand's products, by id or key."),
+        price_id: z.string().max(200).optional(),
+        interval: z.enum(["day", "week", "month", "year"]).optional().describe("How often amount_minor is charged; month by default."),
+        amount_minor: z.number().int().min(0),
+        currency: z.string().length(3),
+        started_at: z.string().optional().describe("When it began (RFC 3339); now by default."),
+        canceled_at: z.string().optional().describe("When it ended (RFC 3339), for status canceled; now by default."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/billing-subscriptions", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -966,6 +1024,307 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     },
     ({ brand, name }) =>
       call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/catalog/events/{event}/approve", { params: { path: { brand: b, event: name } } }))),
+  );
+
+  server.registerTool(
+    "get_event_usage",
+    {
+      title: "See how an event is used",
+      description:
+        "The event dictionary's detail for one event name over the last 30 days: events per day, the people behind them, the properties they carried " +
+        "(with their types, how often each is set and its common values) and the saved insights, conversions and journeys that use the name. " +
+        "Use it before building a funnel or trend on an event, or to write its description with update_event_definition.",
+      inputSchema: { brand: brandRef, name: z.string().min(1).max(100).describe("The catalog name, such as order_completed.") },
+      annotations: read,
+    },
+    ({ brand, name }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/catalog/events/{event}/usage", { params: { path: { brand: b, event: name } } }))),
+  );
+
+  server.registerTool(
+    "list_event_counts",
+    {
+      title: "Count a brand's events by name",
+      description:
+        "How many events of each name the brand stored over the last days (whole UTC days, today included), from how many people, when the " +
+        "newest happened, and where they came from (browser, api, transactions for the payment events Outflare writes once per payment, or a " +
+        "connector). Use it to check an event is the busy one you mean before building a conversion, journey or report on it.",
+      inputSchema: { brand: brandRef, days: z.number().int().min(1).max(365).optional().describe("How many days back. Default 30.") },
+      annotations: read,
+    },
+    ({ brand, days }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/catalog/event-counts", { params: { path: { brand: b }, query: { days } } }))),
+  );
+
+  server.registerTool(
+    "list_event_plan_problems",
+    {
+      title: "See which events break the tracking plan",
+      description:
+        "The tracking plan is the properties each event definition lists, with the ones marked required. This counts the events of the last " +
+        "days that didn't follow it: missing_property (a required property was absent) and unplanned_property (a property the event doesn't " +
+        "list). The events are stored all the same. Fix the sender, or change the plan with update_event_definition.",
+      inputSchema: { brand: brandRef, days: z.number().int().min(1).max(90).optional().describe("How many days back. Default 7.") },
+      annotations: read,
+    },
+    ({ brand, days }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/catalog/event-problems", { params: { path: { brand: b }, query: { days } } }))),
+  );
+
+  const destinationConfig = z
+    .object({
+      url: z.string().optional().describe("webhook: the https URL."),
+      channel: z.string().optional().describe("slack: the channel's id."),
+      channel_name: z.string().optional(),
+      measurement_id: z.string().optional().describe("ga4: the data stream's measurement id, such as G-ABC123DEF4."),
+      properties: z.record(z.string(), z.string()).optional().describe("hubspot: contact properties to set, by HubSpot's internal name."),
+      project: z.string().optional().describe("bigquery: the Google Cloud project's id."),
+      dataset: z.string().optional().describe("bigquery: the dataset, which must exist."),
+      table: z.string().optional().describe("bigquery and snowflake: the table to write to; made if it isn't there."),
+      account: z.string().optional().describe("snowflake: the account identifier, without .snowflakecomputing.com."),
+      user: z.string().optional().describe("snowflake: the user whose key pair signs in."),
+      database: z.string().optional(),
+      schema: z.string().optional(),
+      warehouse: z.string().optional(),
+      role: z.string().optional(),
+    })
+    .describe("What the kind needs that is not a secret.");
+
+  server.registerTool(
+    "list_destinations",
+    {
+      title: "List where events are forwarded",
+      description:
+        "A brand's destinations: the tools its customer events are forwarded to as they arrive (a webhook, Slack, Google Analytics 4, HubSpot, BigQuery, Snowflake), " +
+        "with how many each sent and failed in the last 24 hours, how many wait and since when it can't be reached.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/destinations", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "create_destination",
+    {
+      title: "Forward events to a tool",
+      description:
+        "Adds a destination. kind webhook needs config.url (the answer shows signing_secret once); slack needs integration_id (the workspace's own " +
+        "Slack connection) and config.channel; hubspot needs integration_id and can set config.properties on the contact; ga4 needs " +
+        "config.measurement_id and a secret only the person can add in the app, so don't ask for it in chat. BigQuery and Snowflake destinations " +
+        "need a key too, so the person adds those in the app (Events, Destinations); never ask for a key in chat. events empty sends every tracked event. " +
+        "Needs customers.manage.",
+      inputSchema: {
+        brand: brandRef,
+        kind: z.enum(["webhook", "slack", "ga4", "hubspot"]),
+        name: z.string().min(1).max(120),
+        events: z.array(z.string()).max(50).optional().describe("Catalog names such as order_completed; empty sends every tracked event."),
+        config: destinationConfig,
+        integration_id: z.string().optional(),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/destinations", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "get_replay_settings",
+    {
+      title: "Recording and heatmap settings",
+      description:
+        "Whether the brand's website records visits (recordings) and counts clicks and scrolling per page (heatmaps), the share of visits recorded, " +
+        "whether all page text is hidden, and how many days recordings are kept. storage false means this server has no file storage, which recordings need.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/replay/settings", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "update_replay_settings",
+    {
+      title: "Change recording and heatmap settings",
+      description:
+        "Turns session recordings or heatmaps on or off for a brand's website and sets how they work. Send only what changes. What visitors type is never recorded. " +
+        "Ask the person before turning recordings on: their site's privacy notice should say visits are recorded. Needs customers.manage.",
+      inputSchema: {
+        brand: brandRef,
+        recordings: z.boolean().optional(),
+        heatmaps: z.boolean().optional(),
+        sample_percent: z.number().int().min(1).max(100).optional().describe("The share of visits recorded, in percent."),
+        mask_text: z.boolean().optional().describe("Also hide every piece of text on the page."),
+        keep_days: z.number().int().min(1).max(90).optional().describe("Recordings older than this are deleted."),
+        include_paths: z.array(z.string().max(200)).max(50).optional().describe("Record and count only these pages: a path such as /pricing, or /blog/* with * for any run of characters. Empty is every page."),
+        exclude_paths: z.array(z.string().max(200)).max(50).optional().describe("Pages never recorded or counted, written the same way."),
+        min_seconds: z.number().int().min(0).max(600).optional().describe("Recordings of visits shorter than this are not kept."),
+        daily_limit: z.number().int().min(0).max(100000).optional().describe("The most visits recorded in a day (UTC). 0 is no limit."),
+        hide_shapes: z
+          .array(z.string().max(100))
+          .max(20)
+          .optional()
+          .describe("The shapes of the brand's own keys, hidden in recordings and heatmap pictures: x for each letter or digit, separators kept, at least 8 x (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). Never a real key."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/replay/settings", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "list_recordings",
+    {
+      title: "List recordings of visits",
+      description:
+        "Recorded visits to the brand's website, newest first: when, how long (seconds), the pages seen in order, clicks, device, browser, country, " +
+        "the person's record_id once known, and whether someone has watched it. A recording is watched in Outflare under Analytics, Recordings; " +
+        "this lists them so you can point a person at the ones worth watching.",
+      inputSchema: {
+        brand: brandRef,
+        days: z.number().int().min(1).max(90).optional().describe("How far back. Default 30."),
+        path: z.string().optional().describe("Only visits that saw this page, such as /pricing."),
+        device: z.enum(["desktop", "tablet", "mobile"]).optional(),
+        min_seconds: z.number().int().min(0).optional().describe("Only visits at least this long."),
+        host: z.string().optional().describe("Only visits to this website, by host name, such as app.acme.example."),
+        visitor: z.enum(["known", "anonymous"]).optional().describe("Only visits by known people, or only by anonymous visitors."),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/recordings", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "delete_recording",
+    {
+      title: "Delete a recording",
+      description: "Deletes one recorded visit for good, such as when a visitor asks for it. Needs customers.manage.",
+      inputSchema: { brand: brandRef, id: z.string() },
+      annotations: write,
+    },
+    ({ brand, id }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/recordings/{recording}", { params: { path: { brand: b, recording: id } } }))),
+  );
+
+  server.registerTool(
+    "delete_recordings",
+    {
+      title: "Delete many recordings",
+      description:
+        "Deletes many recorded visits for good: the ones named in ids, or every one that started more than older_than_days ago (0 deletes them all). Send one or the other. " +
+        "Ask the person before deleting. Needs customers.manage.",
+      inputSchema: {
+        brand: brandRef,
+        ids: z.array(z.string()).max(500).optional(),
+        older_than_days: z.number().int().min(0).max(90).optional(),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/recordings/delete", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "clear_heatmaps",
+    {
+      title: "Clear heatmaps",
+      description: "Deletes what has been counted for one page's heatmap (path), or for every page when no path is given, so counting starts again. Ask the person first. Needs customers.manage.",
+      inputSchema: { brand: brandRef, path: z.string().optional().describe("The page, such as /pricing. Leave out for every page.") },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/heatmaps/clear", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "list_heatmap_pages",
+    {
+      title: "List pages with a heatmap",
+      description: "The brand's website pages by clicks counted, with their page views, over the days asked for. Follow with get_heatmap for one page.",
+      inputSchema: {
+        brand: brandRef,
+        days: z.number().int().min(1).max(90).optional().describe("How far back. Default 30."),
+        device: z.enum(["desktop", "tablet", "mobile"]).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/heatmaps/pages", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "get_heatmap",
+    {
+      title: "A page's heatmap",
+      description:
+        "Where visitors clicked on one page and how far down they scrolled, for one kind of device: clicks as [x, y, clicks] spots (x in percent across the page, " +
+        "y in pixels from its top), and scroll as how many page views reached each tenth of the page. Counts only; no visitor is named.",
+      inputSchema: {
+        brand: brandRef,
+        path: z.string().describe("The page's path, such as /pricing."),
+        days: z.number().int().min(1).max(90).optional().describe("How far back. Default 30."),
+        device: z.enum(["desktop", "tablet", "mobile"]).optional().describe("Default desktop."),
+        screen: z.string().optional().describe("One screen of a page whose content changes while its address stays the same (a step of a sign-up), by its name from the answer's screens. Left out, the most clicked screen."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/heatmaps", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "update_destination",
+    {
+      title: "Change a destination",
+      description: "Changes a destination's name, events, config or connection, or turns it off and on (enabled). Send only what changes. Needs customers.manage.",
+      inputSchema: {
+        brand: brandRef,
+        id: z.string(),
+        name: z.string().min(1).max(120).optional(),
+        events: z.array(z.string()).max(50).optional(),
+        config: destinationConfig.optional(),
+        integration_id: z.string().optional(),
+        enabled: z.boolean().optional(),
+      },
+      annotations: write,
+    },
+    ({ brand, id, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/destinations/{destination}", { params: { path: { brand: b, destination: id } }, body }))),
+  );
+
+  server.registerTool(
+    "delete_destination",
+    {
+      title: "Remove a destination",
+      description: "Removes a destination with its log; events still waiting are dropped. Needs customers.manage.",
+      inputSchema: { brand: brandRef, id: z.string() },
+      annotations: write,
+    },
+    ({ brand, id }) =>
+      call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/destinations/{destination}", { params: { path: { brand: b, destination: id } } }))),
+  );
+
+  server.registerTool(
+    "test_destination",
+    {
+      title: "Send a test event to a destination",
+      description:
+        "Sends one made-up event named outflare_test to a destination, on or off, to check it works. It is not stored as one of the brand's events; " +
+        "for HubSpot only the connection is checked. The result shows on the destination a few seconds later (test.ok, test.reason): read it with " +
+        "list_destinations. Needs customers.manage.",
+      inputSchema: { brand: brandRef, id: z.string() },
+      annotations: write,
+    },
+    ({ brand, id }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/destinations/{destination}/test", { params: { path: { brand: b, destination: id } } }))),
+  );
+
+  server.registerTool(
+    "list_destination_sends",
+    {
+      title: "See what a destination sent",
+      description: "A destination's newest events and what happened to each: sent, skipped (with why), failed or queued. Filter with status.",
+      inputSchema: { brand: brandRef, id: z.string(), status: z.enum(["queued", "sent", "skipped", "failed"]).optional(), limit: z.number().int().min(1).max(200).optional() },
+      annotations: read,
+    },
+    ({ brand, id, status, limit }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          gtm.GET("/v1/brands/{brand}/destinations/{destination}/sends", { params: { path: { brand: b, destination: id }, query: { status, limit } } }),
+        ),
+      ),
   );
 
   server.registerTool(

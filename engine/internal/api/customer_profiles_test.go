@@ -12,8 +12,8 @@ func TestIdealCustomerProfiles(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "handle": "geonode"})["id"].(string)
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})["id"].(string)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "handle": "summitly"})
 
 	// A profile on its own.
 	c := owner.must(201, "POST", base+"/ideal-customer-profiles", map[string]any{
@@ -44,10 +44,10 @@ func TestIdealCustomerProfiles(t *testing.T) {
 
 	// A profile is one brand's: it stays in its brand, and another brand
 	// keeps its own, even under the same name.
-	owner.must(400, "PATCH", base+"/ideal-customer-profiles/"+own, map[string]any{"brand_id": "geonode"})
+	owner.must(400, "PATCH", base+"/ideal-customer-profiles/"+own, map[string]any{"brand_id": "northpeak"})
 	gb := "/v1/brands/" + geo
 	if l := owner.must(200, "GET", gb+"/ideal-customer-profiles", nil)["data"].([]any); len(l) != 0 {
-		t.Fatalf("geonode before = %v", l)
+		t.Fatalf("northpeak before = %v", l)
 	}
 	owner.must(201, "POST", gb+"/ideal-customer-profiles", map[string]any{"name": "AU CFOs"})
 	if l := owner.must(200, "GET", gb+"/ideal-customer-profiles", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["brand_id"] != geo {

@@ -265,8 +265,13 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 // RegisterJobs adds the server's own background work to the queue.
 func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobCRMGoogleSync, s.crmGoogleSyncJob)
+	q.Handle(jobSalesDraftAssist, s.salesDraftAssistJob)
 	q.Handle(jobSalesSend, s.salesSendJob)
 	q.Handle(jobSalesSync, s.salesSyncJob)
+	q.Handle(jobSalesFeedPoll, s.salesFeedPollJob)
+	q.Handle(jobSalesFeedItem, s.salesFeedItemJob)
+	q.Handle(jobSalesAlert, s.salesAlertJob)
+	q.Handle(inbox.JobSalesReply, s.salesReplyJob)
 	q.Handle(jobCRMMailPrivacy, s.crmMailPrivacyJob)
 	q.Handle(signals.JobConversation, s.conversationJob)
 	q.Handle(jobCRMCalendarWorkspace, s.crmCalendarWorkspaceJob)
@@ -276,6 +281,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobBulkEdit, s.bulkEditJob)
 	q.Handle(jobEventsProcess, s.eventsProcessJob)
 	q.Handle(jobEventNameCheck, s.eventNameCheckJob)
+	q.Handle(jobErrorsRegroup, s.errorsRegroupJob)
 	q.Handle(jobPrivacyExport, s.privacyExportJob)
 	if s.inboundEmail != nil {
 		q.Handle(inboundemail.JobProcess, s.inboundEmail.Process)
@@ -287,6 +293,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobPartnerPromoCode, s.partnerPromoCodeJob)
 	q.Handle(jobPartnerPostback, s.partnerPostbackJob)
 	q.Handle(jobSourcePostback, s.sourcePostbackJob)
+	q.Handle(jobCostUpdate, s.costUpdateJob)
 	q.Handle(jobPartnerImport, s.partnerImportJob)
 	q.Handle(jobSetupInstall, s.setupInstallJob)
 	q.Handle(jobDNSAdd, s.dnsAddJob)
@@ -307,6 +314,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	s.registerSemanticJobs(q)
 	s.registerKnowledgeJobs(q)
 	s.registerWebsiteImportJobs(q)
+	s.registerSupportImportJobs(q)
 	q.Handle(jobLearnReplies, s.learnRepliesJob)
 }
 

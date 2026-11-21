@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TelegramChat, TelegramMessage } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Empty, ErrorText, field, Loading, Menu, toast } from "../ui";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Badge, Button, Empty, ErrorText, field, Loading, Menu, PageHeader, toast } from "../ui";
 import { PickBrand } from "@/components/pick-brand";
 import { useBrand, pickedBrandId } from "@/lib/brand";
 import { FlagButton } from "./Signals";
@@ -71,12 +70,15 @@ function Chats({ canManage, item, setItem }: { canManage: boolean; item?: string
     });
   }, [item, open?.id]);
 
-  const replace = (c: TelegramChat) => setRows((rs) => (rs ?? []).map((x) => (x.id === c.id ? c : x)).filter((x) => view === "all" || x.match_status !== "confirmed"));
+  const replace = (c: TelegramChat) => {
+    setOpen((o) => (o?.id === c.id ? c : o));
+    setRows((rs) => (rs ?? []).map((x) => (x.id === c.id ? c : x)).filter((x) => view === "all" || x.match_status !== "confirmed"));
+  };
 
   const match = async (c: TelegramChat, record: string | null) => {
     const r = await api.POST("/v1/brands/{brand}/telegram-chats/{id}/match", { params: { path: { brand: pickedBrandId(), id: c.id } }, body: { record_id: record } });
     if (r.error) return toast(errorMessage(r.error), "error");
-    if (r.response.status === 202) return toast("Waiting for approval");
+    if (r.response.status === 202) return toast("Waiting for approval on the Agents page.");
     replace(r.data as TelegramChat);
     toast(record ? `Linked to ${(r.data as TelegramChat).record?.name ?? "the record"}` : "Left for someone to pick");
   };
@@ -89,8 +91,31 @@ function Chats({ canManage, item, setItem }: { canManage: boolean; item?: string
     toast(kind === "personal" ? "Marked personal; its messages are removed" : kind === "internal" ? "Marked as a colleague" : "Marked as a customer");
   };
 
+  if (picking)
+    return (
+      <PickRecord
+        chat={picking}
+        onClose={() => setPicking(null)}
+        onPicked={async (id) => {
+          await match(picking, id);
+          setPicking(null);
+        }}
+      />
+    );
+  if (open)
+    return (
+      <Messages
+        chat={open}
+        canSummarize={canManage || open.mine}
+        onPick={canManage || open.mine ? () => setPicking(open) : undefined}
+        onChange={(c) => { setOpen(c); setRows((rs) => rs?.map((x) => (x.id === c.id ? c : x)) ?? rs); }}
+        onClose={() => { setOpen(null); setItem(undefined); }}
+      />
+    );
+
   return (
     <div className="space-y-4">
+      <PageHeader title="Telegram" description="Chats synced from your team's Telegram accounts, matched to the people and companies they are with." />
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-md border p-0.5 text-[13px]">
           {(["queue", "waiting", "all"] as const).map((v) => (
@@ -123,17 +148,6 @@ function Chats({ canManage, item, setItem }: { canManage: boolean; item?: string
             <Row key={c.id} c={c} canManage={canManage} onOpen={() => { setOpen(c); setItem(c.id); }} onConfirm={() => c.suggested_record && match(c, c.suggested_record.id)} onPick={() => setPicking(c)} onNone={() => match(c, null)} onKind={(k) => setKind(c, k)} />
           ))}
         </div>
-      )}
-      {open && <Messages chat={open} canSummarize={canManage || open.mine} onChange={(c) => { setOpen(c); setRows((rs) => rs?.map((x) => (x.id === c.id ? c : x)) ?? rs); }} onClose={() => { setOpen(null); setItem(undefined); }} />}
-      {picking && (
-        <PickRecord
-          chat={picking}
-          onClose={() => setPicking(null)}
-          onPicked={async (id) => {
-            await match(picking, id);
-            setPicking(null);
-          }}
-        />
       )}
     </div>
   );
@@ -229,13 +243,9 @@ function PickRecord({ chat, onClose, onPicked }: { chat: TelegramChat; onClose: 
   };
 
   return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>Link {chat.title || "this chat"} to a customer</SheetTitle>
-          <SheetDescription>The customer gets this chat's Telegram account, so future chats with them link by themselves.</SheetDescription>
-        </SheetHeader>
-        <div className="space-y-3 px-4 pb-6">
+    <div className="space-y-4">
+      <PageHeader title={`Link ${chat.title || "this chat"} to a customer`} description="The customer gets this chat's Telegram account, so future chats with them link by themselves." back={{ label: "Back to the chat", onClick: onClose }} />
+      <div className="max-w-2xl space-y-3">
           <div className="flex gap-2">
             <select className={field} value={type} onChange={(e) => setType(e.target.value as "person" | "account")} aria-label="Type">
               <option value="person">Person</option>
@@ -261,9 +271,8 @@ function PickRecord({ chat, onClose, onPicked }: { chat: TelegramChat; onClose: 
               Create {type === "person" ? "person" : "company"} “{q.trim()}”
             </Button>
           )}
-        </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </div>
   );
 }
 
@@ -330,7 +339,7 @@ function Summary({ chat, canSummarize, onChange }: { chat: TelegramChat; canSumm
   );
 }
 
-function Messages({ chat, canSummarize, onChange, onClose }: { chat: TelegramChat; canSummarize: boolean; onChange: (c: TelegramChat) => void; onClose: () => void }) {
+function Messages({ chat, canSummarize, onPick, onChange, onClose }: { chat: TelegramChat; canSummarize: boolean; onPick?: () => void; onChange: (c: TelegramChat) => void; onClose: () => void }) {
   const [msgs, setMsgs] = useState<TelegramMessage[] | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => {
@@ -340,13 +349,14 @@ function Messages({ chat, canSummarize, onChange, onClose }: { chat: TelegramCha
     });
   }, [chat.id]);
   return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
-        <SheetHeader>
-          <SheetTitle>{chat.title || chat.peer_id}</SheetTitle>
-          <SheetDescription>{chat.account_label} · {chat.message_count} messages</SheetDescription>
-        </SheetHeader>
-        <div className="space-y-2 px-4 pb-6">
+    <div className="space-y-4">
+      <PageHeader
+        title={chat.title || chat.username || chat.peer_id}
+        description={[chat.account_label, `${chat.message_count} messages`, chat.match_status === "confirmed" && chat.record ? `Linked to ${chat.record.name}` : null].filter(Boolean).join(" · ")}
+        back={{ label: "Telegram", onClick: onClose }}
+        action={onPick && <Button variant="ghost" onClick={onPick}>{chat.match_status === "confirmed" ? "Change customer" : "Pick a customer"}</Button>}
+      />
+      <div className="max-w-3xl space-y-2">
           {chat.kind !== "personal" && chat.kind !== "internal" && chat.message_count > 0 && <Summary chat={chat} canSummarize={canSummarize} onChange={onChange} />}
           {chat.record_id && chat.kind !== "personal" && chat.kind !== "internal" && <FlagButton brandId={pickedBrandId()} recordId={chat.record_id} conversation={{ channel: "telegram", ref: chat.id }} />}
           {err && <ErrorText>{err}</ErrorText>}
@@ -364,8 +374,7 @@ function Messages({ chat, canSummarize, onChange, onClose }: { chat: TelegramCha
               </div>
             ),
           )}
-        </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </div>
   );
 }

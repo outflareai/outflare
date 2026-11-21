@@ -92,14 +92,14 @@ func TestKnowledgeRetrieval(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	kb := base + "/knowledge"
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "handle": "geonode"})
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "handle": "summitly"})
 
 	refunds := owner.must(201, "POST", kb+"/items", map[string]any{"title": "Refunds and cancellations", "visibility": "public",
 		"body": "## Refunds\n\nWe refund any plan within 30 days, no questions asked.\n\n## How to cancel\n\n1. Open Settings\n2. Choose Billing\n3. Click Cancel plan"})
 	owner.must(201, "POST", kb+"/items", map[string]any{"kind": "snippet", "title": "Do you offer a free trial?", "body": "Yes, every plan has a 7-day free trial.", "visibility": "customers_ai"})
 	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Pricing notes", "body": "Our internal margin on the Pro plan is 80%. Discounts up to 20% need a manager.", "visibility": "team"})
-	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Repocket payouts", "body": "Repocket pays out monthly by PayPal.", "brand_id": "repocket"})
+	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Summitly payouts", "body": "Summitly pays out monthly by PayPal.", "brand_id": "summitly"})
 	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Draft refund idea", "body": "Maybe refund within 60 days.", "status": "draft"})
 
 	// Passages, by words: sections are their own passages, drafts and other
@@ -120,10 +120,10 @@ func TestKnowledgeRetrieval(t *testing.T) {
 	if l := owner.must(200, "GET", kb+"/passages?q=discounts+margin", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("team passages = %v", l)
 	}
-	if l := owner.must(200, "GET", kb+"/passages?q=payouts&brand=geonode", nil)["data"].([]any); len(l) != 0 {
+	if l := owner.must(200, "GET", kb+"/passages?q=payouts&brand=northpeak", nil)["data"].([]any); len(l) != 0 {
 		t.Fatalf("another brand's knowledge: %v", l)
 	}
-	if l := owner.must(200, "GET", kb+"/passages?q=payouts&brand=repocket", nil)["data"].([]any); len(l) != 1 {
+	if l := owner.must(200, "GET", kb+"/passages?q=payouts&brand=summitly", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("brand knowledge = %v", l)
 	}
 	owner.must(400, "GET", kb+"/passages?q=", nil)
@@ -204,8 +204,8 @@ func TestKnowledgeRetrieval(t *testing.T) {
 	if k["articles"] != 2.0 || k["snippets"] != 1.0 || !strings.Contains(c["markdown"].(string), "## Knowledge") {
 		t.Fatalf("context knowledge = %v", k)
 	}
-	if k := owner.must(200, "GET", base+"/context?brand=repocket", nil)["knowledge"].(map[string]any); k["articles"] != 1.0 || k["snippets"] != 0.0 {
-		t.Fatalf("repocket knowledge = %v", k)
+	if k := owner.must(200, "GET", base+"/context?brand=summitly", nil)["knowledge"].(map[string]any); k["articles"] != 1.0 || k["snippets"] != 0.0 {
+		t.Fatalf("summitly knowledge = %v", k)
 	}
 
 	seen := map[string]bool{}

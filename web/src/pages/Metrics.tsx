@@ -161,7 +161,8 @@ function describe(m: Metric): string {
   const counts = [...m.events, ...(m.usage ? ["any usage"] : [])].join(", ") || "no events";
   const window = m.aggregate === "last" ? "" : m.offset_days ? `, ${m.window_days} days ending ${m.offset_days} days ago` : `, last ${m.window_days} days`;
   const levels = m.levels.length === 2 ? "companies and people" : m.levels[0] === "company" ? "companies" : "people";
-  return `${what} of ${counts}${window} · kept on ${levels}${m.per_product ? ", also per product" : ""}`;
+  const category = m.product_category ? ` (${m.product_category} products only)` : "";
+  return `${what} of ${counts}${category}${window} · kept on ${levels}${m.per_product ? ", also per product" : ""}`;
 }
 
 // MetricEditor adds a metric or changes one. Changing what it counts makes
@@ -177,6 +178,13 @@ function MetricEditor({ brand, metric, onClose, onSaved }: { brand: string; metr
   const [offsetDays, setOffsetDays] = useState(String(metric?.offset_days ?? 0));
   const [levels, setLevels] = useState<("company" | "person")[]>(metric?.levels ?? ["company", "person"]);
   const [perProduct, setPerProduct] = useState(metric?.per_product ?? true);
+  const [category, setCategory] = useState(metric?.product_category ?? "");
+  const [categories, setCategories] = useState<string[]>([]);
+  useEffect(() => {
+    void api.GET("/v1/brands/{brand}/products", { params: { path: { brand } } }).then(({ data }) => {
+      if (data) setCategories([...new Set(data.data.map((p) => p.category).filter(Boolean))].sort());
+    });
+  }, [brand]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const needsProperty = aggregate === "sum" || aggregate === "min" || aggregate === "max" || aggregate === "latest";
@@ -196,6 +204,7 @@ function MetricEditor({ brand, metric, onClose, onSaved }: { brand: string; metr
       offset_days: Number(offsetDays),
       levels,
       per_product: perProduct,
+      product_category: category,
     };
     const { error } = metric
       ? await api.PATCH("/v1/brands/{brand}/metrics/{metric}", { params: { path: { brand, metric: metric.id } }, body })
@@ -222,6 +231,14 @@ function MetricEditor({ brand, metric, onClose, onSaved }: { brand: string; metr
       <div className="flex flex-wrap items-end gap-2">
         <label className={label}>Event names, separated by commas<input className={`${field} mt-1 block w-80 font-mono`} placeholder="api_called, payment.succeeded" value={events} onChange={(e) => setEvents(e.target.value)} /></label>
         <label className="flex items-center gap-1.5 text-[13px]"><input type="checkbox" checked={usage} onChange={(e) => setUsage(e.target.checked)} />Also any usage</label>
+        {(categories.length > 0 || category) && (
+          <label className={label}>Products
+            <select className={`${field} mt-1 block`} value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">Every product</option>
+              {[...new Set([...categories, ...(category ? [category] : [])])].map((c) => <option key={c} value={c}>Only {c} products</option>)}
+            </select>
+          </label>
+        )}
       </div>
       <div className="flex flex-wrap items-end gap-2">
         {aggregate !== "last" && <label className={label}>Over the last (days)<input type="number" min={1} max={365} className={`${field} mt-1 block w-24`} value={windowDays} onChange={(e) => setWindowDays(e.target.value)} /></label>}

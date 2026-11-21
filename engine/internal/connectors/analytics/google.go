@@ -316,6 +316,9 @@ func (SearchConsole) query(ctx context.Context, cl *c.Client, creds c.Creds, q c
 	if dim != "" {
 		body["dimensions"] = []string{dim}
 	}
+	if f := gscFilters(q); len(f) > 0 {
+		body["dimensionFilterGroups"] = []map[string]any{{"groupType": "and", "filters": f}}
+	}
 	var resp struct {
 		Rows []gscRow `json:"rows"`
 	}
@@ -324,13 +327,56 @@ func (SearchConsole) query(ctx context.Context, cl *c.Client, creds c.Creds, q c
 	return resp.Rows, err
 }
 
+// NarrowsSearch: Search Console filters any report by page and query.
+func (SearchConsole) NarrowsSearch() bool { return true }
+
+// gscFilters narrows a query to the exact page and search query asked for.
+func gscFilters(q c.AnalyticsQuery) []map[string]string {
+	var f []map[string]string
+	if q.Page != "" {
+		f = append(f, map[string]string{"dimension": "page", "operator": "equals", "expression": q.Page})
+	}
+	if q.Keyword != "" {
+		f = append(f, map[string]string{"dimension": "query", "operator": "equals", "expression": q.Keyword})
+	}
+	return f
+}
+
 func (s SearchConsole) Report(ctx context.Context, cl *c.Client, creds c.Creds, q c.AnalyticsQuery) (c.AnalyticsReport, error) {
 	if q.Site == "" || len(q.Site) > 300 {
 		return c.AnalyticsReport{}, c.Errf(c.ErrInvalid, "name a Search Console property, like https://example.com/ or sc-domain:example.com")
 	}
 	rep := c.AnalyticsReport{Report: q.Report, Site: q.Site, From: q.From, To: q.To,
 		Notes: []string{"Search Console data is usually two to three days behind; the latest days may still change."}}
-	total, err := s.query(ctx, cl, creds, q, "", 1)
+	var dim string
+	limit := q.Limit
+	switch q.Report {
+	case c.ReportTraffic:
+		dim, limit = "date", 5000
+	case c.ReportPages:
+		dim = "page"
+	case c.ReportSearchQueries:
+		dim = "query"
+		if q.Keyword == "" {
+			rep.Notes = append(rep.Notes, "Google hides rare queries for privacy, so the queries add up to less than the total.")
+		}
+	default:
+		return rep, c.NotSupported("Google Search Console", q.Report)
+	}
+	// The total and the rows are two calls to Google; ask both at once so
+	// the answer takes as long as the slower one, not the two together.
+	var total []gscRow
+	var totalErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		total, totalErr = s.query(ctx, cl, creds, q, "", 1)
+	}()
+	rows, err := s.query(ctx, cl, creds, q, dim, limit)
+	<-done
+	if totalErr != nil {
+		return rep, totalErr
+	}
 	if err != nil {
 		return rep, err
 	}
@@ -339,13 +385,7 @@ func (s SearchConsole) Report(ctx context.Context, cl *c.Client, creds c.Creds, 
 	} else {
 		rep.Totals = c.Metrics{Clicks: c.Num(0), Impressions: c.Num(0)}
 	}
-	var dim string
-	switch q.Report {
-	case c.ReportTraffic:
-		rows, err := s.query(ctx, cl, creds, q, "date", 5000)
-		if err != nil {
-			return rep, err
-		}
+	if q.Report == c.ReportTraffic {
 		got := map[string]c.Metrics{}
 		for _, r := range rows {
 			if len(r.Keys) > 0 {
@@ -354,17 +394,6 @@ func (s SearchConsole) Report(ctx context.Context, cl *c.Client, creds c.Creds, 
 		}
 		rep.Series = fillDays(q, got)
 		return rep, nil
-	case c.ReportPages:
-		dim = "page"
-	case c.ReportSearchQueries:
-		dim = "query"
-		rep.Notes = append(rep.Notes, "Google hides rare queries for privacy, so the queries add up to less than the total.")
-	default:
-		return rep, c.NotSupported("Google Search Console", q.Report)
-	}
-	rows, err := s.query(ctx, cl, creds, q, dim, q.Limit)
-	if err != nil {
-		return rep, err
 	}
 	rep.Rows = []c.AnalyticsRow{}
 	for _, r := range rows {
@@ -373,6 +402,50 @@ func (s SearchConsole) Report(ctx context.Context, cl *c.Client, creds c.Creds, 
 		}
 	}
 	return rep, nil
+}
+
+// SearchAnalytics answers one Performance report query live, a page of
+// rows at a time up to q.Limit (the totals when no dimension is asked).
+// dataState all includes the newest days, as Search Console's report does.
+func (s SearchConsole) SearchAnalytics(ctx context.Context, cl *c.Client, creds c.Creds, q c.SearchAnalyticsQuery) ([]c.SearchAnalyticsRow, error) {
+	if q.Site == "" || len(q.Site) > 300 {
+		return nil, c.Errf(c.ErrInvalid, "name a Search Console property, like https://example.com/ or sc-domain:example.com")
+	}
+	u := cl.Base("google_search_console", searchSearch) + "/webmasters/v3/sites/" + url.PathEscape(q.Site) + "/searchAnalytics/query"
+	limit := max(q.Limit, 1)
+	out := []c.SearchAnalyticsRow{}
+	for offset := 0; offset < limit; {
+		n := min(searchPage, limit-offset)
+		body := map[string]any{"startDate": q.From, "endDate": q.To, "rowLimit": n, "startRow": offset, "dataState": "all"}
+		if q.Hourly {
+			body["dataState"] = "hourly_all"
+		}
+		if q.Type != "" {
+			body["type"] = q.Type
+		}
+		if len(q.Dimensions) > 0 {
+			body["dimensions"] = q.Dimensions
+		}
+		if len(q.Filters) > 0 {
+			f := make([]map[string]string, 0, len(q.Filters))
+			for _, x := range q.Filters {
+				f = append(f, map[string]string{"dimension": x.Dimension, "operator": x.Operator, "expression": x.Expression})
+			}
+			body["dimensionFilterGroups"] = []map[string]any{{"groupType": "and", "filters": f}}
+		}
+		var resp struct {
+			Rows []c.SearchAnalyticsRow `json:"rows"`
+		}
+		if err := newCall(cl, "Google Search Console").bearer(creds["access_token"]).post(ctx, u, body, &resp); err != nil {
+			return nil, err
+		}
+		out = append(out, resp.Rows...)
+		if len(resp.Rows) < n || len(q.Dimensions) == 0 {
+			break
+		}
+		offset += n
+	}
+	return out, nil
 }
 
 func itoa(n int) string { return str(float64(n)) }

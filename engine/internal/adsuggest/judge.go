@@ -3,6 +3,7 @@ package adsuggest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -28,10 +29,14 @@ import (
 // measuring is one finding whose change is being measured.
 type measuring struct {
 	id, kind, entity, entityName, account, connector, currency, unit, rule string
-	brand                                                                  *string
-	from, until                                                            time.Time
-	target                                                                 *int64
-	pmax, troas                                                            bool
+	// The brand's own currency and the rate to it; empty and 0 when
+	// nothing converts.
+	report      string
+	fx          float64
+	brand       *string
+	from, until time.Time
+	target      *int64
+	pmax, troas bool
 }
 
 // floor is the data floor each side: 30 payers under a tROAS, 5 otherwise.
@@ -67,6 +72,32 @@ func (r *Runner) judge(ctx context.Context, ws string) (int, error) {
 	})
 	if err != nil {
 		return 0, err
+	}
+	// Verdicts are written in the brand's own currency, like the findings.
+	rates, err := paidads.LoadRates(ctx, r.Pool)
+	if err != nil {
+		return 0, err
+	}
+	for i := range list {
+		if list[i].brand == nil {
+			continue
+		}
+		econ, err := paidads.Load(ctx, r.Pool, ws, *list[i].brand)
+		if err != nil {
+			if errors.Is(err, paidads.ErrNoBrand) {
+				continue
+			}
+			return 0, err
+		}
+		if k, ok := rates.Rate(list[i].currency, econ.Currency); ok && econ.Currency != "" && econ.Currency != list[i].currency {
+			list[i].report, list[i].fx = econ.Currency, k
+			// The brand's target is in its own currency; the verdict
+			// compares it with spend in the account's.
+			if list[i].unit == UnitPayers && list[i].target != nil {
+				t := int64(math.Round(float64(*list[i].target) / k))
+				list[i].target = &t
+			}
+		}
 	}
 	lags := map[string]int{}
 	n := 0
@@ -237,7 +268,7 @@ func (r *Runner) brandFinding(ctx context.Context, tx pgx.Tx, ws string, m measu
 	evidence, _ := json.Marshal([]map[string]any{
 		{"kind": "action", "ref": m.id, "note": fmt.Sprintf("the %s finding on campaign %s (%s)", m.kind, m.entity, m.rule)},
 		{"kind": "metric", "ref": "cost_per_" + unitRef(m.unit), "note": fmt.Sprintf("before: %s over %d days (%.0f); after: %s over %d days (%.0f)",
-			costWord(before, m.currency), before.Days, before.Conv, costWord(after, m.currency), after.Days, after.Conv)},
+			costWord(before, m.cash), before.Days, before.Conv, costWord(after, m.cash), after.Days, after.Conv)},
 	})
 	scope, _ := json.Marshal(map[string]any{"channel": "paid_ads"})
 	var id string
@@ -257,11 +288,19 @@ func unitRef(unit string) string {
 	return "conversion"
 }
 
-func costWord(n numbers, cur string) string {
+func costWord(n numbers, cash func(float64) string) string {
 	if n.Conv <= 0 {
-		return "no " + "conversions for " + money(float64(n.Spend), cur)
+		return "no " + "conversions for " + cash(float64(n.Spend))
 	}
-	return money(n.cost(), cur)
+	return cash(n.cost())
+}
+
+// cash writes micros of the account's currency in the brand's own.
+func (m measuring) cash(micros float64) string {
+	if m.report == "" || m.fx <= 0 {
+		return money(micros, m.currency)
+	}
+	return money(micros*m.fx, m.report)
 }
 
 // leverWord says what a kind does, for a finding's text.

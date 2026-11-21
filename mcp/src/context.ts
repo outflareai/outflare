@@ -37,6 +37,7 @@ Outflare is the brain of a company's go-to-market. It sends cold email from the 
 - Agents and the action layer: your changes run, wait for a person or are refused by the grants a person gave your token (list_actions). run_playbook hands a playbook to Outflare's agent. An agent can never approve its own changes. Missions are retired; what they did stays readable.
 - Outcomes and reports: meetings, deals and spend give cost per meeting; reports and analytics show what is working.
 - Reddit campaigns: comments, replies, posts and upvotes placed through Engain (the workspace's own connection), within each brand's budget, as experiments whose results are tracked. Read get_reddit_guide before the first one.
+- Data: every table of the brand's data can be read with SQL (run_query, read-only). describe_brand_data says what each table holds, what each column means and how fresh it is: read it before writing SQL, and join across areas (spend, ads, visits, events, payments) to tell cause from effect.
 - Events: every change is in the audit log and events feed (list_events), and can go to webhooks.
 
 ## When something is wrong

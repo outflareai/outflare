@@ -5,9 +5,11 @@ package api
 // A dashboard keeps no results; every view runs its tiles again.
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/outflareai/outflare/engine/internal/insights"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,6 +38,9 @@ type dashboardSettings struct {
 	Compare bool `json:"compare,omitempty"`
 	// Digest puts the dashboard's trends in the workspace's digest.
 	Digest bool `json:"digest,omitempty"`
+	// Filters go on every event and page view part of every tile
+	// (withDashboardFilters).
+	Filters []insights.Filter `json:"filters,omitempty"`
 }
 
 func checkDashboardSettings(raw json.RawMessage) ([]byte, error) {
@@ -52,6 +57,9 @@ func checkDashboardSettings(raw json.RawMessage) ([]byte, error) {
 		if _, _, err := st.DateRange.resolve(time.Now()); err != nil {
 			return nil, errInvalid("settings.date_range: " + err.Error())
 		}
+	}
+	if err := checkDashboardFilters(st.Filters); err != nil {
+		return nil, err
 	}
 	return json.Marshal(st)
 }
@@ -80,16 +88,31 @@ func scanDashboard(row pgx.Row) (dashboardView, error) {
 }
 
 // tileView is one tile: a saved insight (with its spec, so the app can
-// run it) or a note.
+// run it), a saved report (the app runs it with GET .../drilldown?view=)
+// or a note.
 type tileView struct {
-	ID        string       `json:"id"`
-	InsightID *string      `json:"insight_id"`
-	Insight   *insightView `json:"insight"`
-	Note      string       `json:"note"`
-	X         int          `json:"x"`
-	Y         int          `json:"y"`
-	W         int          `json:"w"`
-	H         int          `json:"h"`
+	ID           string          `json:"id"`
+	InsightID    *string         `json:"insight_id"`
+	Insight      *insightView    `json:"insight"`
+	ReportViewID *string         `json:"report_view_id"`
+	ReportView   *tileReportView `json:"report_view"`
+	Note         string          `json:"note"`
+	X            int             `json:"x"`
+	Y            int             `json:"y"`
+	W            int             `json:"w"`
+	H            int             `json:"h"`
+	// OwnDates keeps the insight's own dates on a dashboard that sets a
+	// date range for its tiles.
+	OwnDates bool `json:"own_dates"`
+}
+
+// tileReportView is a tile's saved report: what the app needs to title
+// it and say what it reports on.
+type tileReportView struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Source  string   `json:"source"`
+	GroupBy []string `json:"group_by"`
 }
 
 type dashboardDetail struct {
@@ -98,9 +121,10 @@ type dashboardDetail struct {
 }
 
 func (s *Server) dashboardTiles(r *http.Request, q pgxQuerier, dashboard string) ([]tileView, error) {
-	rows, err := q.Query(r.Context(), `SELECT t.id::text, t.insight_id::text, t.note, t.x, t.y, t.w, t.h,
-			i.id::text, i.brand_id::text, i.kind, i.name, i.description, i.spec, i.created_by::text, i.created_at, i.updated_at
-		FROM dashboard_tiles t LEFT JOIN insights i ON i.id = t.insight_id
+	rows, err := q.Query(r.Context(), `SELECT t.id::text, t.insight_id::text, t.note, t.x, t.y, t.w, t.h, t.own_dates,
+			i.id::text, i.brand_id::text, i.kind, i.name, i.description, i.spec, i.created_by::text, i.created_at, i.updated_at,
+			t.report_view_id::text, v.name, v.spec
+		FROM dashboard_tiles t LEFT JOIN insights i ON i.id = t.insight_id LEFT JOIN report_views v ON v.id = t.report_view_id
 		WHERE t.dashboard_id = $1 ORDER BY t.y, t.x, t.created_at`, dashboard)
 	if err != nil {
 		return nil, err
@@ -111,9 +135,17 @@ func (s *Server) dashboardTiles(r *http.Request, q pgxQuerier, dashboard string)
 		var ispec []byte
 		var icreatedBy *string
 		var icreated, iupdated *time.Time
-		if err := row.Scan(&t.ID, &t.InsightID, &t.Note, &t.X, &t.Y, &t.W, &t.H,
-			&iid, &ibrand, &ikind, &iname, &idesc, &ispec, &icreatedBy, &icreated, &iupdated); err != nil {
+		var vname *string
+		var vspec []byte
+		if err := row.Scan(&t.ID, &t.InsightID, &t.Note, &t.X, &t.Y, &t.W, &t.H, &t.OwnDates,
+			&iid, &ibrand, &ikind, &iname, &idesc, &ispec, &icreatedBy, &icreated, &iupdated,
+			&t.ReportViewID, &vname, &vspec); err != nil {
 			return t, err
+		}
+		if t.ReportViewID != nil && vname != nil {
+			var spec reportViewSpec
+			_ = json.Unmarshal(vspec, &spec)
+			t.ReportView = &tileReportView{ID: *t.ReportViewID, Name: *vname, Source: cmp.Or(spec.Source, "site"), GroupBy: nonNil(spec.GroupBy)}
 		}
 		if iid != nil {
 			t.Insight = &insightView{ID: *iid, BrandID: *ibrand, Kind: *ikind, Name: *iname, Description: *idesc, Spec: ispec,
@@ -167,13 +199,15 @@ type dashboardInput struct {
 }
 
 type tileInput struct {
-	ID        string  `json:"id,omitempty"`
-	InsightID *string `json:"insight_id"`
-	Note      *string `json:"note"`
-	X         *int    `json:"x"`
-	Y         *int    `json:"y"`
-	W         *int    `json:"w"`
-	H         *int    `json:"h"`
+	ID           string  `json:"id,omitempty"`
+	InsightID    *string `json:"insight_id"`
+	ReportViewID *string `json:"report_view_id"`
+	Note         *string `json:"note"`
+	X            *int    `json:"x"`
+	Y            *int    `json:"y"`
+	W            *int    `json:"w"`
+	H            *int    `json:"h"`
+	OwnDates     *bool   `json:"own_dates"`
 }
 
 func (t tileInput) place(x, y, w, h *int) error {
@@ -431,13 +465,39 @@ func (s *Server) addDashboardTile(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if insight == nil && note == "" {
-			return errInvalid("a tile is a saved insight (insight_id) or a note")
+		// A saved report: one the brand's team can all see, since everyone
+		// who opens the dashboard runs it.
+		var view *string
+		if in.ReportViewID != nil && *in.ReportViewID != "" {
+			var shared bool
+			err := tx.QueryRow(r.Context(), `SELECT id::text, shared FROM report_views WHERE workspace_id = $1 AND brand_id = $2 AND id = $3
+				AND (shared OR created_by IS NOT DISTINCT FROM $4::uuid)`, a.WorkspaceID, a.Brand, validOrNil(*in.ReportViewID), a.ActorID).Scan(&view, &shared)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errInvalid("report_view_id isn't a saved report of this brand")
+			}
+			if err != nil {
+				return err
+			}
+			if !shared {
+				return errInvalid("share the saved report with the team first (PATCH .../report-views/{id} with shared: true): everyone who opens the dashboard sees it")
+			}
+			if insight != nil {
+				return errInvalid("a tile is a saved insight or a saved report, not both")
+			}
+			if note != "" {
+				return errInvalid("a saved report's tile takes no note: add a note tile beside it")
+			}
+		}
+		if insight == nil && view == nil && note == "" {
+			return errInvalid("a tile is a saved insight (insight_id), a saved report (report_view_id) or a note")
 		}
 		// New tiles go below everything, full width for a funnel.
 		x, y, wd, h := 0, 0, 6, 4
 		if insight != nil && kind == "funnel" {
 			wd, h = 12, 6
+		}
+		if view != nil {
+			h = 5
 		}
 		if err := tx.QueryRow(r.Context(), `SELECT COALESCE(max(y + h), 0) FROM dashboard_tiles WHERE dashboard_id = $1`, cur.ID).Scan(&y); err != nil {
 			return err
@@ -448,8 +508,12 @@ func (s *Server) addDashboardTile(w http.ResponseWriter, r *http.Request) {
 		if err := in.place(&x, &y, &wd, &h); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(r.Context(), `INSERT INTO dashboard_tiles (workspace_id, brand_id, dashboard_id, insight_id, note, x, y, w, h)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, a.WorkspaceID, a.Brand, cur.ID, insight, note, x, y, wd, h); err != nil {
+		own := in.OwnDates != nil && *in.OwnDates
+		if own && insight == nil {
+			return errInvalid("own_dates is for a saved insight's tile: a note or a saved report has no dates to keep")
+		}
+		if _, err := tx.Exec(r.Context(), `INSERT INTO dashboard_tiles (workspace_id, brand_id, dashboard_id, insight_id, report_view_id, note, x, y, w, h, own_dates)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, a.WorkspaceID, a.Brand, cur.ID, insight, view, note, x, y, wd, h, own); err != nil {
 			return err
 		}
 		if err := s.touchDashboard(r, tx, a, cur.ID, []string{"tiles"}); err != nil {
@@ -486,9 +550,10 @@ func (s *Server) updateDashboardTile(w http.ResponseWriter, r *http.Request) {
 		}
 		var x, y, wd, h int
 		var note string
-		var insight *string
-		err = tx.QueryRow(r.Context(), `SELECT x, y, w, h, note, insight_id::text FROM dashboard_tiles WHERE dashboard_id = $1 AND id = $2 FOR UPDATE`,
-			cur.ID, validOrNil(r.PathValue("tile"))).Scan(&x, &y, &wd, &h, &note, &insight)
+		var own bool
+		var insight, view *string
+		err = tx.QueryRow(r.Context(), `SELECT x, y, w, h, note, insight_id::text, report_view_id::text, own_dates FROM dashboard_tiles WHERE dashboard_id = $1 AND id = $2 FOR UPDATE`,
+			cur.ID, validOrNil(r.PathValue("tile"))).Scan(&x, &y, &wd, &h, &note, &insight, &view, &own)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -500,18 +565,30 @@ func (s *Server) updateDashboardTile(w http.ResponseWriter, r *http.Request) {
 			if len(note) > 4000 {
 				return errInvalid("note is at most 4000 characters")
 			}
-			if insight == nil && note == "" {
+			if view != nil && note != "" {
+				return errInvalid("a saved report's tile takes no note: add a note tile beside it")
+			}
+			if insight == nil && view == nil && note == "" {
 				return errInvalid("a note tile needs its note; delete the tile instead")
 			}
 		}
 		if in.InsightID != nil {
 			return errInvalid("a tile's insight can't change: add a tile for the other insight")
 		}
+		if in.ReportViewID != nil {
+			return errInvalid("a tile's saved report can't change: add a tile for the other report")
+		}
+		if in.OwnDates != nil {
+			if *in.OwnDates && insight == nil {
+				return errInvalid("own_dates is for a saved insight's tile: a note or a saved report has no dates to keep")
+			}
+			own = *in.OwnDates
+		}
 		if err := in.place(&x, &y, &wd, &h); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(r.Context(), `UPDATE dashboard_tiles SET x = $2, y = $3, w = $4, h = $5, note = $6 WHERE id = $1`,
-			r.PathValue("tile"), x, y, wd, h, note); err != nil {
+		if _, err := tx.Exec(r.Context(), `UPDATE dashboard_tiles SET x = $2, y = $3, w = $4, h = $5, note = $6, own_dates = $7 WHERE id = $1`,
+			r.PathValue("tile"), x, y, wd, h, note, own); err != nil {
 			return err
 		}
 		if err := s.touchDashboard(r, tx, a, cur.ID, []string{"tiles"}); err != nil {

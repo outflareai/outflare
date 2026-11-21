@@ -554,3 +554,8 @@
 .sales-reporting .sr-growth-down { color: var(--destructive); }
 .sales-reporting .sr-growth-flat { color: var(--muted-foreground); }
 .sales-reporting .sr-value-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.5rem; }
+
+/* Keep wide evidence tables scrollable inside the card on narrow screens. */
+.sr-execution { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.sr-execution > * { min-width: 0; }
+.sr-execution select { width: 100%; min-width: 0; max-width: 100%; }

@@ -30,101 +30,101 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	}
 
 	// Adding brands: the website becomes a domain and handles come from names.
-	owner.must(400, "POST", base+"/brands", map[string]any{"website": "geonode.com"})
+	owner.must(400, "POST", base+"/brands", map[string]any{"website": "northpeak.example"})
 	owner.must(400, "POST", base+"/brands", map[string]any{"name": "X", "platforms": []string{"fax"}})
 	owner.must(400, "POST", base+"/brands", map[string]any{"name": "X", "handle": "None"})
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "https://www.geonode.com/pricing"})
-	if geo["handle"] != "geonode" || geo["website"] != "geonode.com" || geo["domains"].([]any)[0] != "geonode.com" || geo["context_version"] != 1.0 {
-		t.Fatalf("geonode: %v", geo)
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "https://www.northpeak.example/pricing"})
+	if geo["handle"] != "northpeak" || geo["website"] != "northpeak.example" || geo["domains"].([]any)[0] != "northpeak.example" || geo["context_version"] != 1.0 {
+		t.Fatalf("northpeak: %v", geo)
 	}
 	rp := owner.must(201, "POST", base+"/brands", map[string]any{
-		"name": "Repocket", "website": "repocket.com", "domains": []string{"repocket.co"}, "platforms": []string{"web", "ios", "android"},
+		"name": "Summitly", "website": "summitly.example", "domains": []string{"summitly.co"}, "platforms": []string{"web", "ios", "android"},
 	})
 	rid := rp["id"].(string)
-	if d := rp["domains"].([]any); len(d) != 2 || d[0] != "repocket.com" {
-		t.Fatalf("repocket domains: %v", d)
+	if d := rp["domains"].([]any); len(d) != 2 || d[0] != "summitly.example" {
+		t.Fatalf("summitly domains: %v", d)
 	}
 	// Links: kinds are guessed from the address, bad addresses refused.
-	links := owner.must(200, "PATCH", base+"/brands/repocket", map[string]any{"links": []map[string]any{
-		{"url": "https://apps.apple.com/app/repocket/id1"}, {"url": "play.google.com/store/apps/details?id=com.repocket"},
-		{"url": "https://www.amazon.com/dp/B0", "kind": "tv_app", "label": "Fire TV"}, {"url": "https://help.repocket.com"},
+	links := owner.must(200, "PATCH", base+"/brands/summitly", map[string]any{"links": []map[string]any{
+		{"url": "https://apps.apple.com/app/summitly/id1"}, {"url": "play.google.com/store/apps/details?id=com.summitly"},
+		{"url": "https://www.amazon.com/dp/B0", "kind": "tv_app", "label": "Fire TV"}, {"url": "https://help.summitly.example"},
 	}})["links"].([]any)
 	if len(links) != 4 || links[0].(map[string]any)["kind"] != "app_store" || links[1].(map[string]any)["kind"] != "google_play" ||
-		links[1].(map[string]any)["url"] != "https://play.google.com/store/apps/details?id=com.repocket" || links[3].(map[string]any)["kind"] != "other" {
+		links[1].(map[string]any)["url"] != "https://play.google.com/store/apps/details?id=com.summitly" || links[3].(map[string]any)["kind"] != "other" {
 		t.Fatalf("links: %v", links)
 	}
-	owner.must(400, "PATCH", base+"/brands/repocket", map[string]any{"links": []map[string]any{{"url": "javascript:alert(1)"}}})
-	owner.must(400, "PATCH", base+"/brands/repocket", map[string]any{"links": []map[string]any{{"url": "https://x.com/r", "kind": "myspace"}}})
-	owner.must(400, "POST", base+"/brands", map[string]any{"name": "repocket"})
-	owner.must(400, "PATCH", base+"/brands/geonode", map[string]any{"handle": "repocket"})
-	if b := owner.must(200, "GET", base+"/brands/repocket", nil); b["id"] != rid {
+	owner.must(400, "PATCH", base+"/brands/summitly", map[string]any{"links": []map[string]any{{"url": "javascript:alert(1)"}}})
+	owner.must(400, "PATCH", base+"/brands/summitly", map[string]any{"links": []map[string]any{{"url": "https://x.com/r", "kind": "myspace"}}})
+	owner.must(400, "POST", base+"/brands", map[string]any{"name": "summitly"})
+	owner.must(400, "PATCH", base+"/brands/northpeak", map[string]any{"handle": "summitly"})
+	if b := owner.must(200, "GET", base+"/brands/summitly", nil); b["id"] != rid {
 		t.Fatalf("by handle: %v", b)
 	}
 	owner.must(404, "GET", base+"/brands/nope", nil)
 
-	// Brand context: versioned, and each brand's own. Geonode is now the
+	// Brand context: versioned, and each brand's own. Northpeak is now the
 	// workspace's first brand, so the workspace context route edits it.
 	owner.must(200, "PATCH", base+"/context", map[string]any{"rules": "Never promise uptime numbers."})
-	bc := owner.must(200, "PATCH", base+"/brands/repocket/context", map[string]any{
+	bc := owner.must(200, "PATCH", base+"/brands/summitly/context", map[string]any{
 		"about": "Earn passive income by sharing unused internet.\nMore detail here.", "voice": "Friendly and casual.",
-		"rules": "Never mention Geonode.", "version": 1,
+		"rules": "Never mention Northpeak.", "version": 1,
 	})
 	if bc["version"] != 2.0 || bc["voice"] != "Friendly and casual." {
 		t.Fatalf("brand context: %v", bc)
 	}
-	e := owner.must(409, "PATCH", base+"/brands/repocket/context", map[string]any{"goals": "Stale", "version": 1})
+	e := owner.must(409, "PATCH", base+"/brands/summitly/context", map[string]any{"goals": "Stale", "version": 1})
 	if e["error"].(map[string]any)["code"] != "context_changed" {
 		t.Fatalf("stale brand context: %v", e)
 	}
 
 	// Business details: entered once, checked, and read by agents.
-	owner.must(400, "PATCH", base+"/brands/repocket/context", map[string]any{"address": map[string]any{"line1": "1 Example St", "city": "Sydney", "country": "ZZ"}})
-	owner.must(400, "PATCH", base+"/brands/repocket/context", map[string]any{"address": map[string]any{"city": "Sydney", "country": "AU"}})
-	owner.must(400, "PATCH", base+"/brands/repocket/context", map[string]any{"tax_id": strings.Repeat("1", 61)})
-	biz := owner.must(200, "PATCH", base+"/brands/repocket/context", map[string]any{
-		"legal_name": " Repocket Example Pty Ltd ", "tax_id": "ABN 00 000 000 000",
+	owner.must(400, "PATCH", base+"/brands/summitly/context", map[string]any{"address": map[string]any{"line1": "1 Example St", "city": "Sydney", "country": "ZZ"}})
+	owner.must(400, "PATCH", base+"/brands/summitly/context", map[string]any{"address": map[string]any{"city": "Sydney", "country": "AU"}})
+	owner.must(400, "PATCH", base+"/brands/summitly/context", map[string]any{"tax_id": strings.Repeat("1", 61)})
+	biz := owner.must(200, "PATCH", base+"/brands/summitly/context", map[string]any{
+		"legal_name": " Summitly Example Pty Ltd ", "tax_id": "ABN 00 000 000 000",
 		"address": map[string]any{"line1": "Level 2, 10 Example Street", "city": "Sydney", "region": "NSW", "postal_code": "2000", "country": "au"},
 	})
-	if biz["legal_name"] != "Repocket Example Pty Ltd" || biz["address"].(map[string]any)["country"] != "AU" ||
+	if biz["legal_name"] != "Summitly Example Pty Ltd" || biz["address"].(map[string]any)["country"] != "AU" ||
 		biz["address_text"] != "Level 2, 10 Example Street, Sydney NSW 2000, Australia" || biz["version"] != 3.0 {
 		t.Fatalf("business details: %v", biz)
 	}
-	if md := owner.must(200, "GET", base+"/context?brand=repocket", nil)["markdown"].(string); !strings.Contains(md, "- Postal address: Level 2, 10 Example Street, Sydney NSW 2000, Australia") ||
-		!strings.Contains(md, "- Legal name: Repocket Example Pty Ltd") {
+	if md := owner.must(200, "GET", base+"/context?brand=summitly", nil)["markdown"].(string); !strings.Contains(md, "- Postal address: Level 2, 10 Example Street, Sydney NSW 2000, Australia") ||
+		!strings.Contains(md, "- Legal name: Summitly Example Pty Ltd") {
 		t.Fatalf("agent context without business details:\n%s", md)
 	}
-	if same := owner.must(200, "PATCH", base+"/brands/repocket/context", map[string]any{"address": biz["address"]}); same["version"] != 3.0 {
+	if same := owner.must(200, "PATCH", base+"/brands/summitly/context", map[string]any{"address": biz["address"]}); same["version"] != 3.0 {
 		t.Fatalf("unchanged address bumped the version: %v", same["version"])
 	}
 
 	// Memories at two levels: company and brand.
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Jack approves new domains", "pinned": true})
-	rm := owner.must(201, "POST", base+"/memories", map[string]any{"text": "No discounts over 20%", "brand_id": "repocket"})
+	rm := owner.must(201, "POST", base+"/memories", map[string]any{"text": "No discounts over 20%", "brand_id": "summitly"})
 	if rm["brand_id"] != rid {
 		t.Fatalf("brand memory: %v", rm)
 	}
-	gm := owner.must(201, "POST", base+"/memories", map[string]any{"text": "Proxy buyers want SOCKS5", "brand_id": "geonode"})
+	gm := owner.must(201, "POST", base+"/memories", map[string]any{"text": "Proxy buyers want SOCKS5", "brand_id": "northpeak"})
 	if gm["brand_id"] != geo["id"] {
-		t.Fatalf("geonode memory: %v", gm)
+		t.Fatalf("northpeak memory: %v", gm)
 	}
 
 	// Without a brand: the first brand's context and a line per other brand.
 	c := owner.must(200, "GET", base+"/context", nil)
 	md := c["markdown"].(string)
-	if c["memory_count"] != 2.0 || len(c["brands"].([]any)) != 2 || !strings.Contains(md, "Repocket (brand repocket, repocket.com): Earn passive income") ||
+	if c["memory_count"] != 2.0 || len(c["brands"].([]any)) != 2 || !strings.Contains(md, "Summitly (brand summitly, summitly.example): Earn passive income") ||
 		!strings.Contains(md, "Never promise uptime") || c["projects"] != nil {
 		t.Fatalf("first brand's context: %v\n%s", c, md)
 	}
 	// With a brand: that brand's alone, other brands' rules and memories
 	// left out.
-	c = owner.must(200, "GET", base+"/context?brand=repocket", nil)
+	c = owner.must(200, "GET", base+"/context?brand=summitly", nil)
 	md = c["markdown"].(string)
 	if c["brand"].(map[string]any)["brand_id"] != rid || c["memory_count"] != 1.0 ||
-		strings.Contains(md, "Never promise uptime") || !strings.Contains(md, "# Repocket") || !strings.Contains(md, "- Fire TV: https://www.amazon.com/dp/B0") || !strings.Contains(md, "Never mention Geonode") {
-		t.Fatalf("repocket context: %v\n%s", c, md)
+		strings.Contains(md, "Never promise uptime") || !strings.Contains(md, "# Summitly") || !strings.Contains(md, "- Fire TV: https://www.amazon.com/dp/B0") || !strings.Contains(md, "Never mention Northpeak") {
+		t.Fatalf("summitly context: %v\n%s", c, md)
 	}
-	if c := owner.must(200, "GET", base+"/context?brand=geonode", nil); c["memory_count"] != 2.0 {
-		t.Fatalf("geonode context: %v", c)
+	if c := owner.must(200, "GET", base+"/context?brand=northpeak", nil); c["memory_count"] != 2.0 {
+		t.Fatalf("northpeak context: %v", c)
 	}
 	owner.must(404, "GET", base+"/context?brand=nope", nil)
 	// Brands share no memories, so none is left without a brand.
@@ -136,34 +136,34 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	// Moving records: lists filter by brand.
 	list := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Gamers"})
 	other := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Proxy leads"})
-	owner.must(400, "POST", base+"/brands/repocket/add", map[string]any{})
-	moved := owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{
+	owner.must(400, "POST", base+"/brands/summitly/add", map[string]any{})
+	moved := owner.must(200, "POST", base+"/brands/summitly/add", map[string]any{
 		"lead_list_ids": []string{list["id"].(string), other["id"].(string)},
 	})["moved"].(map[string]any)
 	if moved["lead_lists"] != 2.0 || moved["in_project"] != nil {
 		t.Fatalf("moved: %v", moved)
 	}
-	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=repocket", nil)["data"].([]any)); n != 2 {
-		t.Fatalf("repocket lists: %d", n)
+	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=summitly", nil)["data"].([]any)); n != 2 {
+		t.Fatalf("summitly lists: %d", n)
 	}
 	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=none", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("shared lists: %d", n)
 	}
 	owner.must(404, "GET", base+"/lead-lists?brand=nope", nil)
-	b := owner.must(200, "GET", base+"/brands/repocket", nil)
+	b := owner.must(200, "GET", base+"/brands/summitly", nil)
 	if c := b["counts"].(map[string]any); c["projects"] != nil || c["lead_lists"] != 2.0 {
 		t.Fatalf("counts: %v", c)
 	}
 	// Brands share nothing: a list can't be taken out of every brand, only
 	// moved to another.
-	owner.must(400, "POST", base+"/brands/repocket/remove", map[string]any{"lead_list_ids": []string{list["id"].(string)}})
-	owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"lead_list_ids": []string{list["id"].(string)}})
-	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=repocket", nil)["data"].([]any)); n != 1 {
-		t.Fatalf("repocket lists after the move: %d", n)
+	owner.must(400, "POST", base+"/brands/summitly/remove", map[string]any{"lead_list_ids": []string{list["id"].(string)}})
+	owner.must(200, "POST", base+"/brands/northpeak/add", map[string]any{"lead_list_ids": []string{list["id"].(string)}})
+	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=summitly", nil)["data"].([]any)); n != 1 {
+		t.Fatalf("summitly lists after the move: %d", n)
 	}
 
 	// Archiving hides a brand from the default list but keeps it.
-	owner.must(200, "PATCH", base+"/brands/geonode", map[string]any{"status": "archived"})
+	owner.must(200, "PATCH", base+"/brands/northpeak", map[string]any{"status": "archived"})
 	if n := len(owner.must(200, "GET", base+"/brands", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("active brands: %d", n)
 	}
@@ -175,7 +175,7 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	// Reading alone cannot add brands or write their context; every brand action is an event.
 	reader := &client{t: t, h: h, bearer: owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "r", "scopes": []string{"workspace.read"}})["token"].(string)}
 	reader.must(403, "POST", base+"/brands", map[string]any{"name": "Games"})
-	reader.must(403, "PATCH", base+"/brands/repocket/context", map[string]any{"about": "x"})
+	reader.must(403, "PATCH", base+"/brands/summitly/context", map[string]any{"about": "x"})
 	time.Sleep(10 * time.Millisecond)
 	ev := got()
 	for _, name := range []string{"brand.created", "brand.context_updated", "brand.records_added", "brand.archived"} {
@@ -190,29 +190,29 @@ func TestBrandMailboxesSendOnlyForTheirBrand(t *testing.T) {
 	clock := &fakeClock{}
 	clock.Set(time.Date(2030, 1, 8, 10, 0, 0, 0, time.UTC))
 	owner, base, _ := sendingSetup(t, e, clock)
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode"})
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket"})
-	moved := owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"domains": []string{"acme.test"}})["moved"].(map[string]any)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly"})
+	moved := owner.must(200, "POST", base+"/brands/northpeak/add", map[string]any{"domains": []string{"acme.test"}})["moved"].(map[string]any)
 	if moved["domains"] != 1.0 || moved["mailboxes"] != 2.0 {
 		t.Fatalf("moved: %v", moved)
 	}
-	if n := len(owner.must(200, "GET", base+"/mailboxes?brand=geonode", nil)["data"].([]any)); n != 2 {
-		t.Fatalf("geonode mailboxes: %d", n)
+	if n := len(owner.must(200, "GET", base+"/mailboxes?brand=northpeak", nil)["data"].([]any)); n != 2 {
+		t.Fatalf("northpeak mailboxes: %d", n)
 	}
-	if n := len(owner.must(200, "GET", base+"/sending-domains?brand=repocket", nil)["data"].([]any)); n != 0 {
-		t.Fatalf("repocket domains: %d", n)
+	if n := len(owner.must(200, "GET", base+"/sending-domains?brand=summitly", nil)["data"].([]any)); n != 0 {
+		t.Fatalf("summitly domains: %d", n)
 	}
 	seq := owner.must(201, "POST", base+"/sequences", map[string]any{
-		"name": "Repocket launch", "steps": []map[string]any{{"subject": "Hi", "body": "Hi"}},
+		"name": "Summitly launch", "steps": []map[string]any{{"subject": "Hi", "body": "Hi"}},
 	})["id"].(string)
-	owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"sequence_ids": []string{seq}})
+	owner.must(200, "POST", base+"/brands/summitly/add", map[string]any{"sequence_ids": []string{seq}})
 	if s := owner.must(200, "GET", base+"/sequences/"+seq, nil); s["brand_id"] == nil {
 		t.Fatalf("sequence brand: %v", s["brand_id"])
 	}
 	boxes := mailboxIDs(t, owner, base)
 	res := owner.must(200, "POST", base+"/mailboxes/assign", map[string]any{"mailbox_ids": []string{boxes["ana@acme.test"]}, "sequence_id": seq})
 	r0 := res["data"].([]any)[0].(map[string]any)
-	if r0["result"] != "refused" || !strings.Contains(r0["message"].(string), "brand Geonode") {
+	if r0["result"] != "refused" || !strings.Contains(r0["message"].(string), "brand Northpeak") {
 		t.Fatalf("cross-brand assign: %v", res)
 	}
 }
@@ -223,15 +223,16 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
 
 	// One tool reads three sites: two match a brand's domain, one no brand's.
-	// A domain only suggests a brand: until someone assigns them, every
-	// site counts for the workspace's first brand.
+	// A site on a brand's domain is that brand's without anyone picking; the
+	// one on no brand's domain counts for the first brand until someone
+	// picks.
 	ga := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "plausible", "name": "GA4", "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}})["id"].(string)
 	day := time.Now().UTC().AddDate(0, 0, -2).Format(time.DateOnly)
-	for site, host := range map[string]string{"properties/1": "geonode.com", "properties/2": "app.repocket.com", "properties/3": "games.io"} {
+	for site, host := range map[string]string{"properties/1": "northpeak.example", "properties/2": "app.summitly.example", "properties/3": "games.io"} {
 		if _, err := e.pool.Exec(ctx, `INSERT INTO analytics_daily (workspace_id, integration_id, connector, site, host, report, day, key, visitors)
 			VALUES ($1, $2, 'plausible', $3, $4, 'traffic', $5, '', 10)`, ws, ga, site, host, day); err != nil {
 			t.Fatal(err)
@@ -240,8 +241,8 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Home lists the three sites as needing a brand, and the brands as
-	// having no analytics.
+	// Home lists only the games site as needing a brand; both brands have
+	// analytics already.
 	blockers := func() map[string]map[string]any {
 		t.Helper()
 		out := map[string]map[string]any{}
@@ -250,11 +251,11 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 		}
 		return out
 	}
-	if b := blockers(); b["analytics_site_unmapped"] == nil || b["analytics_site_unmapped"]["count"] != 3.0 || b["brand_without_analytics"] == nil {
+	if b := blockers(); b["analytics_site_unmapped"] == nil || b["analytics_site_unmapped"]["count"] != 1.0 || b["brand_without_analytics"] != nil {
 		t.Fatalf("status: %v", b)
 	}
-	owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "geonode"})
-	owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/2", "brand": "repocket"})
+	owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "northpeak"})
+	owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/2", "brand": "summitly"})
 	if b := blockers(); b["analytics_site_unmapped"] == nil || b["analytics_site_unmapped"]["count"] != 1.0 || b["brand_without_analytics"] != nil {
 		t.Fatalf("status after assigning: %v", b)
 	}
@@ -270,8 +271,8 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 		}
 		return n
 	}
-	if visitors("&brand=geonode") != 10 || visitors("&brand=repocket") != 10 {
-		t.Fatalf("by assignment: %v %v", visitors("&brand=geonode"), visitors("&brand=repocket"))
+	if visitors("&brand=northpeak") != 10 || visitors("&brand=summitly") != 10 {
+		t.Fatalf("by assignment: %v %v", visitors("&brand=northpeak"), visitors("&brand=summitly"))
 	}
 	// A day stored before the site's domain was known still lists it once.
 	if _, err := e.pool.Exec(ctx, `INSERT INTO analytics_daily (workspace_id, integration_id, connector, site, host, report, day, key, visitors)
@@ -285,31 +286,43 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 
 	// Picking a brand for the games site. No site can be shared.
 	owner.must(400, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/3", "brand": "nope"})
-	owner.must(404, "PUT", base+"/analytics/00000000-0000-0000-0000-000000000000/site-brand", map[string]any{"site": "x", "brand": "repocket"})
-	sb := owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/3", "brand": "repocket"})
+	owner.must(404, "PUT", base+"/analytics/00000000-0000-0000-0000-000000000000/site-brand", map[string]any{"site": "x", "brand": "summitly"})
+	sb := owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/3", "brand": "summitly"})
 	if sb["brand_id"] != rp || sb["source"] != "set" || sb["host"] != "games.io" {
 		t.Fatalf("set: %v", sb)
 	}
 	owner.must(400, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "none"})
-	if visitors("&brand=repocket") != 20 || visitors("&brand=geonode") != 10 {
+	if visitors("&brand=summitly") != 20 || visitors("&brand=northpeak") != 10 {
 		t.Fatal("after mapping")
 	}
 	if b := blockers(); b["analytics_site_unmapped"] != nil {
 		t.Fatalf("mapped sites still listed: %v", b["analytics_site_unmapped"])
 	}
-	if n := len(owner.must(200, "GET", base+"/analytics/site-brands?brand=repocket", nil)["data"].([]any)); n != 2 {
-		t.Fatalf("repocket sites: %d", n)
+	if n := len(owner.must(200, "GET", base+"/analytics/site-brands?brand=summitly", nil)["data"].([]any)); n != 2 {
+		t.Fatalf("summitly sites: %d", n)
 	}
-	// auto takes the assignment away: the domain only suggests, so the
-	// site counts for the first brand until it is assigned again.
-	if sb := owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "auto"}); sb["source"] != "default" || sb["brand_id"] == nil {
+	// auto takes the assignment away: the site goes back to the brand
+	// whose domain it is on.
+	if sb := owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "auto"}); sb["source"] != "domain" || sb["brand_id"] == nil {
 		t.Fatalf("auto: %v", sb)
 	}
-	owner.must(200, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("properties/1"), map[string]any{"brand_id": "geonode"})
+	owner.must(200, "PUT", base+"/integrations/"+ga+"/accounts/"+url.PathEscape("properties/1"), map[string]any{"brand_id": "northpeak"})
 	// The site's days are the brand's whatever their domain, including the
 	// one stored before its domain was known.
-	if o := owner.must(200, "GET", base+"/analytics/overview?brand=geonode", nil)["data"].([]any); len(o) != 2 {
+	if o := owner.must(200, "GET", base+"/analytics/overview?brand=northpeak", nil)["data"].([]any); len(o) != 2 {
 		t.Fatalf("overview: %v", o)
+	}
+	// A Search Console sign-in that reads several brands' properties puts
+	// each in its own brand, by the domain in the property's id, before
+	// any sync stored its domain; a subdomain counts for its parent.
+	for site, want := range map[string]string{"sc-domain:summitly.example": rp, "https://www.summitly.example/": rp, "sc-domain:games.io": ""} {
+		var b *string
+		if err := e.pool.QueryRow(ctx, `SELECT outflare_domain_brand($1, outflare_site_domain($2, $3))::text`, ws, ga, site).Scan(&b); err != nil {
+			t.Fatal(err)
+		}
+		if (want == "" && b != nil) || (want != "" && (b == nil || *b != want)) {
+			t.Fatalf("%s: %v", site, b)
+		}
 	}
 	time.Sleep(10 * time.Millisecond)
 	if len(named(got(), "analytics.site_brand_set")) != 4 {
@@ -323,28 +336,28 @@ func TestBrandAccess(t *testing.T) {
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
 
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})["id"].(string)
-	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})["id"].(string)
+	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "website": "summitly.example"})["id"].(string)
 	geoSeq := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Proxy buyers"})["id"].(string)
 	rpSeq := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Bandwidth sharers"})["id"].(string)
 	shared := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Partners"})["id"].(string)
-	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Geonode pricing is secret", "brand_id": "geonode"})
+	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Northpeak pricing is secret", "brand_id": "northpeak"})
 	// Brands share no memories: one saved with no brand is the first brand's.
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Company fact"})
-	geoList := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Geonode buyers"})["id"].(string)
+	geoList := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Northpeak buyers"})["id"].(string)
 	sharedList := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Everyone"})["id"].(string)
-	owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"sequence_ids": []string{geoSeq}, "lead_list_ids": []string{geoList}})
-	owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"sequence_ids": []string{rpSeq}})
+	owner.must(200, "POST", base+"/brands/northpeak/add", map[string]any{"sequence_ids": []string{geoSeq}, "lead_list_ids": []string{geoList}})
+	owner.must(200, "POST", base+"/brands/summitly/add", map[string]any{"sequence_ids": []string{rpSeq}})
 
 	// A brand token: one brand.
 	scopes := []string{"workspace.read", "leads.manage", "context.manage", "sequences.manage", "inbox.read", "analytics.read", "integrations.read"}
 	owner.must(400, "POST", base+"/api-tokens", map[string]any{"name": "x", "scopes": scopes, "brand": "nope"})
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": scopes, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Summitly agent", "scopes": scopes, "brand": "summitly"})
 	if tok["api_token"].(map[string]any)["brand_id"] != rp {
 		t.Fatalf("token view: %v", tok["api_token"])
 	}
 	agent := &client{t: t, h: h, bearer: tok["token"].(string)}
-	if b := agent.must(200, "GET", "/v1/whoami", nil)["token"].(map[string]any)["brand"].(map[string]any); b["handle"] != "repocket" {
+	if b := agent.must(200, "GET", "/v1/whoami", nil)["token"].(map[string]any)["brand"].(map[string]any); b["handle"] != "summitly" {
 		t.Fatalf("whoami brand: %v", b)
 	}
 	if ids := agent.must(200, "GET", base, nil)["brand_ids"].([]any); len(ids) != 1 || ids[0] != rp {
@@ -371,17 +384,17 @@ func TestBrandAccess(t *testing.T) {
 		t.Fatalf("agent lists: %v", l)
 	}
 	agent.must(404, "GET", base+"/sequences/"+geoSeq, nil)
-	agent.must(404, "GET", base+"/sequences?brand=geonode", nil)
-	agent.must(404, "GET", base+"/brands/geonode", nil)
+	agent.must(404, "GET", base+"/sequences?brand=northpeak", nil)
+	agent.must(404, "GET", base+"/brands/northpeak", nil)
 	agent.must(404, "GET", base+"/lead-lists/"+geoList, nil)
-	agent.must(404, "GET", base+"/context?brand=geonode", nil)
+	agent.must(404, "GET", base+"/context?brand=northpeak", nil)
 	c := agent.must(200, "GET", base+"/context", nil)
-	if c["brand"].(map[string]any)["brand_id"] != rp || strings.Contains(c["markdown"].(string), "Geonode pricing") || strings.Contains(c["markdown"].(string), "Company fact") {
+	if c["brand"].(map[string]any)["brand_id"] != rp || strings.Contains(c["markdown"].(string), "Northpeak pricing") || strings.Contains(c["markdown"].(string), "Company fact") {
 		t.Fatalf("agent context: %v", c)
 	}
 	for _, m := range agent.must(200, "GET", base+"/memories", nil)["data"].([]any) {
 		if m.(map[string]any)["brand_id"] == geo {
-			t.Fatalf("agent sees a Geonode memory: %v", m)
+			t.Fatalf("agent sees a Northpeak memory: %v", m)
 		}
 	}
 
@@ -395,7 +408,7 @@ func TestBrandAccess(t *testing.T) {
 	if l := agent.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Students"}); l["brand_id"] != rp {
 		t.Fatalf("agent's list: %v", l)
 	}
-	if q := agent.must(201, "POST", base+"/sequences", map[string]any{"name": "Repocket intro"}); q["brand_id"] != rp {
+	if q := agent.must(201, "POST", base+"/sequences", map[string]any{"name": "Summitly intro"}); q["brand_id"] != rp {
 		t.Fatalf("agent's sequence: %v", q)
 	}
 	agent.must(201, "POST", base+"/leads", map[string]any{"email": "sam@students.test"})
@@ -407,10 +420,10 @@ func TestBrandAccess(t *testing.T) {
 	}
 	agent.must(403, "POST", base+"/brands", map[string]any{"name": "Mine"})
 
-	// People: an operator kept to Geonode, by invite.
-	owner.must(400, "POST", base+"/invites", map[string]any{"email": "ad@example.com", "role": "admin", "brand_ids": []string{"geonode"}})
+	// People: an operator kept to Northpeak, by invite.
+	owner.must(400, "POST", base+"/invites", map[string]any{"email": "ad@example.com", "role": "admin", "brand_ids": []string{"northpeak"}})
 	owner.must(400, "POST", base+"/invites", map[string]any{"email": "op@example.com", "role": "operator", "brand_ids": []string{"nope"}})
-	inv := owner.must(201, "POST", base+"/invites", map[string]any{"email": "op@example.com", "role": "operator", "brand_ids": []string{"geonode"}})
+	inv := owner.must(201, "POST", base+"/invites", map[string]any{"email": "op@example.com", "role": "operator", "brand_ids": []string{"northpeak"}})
 	if b := inv["invite"].(map[string]any)["brand_ids"].([]any); len(b) != 1 || b[0] != geo {
 		t.Fatalf("invite brands: %v", b)
 	}
@@ -436,17 +449,17 @@ func TestBrandAccess(t *testing.T) {
 	}
 	owner.must(400, "PATCH", base+"/members/"+opID, map[string]any{})
 	owner.must(400, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"nope"}})
-	owner.must(200, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"geonode", "repocket"}})
+	owner.must(200, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"northpeak", "summitly"}})
 	op.must(200, "GET", base+"/sequences/"+rpSeq, nil)
 	op.must(403, "GET", base+"/status", nil)
 	owner.must(200, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{}})
 	op.must(200, "GET", base+"/status", nil)
 	// Admins always work on every brand.
-	owner.must(200, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"geonode"}})
+	owner.must(200, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"northpeak"}})
 	if m := owner.must(200, "PATCH", base+"/members/"+opID, map[string]any{"role": "admin"}); len(m["brand_ids"].([]any)) != 0 {
 		t.Fatalf("promoted: %v", m)
 	}
-	owner.must(400, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"geonode"}})
+	owner.must(400, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"northpeak"}})
 	op.must(200, "GET", base+"/sequences/"+rpSeq, nil)
 
 	if n := len(named(got(), "member.brands_changed")); n != 4 {
@@ -460,12 +473,12 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 	clock := &fakeClock{}
 	clock.Set(time.Date(2030, 1, 8, 10, 0, 0, 0, time.UTC)) // a Tuesday
 	owner, base, srv := sendingSetup(t, e, clock)
-	geonode := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode"})["id"].(string)
-	repocket := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket"})["id"].(string)
+	northpeak := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak"})["id"].(string)
+	summitly := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly"})["id"].(string)
 	// A mailbox sends only for its own brand's sequences (brands step 6).
 	boxes := mailboxIDs(t, owner, base)
-	owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"mailbox_ids": []string{boxes["ana@acme.test"]}})
-	owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"mailbox_ids": []string{boxes["bo@acme.test"]}})
+	owner.must(200, "POST", base+"/brands/northpeak/add", map[string]any{"mailbox_ids": []string{boxes["ana@acme.test"]}})
+	owner.must(200, "POST", base+"/brands/northpeak/add", map[string]any{"mailbox_ids": []string{boxes["bo@acme.test"]}})
 	code, imp := owner.raw("POST", base+"/leads/import?list=Founders", "text/csv", "email,first_name\nli@one-io.example,Li\nmo@two-io.example,Mo\n")
 	if code != 200 || imp["created"] != 2.0 {
 		t.Fatalf("lead import: %d %v", code, imp)
@@ -496,9 +509,9 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 	// without one it is the workspace's first brand's.
 	first := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
 	all := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/all", "events": []string{"sequence.*"}})
-	geo := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/geo", "events": []string{"sequence.*"}, "brand": "geonode"})
-	rep := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/rep", "events": []string{"sequence.*"}, "brand": "repocket"})
-	if all["brand_id"] != first || geo["brand_id"] != geonode || rep["brand_id"] != repocket {
+	geo := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/geo", "events": []string{"sequence.*"}, "brand": "northpeak"})
+	rep := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/rep", "events": []string{"sequence.*"}, "brand": "summitly"})
+	if all["brand_id"] != first || geo["brand_id"] != northpeak || rep["brand_id"] != summitly {
 		t.Fatalf("webhook brands: %v %v %v", all["brand_id"], geo["brand_id"], rep["brand_id"])
 	}
 	owner.must(400, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/x", "brand": "nope"})
@@ -510,46 +523,46 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 	owner.must(400, "PATCH", base+"/brand-rules", map[string]any{"cross_brand_days": 0})
 	owner.must(400, "PATCH", base+"/brand-rules", map[string]any{})
 
-	// Geonode emails both people.
-	geoSeq := sequence("Geonode founders", "geonode")
+	// Northpeak emails both people.
+	geoSeq := sequence("Northpeak founders", "northpeak")
 	owner.must(200, "PATCH", base+"/sequences/"+geoSeq, map[string]any{"status": "active"})
 	e.pump(t)
 	if n := len(srv.Messages()); n != 2 {
-		t.Fatalf("geonode sent %d", n)
+		t.Fatalf("northpeak sent %d", n)
 	}
 
-	// Without the rule, Repocket could email them too; with it, it can't.
-	check := owner.must(200, "POST", base+"/recipients/check", map[string]any{"emails": []string{"li@one-io.example"}, "brand": "repocket"})["data"].([]any)[0].(map[string]any)
+	// Without the rule, Summitly could email them too; with it, it can't.
+	check := owner.must(200, "POST", base+"/recipients/check", map[string]any{"emails": []string{"li@one-io.example"}, "brand": "summitly"})["data"].([]any)[0].(map[string]any)
 	if check["allowed"] != true {
 		t.Fatalf("rule off: %v", check)
 	}
 	if r := owner.must(200, "PATCH", base+"/brand-rules", map[string]any{"cross_brand_days": 30}); r["cross_brand_days"] != 30.0 {
 		t.Fatalf("set rule: %v", r)
 	}
-	check = owner.must(200, "POST", base+"/recipients/check", map[string]any{"emails": []string{"LI@one-io.example", "new@three-io.example"}, "brand": "repocket"})["data"].([]any)[0].(map[string]any)
-	if check["allowed"] != false || fmt.Sprint(check["reasons"]) != "[other_brand:geonode]" {
+	check = owner.must(200, "POST", base+"/recipients/check", map[string]any{"emails": []string{"LI@one-io.example", "new@three-io.example"}, "brand": "summitly"})["data"].([]any)[0].(map[string]any)
+	if check["allowed"] != false || fmt.Sprint(check["reasons"]) != "[other_brand:northpeak]" {
 		t.Fatalf("rule on: %v", check)
 	}
-	if check := owner.must(200, "POST", base+"/recipients/check", map[string]any{"emails": []string{"li@one-io.example"}, "brand": "geonode"})["data"].([]any)[0].(map[string]any); check["allowed"] != true {
+	if check := owner.must(200, "POST", base+"/recipients/check", map[string]any{"emails": []string{"li@one-io.example"}, "brand": "northpeak"})["data"].([]any)[0].(map[string]any); check["allowed"] != true {
 		t.Fatalf("same brand: %v", check)
 	}
 	owner.must(404, "POST", "/v1/brands/nope/recipients/check", map[string]any{"emails": []string{"li@one-io.example"}})
 
-	owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"mailbox_ids": []string{boxes["bo@acme.test"]}})
-	repSeq := sequence("Repocket founders", "repocket")
+	owner.must(200, "POST", base+"/brands/summitly/add", map[string]any{"mailbox_ids": []string{boxes["bo@acme.test"]}})
+	repSeq := sequence("Summitly founders", "summitly")
 	owner.must(200, "PATCH", base+"/sequences/"+repSeq, map[string]any{"status": "active"})
 	clock.Add(10 * time.Minute)
 	e.pump(t)
 	if n := len(srv.Messages()); n != 2 {
-		t.Fatalf("repocket sent despite the rule: %d", n)
+		t.Fatalf("summitly sent despite the rule: %d", n)
 	}
 	for email, en := range enrollments(t, owner, base, repSeq) {
-		if en["status"] != "blocked" || en["status_reason"] != "other_brand:geonode" {
+		if en["status"] != "blocked" || en["status_reason"] != "other_brand:northpeak" {
 			t.Fatalf("%s: %v", email, en)
 		}
 	}
 	blocked := named(got(), "message.blocked")
-	if len(blocked) != 2 || blocked[0].Props["reason"] != "other_brand" || blocked[0].Props["brand_id"] != repocket {
+	if len(blocked) != 2 || blocked[0].Props["reason"] != "other_brand" || blocked[0].Props["brand_id"] != summitly {
 		t.Fatalf("blocked events: %+v", blocked)
 	}
 	if ev := named(got(), "brand.rules_updated"); len(ev) != 1 {
@@ -561,37 +574,37 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 	totals := func(brand, query string) map[string]any {
 		return owner.must(200, "GET", "/v1/brands/"+brand+"/reports?"+query, nil)["totals"].(map[string]any)
 	}
-	if g, r := totals(geonode, "from=2030-01-01&to=2030-01-31"), totals(repocket, "from=2030-01-01&to=2030-01-31"); g["sent"] != 2.0 || r["sent"] != 0.0 {
+	if g, r := totals(northpeak, "from=2030-01-01&to=2030-01-31"), totals(summitly, "from=2030-01-01&to=2030-01-31"); g["sent"] != 2.0 || r["sent"] != 0.0 {
 		t.Fatalf("sends by brand: %v %v", g, r)
 	}
-	if g, r := totals(geonode, ""), totals(repocket, ""); r["blocked"] != 2.0 || g["blocked"] != 0.0 {
+	if g, r := totals(northpeak, ""), totals(summitly, ""); r["blocked"] != 2.0 || g["blocked"] != 0.0 {
 		t.Fatalf("blocks by brand: %v %v", g, r)
 	}
-	if r := owner.must(200, "GET", base+"/reports?brand=repocket&from=2030-01-01&to=2030-01-31", nil); r["totals"].(map[string]any)["sent"] != 0.0 {
-		t.Fatalf("repocket report: %v", r["totals"])
+	if r := owner.must(200, "GET", base+"/reports?brand=summitly&from=2030-01-01&to=2030-01-31", nil); r["totals"].(map[string]any)["sent"] != 0.0 {
+		t.Fatalf("summitly report: %v", r["totals"])
 	}
-	if out := owner.must(200, "GET", "/v1/brands/"+geonode+"/outcomes/report?from=2030-01-01&to=2030-01-31", nil); out["totals"].(map[string]any)["sent"] != 2.0 {
-		t.Fatalf("geonode outcomes: %v", out["totals"])
+	if out := owner.must(200, "GET", "/v1/brands/"+northpeak+"/outcomes/report?from=2030-01-01&to=2030-01-31", nil); out["totals"].(map[string]any)["sent"] != 2.0 {
+		t.Fatalf("northpeak outcomes: %v", out["totals"])
 	}
-	if r := owner.must(200, "GET", base+"/outcomes/report?brand=repocket&from=2030-01-01&to=2030-01-31", nil); r["totals"].(map[string]any)["sent"] != 0.0 {
-		t.Fatalf("repocket outcomes: %v", r["totals"])
+	if r := owner.must(200, "GET", base+"/outcomes/report?brand=summitly&from=2030-01-01&to=2030-01-31", nil); r["totals"].(map[string]any)["sent"] != 0.0 {
+		t.Fatalf("summitly outcomes: %v", r["totals"])
 	}
 
 	// The audit log and events feed know each change's brand, and a brand
 	// webhook hears only its brand.
-	owner.must(200, "PATCH", base+"/sequences/"+repSeq, map[string]any{"name": "Repocket founders 2"})
-	owner.must(200, "PATCH", base+"/sequences/"+geoSeq, map[string]any{"name": "Geonode founders 2"})
-	audit := owner.must(200, "GET", base+"/audit-events?brand=repocket", nil)["data"].([]any)
+	owner.must(200, "PATCH", base+"/sequences/"+repSeq, map[string]any{"name": "Summitly founders 2"})
+	owner.must(200, "PATCH", base+"/sequences/"+geoSeq, map[string]any{"name": "Northpeak founders 2"})
+	audit := owner.must(200, "GET", base+"/audit-events?brand=summitly", nil)["data"].([]any)
 	if len(audit) == 0 {
-		t.Fatal("no repocket audit events")
+		t.Fatal("no summitly audit events")
 	}
 	for _, ev := range audit {
-		if ev.(map[string]any)["brand_id"] != repocket {
+		if ev.(map[string]any)["brand_id"] != summitly {
 			t.Fatalf("audit brand: %v", ev)
 		}
 	}
-	feed := owner.must(200, "GET", base+"/events?types=sequence.updated&brand=geonode", nil)["data"].([]any)
-	if len(feed) != 1 || feed[0].(map[string]any)["brand_id"] != geonode {
+	feed := owner.must(200, "GET", base+"/events?types=sequence.updated&brand=northpeak", nil)["data"].([]any)
+	if len(feed) != 1 || feed[0].(map[string]any)["brand_id"] != northpeak {
 		t.Fatalf("events feed: %v", feed)
 	}
 	deliveries := func(brand, id string) int {
@@ -603,12 +616,12 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 		}
 		return n
 	}
-	if a, g, r := deliveries(first, all["id"].(string)), deliveries(geonode, geo["id"].(string)), deliveries(repocket, rep["id"].(string)); a != 0 || g != 1 || r != 1 {
-		t.Fatalf("webhook deliveries: first brand %d, geonode %d, repocket %d", a, g, r)
+	if a, g, r := deliveries(first, all["id"].(string)), deliveries(northpeak, geo["id"].(string)), deliveries(summitly, rep["id"].(string)); a != 0 || g != 1 || r != 1 {
+		t.Fatalf("webhook deliveries: first brand %d, northpeak %d, summitly %d", a, g, r)
 	}
 	// Null keeps it in its brand: brands are fully separate.
 	owner.must(200, "PATCH", base+"/webhooks/"+geo["id"].(string), map[string]any{"brand": nil})
-	if w := owner.must(200, "GET", base+"/webhooks/"+geo["id"].(string), nil); w["brand_id"] != geonode {
+	if w := owner.must(200, "GET", base+"/webhooks/"+geo["id"].(string), nil); w["brand_id"] != northpeak {
 		t.Fatalf("webhook brand cleared: %v", w)
 	}
 }

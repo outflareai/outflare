@@ -384,7 +384,7 @@ function OneClick({ ws, brand, step, method, install, canManage, catalog, back, 
     const { data, error } = await api.POST("/v1/workspaces/{ws}/brands/{brand}/setup/install", { params: { path: { ws, brand } }, body });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
-    if (data && "mission_id" in data) toast("Waiting for approval in a mission.");
+    if (data && "mission_id" in data) toast("Waiting for approval on the Agents page.");
     onQueued();
   }
 

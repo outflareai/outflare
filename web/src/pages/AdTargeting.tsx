@@ -9,12 +9,17 @@ import { ask, Badge, Button, Card, ErrorText, Loading, toast } from "../ui";
 import { money, platformName } from "./Ads";
 import { pickedBrandId } from "@/lib/brand";
 
-const methodWord: Record<string, string> = { maximize_conversions: "Maximise conversions", maximize_conversion_value: "Maximise conversion value", portfolio: "Portfolio strategy" };
+const methodWord: Record<string, string> = { maximize_conversions: "Maximise conversions", maximize_conversion_value: "Maximise conversion value", portfolio: "Portfolio strategy",
+  target_impression_share: "Target impression share", target_spend: "Maximise clicks" };
+const shareWhere: Record<string, string> = { anywhere_on_page: "anywhere on the page", top_of_page: "at the top of the page", absolute_top_of_page: "in the very first position" };
 
 function biddingWord(t: Targeting["bidding"], currency: string) {
   const name = methodWord[t.strategy] ?? t.strategy.replace(/_/g, " ");
   if (t.strategy === "set_per_ad_set") return "Set on each ad set, in Ads Manager";
   if (t.bidding_strategy_id) return `${name}, on portfolio strategy ${t.bidding_strategy_id}`;
+  const cpc = t.max_cpc_micros != null ? `, at most ${money(t.max_cpc_micros, currency)} a click` : "";
+  if (t.impression_share != null) return `${name}: ${Math.round(t.impression_share * 100)}% of searches ${shareWhere[t.impression_share_location ?? ""] ?? ""}${cpc}`;
+  if (t.strategy === "target_spend") return `${name}${cpc || ", no limit on a click"}`;
   if (t.target_cpa_micros != null) return `${name}, target ${money(t.target_cpa_micros, currency)} a conversion`;
   if (t.target_roas != null) return `${name}, target ${t.target_roas}× return`;
   return `${name}, no target`;
@@ -59,18 +64,48 @@ export function CampaignTargeting({ ws, campaign }: { ws: string; campaign: AdCa
     const res = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/bidding", { params: { path }, body: { strategy: "portfolio", bidding_strategy_id: r.choice } });
     done(res.error);
   }
+  // impressionShare asks where on the page, how often, and the most to
+  // pay for a click: Google needs all three.
+  async function impressionShare() {
+    const now = data?.targeting?.bidding;
+    const where = await ask({
+      title: "Where should the ad show, and how often?",
+      body: "Google bids to show the ad in that spot for this share of the searches it could show on. 100 means every one.",
+      input: { label: "Share of searches (%)", type: "number", value: String(Math.round((now?.impression_share ?? 1) * 100)) },
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Anywhere on the page", value: "anywhere_on_page", variant: "ghost" },
+        { label: "Top of the page", value: "top_of_page", variant: "ghost" }, { label: "Very first position", value: "absolute_top_of_page", variant: "primary" }],
+    });
+    if (!where || where.choice === "cancel") return;
+    const share = Number(where.value);
+    if (!(share > 0 && share <= 100)) return toast("The share is a number from 1 to 100.", "error");
+    const cap = await ask({
+      title: "The most to pay for a click",
+      body: `Google never bids above it, in ${campaign.currency}. Without a limit this method can pay any price to hold the spot, so one is required.`,
+      input: { label: `Most for a click (${campaign.currency})`, type: "number", placeholder: "5.00", value: now?.max_cpc_micros != null ? (now.max_cpc_micros / 1e6).toFixed(2) : "" },
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Change bidding", value: "ok", variant: "primary" }],
+    });
+    if (!cap || cap.choice !== "ok") return;
+    const max = Number(cap.value);
+    if (!(max > 0)) return toast("The most to pay for a click is an amount above zero.", "error");
+    setBusy(true);
+    const { error } = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/bidding", { params: { path },
+      body: { strategy: "target_impression_share", impression_share_location: where.choice as "anywhere_on_page" | "top_of_page" | "absolute_top_of_page", impression_share: share / 100, max_cpc_micros: Math.round(max * 1e6) } });
+    done(error);
+  }
   async function bidding() {
     const r = await ask({
       title: `Change how ${campaign.name} bids`,
-      body: `Google's bidding takes one to two weeks to settle after a change. A target is optional: a cost per conversion in ${campaign.currency} for conversions, a return such as 3 (three times spend) for value.`,
+      body: `Google's bidding takes one to two weeks to settle after a change. A target is optional: a cost per conversion in ${campaign.currency} for conversions, a return such as 3 (three times spend) for value, the most to pay for a click for clicks. Target impression share asks for its own settings next.`,
       input: { label: "Target", type: "number", optional: true, placeholder: "Optional" },
       choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, ...data!.bidding_methods.map((m) => ({ label: methodWord[m] ?? m, value: m, variant: "primary" as const }))],
     });
     if (!r) return;
     if (r.choice === "portfolio") return portfolio();
+    if (r.choice === "target_impression_share") return impressionShare();
     const v = Number(r.value);
-    const strategy = r.choice as "maximize_conversions" | "maximize_conversion_value";
-    const target = r.value.trim() === "" || !(v > 0) ? {} : strategy === "maximize_conversions" ? { target_cpa_micros: Math.round(v * 1e6) } : { target_roas: v };
+    const strategy = r.choice as "maximize_conversions" | "maximize_conversion_value" | "target_spend";
+    const target = r.value.trim() === "" || !(v > 0) ? {} : strategy === "maximize_conversions" ? { target_cpa_micros: Math.round(v * 1e6) }
+      : strategy === "target_spend" ? { max_cpc_micros: Math.round(v * 1e6) } : { target_roas: v };
     setBusy(true);
     const { error } = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/bidding", { params: { path }, body: { strategy, ...target } });
     done(error);
@@ -141,7 +176,7 @@ export function CampaignTargeting({ ws, campaign }: { ws: string; campaign: AdCa
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <div className="text-muted-foreground text-[12px]">Countries</div>
-            {t.countries.length === 0 ? "None set here" : (
+            {t.target_all_locations ? "Everywhere it isn't excluded from" : t.countries.length === 0 ? "No whole country, see the places below" : (
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {t.countries.map((c) => (
                   <Badge key={c} tone="grey">
@@ -155,6 +190,20 @@ export function CampaignTargeting({ ws, campaign }: { ws: string; campaign: AdCa
             )}
           </div>
           <Button variant="ghost" disabled={busy} onClick={addCountry}>Add country</Button>
+        </div>
+        {t.included_locations.some((l) => l.target_type !== "Country") && (
+          <div>
+            <div className="text-muted-foreground text-[12px]">Regions, cities and radiuses it shows in</div>
+            {t.included_locations.filter((l) => l.target_type !== "Country").map((l) => l.radius != null ? `${l.radius} ${l.radius_units} around ${l.name || "a point"}` : l.name || l.geo_target_constant).join("; ")}
+          </div>
+        )}
+        <div>
+          <div className="text-muted-foreground text-[12px]">Excluded places</div>
+          {t.excluded_locations.length === 0 ? "None" : (
+            <div className="flex flex-wrap gap-1.5 pt-1" data-excluded-places>
+              {t.excluded_locations.map((l) => <Badge key={l.criterion_id || l.name} tone="grey">{l.name || l.geo_target_constant}</Badge>)}
+            </div>
+          )}
         </div>
         {t.notes.length > 0 && <ul className="text-[12px] text-muted-foreground list-disc pl-4">{t.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
       </div>

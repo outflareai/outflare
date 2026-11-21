@@ -294,7 +294,7 @@ const audienceWhere = `
 	FROM records r
 	JOIN LATERAL (SELECT value FROM record_identities i WHERE i.record_id = r.id AND i.namespace = 'email'
 		AND (i.verified OR $3 IN ('records', 'list'))
-		AND i.valid_to IS NULL ORDER BY i.verified DESC, i.valid_from, i.id LIMIT 1) i ON true
+		AND i.valid_to IS NULL ORDER BY i.preferred DESC, i.verified DESC, i.valid_from DESC, i.id LIMIT 1) i ON true
 	WHERE r.workspace_id = $1 AND r.record_type = 'person' AND r.archived_at IS NULL AND r.merged_into IS NULL AND r.deleted_at IS NULL
 	  AND ($2::uuid IS NULL OR r.brand_id = $2::uuid)
 	  AND ($3 <> 'records' OR r.id = ANY($4::uuid[]))
@@ -330,7 +330,7 @@ func AudienceBases(ctx context.Context, q interface {
 			(SELECT c.status FROM consents c WHERE c.workspace_id = r.workspace_id AND c.record_id = r.id AND c.channel = 'email'
 				AND c.topic = '' AND c.purpose = 'marketing' ORDER BY c.occurred_at DESC, c.created_at DESC LIMIT 1)
 			WHEN 'granted' THEN 'opted_in' WHEN 'withdrawn' THEN 'opted_out'
-			ELSE CASE r.origin WHEN 'first_party' THEN 'customer' WHEN 'prospect' THEN 'third_party' ELSE 'unknown' END
+			ELSE CASE outflare_contact_origin(r.origin, r.attributes) WHEN 'first_party' THEN 'customer' WHEN 'prospect' THEN 'third_party' ELSE 'unknown' END
 		END AS b`+audienceWhere+`) t GROUP BY b`, append([]any{ws, brandID}, a.args()...)...)
 	if err != nil {
 		return nil, err
@@ -351,7 +351,7 @@ func AudienceBases(ctx context.Context, q interface {
 // audienceBatch is the next people after the cursor.
 func audienceBatch(ctx context.Context, tx pgx.Tx, b broadcast) ([]person, error) {
 	a := Audience{Kind: b.audience, RecordIDs: b.recordIDs, Ref: deref(b.ref)}
-	rows, err := tx.Query(ctx, `SELECT r.id::text, r.name, r.origin, i.value, r.attributes`+audienceWhere+`
+	rows, err := tx.Query(ctx, `SELECT r.id::text, r.name, outflare_contact_origin(r.origin, r.attributes), i.value, r.attributes`+audienceWhere+`
 		AND ($6::uuid IS NULL OR r.id > $6::uuid) ORDER BY r.id LIMIT $7`, append(append([]any{b.ws, b.brandID}, a.args()...), b.cursor, broadcastBatch)...)
 	if err != nil {
 		return nil, err
@@ -424,7 +424,7 @@ func basisBlock(ctx context.Context, q jobs.Querier, ws, recordID, origin string
 // lifecycle email of the topic (nil for none), or "".
 func SkipReason(ctx context.Context, q jobs.Querier, ws, recordID string, topicID *string) (string, error) {
 	var origin string
-	if err := q.QueryRow(ctx, `SELECT origin FROM records WHERE workspace_id = $1 AND id = $2`, ws, recordID).Scan(&origin); err != nil {
+	if err := q.QueryRow(ctx, `SELECT outflare_contact_origin(origin, attributes) FROM records WHERE workspace_id = $1 AND id = $2`, ws, recordID).Scan(&origin); err != nil {
 		return "", err
 	}
 	key, name, byDefault := "", "", true

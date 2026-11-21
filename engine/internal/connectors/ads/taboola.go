@@ -1,13 +1,17 @@
 package ads
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -45,9 +49,9 @@ func (TaboolaAds) Definition() c.Definition {
 	d := def("taboola_ads", "Taboola Ads", "https://www.taboola.com",
 		"https://developers.taboola.com/backstage-api/reference/welcome", "",
 		"Spend, impressions, clicks and conversions per campaign from your Taboola advertiser accounts.",
-		"Uses your own Backstage API credentials: ask your Taboola account manager for API access, and paste the client id and secret they issue. A network's credentials read every advertiser account under it. Read-only; conversions go back to your event-based conversions as server-to-server actions, matched on Taboola's click id.")
+		"Uses your own Backstage API credentials: ask your Taboola account manager for API access, and paste the client id and secret they issue. A network's credentials read every advertiser account under it. Outflare changes a campaign only when you ask: pause, resume, its daily cap, blocking a publisher site on it, and pausing or resuming one of its ads. Conversions go back to your event-based conversions as server-to-server actions, matched on Taboola's click id.")
 	d.Auth = c.AuthAPIKey
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions)
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsManage)
 	d.Fields = []c.Field{
 		{Name: "client_id", Label: "Client ID", Secret: false, Help: "From your Taboola account manager, issued with Backstage API access."},
 		{Name: "client_secret", Label: "Client secret", Secret: true},
@@ -121,12 +125,25 @@ func (t TaboolaAds) token(ctx context.Context, cl *c.Client, creds c.Creds, fres
 	return out.AccessToken, nil
 }
 
-// get sends one GET to the Backstage API, trading the credentials for a
-// token first; a refused token is traded again once.
+// get sends one GET to the Backstage API.
 func (t TaboolaAds) get(ctx context.Context, cl *c.Client, creds c.Creds, path string, q url.Values, out any) (int, error) {
+	return t.send(ctx, cl, creds, http.MethodGet, path, q, nil, out)
+}
+
+// send sends one call to the Backstage API, trading the credentials for a
+// token first; a refused token is traded again once. body, when not nil,
+// goes as JSON.
+func (t TaboolaAds) send(ctx context.Context, cl *c.Client, creds c.Creds, method, path string, q url.Values, body, out any) (int, error) {
 	u := t.base(cl) + taboolaAPI + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
+	}
+	var raw []byte
+	if body != nil {
+		var err error
+		if raw, err = json.Marshal(body); err != nil {
+			return 0, c.Errf(c.ErrInvalid, "Taboola Ads can't take that request")
+		}
 	}
 	var status int
 	for attempt := 0; attempt < 2; attempt++ {
@@ -134,11 +151,18 @@ func (t TaboolaAds) get(ctx context.Context, cl *c.Client, creds c.Creds, path s
 		if err != nil {
 			return 0, err
 		}
-		req, err := http.NewRequest(http.MethodGet, u, nil)
+		var rd io.Reader
+		if raw != nil {
+			rd = bytes.NewReader(raw)
+		}
+		req, err := http.NewRequest(method, u, rd)
 		if err != nil {
 			return 0, c.Errf(c.ErrInvalid, "bad Taboola Ads address: %v", err)
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)
+		if raw != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		status, err = c.DoJSON(ctx, cl, "Taboola Ads", req, out)
 		if status == http.StatusUnauthorized && attempt == 0 {
 			continue
@@ -237,10 +261,16 @@ func (t TaboolaAds) AdAccounts(ctx context.Context, cl *c.Client, creds c.Creds)
 
 // ---- campaigns ----
 
-// taboolaStatus maps a campaign's status onto the shared statuses.
-func taboolaStatus(word string) string {
+// taboolaStatus maps a campaign's status onto the shared statuses. A
+// campaign the advertiser paused still reads RUNNING: Taboola says so with
+// is_active false ("When status = RUNNING and is_active = false, then the
+// campaign is PAUSED"), which active carries; nil when it wasn't sent.
+func taboolaStatus(word string, active *bool) string {
 	switch strings.ToUpper(strings.TrimSpace(word)) {
 	case "RUNNING":
+		if active != nil && !*active {
+			return c.AdPaused
+		}
 		return c.AdActive
 	case "PAUSED":
 		return c.AdPaused
@@ -259,6 +289,7 @@ func (t TaboolaAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds
 				ID                 string  `json:"id"`
 				Name               string  `json:"name"`
 				Status             string  `json:"status"`
+				IsActive           *bool   `json:"is_active"`
 				MarketingObjective string  `json:"marketing_objective"`
 				DailyCap           flexNum `json:"daily_cap"`
 			} `json:"results"`
@@ -270,7 +301,7 @@ func (t TaboolaAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds
 			return nil, err
 		}
 		for _, cp := range resp.Results {
-			camp := c.AdCampaign{ID: cp.ID, Name: cp.Name, Status: taboolaStatus(cp.Status), ProviderStatus: cp.Status,
+			camp := c.AdCampaign{ID: cp.ID, Name: cp.Name, Status: taboolaStatus(cp.Status, cp.IsActive), ProviderStatus: cp.Status,
 				Objective: strings.ToLower(cp.MarketingObjective)}
 			// daily_cap is in the account's currency; 0 means none.
 			if cp.DailyCap > 0 {
@@ -334,6 +365,151 @@ func (t TaboolaAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acc
 		}
 	}
 	return out, nil
+}
+
+// ---- ads (items) ----
+
+var _ c.AdCampaignAdsReader = TaboolaAds{}
+
+const (
+	// taboolaItemDays is the most days of ads one sync reads: the content
+	// report has no day breakdown, so each day is a call of its own.
+	taboolaItemDays = 31
+	// taboolaItemCampaigns is the most campaigns whose items one sync
+	// lists, the ones that spent most first.
+	taboolaItemCampaigns = 50
+)
+
+// taboolaItem is an ad as a campaign's item list returns it.
+type taboolaItem struct {
+	ID            flexStr `json:"id"`
+	CampaignID    flexStr `json:"campaign_id"`
+	Type          string  `json:"type"`
+	URL           string  `json:"url"`
+	ThumbnailURL  string  `json:"thumbnail_url"`
+	Title         string  `json:"title"`
+	ApprovalState string  `json:"approval_state"`
+	Status        string  `json:"status"`
+}
+
+// item maps a listed item. Its status is Taboola's word: RUNNING and
+// PAUSED are what they say; an item being crawled, waiting for approval,
+// rejected or stopped is none of the shared ones.
+func (i taboolaItem) item() c.AdItem {
+	st := c.AdOther
+	switch strings.ToUpper(i.Status) {
+	case "RUNNING":
+		st = c.AdActive
+	case "PAUSED":
+		st = c.AdPaused
+	}
+	policy := map[string]string{"APPROVED": "approved", "REJECTED": "disapproved", "PENDING": "under_review"}[strings.ToUpper(i.ApprovalState)]
+	return c.AdItem{ID: string(i.ID), ParentID: string(i.CampaignID), Name: i.Title, Status: st, ProviderStatus: i.Status,
+		Details: adDetails(map[string]string{c.AdDetailType: strings.ToLower(i.Type), c.AdDetailHeadline: i.Title, c.AdDetailURL: i.URL,
+			c.AdDetailThumbnail: i.ThumbnailURL, c.AdDetailPolicy: policy})}
+}
+
+// CampaignAds reads the ads (Taboola's items) that were shown in the
+// window, with their numbers per day. The top campaign content report
+// lists up to 1,000 items for a range with no day breakdown, so it is read
+// a day at a time, for the window's last 31 days at most. What each ad is
+// doing now comes from its campaign's item list, read for the 50 campaigns
+// that spent most; an ad of another campaign keeps the status it had.
+func (t TaboolaAds) CampaignAds(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdItem, []c.AdItemDay, error) {
+	all := days(from, to)
+	if len(all) > taboolaItemDays {
+		all = all[len(all)-taboolaItemDays:]
+	}
+	reported := map[string]c.AdItem{}
+	var order []string
+	spent := map[string]int64{}
+	var out []c.AdItemDay
+	for _, date := range all {
+		var resp struct {
+			Results []struct {
+				Item             flexStr  `json:"item"`
+				ItemName         string   `json:"item_name"`
+				ThumbnailURL     string   `json:"thumbnail_url"`
+				URL              string   `json:"url"`
+				Campaign         flexStr  `json:"campaign"`
+				Spent            flexNum  `json:"spent"`
+				Impressions      flexInt  `json:"impressions"`
+				Clicks           flexInt  `json:"clicks"`
+				Actions          *flexNum `json:"actions"`
+				ConversionsValue *flexNum `json:"conversions_value"`
+			} `json:"results"`
+		}
+		q := url.Values{"start_date": {date}, "end_date": {date}}
+		if _, err := t.get(ctx, cl, creds, "/"+esc(acct.ID)+"/reports/top-campaign-content/dimensions/item_breakdown", q, &resp); err != nil {
+			return nil, nil, err
+		}
+		for _, r := range resp.Results {
+			id, camp := string(r.Item), string(r.Campaign)
+			if id == "" || camp == "" || r.Spent == 0 && r.Impressions == 0 && r.Clicks == 0 {
+				continue
+			}
+			day := c.AdItemDay{ID: id, ParentID: camp, Name: r.ItemName, Date: date, SpendMicros: micros(float64(r.Spent)),
+				Impressions: int64(r.Impressions), Clicks: int64(r.Clicks)}
+			if r.Actions != nil {
+				day.Conversions = ptrF(float64(*r.Actions))
+			}
+			if r.ConversionsValue != nil && *r.ConversionsValue > 0 {
+				day.ConversionValueMicros = ptrI(micros(float64(*r.ConversionsValue)))
+			}
+			out = append(out, day)
+			spent[camp] += day.SpendMicros
+			if _, ok := reported[id]; !ok {
+				order = append(order, id)
+			}
+			// The newest day's name and link win.
+			reported[id] = c.AdItem{ID: id, ParentID: camp, Name: r.ItemName,
+				Details: adDetails(map[string]string{c.AdDetailHeadline: r.ItemName, c.AdDetailURL: r.URL, c.AdDetailThumbnail: r.ThumbnailURL})}
+		}
+	}
+	camps := make([]string, 0, len(spent))
+	for id := range spent {
+		if taboolaCampaignID(id) == nil {
+			camps = append(camps, id)
+		}
+	}
+	slices.SortFunc(camps, func(a, b string) int {
+		if spent[a] != spent[b] {
+			if spent[a] > spent[b] {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
+	if len(camps) > taboolaItemCampaigns {
+		camps = camps[:taboolaItemCampaigns]
+	}
+	var items []c.AdItem
+	listed := map[string]bool{}
+	for _, camp := range camps {
+		var resp struct {
+			Results []taboolaItem `json:"results"`
+		}
+		if _, err := t.get(ctx, cl, creds, t.campaignPath(acct, camp)+"/items/", nil, &resp); err != nil {
+			return nil, nil, err
+		}
+		for _, i := range resp.Results {
+			if i.ID == "" {
+				continue
+			}
+			if i.CampaignID == "" {
+				i.CampaignID = flexStr(camp)
+			}
+			items = append(items, i.item())
+			listed[string(i.ID)] = true
+		}
+	}
+	for _, id := range order {
+		if !listed[id] {
+			items = append(items, reported[id])
+		}
+	}
+	return items, out, nil
 }
 
 // flexStr reads an id sent as a JSON string or number.
@@ -437,4 +613,132 @@ func (t TaboolaAds) SendConversions(ctx context.Context, cl *c.Client, creds c.C
 		}
 	}
 	return results, nil
+}
+
+// ---- changes ----
+//
+// Outflare changes a Taboola campaign only when asked (Backstage API,
+// "Update a Campaign" and "Patching targeted publishers"): it pauses or
+// resumes it, sets its daily cap, and blocks or unblocks one publisher
+// site on it. A campaign is updated with POST on its own address, where
+// fields left out stay as they are.
+
+var (
+	_ c.AdsManager         = TaboolaAds{}
+	_ c.AdExclusionManager = TaboolaAds{}
+)
+
+// taboolaCampaignID checks an id before it goes into a path: Taboola's
+// campaign ids are numbers.
+func taboolaCampaignID(id string) error {
+	if id == "" || strings.Trim(id, "0123456789") != "" {
+		return c.Errf(c.ErrInvalid, "not a Taboola campaign id: %q", id)
+	}
+	return nil
+}
+
+func (t TaboolaAds) campaignPath(acct c.AdAccount, campaignID string) string {
+	return "/" + esc(acct.ID) + "/campaigns/" + esc(campaignID)
+}
+
+// AdCampaign reads one campaign.
+func (t TaboolaAds) AdCampaign(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string) (c.AdCampaign, error) {
+	if err := taboolaCampaignID(campaignID); err != nil {
+		return c.AdCampaign{}, err
+	}
+	var cp struct {
+		ID                 flexStr `json:"id"`
+		Name               string  `json:"name"`
+		Status             string  `json:"status"`
+		IsActive           *bool   `json:"is_active"`
+		MarketingObjective string  `json:"marketing_objective"`
+		DailyCap           flexNum `json:"daily_cap"`
+	}
+	status, err := t.get(ctx, cl, creds, t.campaignPath(acct, campaignID)+"/", nil, &cp)
+	if status == http.StatusNotFound {
+		return c.AdCampaign{}, c.ErrNotFound
+	}
+	if err != nil {
+		return c.AdCampaign{}, err
+	}
+	camp := c.AdCampaign{ID: campaignID, Name: cp.Name, Status: taboolaStatus(cp.Status, cp.IsActive), ProviderStatus: cp.Status,
+		Objective: strings.ToLower(cp.MarketingObjective)}
+	if cp.DailyCap > 0 {
+		camp.DailyBudgetMicros = ptrI(micros(float64(cp.DailyCap)))
+	}
+	return camp, nil
+}
+
+// SetCampaignStatus pauses or resumes a campaign (is_active).
+func (t TaboolaAds) SetCampaignStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, active bool) error {
+	if err := taboolaCampaignID(campaignID); err != nil {
+		return err
+	}
+	_, err := t.send(ctx, cl, creds, http.MethodPost, t.campaignPath(acct, campaignID), nil, map[string]any{"is_active": active}, nil)
+	return err
+}
+
+var _ c.AdStatusManager = TaboolaAds{}
+
+// SetAdStatus pauses or resumes one ad (an item's is_active), leaving the
+// campaign and its other items as they are. Taboola has no ad groups, so
+// adGroupID is the campaign's id. An item still waiting for approval is
+// paused once approved, which is Taboola's own rule.
+func (t TaboolaAds) SetAdStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, adGroupID, adID string, active bool) error {
+	if err := taboolaCampaignID(adGroupID); err != nil {
+		return err
+	}
+	if adID == "" || strings.Trim(adID, "0123456789") != "" {
+		return c.Errf(c.ErrInvalid, "not a Taboola item id: %q", adID)
+	}
+	_, err := t.send(ctx, cl, creds, http.MethodPost, t.campaignPath(acct, adGroupID)+"/items/"+esc(adID)+"/", nil, map[string]any{"is_active": active}, nil)
+	return err
+}
+
+// SetCampaignDailyBudget sets a campaign's daily cap, in the account's
+// currency, rounded to the cent.
+func (t TaboolaAds) SetCampaignDailyBudget(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, budget int64) error {
+	if err := taboolaCampaignID(campaignID); err != nil {
+		return err
+	}
+	if budget <= 0 {
+		return c.Errf(c.ErrInvalid, "the daily budget must be more than nothing")
+	}
+	cents := (budget + 5_000) / 10_000
+	_, err := t.send(ctx, cl, creds, http.MethodPost, t.campaignPath(acct, campaignID), nil, map[string]any{"daily_cap": float64(cents) / 100}, nil)
+	return err
+}
+
+// ExclusionKinds: a placement is a publisher site, by Taboola's alphabetic
+// site id (the site column of its reports, what {site} carries on a
+// click), which is what a campaign's publisher targeting takes.
+func (TaboolaAds) ExclusionKinds() []string { return []string{c.ExcludePlacement} }
+
+// taboolaSite is a publisher's alphabetic id, such as examplenews-home.
+var taboolaSite = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$`)
+
+// patchPublisher adds a publisher to the campaign's blocked list or takes
+// it off. Taboola patches the list one publisher at a time, so the others
+// stay as they are.
+func (t TaboolaAds) patchPublisher(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, x c.AdExclusion, op string) error {
+	if err := taboolaCampaignID(campaignID); err != nil {
+		return err
+	}
+	site := strings.TrimSpace(x.Value)
+	if x.Kind != c.ExcludePlacement || !taboolaSite.MatchString(site) {
+		return c.Errf(c.ErrInvalid, "Taboola blocks publisher sites: the site's id from its reports, such as examplenews-home")
+	}
+	_, err := t.send(ctx, cl, creds, http.MethodPatch, t.campaignPath(acct, campaignID), nil,
+		map[string]any{"patch_operation": op, "publisher_targeting": map[string]any{"publishers": []string{site}}}, nil)
+	return err
+}
+
+// AddExclusion blocks one publisher site on a campaign.
+func (t TaboolaAds) AddExclusion(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, x c.AdExclusion) error {
+	return t.patchPublisher(ctx, cl, creds, acct, campaignID, x, "ADD")
+}
+
+// RemoveExclusion unblocks it.
+func (t TaboolaAds) RemoveExclusion(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, x c.AdExclusion) error {
+	return t.patchPublisher(ctx, cl, creds, acct, campaignID, x, "REMOVE")
 }

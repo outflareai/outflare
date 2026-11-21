@@ -22,27 +22,13 @@ var brandTables embed.FS
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-var madeTable = regexp.MustCompile(`(?i)(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:UNLOGGED\s+|MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?|RENAME\s+TO\s+)"?(\w+)`)
-
 // knownTables are the tables and views this version's own migrations create
-// or rename to. The test also runs the previous version against a newer schema (CI's
-// migrations job), where a table the next version adds is one this version's
-// lists can't know about yet: that version's own run checks it.
+// or rename to (KnownTables).
 func knownTables(t *testing.T) map[string]bool {
 	t.Helper()
-	names, err := fs.Glob(migrationFiles, "migrations/*.sql")
+	known, err := db.KnownTables()
 	if err != nil {
 		t.Fatal(err)
-	}
-	known := map[string]bool{}
-	for _, name := range names {
-		b, err := migrationFiles.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, m := range madeTable.FindAllStringSubmatch(string(b), -1) {
-			known[strings.ToLower(m[1])] = true
-		}
 	}
 	return known
 }

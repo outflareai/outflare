@@ -49,7 +49,7 @@ func (s *Server) routesCRMGoogle(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+b+"sync", s.onBrand(auth.ScopeCustomersManage, s.queueCRMGoogleSync))
 	mux.HandleFunc("GET "+b+"records/{record}/capture", s.onBrand(auth.ScopeCustomersRead, s.getCRMMailCapture))
 	mux.HandleFunc("PUT "+b+"records/{record}/capture", s.onBrand(auth.ScopeCustomersManage, s.putCRMMailCapture))
-	mux.HandleFunc("GET /v1/crm-mail/google/callback", s.requireUser(s.finishCRMGoogle))
+	mux.HandleFunc("GET "+crmLegacyCallback, s.requireUser(s.finishCRMGoogle))
 }
 func readMailRollout(ctx context.Context, q mailQuery, ws, brand string) (crmMailRollout, error) {
 	out := crmMailRollout{Allowed: []string{}, Excluded: []string{}, ExcludedEmails: []string{}}
@@ -218,8 +218,12 @@ func (s *Server) putCRMMailRollout(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		salesRemoved, err := s.revokeSalesWorkspace(r.Context(), tx, a.WorkspaceID, a.Brand)
+		if err != nil {
+			return err
+		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "crm_mail.rollout_updated", "crm_mail_rollout", a.Brand, map[string]any{"brand_id": a.Brand, "enabled": in.Enabled, "allowed_count": len(in.Allowed), "excluded_count": len(in.Excluded), "excluded_email_count": len(in.ExcludedEmails),
-			"workspace": in.WorkspaceIntegrationID != nil, "workspace_mailboxes_added": added, "history_days": in.HistoryDays})
+			"workspace": in.WorkspaceIntegrationID != nil, "workspace_mailboxes_added": added, "sales_workspace_removed": salesRemoved, "history_days": in.HistoryDays})
 	})
 	if errors.Is(err, errConflict) {
 		writeError(w, r, 409, "conflict", "rollout changed; reload before saving")
@@ -273,7 +277,7 @@ func (s *Server) getCRMGoogleConnection(w http.ResponseWriter, r *http.Request) 
 	if s.oauth != nil {
 		clientID = s.oauth.Google.ID
 	}
-	writeJSON(w, 200, map[string]any{"redirect_uri": s.publicURL + "/v1/crm-mail/google/callback", "client_id": clientID, "configured": s.crmGoogleConfigured(), "eligible": eligible, "connected": connected, "status": state, "last_synced_at": at, "error_code": code, "capture_count": count, "via": via})
+	writeJSON(w, 200, map[string]any{"redirect_uri": s.loginRedirectURI(), "client_id": clientID, "configured": s.crmGoogleConfigured(), "eligible": eligible, "connected": connected, "status": state, "last_synced_at": at, "error_code": code, "capture_count": count, "via": via})
 }
 func (s *Server) authorizeCRMGoogle(w http.ResponseWriter, r *http.Request) {
 	if !s.crmMailPerson(w, r) {
@@ -292,7 +296,7 @@ func (s *Server) authorizeCRMGoogle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, 403, "forbidden", "your administrator must enable you for personal CRM mail and configure internal domains")
 		return
 	}
-	id, state, nonce, verifier := newID(), randomMailToken(), randomMailToken(), randomMailToken()
+	id, state, nonce, verifier := newID(), crmStatePrefix+randomMailToken(), randomMailToken(), randomMailToken()
 	expires := time.Now().Add(10 * time.Minute)
 	sealed := s.box.Seal([]byte(verifier), []byte(id))
 	digest := sha256.Sum256([]byte(state))
@@ -312,7 +316,7 @@ func (s *Server) authorizeCRMGoogle(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	writeJSON(w, 200, map[string]any{"url": s.oauth.ReadonlyGoogleURL(s.publicURL+"/v1/crm-mail/google/callback", state, nonce, verifier, email), "expires_at": expires})
+	writeJSON(w, 200, map[string]any{"url": s.oauth.ReadonlyGoogleURL(s.loginRedirectURI(), state, nonce, verifier, email), "expires_at": expires})
 }
 func randomMailToken() string {
 	var b [32]byte
@@ -366,7 +370,7 @@ func (s *Server) finishCRMGoogle(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	grant, err := s.oauth.ExchangePersonalGoogle(ctx, r.URL.Query().Get("code"), s.publicURL+"/v1/crm-mail/google/callback", nonce, string(verifier))
+	grant, err := s.oauth.ExchangePersonalGoogle(ctx, r.URL.Query().Get("code"), s.mailRedirectURI(r, crmLegacyCallback), nonce, string(verifier))
 	if err != nil {
 		done("consent_failed")
 		return

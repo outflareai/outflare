@@ -284,7 +284,7 @@ func (s *Server) runConversationAssistant(w http.ResponseWriter, r *http.Request
 	if s.supportError(w, r, err) {
 		return
 	}
-	if !s.supportWrites(w, r, a, c) {
+	if !s.supportWrites(w, r, a, c) || !supportAnswers(w, r, c) {
 		return
 	}
 	actor := nilIfEmpty(a.ActorID)

@@ -96,7 +96,7 @@ func TestCRMMailCaptureEveryContact(t *testing.T) {
 	mu.Lock()
 	nonce, challenge = authURL.Query().Get("nonce"), authURL.Query().Get("code_challenge")
 	mu.Unlock()
-	owner.must(302, "GET", "/v1/crm-mail/google/callback?state="+url.QueryEscape(authURL.Query().Get("state"))+"&code=test-code-not-real", nil)
+	owner.must(302, "GET", "/v1/auth/google/callback?state="+url.QueryEscape(authURL.Query().Get("state"))+"&code=test-code-not-real", nil)
 
 	// A person can't switch it on for the brand from their own settings.
 	prefs := owner.must(200, "PUT", root+"/preferences", map[string]any{"blocked_addresses": []string{}, "blocked_domains": []string{}, "capture_all_contacts": true, "version": 0})

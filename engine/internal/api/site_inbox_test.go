@@ -95,3 +95,38 @@ func TestSiteEventsWaitInTheInbox(t *testing.T) {
 		t.Fatal("inline send not stored")
 	}
 }
+
+// A page whose title holds a NUL character or half a surrogate pair is
+// stored without them: Postgres refuses both, and the batch used to fail
+// with a 500 on every send from that visitor.
+func TestSiteEventsWithCharactersPostgresRefuses(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	ctx := context.Background()
+	k := owner.must(201, "POST", "/v1/workspaces/"+ws+"/site-keys", map[string]any{"name": "acme.example", "origins": []string{"https://acme.example"}})
+	key := k["key"].(string)
+	srv := api.NewServer(e.pool, slog.New(slog.NewTextHandler(io.Discard, nil)), api.Options{SiteInbox: true})
+	h := srv.Handler()
+	for _, title := range []string{"Pricing\x00", "Half \xed\xa0\xbd here"} {
+		rec := sendSiteAs(t, h, "https://acme.example", key, desktopUA, false,
+			map[string]any{"type": "page", "anonymousId": "a-nul-1", "properties": map[string]any{"title": title},
+				"context": map[string]any{"page": map[string]any{"url": "https://acme.example/", "path": "/", "title": title}}})
+		if rec.Code != 200 {
+			t.Fatalf("send %q: %d %s", title, rec.Code, rec.Body)
+		}
+	}
+	if _, err := srv.DrainSiteInbox(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM customer_events WHERE workspace_id = $1 AND anonymous_id = 'a-nul-1'`, ws).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("stored %d events (%v), want 2", n, err)
+	}
+	// Without the inbox, the same events are stored during the request.
+	for _, title := range []string{"Pricing\x00"} {
+		if rec := sendSiteAs(t, e.h, "https://acme.example", key, desktopUA, false,
+			map[string]any{"type": "page", "anonymousId": "a-nul-2", "properties": map[string]any{"title": title}}); rec.Code != 200 {
+			t.Fatalf("send without inbox: %d %s", rec.Code, rec.Body)
+		}
+	}
+}

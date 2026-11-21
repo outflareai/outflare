@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, errorMessage } from "../../api";
-import { Button, Card, Empty, ErrorText, toast } from "../../ui";
+import { Badge, Button, Card, Empty, ErrorText, toast } from "../../ui";
 import { dash, day, donorBy, idemp, shortId, type LinkOrder, type PageData } from "./shared";
 
 function mark(ok: boolean | null): string {
@@ -33,7 +33,7 @@ export function Checks({ data }: { data: PageData }) {
   return (
     <Card
       title="Link checks"
-      description="Live, rel, anchor and target come from the coverage.check job (and from the weekly backlinks sync). Indexed on a third-party URL is out of this version, so that column stays unknown and does not block Verified. Two agreeing down checks are required before Lost; a network error does not count."
+      description="Live, rel, anchor and target come from the coverage.check job. The anchor is compared with the ordered primary and second anchors (a warning only) (and from the weekly backlinks sync). Indexed on a third-party URL is out of this version, so that column stays unknown and does not block Verified. Two agreeing down checks are required before Lost; a network error does not count."
     >
       {err ? <ErrorText>{err}</ErrorText> : null}
       {list.length ? (
@@ -65,7 +65,7 @@ export function Checks({ data }: { data: PageData }) {
                     <td className="py-2 pr-3">{mark(o.last_check_live)}</td>
                     <td className="py-2 pr-3">{dash}</td>
                     <td className="py-2 pr-3">{o.last_check_rel || dash}</td>
-                    <td className="py-2 pr-3">{o.last_check_anchor || dash}</td>
+                    <td className="py-2 pr-3">{o.last_check_anchor || dash}{anchorBadge(o)}</td>
                     <td className="py-2 pr-3">{mark(o.last_check_target_match)}</td>
                     <td className="py-2 pr-3 text-muted-foreground">{o.last_check_at ? day(o.last_check_at) : dash}</td>
                     <td className="py-2 pr-3" onClick={(e) => e.stopPropagation()}>
@@ -86,4 +86,19 @@ export function Checks({ data }: { data: PageData }) {
       )}
     </Card>
   );
+}
+
+// The anchor verdict next to the seen text: what was ordered, in the tooltip.
+function anchorBadge(o: LinkOrder) {
+  const ordered = [o.anchor_primary, o.anchor_secondary].filter(Boolean).join(" · ");
+  switch (o.last_check_anchor_match) {
+    case "exact":
+      return <> <Badge tone="green" title={`Ordered: ${ordered}`}>matches</Badge></>;
+    case "partial":
+      return <> <Badge tone="amber" title={`Ordered: ${ordered}`}>partly matches</Badge></>;
+    case "different":
+      return <> <Badge tone="red" title={`Ordered: ${ordered}`}>not the ordered anchor</Badge></>;
+    default:
+      return null;
+  }
 }

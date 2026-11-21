@@ -24,6 +24,7 @@ import (
 	valerrors "github.com/pb33f/libopenapi-validator/errors"
 
 	spec "github.com/outflareai/outflare/api"
+	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/auth"
 )
 
@@ -48,6 +49,12 @@ func contractValidator() validator.Validator {
 			panic(err)
 		}
 		opts := []config.Option{config.WithoutSecurityValidation()}
+		if os.Getenv("OUTFLARE_TEST_CONTRACT_NO_CACHE") != "" {
+			// Focused runs on a loaded machine need not precompile every
+			// schema before their first request. Every response is still
+			// validated; only the validator's schema cache is disabled.
+			opts = append(opts, config.WithSchemaCache(nil))
+		}
 		if os.Getenv("CONTRACT_STRICT") != "" {
 			opts = append(opts, config.WithStrictMode())
 		}
@@ -269,6 +276,8 @@ func checkAccess() {
 
 func TestMain(m *testing.M) {
 	auth.FastHashesForTests()
+	// Alert emails go at once in tests; TestAlertEmailsGroup sets the wait.
+	alerts.EmailWait = 0
 	code := m.Run()
 	contractValidator()
 	contract.mu.Lock()

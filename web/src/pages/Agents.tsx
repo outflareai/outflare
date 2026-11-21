@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Action, ActionGrant, APIToken } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { ask, Badge, Button, confirmAction, Empty, ErrorText, field, Input, Loading, PageHeader, toast } from "../ui";
 import { ago, plural, stamp } from "../format";
 import { track } from "@/lib/analytics";
 import { useBrand } from "@/lib/brand";
+import { useVisibleRefresh } from "@/lib/useVisibleRefresh";
 import { actionsAPI } from "@/lib/scoped";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
@@ -19,7 +20,8 @@ import type { Tab } from "../App";
 // person, what each agent may do on its own (docs/actions.md), and the runs
 // of Outflare's own agent (AgentRuns.tsx). A person approves held changes
 // one at a time, in a batch, or as a pattern to let changes like it through
-// from then on.
+// from then on. Agents work on their own, so the page follows along: the
+// lists load again every few seconds while the page is on screen.
 
 type Status = Action["status"];
 const statusLabel: Record<Status, string> = { held: "Waiting", running: "Running", executed: "Done", failed: "Failed", refused: "Refused", rejected: "Rejected", expired: "Expired", cancelled: "Cancelled" };
@@ -58,10 +60,12 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
   // The tab says how many changes wait before Waiting for you opens.
   const brandId = useBrand(ws).brand?.id;
   const hasAgent = !!brandAgent;
-  useEffect(() => {
+  const countWaiting = useCallback(async () => {
     if (!hasAgent || view === "waiting") return;
-    actionsAPI(ws, brandId).list({ status: "held", limit: 200 }).then(({ data }) => setWaiting(data?.data.length ?? 0));
+    const { data } = await actionsAPI(ws, brandId).list({ status: "held", limit: 200 });
+    if (data) setWaiting(data.data.length);
   }, [ws, hasAgent, view, brandId]);
+  useVisibleRefresh(countWaiting, 10000);
   const [extra, setExtra] = useState<AgentPageTab[]>([]);
   const pick = useCallback((v: View) => { setView(v); track("ui.agents_view_opened", { view: v }); }, []);
   if (open) return <AgentRunDetail key={open} ws={ws} id={open} canRun={canRun} canApprove={canApprove} onBack={() => { setOpen(undefined); setView("runs"); }} />;
@@ -160,13 +164,14 @@ export function Waiting({ ws, canApprove, canManage, onCount, team }: { ws: stri
     const { data, error } = await actionsAPI(ws, brand).list({ status: "held", limit: 200 });
     if (error) return setError(errorMessage(error));
     setError("");
-    setList(data?.data ?? []);
-    onCount(data?.data.length ?? 0);
-    setPicked(new Set());
+    const next = data?.data ?? [];
+    setList(next);
+    onCount(next.length);
+    // Keep what someone ticked while it still waits: a refresh mustn't
+    // undo a selection.
+    setPicked((p) => (p.size ? new Set(next.filter((a) => p.has(a.id)).map((a) => a.id)) : p));
   }, [ws, brand, onCount]);
-  useEffect(() => {
-    load();
-  }, [load]);
+  useVisibleRefresh(load, 5000);
 
   async function decideBatch(approve: boolean) {
     const ids = [...picked];
@@ -353,7 +358,11 @@ export function Everything({ ws, tokens, team }: { ws: string; tokens: APIToken[
   const picked = useBrand(ws).brand?.id;
   const brand = team ? undefined : picked;
 
+  // more is true once "Show more" has loaded a page: refreshing then
+  // would drop those rows, so the list stays as it is until a filter changes.
+  const more = useRef(false);
   const load = useCallback(async (after?: string) => {
+    if (after) more.current = true;
     const { data, error } = await actionsAPI(ws, brand).list({ limit: 50, ...(status ? { status } : {}), ...(token ? { token_id: token } : {}), ...(after ? { cursor: after } : {}) });
     if (error) return setError(errorMessage(error));
     setError("");
@@ -362,8 +371,12 @@ export function Everything({ ws, tokens, team }: { ws: string; tokens: APIToken[
   }, [ws, status, token, brand]);
   useEffect(() => {
     setList(null);
-    load();
+    more.current = false;
   }, [load]);
+  const refresh = useCallback(async () => {
+    if (!more.current) await load();
+  }, [load]);
+  useVisibleRefresh(refresh, 5000);
 
   return (
     <div className="space-y-3">
@@ -459,9 +472,7 @@ function Grants({ ws, canManage, tokens }: { ws: string; canManage: boolean; tok
     setError("");
     setList(data?.data ?? []);
   }, [ws]);
-  useEffect(() => {
-    load();
-  }, [load]);
+  useVisibleRefresh(load, 10000);
 
   async function revoke(g: ActionGrant) {
     if (!(await confirmAction("Remove this rule?", <p>From its next change, {g.token_name ?? "the agent"} waits for a person again where this rule let it through.</p>, "Remove"))) return;
@@ -482,6 +493,7 @@ function Grants({ ws, canManage, tokens }: { ws: string; canManage: boolean; tok
         <p className="min-w-0 flex-1">A rule says what happens to an agent's changes that match it: run on their own, wait for a person, or be refused. The most specific rule decides; with none, the change waits. Some changes always wait for a person, whatever the rules say.</p>
         {canManage && <Button onClick={() => setAdding(true)}>New rule</Button>}
       </div>
+      <RemovalPermissions ws={ws} canManage={canManage} tokens={tokens} grants={list} onChange={load} />
       {list.length === 0 && <Empty title="No rules yet">Every change your agents make waits for a person. Approve one with “approve changes like this from now on”, or add a rule here.</Empty>}
       {[...byToken.entries()].map(([tokenId, grants]) => (
         <section key={tokenId} className="space-y-2">
@@ -507,6 +519,110 @@ function Grants({ ws, canManage, tokens }: { ws: string; canManage: boolean; tok
         </section>
       ))}
       {adding && <GrantDialog ws={ws} tokens={tokens} onClose={() => setAdding(false)} onDone={() => { setAdding(false); load(); }} />}
+    </div>
+  );
+}
+
+// Removing a Google Ads campaign, ad or keyword can't be undone, so it is
+// a permission of its own for each agent, set here: Off (the default)
+// refuses it and says which permission is missing, Ask holds each removal
+// for a person, On removes at once. Ask and On can be kept to some
+// removals. A broad rule (such as **) never lets an agent remove.
+const removals = [
+  { kind: "campaigns", permission: "ads.remove_campaign", label: "Remove campaigns" },
+  { kind: "items", permission: "ads.remove_ad", label: "Remove ads" },
+  { kind: "keywords", permission: "ads.remove_keyword", label: "Remove keywords" },
+] as const;
+type RemovalMode = "off" | "hold" | "run";
+type Conditions = { paused_campaign_only?: boolean; disapproved_only?: boolean; max_spend_micros?: number };
+
+function RemovalPermissions({ ws, canManage, tokens, grants, onChange }: { ws: string; canManage: boolean; tokens: APIToken[] | null; grants: ActionGrant[]; onChange: () => void }) {
+  if (!tokens || tokens.length === 0) return null;
+  return (
+    <section className="space-y-2 rounded-lg border p-3">
+      <div>
+        <h3 className="font-medium">Removing ads</h3>
+        <p className="text-[12px] text-muted-foreground">Google Ads can't undo a removal, so agents can't remove campaigns, ads or keywords unless you turn it on here. Ask: each removal waits for a person's approval. On: the agent removes them itself. Pausing stops spend and can be undone, and needs none of this.</p>
+      </div>
+      <div className="divide-y">
+        {tokens.map((t) => (
+          <div key={t.id} className="py-2">
+            <div className="mb-1 text-[13px] font-medium">{t.name}</div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {removals.map((r) => (
+                <RemovalSwitch key={r.kind} ws={ws} canManage={canManage} token={t} removal={r}
+                  grants={grants.filter((g) => g.token_id === t.id && g.permission === r.permission)} onChange={onChange} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RemovalSwitch({ ws, canManage, token, removal, grants, onChange }: { ws: string; canManage: boolean; token: APIToken; removal: (typeof removals)[number]; grants: ActionGrant[]; onChange: () => void }) {
+  const current = grants.find((g) => g.mode !== "refuse") ?? null;
+  const mode: RemovalMode = current ? (current.mode as RemovalMode) : "off";
+  const cond = (current?.conditions ?? {}) as Conditions;
+  const [busy, setBusy] = useState(false);
+
+  async function save(next: RemovalMode, c: Conditions) {
+    if (next === "run" && mode !== "run" && !(await confirmAction(`Let ${token.name} remove ${removal.kind === "items" ? "ads" : removal.kind} on its own?`,
+      <p>Removals can't be undone in Google Ads. Each one is kept in the audit log with what was removed, so it can be made again by hand.</p>, "Turn on"))) return;
+    setBusy(true);
+    // One rule per permission: the old one goes, the new one replaces it.
+    for (const g of grants) {
+      const { error } = await api.DELETE("/v1/workspaces/{ws}/action-grants/{id}", { params: { path: { ws, id: g.id } } });
+      if (error) {
+        setBusy(false);
+        return toast(errorMessage(error), "error");
+      }
+    }
+    if (next !== "off") {
+      const conditions = Object.fromEntries(Object.entries(c).filter(([, v]) => v !== undefined && v !== false));
+      const { error } = await api.POST("/v1/workspaces/{ws}/action-grants", {
+        params: { path: { ws } },
+        body: { token_id: token.id ?? "", method: "POST", path: `brands/*/ads/${removal.kind}/*/remove`, mode: next, conditions: Object.keys(conditions).length ? conditions : null, note: removal.label },
+      });
+      if (error) {
+        setBusy(false);
+        onChange();
+        return toast(errorMessage(error), "error");
+      }
+    }
+    setBusy(false);
+    track("ui.ad_removal_permission_set", { permission: removal.permission, mode: next, conditions: Object.keys(c).filter((k) => c[k as keyof Conditions] !== undefined && c[k as keyof Conditions] !== false).length });
+    toast(next === "off" ? `${token.name} can't ${removal.label.toLowerCase()} now.` : `Saved. It applies to ${token.name}'s next removal.`);
+    onChange();
+  }
+
+  const box = (key: keyof Conditions, label: string, on: Conditions) => (
+    <label className="flex items-center gap-1.5 text-[12px]">
+      <input type="checkbox" disabled={!canManage || busy} checked={key === "max_spend_micros" ? cond.max_spend_micros === 0 : !!cond[key]} onChange={(e) => save(mode, { ...cond, ...on, [key]: e.target.checked ? (key === "max_spend_micros" ? 0 : true) : undefined })} />
+      {label}
+    </label>
+  );
+  return (
+    <div className="rounded-md border px-2.5 py-2">
+      <label className="flex items-center justify-between gap-2 text-[13px]">
+        <span>{removal.label}</span>
+        <select aria-label={`${removal.label} for ${token.name}`} className={`${field} h-7 w-auto py-0 text-[12px]`} value={mode} disabled={!canManage || busy} onChange={(e) => save(e.target.value as RemovalMode, cond)}>
+          <option value="off">Off</option>
+          <option value="hold">Ask</option>
+          <option value="run">On</option>
+        </select>
+      </label>
+      <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">{removal.permission}</div>
+      {mode !== "off" && (
+        <div className="mt-1.5 space-y-1">
+          <div className="text-[12px] text-muted-foreground">Only when:</div>
+          {box("paused_campaign_only", "the campaign is paused", {})}
+          {removal.kind !== "keywords" && box("disapproved_only", removal.kind === "campaigns" ? "Google disapproved all its ads" : "Google disapproved the ad", {})}
+          {box("max_spend_micros", "it spent nothing in 30 days", {})}
+          {current?.daily_limit ? <div className="text-[12px] text-muted-foreground">At most {plural(current.daily_limit, "removal")} a day</div> : null}
+        </div>
+      )}
     </div>
   );
 }

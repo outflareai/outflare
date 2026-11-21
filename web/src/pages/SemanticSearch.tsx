@@ -42,7 +42,10 @@ export function SemanticSearchCard({ ws, canManage }: { ws: string; canManage: b
               {!s.enabled ? (
                 <Status tone="grey">Off</Status>
               ) : s.problem ? (
-                <Status tone="amber">{s.problem.message}</Status>
+                <>
+                  <Status tone="amber">Not working</Status>
+                  <span className="min-w-0 basis-full text-muted-foreground">{s.problem.message}</span>
+                </>
               ) : (
                 <Status tone="green">On{s.waiting > 0 ? `: ${s.waiting.toLocaleString()} items to go` : ""}</Status>
               )}

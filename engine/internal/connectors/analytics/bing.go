@@ -91,6 +91,9 @@ func (b Bing) Report(ctx context.Context, cl *c.Client, creds c.Creds, q c.Analy
 	rep := c.AnalyticsReport{Report: q.Report, Site: q.Site, From: q.From, To: q.To,
 		Notes: []string{"Bing keeps about six months of search data and reports queries and pages by week."}}
 	in := func(d string) bool { return d != "" && d >= q.From && d <= q.To }
+	if q.Narrowed() {
+		return b.narrowed(ctx, cl, creds, q, rep, in)
+	}
 	var method string
 	switch q.Report {
 	case c.ReportTraffic:
@@ -125,34 +128,105 @@ func (b Bing) Report(ctx context.Context, cl *c.Client, creds c.Creds, q c.Analy
 	if err := b.get(ctx, cl, creds, method, url.Values{"siteUrl": {q.Site}}, &resp); err != nil {
 		return rep, err
 	}
-	// Sum each query or page over the weeks in range; position is the
-	// impression-weighted average.
-	type acc struct{ clicks, impr, posW float64 }
-	byKey := map[string]*acc{}
+	// Sum each query or page over the weeks in range.
+	sums := bingSums{}
 	for _, s := range resp.D {
-		if !in(bingDay(s.Date)) {
-			continue
-		}
-		a := byKey[s.Query]
-		if a == nil {
-			a = &acc{}
-			byKey[s.Query] = a
-		}
-		a.clicks += s.Clicks
-		a.impr += s.Impressions
-		if s.AvgImpressionPosition > 0 {
-			a.posW += s.AvgImpressionPosition * s.Impressions
+		if in(bingDay(s.Date)) {
+			sums.add(s.Query, s)
 		}
 	}
+	rows := sums.rows()
+	rep.Totals = search(sumRows(rows))
+	rep.Rows = sortRows(rows, q.Limit, byClicks)
+	return rep, nil
+}
+
+// NarrowsSearch: Bing lists the queries of one page and the pages of one
+// query.
+func (Bing) NarrowsSearch() bool { return true }
+
+// narrowed answers a report narrowed to one page or one search query. Bing
+// lists the queries that showed one page (GetPageQueryStats) and the pages
+// one query showed (GetQueryPageStats), by week, with the other side in
+// Query.
+func (b Bing) narrowed(ctx context.Context, cl *c.Client, creds c.Creds, q c.AnalyticsQuery, rep c.AnalyticsReport, in func(string) bool) (c.AnalyticsReport, error) {
+	method, args := "GetPageQueryStats", url.Values{"siteUrl": {q.Site}, "page": {q.Page}}
+	if q.Page == "" {
+		method, args = "GetQueryPageStats", url.Values{"siteUrl": {q.Site}, "query": {q.Keyword}}
+	}
+	var resp struct {
+		D []bingStat `json:"d"`
+	}
+	if err := b.get(ctx, cl, creds, method, args, &resp); err != nil {
+		return rep, err
+	}
+	sums := bingSums{}
+	for _, s := range resp.D {
+		day := bingDay(s.Date)
+		if !in(day) {
+			continue
+		}
+		page, query := q.Page, s.Query
+		if q.Page == "" {
+			page, query = s.Query, q.Keyword
+		}
+		if q.Keyword != "" && query != q.Keyword {
+			continue
+		}
+		switch q.Report {
+		case c.ReportTraffic:
+			sums.add(day, s)
+		case c.ReportPages:
+			sums.add(page, s)
+		case c.ReportSearchQueries:
+			sums.add(query, s)
+		default:
+			return rep, c.NotSupported("Bing Webmaster Tools", q.Report)
+		}
+	}
+	rows := sums.rows()
+	if q.Report != c.ReportTraffic {
+		rep.Totals = search(sumRows(rows))
+		rep.Rows = sortRows(rows, q.Limit, byClicks)
+		return rep, nil
+	}
+	got := map[string]c.Metrics{}
+	for _, r := range rows {
+		got[r.Key] = r.Metrics
+	}
+	rep.Series = fillDays(q, got)
+	for i := range rep.Series {
+		rep.Series[i].Metrics = search(rep.Series[i].Metrics)
+	}
+	rep.Totals = search(sumRows(rows))
+	return rep, nil
+}
+
+// bingSums adds Bing's weekly rows up by key; position is the
+// impression-weighted average.
+type bingSums map[string]*struct{ clicks, impr, posW float64 }
+
+func (b bingSums) add(key string, s bingStat) {
+	a := b[key]
+	if a == nil {
+		a = &struct{ clicks, impr, posW float64 }{}
+		b[key] = a
+	}
+	a.clicks += s.Clicks
+	a.impr += s.Impressions
+	if s.AvgImpressionPosition > 0 {
+		a.posW += s.AvgImpressionPosition * s.Impressions
+	}
+}
+
+func (b bingSums) rows() []c.AnalyticsRow {
 	rows := []c.AnalyticsRow{}
-	for k, a := range byKey {
+	for k, a := range b {
 		m := c.Metrics{Clicks: c.Num(a.clicks), Impressions: c.Num(a.impr)}
 		if a.impr > 0 && a.posW > 0 {
 			m.Position = c.Num(a.posW / a.impr)
 		}
 		rows = append(rows, c.AnalyticsRow{Key: k, Metrics: search(m)})
 	}
-	rep.Totals = search(sumRows(rows))
-	rep.Rows = sortRows(rows, q.Limit, byClicks)
-	return rep, nil
+	return rows
 }

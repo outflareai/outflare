@@ -47,13 +47,20 @@ func (s *Server) registerSocialJobs(q *jobs.Queue) {
 	s.registerRedditJobs(q)
 	s.registerBrandLinkJobs(q)
 	s.registerBrandLookJobs(q)
+	s.registerBrandGenerationJobs(q)
+	s.registerBrandVideoJobs(q)
 	s.registerBrandKnowledgeJobs(q)
 	s.registerBrandDeleteJobs(q)
 	s.registerReviewJobs(q)
 	s.registerPricingJobs(q)
 	s.registerABTestJobs(q)
+	s.registerInsightAskJobs(q)
+	s.registerSmartListDraftJobs(q)
+	s.registerCreativeSkillDraftJobs(q)
+	s.registerQueryAskJobs(q)
 	s.registerInsightAlertJobs(q)
 	s.registerNewsJobs(q)
+	s.registerMentionJobs(q)
 	q.Handle(jobCoverageCheck, s.coverageCheckJob)
 	q.Handle(jobCoverageReview, s.coverageReviewJob)
 	q.Handle(jobCoverageExtract, s.coverageExtractJob)
@@ -99,6 +106,9 @@ func (s *Server) RunSocial(ctx context.Context, every time.Duration) {
 		}
 		if _, err := s.QueueDueNewsSearches(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.log, track.Event{Name: "news.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)
+		}
+		if _, err := s.QueueDueMentionScans(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.log, track.Event{Name: "mentions.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
 		select {
 		case <-ctx.Done():

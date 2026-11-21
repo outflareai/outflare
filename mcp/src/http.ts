@@ -162,8 +162,8 @@ export function serveHttp(opts: HttpOptions) {
       if (req.method !== "POST") return fail(res, 400, -32000, "Start a session with an initialize request.", { code: "invalid_request", param: req.method });
       const body = await readJSON(req);
       if (!isInitializeRequest(body)) return fail(res, 400, -32000, "Start a session with an initialize request.", { code: "invalid_request", param: methodOf(body) || "method" });
-      // /mcp?tools=all lists every tool; by default apps get the core set
-      // and find_tools (toolbox.ts).
+      // /mcp?tools=all lists every tool, ?tools=core,seo adds areas to the
+      // core set; by default apps get the core set and find_tools (toolbox.ts).
       const s = await open(token, res, toolMode(url.searchParams.get("tools")));
       if (!s) return;
       const name = (body as { params?: { clientInfo?: { name?: string } } }).params?.clientInfo?.name;

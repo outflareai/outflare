@@ -51,8 +51,8 @@ func TestInboxSyncRevokedSignIn(t *testing.T) {
 		t.Fatalf("revoked returned %v", err)
 	}
 	m = owner.must(200, "GET", base+"/mailboxes/"+id, nil)
-	if m["status"] != "error" || m["imap_ok"] != false || !strings.Contains(m["status_reason"].(string), "no longer accepts") ||
-		!strings.Contains(m["sync_error"].(string), "no longer accepts") {
+	if m["status"] != "error" || m["imap_ok"] != false || !strings.Contains(m["status_reason"].(string), "expired or was revoked") ||
+		!strings.Contains(m["sync_error"].(string), "expired or was revoked") {
 		t.Fatalf("after revoke: %v", m)
 	}
 	ev := got()

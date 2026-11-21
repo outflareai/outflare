@@ -15,8 +15,9 @@ Rank tracking: follow where your site ranks on Google for the keywords you choos
 ```
 
 - **kind**: `launch` (something new), `improvement` (something that works better or differently), `fix` or `security`.
-- **area**: `agents`, `crm`, `outreach`, `deliverability`, `inbox`, `lifecycle`, `seo`, `social`, `paid-ads`, `partners`, `analytics`, `records`, `connectors`, `api`, `workspace`, `self-hosting` or `general`.
+- **area**: `agents`, `crm`, `outreach`, `deliverability`, `inbox`, `lifecycle`, `seo`, `social`, `paid-ads`, `partners`, `analytics`, `records`, `connectors`, `api`, `developer-setup`, `workspace`, `self-hosting` or `general`.
 - **The text**: one or two sentences, at most 400 characters, in plain words. Say what someone can now do or what behaves differently, not how it was built.
+- **No real names.** A note never names a real customer, a customer's brand or product, a partner or a person, not even a provider that is also a customer. Say what it is: "your web data connection", "a proxy company", or a made-up brand such as Northpeak. Notes become the public changelog and release notes, and a check fails a note that names someone real.
 - **Upgrade steps** for self-hosters (a new setting, a migration that takes a while, something to turn on) go in a last paragraph that starts with `Upgrade:`. They appear only in the self-hosted release notes.
 - **Security fixes** say only `Security improvements to <area>.` (for example `Security improvements to sign-in.`), so the changelog never explains an unfixed weakness. The full account goes in a security advisory once the fix has shipped (`SECURITY.md`).
 

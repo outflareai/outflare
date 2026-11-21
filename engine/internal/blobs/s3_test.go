@@ -91,3 +91,66 @@ func (h hostRewrite) RoundTrip(r *http.Request) (*http.Response, error) {
 	r.URL.Host = h.to
 	return http.DefaultTransport.RoundTrip(r)
 }
+
+// Check writes, reads and removes a file, and a store that fails for a
+// moment is asked again instead of failing the call.
+func TestCheckAndRetry(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		objs  = map[string]string{}
+		fails = 2
+		calls int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if fails > 0 {
+			fails--
+			http.Error(w, "slow down", http.StatusServiceUnavailable)
+			return
+		}
+		switch r.Method {
+		case "PUT":
+			b, _ := io.ReadAll(r.Body)
+			objs[r.URL.Path] = string(b)
+		case "GET":
+			v, ok := objs[r.URL.Path]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			io.WriteString(w, v) //nolint:errcheck
+		case "DELETE":
+			delete(objs, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer srv.Close()
+	s, err := New(Config{Endpoint: srv.URL, Bucket: "bucket", AccessKey: "test_not_a_real_key", SecretKey: "test-not-a-real-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.retryWait = time.Millisecond
+	ctx := context.Background()
+	if err := s.Check(ctx); err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if len(objs) != 0 || calls != 5 {
+		t.Fatalf("after the check: %d files left, %d calls, want 0 and 5", len(objs), calls)
+	}
+	// A store that keeps failing is given up on after three tries.
+	mu.Lock()
+	fails, calls = 10, 0
+	mu.Unlock()
+	if err := s.Put(ctx, "a/b", "text/plain", []byte("x")); err == nil || calls != 3 {
+		t.Fatalf("put on a failing store: err %v after %d calls, want an error after 3", err, calls)
+	}
+	// A refusal is not retried.
+	mu.Lock()
+	fails, calls = 0, 0
+	mu.Unlock()
+	if _, err := s.Get(ctx, "missing"); err != ErrNotFound || calls != 1 {
+		t.Fatalf("get of a missing file: err %v after %d calls", err, calls)
+	}
+}

@@ -38,6 +38,13 @@ type DonorMetrics struct {
 	OutgoingDomainsAllTime   *int64  `json:"outgoing_domains_all_time"`
 	OutgoingLinksFollowed    *int64  `json:"outgoing_links_followed"`
 	OutgoingLinksAllTime     *int64  `json:"outgoing_links_all_time"`
+	// From an Ahrefs check (or a file that has them): live linked
+	// domains, and where the search traffic sits.
+	LinkedDomains  *int64  `json:"linked_domains_live"`
+	TopPageURL     *string `json:"top_page_url"`
+	TopPageTraffic *int64  `json:"top_page_traffic"`
+	Top3Traffic    *int64  `json:"top3_traffic"`
+	HomeTraffic    *int64  `json:"home_traffic"`
 }
 
 // Metric keys, as stored and as the API names them.
@@ -64,13 +71,18 @@ const (
 	MetricOutgoingDomainsAllTime   = "outgoing_domains_all_time"
 	MetricOutgoingLinksFollowed    = "outgoing_links_followed"
 	MetricOutgoingLinksAllTime     = "outgoing_links_all_time"
+	MetricLinkedDomains            = "linked_domains_live"
+	MetricTopPageURL               = "top_page_url"
+	MetricTopPageTraffic           = "top_page_traffic"
+	MetricTop3Traffic              = "top3_traffic"
+	MetricHomeTraffic              = "home_traffic"
 )
 
 // textMetrics are the metrics that hold text; every other metric is a
 // whole, non-negative count.
 var textMetrics = map[string]bool{
 	MetricDateAdded: true, MetricGeoTop1: true, MetricGeoTop2: true,
-	MetricArticleType: true, MetricMainCategory: true, MetricSubcategory: true,
+	MetricArticleType: true, MetricMainCategory: true, MetricSubcategory: true, MetricTopPageURL: true,
 }
 
 // MetricKeys lists every metric, in the order the donor card and the CSV
@@ -82,6 +94,7 @@ var MetricKeys = []string{
 	MetricReferringIPs, MetricReferringSubnets,
 	MetricBacklinks, MetricBacklinksFollowed, MetricBacklinksNoFollow, MetricBacklinksRedirects, MetricBacklinksInternal,
 	MetricOutgoingDomainsFollowed, MetricOutgoingDomainsAllTime, MetricOutgoingLinksFollowed, MetricOutgoingLinksAllTime,
+	MetricLinkedDomains, MetricTopPageURL, MetricTopPageTraffic, MetricTop3Traffic, MetricHomeTraffic,
 }
 
 // metricLabels are the names the donor card and error messages use.
@@ -95,7 +108,9 @@ var metricLabels = map[string]string{
 	MetricBacklinksNoFollow: "Backlinks, not followed", MetricBacklinksRedirects: "Backlinks, redirects",
 	MetricBacklinksInternal: "Backlinks, internal", MetricOutgoingDomainsFollowed: "Outgoing domains, followed",
 	MetricOutgoingDomainsAllTime: "Outgoing domains, all time", MetricOutgoingLinksFollowed: "Outgoing links, followed",
-	MetricOutgoingLinksAllTime: "Outgoing links, all time",
+	MetricOutgoingLinksAllTime: "Outgoing links, all time", MetricLinkedDomains: "Linked domains",
+	MetricTopPageURL: "Top page", MetricTopPageTraffic: "Top page traffic", MetricTop3Traffic: "Top 3 pages' traffic",
+	MetricHomeTraffic: "Home page traffic",
 }
 
 // IsMetric reports whether k is a metric key.
@@ -109,7 +124,7 @@ func IsMetric(k string) bool {
 }
 
 // maxMetricText bounds a text metric.
-const maxMetricText = 200
+const maxMetricText = 500
 
 // ValidateMetrics checks a metrics patch from the API: known keys only,
 // text for text metrics and whole non-negative numbers for counts, nil to

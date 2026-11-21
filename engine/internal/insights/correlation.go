@@ -90,7 +90,7 @@ func (c *Compiled) Correlate(ctx context.Context, q Querier, cq CorrelationQuery
 	if c.f.By == ByCompany {
 		return CorrelationResult{}, Invalid("correlation is for funnels of people: a company's events are its people's")
 	}
-	a := args{list: slices.Clone(c.args.list)}
+	a := args{list: slices.Clone(c.args.list), records: c.args.records}
 	overall := DefaultWindow
 	if c.f.Window != nil {
 		overall = c.f.Window.duration()

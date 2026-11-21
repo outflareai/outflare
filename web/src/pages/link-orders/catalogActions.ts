@@ -5,7 +5,7 @@ import type { LinkOrderDonor, PageData } from "./shared";
 // table. Keep labels plain and in sentence case.
 
 /** The catalog column a right-click landed on. */
-export type CatalogColumn = "request" | "site" | "dr" | "traffic" | "niche" | "intermediary" | "rel" | "duration" | "price";
+export type CatalogColumn = "request" | "site" | "dr" | "traffic" | "niche" | "intermediary" | "rel" | "duration" | "price" | "value" | "metric";
 
 /** What an action knows about the cell it was opened on. */
 export type CatalogCellContext = {
@@ -19,11 +19,15 @@ export type CatalogActionHost = {
   openDonor: (d: LinkOrderDonor) => void;
   findEmail: (d: LinkOrderDonor) => void;
   sendToSequence: (d: LinkOrderDonor) => void;
+  toggleBestLink: (d: LinkOrderDonor) => void;
+  togglePBN: (d: LinkOrderDonor) => void;
 };
 
 export type CatalogCellAction = {
   id: string;
   label: string;
+  /** A label that depends on the row, such as Mark or Remove. */
+  labelFor?: (ctx: CatalogCellContext) => string;
   /** A group starts a new section of the menu. */
   group: "outreach" | "donor";
   /** A plain reason the action can't run for this person, or null when it can. */
@@ -49,6 +53,22 @@ export const catalogCellActions: CatalogCellAction[] = [
       return null;
     },
     run: ({ donor }, host) => host.sendToSequence(donor),
+  },
+  {
+    id: "best-link",
+    label: "Mark as best link",
+    labelFor: ({ donor }) => (donor.best_link ? "Remove the Best link label" : "Mark as best link"),
+    group: "donor",
+    disabledReason: ({ data }) => (data.canManage ? null : "You need permission to manage link orders."),
+    run: ({ donor }, host) => host.toggleBestLink(donor),
+  },
+  {
+    id: "pbn",
+    label: "Flag as PBN",
+    labelFor: ({ donor }) => (donor.pbn ? "Remove the PBN flag" : "Flag as PBN"),
+    group: "donor",
+    disabledReason: ({ data }) => (data.canManage ? null : "You need permission to manage link orders."),
+    run: ({ donor }, host) => host.togglePBN(donor),
   },
   {
     id: "open-donor",

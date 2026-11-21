@@ -45,7 +45,12 @@ const donor = (id, domain, extra = {}) => ({
 const donors = [
   donor('50000000-0000-4000-8000-000000000001', 'infrachronicle.example', { domain_rating: 62, direct_contact: { recommended: true, emails: 1, missing: [] }, prices: [{ currency: 'USD', amount_minor: 85000 }] }),
   donor('50000000-0000-4000-8000-000000000002', 'securityledger.example', { domain_rating: 58, country: 'DE', languages: ['EN', 'DE'], prices: [{ currency: 'EUR', amount_minor: 35000 }] }),
-  donor('50000000-0000-4000-8000-000000000003', 'saasstack.example', { domain_rating: 41, niches: ['saas'], prices: [{ currency: 'EUR', amount_minor: 8000 }] }),
+  // A green light: verdict OK and checked in Ahrefs a day ago, so its quoted order can be approved.
+  donor('50000000-0000-4000-8000-000000000003', 'saasstack.example', {
+    domain_rating: 41, niches: ['saas'], prices: [{ currency: 'EUR', amount_minor: 8000 }],
+    quality: { verdict: 'ok', reasons: [], home_share: 0.1, top_page_share: 0.12, top3_share: 0.3, out_in: 0.1, rd_ld: 6, grade: 'premium' },
+    ahrefs_check: { at: new Date(Date.now() - 86_400_000).toISOString(), status: 'checked' },
+  }),
   donor('50000000-0000-4000-8000-000000000004', 'growthopsblog.example', { domain_rating: 36, pbn: true, prices: [{ currency: 'USD', amount_minor: 12000 }] }),
   donor('50000000-0000-4000-8000-000000000005', 'devtoolsweekly.example', { domain_rating: 55, prices: [{ currency: 'USD', amount_minor: 40000 }] }),
 ];
@@ -93,7 +98,7 @@ const orders = [
     placement_id: '60000000-0000-4000-8000-000000000002',
   }),
   order('40000000-0000-4000-8000-000000000003', '50000000-0000-4000-8000-000000000001', 'published', {
-    target_url: '/blog', published_url: 'https://infrachronicle.example/guest/geonode', published_at: '2026-11-02T00:00:00Z',
+    target_url: '/blog', published_url: 'https://infrachronicle.example/guest/northpeak', published_at: '2026-11-02T00:00:00Z',
     placement_id: '60000000-0000-4000-8000-000000000003',
     last_check_at: '2026-11-08T09:00:00Z', last_check_live: true, last_check_target_match: true,
     last_check_rel: 'dofollow', last_check_anchor: 'residential proxies',
@@ -120,10 +125,10 @@ const orders = [
     quoted_amount_minor: 63540, quoted_currency: 'USD', invoice: gbpInvoice,
   }),
   order('40000000-0000-4000-8000-000000000004', '50000000-0000-4000-8000-000000000002', 'lost', {
-    target_url: '/blog', published_url: 'https://securityledger.example/inserts/geonode', published_at: '2026-10-12T00:00:00Z',
+    target_url: '/blog', published_url: 'https://securityledger.example/inserts/northpeak', published_at: '2026-10-12T00:00:00Z',
     paid_at: '2026-10-21T00:00:00Z', payment_id: '70000000-0000-4000-8000-000000000004', invoice_id: '71000000-0000-4000-8000-000000000004',
     lost_at: '2026-11-06T00:00:00Z', last_check_at: '2026-11-06T00:00:00Z', last_check_live: false, last_check_target_match: false,
-    last_check_rel: 'dofollow', last_check_anchor: 'geonode',
+    last_check_rel: 'dofollow', last_check_anchor: 'northpeak',
   }),
 ];
 
@@ -163,8 +168,8 @@ const impact = {
   rankings: {
     available: true,
     series: [
-      { day: '2026-09-15', keyword: 'free proxy list', position: 6, url: 'https://geonode.com/free-proxy-list' },
-      { day: '2026-10-15', keyword: 'free proxy list', position: 4, url: 'https://geonode.com/free-proxy-list' },
+      { day: '2026-09-15', keyword: 'free proxy list', position: 6, url: 'https://northpeak.example/free-proxy-list' },
+      { day: '2026-10-15', keyword: 'free proxy list', position: 4, url: 'https://northpeak.example/free-proxy-list' },
     ],
   },
 };
@@ -309,17 +314,8 @@ try {
     assert.match(kpi, /\$10,000/);
     assert.match(kpi, /€2,000/);
     assert.doesNotMatch(kpi, /\$12,000|€12,000|12,000 USD\+EUR|total of USD and EUR/i);
-    const seoBtn = page.getByRole('button', { name: 'SEO', exact: true });
-    const loBtn = page.getByRole('button', { name: 'Link orders', exact: true });
-    const backBtn = page.getByRole('button', { name: 'Backlinks', exact: true });
-    if (!(await loBtn.isVisible().catch(() => false))) await seoBtn.click();
-    await loBtn.waitFor();
-    await backBtn.waitFor();
-    const order = await page.evaluate(() => {
-      const names = [...document.querySelectorAll('button')].map(b => (b.textContent || '').trim()).filter(Boolean);
-      return { names, back: names.indexOf('Backlinks'), lo: names.indexOf('Link orders') };
-    });
-    assert(order.back !== -1 && order.lo !== -1 && order.lo === order.back + 1, `Link orders should sit immediately after Backlinks in the SEO module, got ${order.names.slice(Math.max(0, order.back - 2), order.lo + 3).join(' | ')}`);
+    // Link orders open inside Partnerships: its Offers tab is the one lit in the menu.
+    await page.locator('[data-sidebar="content"] a[aria-current="page"]', { hasText: 'Offers' }).waitFor();
     assert(!calls.some(c => c.path.includes('/seo-competitors/gaps') && c.method !== 'GET'), 'the page started a paid gaps read');
     assert(!calls.some(c => c.path.includes('/seo-competitors/gaps/links') && c.method === 'POST'), 'the page posted a paid link-gap pull');
     await shot(page, 'overview-desktop-dark');
@@ -330,8 +326,10 @@ try {
     assert.equal(await page.getByText('growthopsblog.example').count(), 0, 'PBN donor shown in the default exclude-PBN filter');
     await page.getByLabel('PBN').selectOption('any');
     await page.getByText('growthopsblog.example').waitFor();
-    assert.equal(await page.getByRole('button', { name: /google sheet/i }).count(), 0, 'Google Sheet import is offered');
-    await page.getByRole('button', { name: 'Import CSV' }).waitFor();
+    await page.getByRole('button', { name: 'Import CSV' }).click();
+    await page.getByRole('button', { name: 'Google Sheet link' }).click();
+    await page.getByLabel('Google Sheet link').waitFor();
+    await page.getByRole('button', { name: 'Cancel' }).click();
     await shot(page, 'catalog-desktop-dark');
 
     await tab(page, 'Candidates');
@@ -554,6 +552,28 @@ try {
     await page.getByRole('dialog').getByText(/nothing is sent until it is started/).waitFor();
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
     assert(!calls.some(c => c.method === 'POST' && c.path.endsWith('/outreach')), 'opening Send to a sequence sent something');
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+
+  // 7. The green light: an order on a donor never checked in Ahrefs can't be
+  // approved until it is checked or the approver ticks the override.
+  {
+    calls.length = 0;
+    const { page, errors } = await open(1440, 900, 'dark', approver);
+    await openPage(page);
+    await tab(page, 'Orders');
+    await page.getByRole('tab', { name: 'Table' }).click();
+    await page.locator('tr', { hasText: 'devtoolsweekly.example' }).filter({ hasText: 'Negotiating' }).click();
+    const light = page.getByTestId('order-light');
+    await light.waitFor();
+    assert.match(await light.innerText(), /Not checked/);
+    const approve = page.getByRole('button', { name: 'Approve', exact: true });
+    assert.equal(await approve.isDisabled(), true, 'Approve is enabled without a green light');
+    await light.getByLabel('Go ahead without a green light').check();
+    assert.equal(await approve.isDisabled(), false, 'Approve stays disabled after the override');
+    assert(!calls.some(c => c.method === 'POST' && c.path.endsWith('/approve')), 'the light posted Approve');
+    await shot(page, 'order-light-desktop-dark');
     assert.deepEqual(errors, []);
     await page.close();
   }

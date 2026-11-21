@@ -172,6 +172,20 @@
     $("log").appendChild(el);
   }
 
+  // waiting says what a visitor with no answer yet is told: once nobody
+  // is free, the team answers by email, so the chat asks for an address.
+  var told = "", needEmail = false, teamOnline = null;
+  function setWaiting(w) {
+    w = w || "";
+    needEmail = w === "email_needed";
+    if (needEmail) $("email").hidden = false;
+    if (!w || w === told) return;
+    told = w;
+    note(needEmail ? "Nobody is free right now. Leave your email below and we'll reply there."
+      : "Nobody is free right now. We'll reply here and to your email.");
+    $("log").scrollTop = $("log").scrollHeight;
+  }
+
   function err(text) { $("error").textContent = text || ""; $("error").hidden = !text; }
 
   function render(res) {
@@ -180,6 +194,8 @@
     known = known || started || !!identity;
     $("email").hidden = !(st.require_email && !known);
     $("search").hidden = started || !st.show_articles;
+    if ("team_online" in res) teamOnline = res.team_online;
+    setWaiting(res.waiting);
   }
 
   function startSession() {
@@ -199,6 +215,7 @@
       res.messages.forEach(show);
       busy = !!res.typing;
       typing(busy);
+      setWaiting(res.waiting);
     }).catch(function () {}).then(function () {
       timer = setTimeout(poll, document.hidden ? 20000 : busy ? 1200 : 4000);
     });
@@ -225,8 +242,19 @@
     e.preventDefault();
     var body = $("body").value.trim();
     var email = $("email").hidden ? "" : $("email").value.trim();
-    if (!body) return;
-    if (!$("email").hidden && !email) { err("Leave your email so we can get back to you."); $("email").focus(); return; }
+    if (!body) {
+      // Only an address: save it so the team can reply by email.
+      if (!needEmail || !email || !token) return;
+      err("");
+      call("POST", "/email", { email: email }).then(function () {
+        needEmail = false; told = "email"; known = true;
+        $("email").hidden = true;
+        note("Thanks. We'll reply here and to your email.");
+        $("log").scrollTop = $("log").scrollHeight;
+      }).catch(function (x) { err(x && x.message ? x.message : "Couldn't save. Try again."); });
+      return;
+    }
+    if (st.require_email && !known && !email) { err("Leave your email so we can get back to you."); $("email").focus(); return; }
     err("");
     $("send").disabled = true;
     var go = token ? Promise.resolve() : startSession();
@@ -236,10 +264,11 @@
       $("body").value = "";
       $("body").style.height = "";
       known = true;
-      $("email").hidden = true;
+      if (email) { needEmail = false; if (told === "email_needed") told = "email"; }
+      $("email").hidden = !needEmail;
       // Shown now; the server's copy has the same id, so it isn't shown twice.
       show({ id: res.id, from: "visitor", name: "", body: body, created_at: "" });
-      if (res.started) note("Thanks! Someone from the team will reply here.");
+      if (res.started && teamOnline !== false) note("Thanks! Someone from the team will reply here.");
       poll();
     }).catch(function (x) {
       err(x && x.message ? x.message : "Couldn't send. Try again.");

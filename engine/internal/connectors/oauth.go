@@ -202,6 +202,13 @@ func Refresh(ctx context.Context, cl *Client, d Definition, app OAuthApp, creds 
 	if exp, err := strconv.ParseInt(creds["expires_at"], 10, 64); err == nil && time.Until(time.Unix(exp, 0)) > 5*time.Minute {
 		return creds, false, nil
 	}
+	return ForceRefresh(ctx, cl, d, app, creds)
+}
+
+// ForceRefresh renews OAuth credentials whatever their expiry says: for an
+// access token the provider refused before it was due to expire. It returns
+// creds unchanged when there is no refresh token.
+func ForceRefresh(ctx context.Context, cl *Client, d Definition, app OAuthApp, creds Creds) (Creds, bool, error) {
 	if creds["refresh_token"] == "" {
 		return creds, false, nil
 	}
@@ -256,7 +263,9 @@ func tokenCall(ctx context.Context, cl *Client, d Definition, form url.Values, o
 	_ = json.Unmarshal(body, &t)
 	if resp.StatusCode != http.StatusOK || t.AccessToken == "" {
 		if t.Error == "invalid_grant" {
-			return nil, Errf(ErrAuth, "%s no longer accepts this connection; connect it again", d.Name)
+			e := Errf(ErrAuth, "The sign-in to %s expired or was revoked. Sign in again to reconnect it.", d.Name)
+			e.expired = true
+			return nil, e
 		}
 		// A provider outage (5xx, such as temporarily_unavailable) is not a
 		// refusal of the connection.

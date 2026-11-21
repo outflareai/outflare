@@ -24,7 +24,7 @@ import (
 )
 
 // Brands: the businesses one company markets, each with its own website,
-// such as Geonode, Repocket and each of its games. Connectors, members,
+// such as Northpeak, Summitly and each of its games. Connectors, members,
 // tokens, leads and suppressions stay with the workspace; a brand owns its
 // context, memories and sending setup. Records without a brand are shared by
 // every brand.
@@ -214,6 +214,15 @@ type brandSel struct {
 	in []string
 }
 
+// one is the filter's single brand id, or "" when it names none (every
+// brand, or records shared by every brand).
+func (b brandSel) one() string {
+	if b.id == "none" {
+		return ""
+	}
+	return b.id
+}
+
 // all reports whether the filter lets every record through.
 func (b brandSel) all() bool { return b.id == "" && b.in == nil }
 
@@ -400,7 +409,7 @@ type brandInput struct {
 	Timezone *string `json:"timezone"`
 }
 
-// hostOf turns "https://www.Repocket.com/pricing" into "repocket.com".
+// hostOf turns "https://www.summitly.example/pricing" into "summitly.example".
 func hostOf(site string) string {
 	site = strings.ToLower(strings.TrimSpace(site))
 	site = strings.TrimPrefix(strings.TrimPrefix(site, "https://"), "http://")
@@ -424,7 +433,7 @@ func handleProblem(h string) string {
 	case h == "none" || h == "all":
 		return "handle must not be none or all"
 	case slices.Contains(pageNames, h):
-		return "handle must not be the name of a page in the app, like " + h + ": it comes before the page in URLs (/acme/repocket/seo)"
+		return "handle must not be the name of a page in the app, like " + h + ": it comes before the page in URLs (/acme/summitly/seo)"
 	}
 	return ""
 }
@@ -433,10 +442,10 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"crm", "sales-reporting", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "live", "page-speed", "tracking", "links", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-pages", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "signals", "revenue", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "workspace-brands", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail", "outreach-mailboxes", "telegram"}
+var pageNames = []string{"crm", "sales-reporting", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "live", "page-speed", "errors", "named-clicks", "internal-people", "tracking", "links", "tracker", "tracker-campaigns", "tracker-offers", "tracker-landers", "tracker-flows", "tracker-sources", "tracker-networks", "tracker-setup", "tracker-logs", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "organic-conversions", "content", "ai-visibility", "ai-answer-share", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-pages", "ai-visibility-settings", "backlinks", "link-orders", "link-roi", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "partnerships", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "signals", "revenue", "automations", "templates", "topics", "providers", "people", "query", "query-endpoints", "data-catalog", "leads", "lists", "suppression", "knowledge", "company", "brand-profile", "brands", "brand-accounts", "ideal-customers", "workspace", "workspace-brands", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "mentions", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "recordings", "heatmaps", "ab-tests", "support", "help-centre", "agent-mail", "outreach-mailboxes", "telegram"}
 
-// handleFrom makes a handle from a brand's name: "Repocket Games" becomes
-// "repocket-games".
+// handleFrom makes a handle from a brand's name: "Summitly Games" becomes
+// "summitly-games".
 func handleFrom(name string) string {
 	h := strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(name), "-"), "-")
 	if len(h) > 40 {
@@ -512,7 +521,7 @@ func (in *brandInput) validate() error {
 	if in.Website != nil {
 		*in.Website = hostOf(*in.Website)
 		if *in.Website != "" && !domainShape.MatchString(*in.Website) {
-			return errInvalid("website must be a domain like repocket.com")
+			return errInvalid("website must be a domain like summitly.example")
 		}
 	}
 	if in.Domains != nil {
@@ -523,7 +532,7 @@ func (in *brandInput) validate() error {
 				continue
 			}
 			if !domainShape.MatchString(d) {
-				return errInvalid("domains must be domains like repocket.com: " + d + " is not")
+				return errInvalid("domains must be domains like summitly.example: " + d + " is not")
 			}
 			if !slices.Contains(out, d) {
 				out = append(out, d)
@@ -870,6 +879,12 @@ type brandContextView struct {
 	// The brand's active findings, nearest review first (at most 20):
 	// what was learned about its marketing, as data for an agent.
 	Findings []findingView `json:"findings,omitempty"`
+	// The brand profile's confirmed facts (at most 100) and personas (at
+	// most 20), as data for an agent. Facts that mirror about, audience,
+	// goals, voice or rules are left out: those fields carry them. Only a
+	// fact with say_to_customers may be used in what a customer reads.
+	Profile  []profileBrief `json:"profile,omitempty"`
+	Personas []personaBrief `json:"personas,omitempty"`
 	// ---- Knowledge sheet review (paid ads) ----
 	// Whether the knowledge can be trusted for ads: who reviewed it and
 	// when, whether a read changed what the brand sells since, whether the
@@ -986,6 +1001,14 @@ func (s *Server) getBrandContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if v.Findings, err = s.loadFindings(r.Context(), a.WorkspaceID, b.ID, true, 20); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if v.Profile, err = s.loadProfileBrief(r.Context(), a.WorkspaceID, b.ID, 100); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if v.Personas, err = s.loadPersonaBrief(r.Context(), a.WorkspaceID, b.ID, 20); err != nil {
 		s.internal(w, r, err)
 		return
 	}
@@ -1115,6 +1138,14 @@ func (s *Server) writeBrandContext(ctx context.Context, a *access, brand string,
 			req.LegalName, req.TaxID, newAddress)
 		if err != nil {
 			return err
+		}
+		// The profile's mirror facts follow the fields they mirror.
+		for _, key := range changed {
+			if _, ok := profileContextSection[key]; ok {
+				if err := mirrorContextField(ctx, tx, a, brand, key, *req.field(key)); err != nil {
+					return err
+				}
+			}
 		}
 		data := map[string]any{"fields": changed, "version": cur.Version}
 		if bump {
@@ -1402,7 +1433,7 @@ func (s *Server) needHostInBrand(w http.ResponseWriter, r *http.Request, ws, hos
 	if err == nil {
 		args := []any{ws, host}
 		err = s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM analytics_syncs a WHERE a.workspace_id = $1 AND a.host = $2`+
-			sel.sql(`outflare_site_brand_or_first(a.integration_id, a.site)`, &args)+`)`, args...).Scan(&mapped)
+			sel.sql(`outflare_site_brand_now(a.integration_id, a.site)`, &args)+`)`, args...).Scan(&mapped)
 	}
 	if err != nil {
 		s.internal(w, r, err)

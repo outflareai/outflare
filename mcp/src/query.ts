@@ -22,13 +22,38 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
   const onBrand = brandCaller(gtm, workspace);
 
   server.registerTool(
+    "describe_brand_data",
+    {
+      title: "Describe the brand's data",
+      description:
+        "The data catalog: what data the brand has and what it means, before you write SQL. Without table, every table run_query reads, " +
+        "grouped by area (customers, revenue, ads, analytics, outreach, email, seo, coverage, social), with what a row is, where its rows come " +
+        "from, whether you may read it, and, read live, how many rows it holds and the first and last date (how fresh it is), plus example " +
+        "questions with SQL. With table, every column of that table explained: meaning, unit (amounts ending _minor or _cents are minor units of " +
+        "the row's currency; times are UTC), what an id joins to, whether it is personal data, how often it is filled and its common values.",
+      inputSchema: {
+        brand: brandRef,
+        table: z.string().optional().describe("One table's name, from the list without table."),
+        fresh: z.boolean().optional().describe("Read the numbers again instead of the copy kept for up to five minutes."),
+        numbers: z.boolean().optional().describe("false answers at once with the descriptions and no row counts, dates or values: use it when you only need what the tables and columns mean."),
+      },
+      annotations: read,
+    },
+    ({ brand, table, fresh, numbers }) =>
+      table
+        ? call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/data/catalog/{table}", { params: { path: { brand: b, table }, query: { fresh, numbers } } })))
+        : call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/data/catalog", { params: { path: { brand: b }, query: { fresh, numbers } } }))),
+  );
+
+  server.registerTool(
     "list_query_tables",
     {
       title: "List the tables run_query can read",
       description:
         "The tables run_query reads (people, companies, customer_events, deals, messages, replies, emails, visits and more), their columns, and " +
         "whether this connection holds the read scope each needs. A query is for one brand: its customer tables hold that brand's rows only, and " +
-        "each of its record types (such as deal or subscription) is a table of its own, with a column per field. Read it before writing SQL.",
+        "each of its record types (such as deal or subscription) is a table of its own, with a column per field. describe_brand_data explains " +
+        "each table and column and says how much data each holds.",
       inputSchema: { brand: brandRef },
       annotations: read,
     },
@@ -56,11 +81,31 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
   );
 
   server.registerTool(
+    "export_query_csv",
+    {
+      title: "Export a query's results as CSV",
+      description:
+        "The same read-only SELECT as run_query, answered as CSV with a header row, for up to 10,000 rows (limit; default 10,000, at most " +
+        "16 MB): for a list too long for run_query's 1,000 rows, to save as a file or hand to another tool. Aggregate with run_query instead " +
+        "when you only need numbers. Needs customers.read and the read scope of each table; the download is recorded in the activity log, " +
+        "and an agent kept to missions exports only inside one. CSV holds personal data when the query does: never paste it anywhere public.",
+      inputSchema: {
+        brand: brandRef,
+        sql: z.string().min(1).max(20000),
+        limit: z.number().int().min(1).max(10000).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/query/csv", { params: { path: { brand: b } }, body, parseAs: "text" }))),
+  );
+
+  server.registerTool(
     "list_saved_queries",
     {
       title: "List a brand's saved queries",
       description:
-        "Queries people saved in Query Studio for one brand: your own private ones and those shared with the brand, newest first, each with " +
+        "Queries people saved in Data → Queries for one brand: your own private ones and those shared with the brand, newest first, each with " +
         "its current SQL and chart. Look here before writing SQL for a common question; run one with run_saved_query.",
       inputSchema: {
         brand: brandRef,
@@ -102,6 +147,32 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
       annotations: read,
     },
     ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/query-endpoints", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "describe_query_endpoint",
+    {
+      title: "Describe a query endpoint in plain English",
+      description:
+        "Writes a plain-English description of what an endpoint for a saved query returns: the table it reads, its filters, the parameters " +
+        "callers send, its order and its row limit. Written by rules, not AI, and nothing is saved; publishing without a description uses it.",
+      inputSchema: {
+        brand: brandRef,
+        saved_query_id: z.string().uuid().describe("The saved query, from list_saved_queries."),
+        version: z.number().int().min(1).optional().describe("The saved query's version; its current one when left out."),
+        params: z
+          .array(z.object({ name: z.string(), type: z.enum(["text", "integer", "number", "boolean", "date", "timestamp", "uuid"]), required: z.boolean().optional() }))
+          .max(20)
+          .optional()
+          .describe("The parameters in order ($1, $2, …), as the endpoint will declare them."),
+        row_cap: z.number().int().min(1).max(10000).optional().describe("The most rows a call returns."),
+      },
+      annotations: read,
+    },
+    ({ brand, saved_query_id, version, params, row_cap }) =>
+      call(() =>
+        onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/query-endpoints/describe", { params: { path: { brand: b } }, body: { saved_query_id, version, params, row_cap } })),
+      ),
   );
 
   server.registerTool(
@@ -189,7 +260,7 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
     {
       title: "Save a query for a brand",
       description:
-        "Saves SQL (check it with run_query first) as a query people can open in Query Studio. Without query_id it makes a new one, private to " +
+        "Saves SQL (check it with run_query first) as a query people can open in Data → Queries. Without query_id it makes a new one, private to " +
         "the person this connection belongs to unless visibility is brand (shared with everyone who can query the brand). With query_id it " +
         "changes that query: new sql or chart makes a new version, and the old one stays in its history. Needs customers.manage.",
       inputSchema: {

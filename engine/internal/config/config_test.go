@@ -126,3 +126,21 @@ func TestBuilderURL(t *testing.T) {
 		t.Fatal("an address without https was taken")
 	}
 }
+
+func TestAdsSyncInterval(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	c, err := Load()
+	if err != nil || c.AdsSyncInterval != 0 {
+		t.Fatalf("unset: %v %v", c.AdsSyncInterval, err)
+	}
+	t.Setenv("OUTFLARE_ADS_SYNC_INTERVAL", "30m")
+	if c, err := Load(); err != nil || c.AdsSyncInterval.Minutes() != 30 {
+		t.Fatalf("30m: %v %v", c.AdsSyncInterval, err)
+	}
+	for _, bad := range []string{"5m", "25h", "hourly", "-1h"} {
+		t.Setenv("OUTFLARE_ADS_SYNC_INTERVAL", bad)
+		if _, err := Load(); err == nil {
+			t.Fatalf("%q was taken", bad)
+		}
+	}
+}

@@ -100,7 +100,7 @@ A server that shows a version itself (a server-rendered page, an email, an app s
 { "type": "track", "event": "Experiment Viewed", "anonymousId": "the visitor's id", "properties": { "flag": "pricing-headline", "variant": "faster" } }
 ```
 
-Use the same `anonymousId` as the website (`outflare.anonymousId()`, or the `of_aid` cookie), so the visitor's exposure and their goal events match.
+Use the same `anonymousId` as the website (`outflare.anonymousId()`, or the `of_aid` cookie), so the visitor's exposure and their goal events match. The libraries send it for you: `tracker.exposed("pricing-headline", variant, { anonymousId })` in TypeScript and `tracker.exposed(None, "pricing-headline", variant, anonymous_id=...)` in Python, which send nothing when the flag is off for the visitor.
 
 A visitor's version is the first one they saw. A conversion counts when a goal event of theirs (matched on `anonymousId`) follows their first view, before the test ends. Each visitor counts once per goal, however many times they convert.
 

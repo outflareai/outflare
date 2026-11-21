@@ -69,4 +69,6 @@ When EmailBison, Instantly or Smartlead is connected, every platform sync (every
 
 So a campaign sent from the sequencer honours Outflare's list, and the other way round. `GET .../suppression-syncs` (MCP `list_suppression_syncs`) shows each one's counts and last error, and `PATCH .../suppression-syncs/{integration}` turns `pull` or `push` off. Nothing is ever removed from the platform's list.
 
+Contact guards (a product's own account lookup, a shared outreach blocklist) keep a copy of their whole lists here too: the account feed every 5 minutes (source `accountlookup_sync`, reason `customer`, each address and its company's domain, never a mailbox provider's domain) and the blocklist's exports every 30 minutes (source `outreachblocklist_sync`, reason `blocklist`; entries that leave the export leave the list). `GET .../guard-list-syncs` (MCP `list_guard_list_syncs`) shows how fresh each copy is, and `PATCH .../guard-list-syncs/{integration}` turns one off or changes how often it runs. See [connectors.md](connectors.md#a-copy-of-each-guards-whole-list).
+
 Both run on the workspace's own connection to the sequencer.

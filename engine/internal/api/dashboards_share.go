@@ -202,13 +202,17 @@ type sharedTile struct {
 	ID   string  `json:"id"`
 	Kind *string `json:"kind"`
 	Name *string `json:"name"`
-	// Display is how a trend is drawn (line, bar, number, table).
+	// Display is how a trend is drawn (line, bar, pie, number, ...).
 	Display *string `json:"display"`
-	Note    string  `json:"note"`
-	X       int     `json:"x"`
-	Y       int     `json:"y"`
-	W       int     `json:"w"`
-	H       int     `json:"h"`
+	// View is the rest of how a trend is drawn (its spec's forecast,
+	// cumulative, percent, smoothing, value_labels and right_axis, and
+	// whether it has a breakdown), never what it counts.
+	View json.RawMessage `json:"view"`
+	Note string          `json:"note"`
+	X    int             `json:"x"`
+	Y    int             `json:"y"`
+	W    int             `json:"w"`
+	H    int             `json:"h"`
 }
 
 type sharedView struct {
@@ -255,15 +259,21 @@ func (s *Server) openSharedDashboard(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	rows, err := s.pool.Query(r.Context(), `SELECT t.id::text, i.kind, i.name, i.spec->>'display', t.note, t.x, t.y, t.w, t.h
-		FROM dashboard_tiles t LEFT JOIN insights i ON i.id = t.insight_id WHERE t.dashboard_id = $1 ORDER BY t.y, t.x, t.created_at`, d.dashboard)
+	// A saved report's tile is named but never run from a link: its
+	// numbers (cost, profit) are for the brand's own team.
+	rows, err := s.pool.Query(r.Context(), `SELECT t.id::text, CASE WHEN t.report_view_id IS NOT NULL THEN 'report' ELSE i.kind END, COALESCE(v.name, i.name), i.spec->>'display',
+			CASE WHEN i.kind = 'trend' THEN jsonb_strip_nulls(jsonb_build_object('forecast', i.spec->'forecast', 'cumulative', i.spec->'cumulative', 'percent', i.spec->'percent',
+				'smoothing', i.spec->'smoothing', 'value_labels', i.spec->'value_labels', 'right_axis', i.spec->'right_axis', 'breakdown', (i.spec->>'breakdown') IS NOT NULL AND i.spec->>'breakdown' <> '')) END,
+			t.note, t.x, t.y, t.w, t.h
+		FROM dashboard_tiles t LEFT JOIN insights i ON i.id = t.insight_id LEFT JOIN report_views v ON v.id = t.report_view_id
+		WHERE t.dashboard_id = $1 ORDER BY t.y, t.x, t.created_at`, d.dashboard)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	v.TileList, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (sharedTile, error) {
 		var t sharedTile
-		return t, row.Scan(&t.ID, &t.Kind, &t.Name, &t.Display, &t.Note, &t.X, &t.Y, &t.W, &t.H)
+		return t, row.Scan(&t.ID, &t.Kind, &t.Name, &t.Display, &t.View, &t.Note, &t.X, &t.Y, &t.W, &t.H)
 	})
 	if err != nil {
 		s.internal(w, r, err)
@@ -310,8 +320,9 @@ func (s *Server) runSharedTile(w http.ResponseWriter, r *http.Request) {
 	}
 	var kind string
 	var spec, settings []byte
-	err = s.pool.QueryRow(r.Context(), `SELECT i.kind, i.spec, d.settings FROM dashboard_tiles t JOIN insights i ON i.id = t.insight_id JOIN dashboards d ON d.id = t.dashboard_id
-		WHERE t.dashboard_id = $1 AND t.id = $2 AND i.brand_id = $3`, d.dashboard, validOrNil(r.PathValue("tile")), d.brand).Scan(&kind, &spec, &settings)
+	var own bool
+	err = s.pool.QueryRow(r.Context(), `SELECT i.kind, i.spec, d.settings, t.own_dates FROM dashboard_tiles t JOIN insights i ON i.id = t.insight_id JOIN dashboards d ON d.id = t.dashboard_id
+		WHERE t.dashboard_id = $1 AND t.id = $2 AND i.brand_id = $3`, d.dashboard, validOrNil(r.PathValue("tile")), d.brand).Scan(&kind, &spec, &settings, &own)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, r, http.StatusNotFound, "not_found", "tile not found")
 		return
@@ -328,6 +339,15 @@ func (s *Server) runSharedTile(w http.ResponseWriter, r *http.Request) {
 	rng := st.DateRange
 	if in.DateRange != nil {
 		rng = in.DateRange
+	}
+	// A tile that keeps its own dates ignores the dashboard's and the
+	// viewer's.
+	if own {
+		rng = nil
+	}
+	if spec, err = withDashboardFilters(kind, spec, st.Filters); err != nil {
+		s.internal(w, r, err)
+		return
 	}
 	start := time.Now()
 	var res any

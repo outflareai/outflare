@@ -96,6 +96,10 @@ func (k *call) post(ctx context.Context, u string, body, out any) error {
 	return k.do(ctx, http.MethodPost, u, body, out)
 }
 
+func (k *call) put(ctx context.Context, u string, body, out any) error {
+	return k.do(ctx, http.MethodPut, u, body, out)
+}
+
 func (k *call) patch(ctx context.Context, u string, body, out any) error {
 	return k.do(ctx, http.MethodPatch, u, body, out)
 }
@@ -151,7 +155,7 @@ func status(word string) string {
 	switch strings.ToUpper(strings.TrimSpace(word)) {
 	case "ENABLED", "ACTIVE", "SERVING", "RUNNING", "IN_PROCESS":
 		return c.AdActive
-	case "PAUSED", "INACTIVE", "DRAFT", "ON_HOLD", "CAMPAIGN_PAUSED", "ADSET_PAUSED":
+	case "PAUSED", "INACTIVE", "DRAFT", "ON_HOLD", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "AD_GROUP_PAUSED":
 		return c.AdPaused
 	case "REMOVED", "DELETED", "ARCHIVED", "CANCELED", "CANCELLED", "COMPLETED":
 		return c.AdRemoved

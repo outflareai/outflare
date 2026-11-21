@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
 
@@ -177,6 +178,115 @@ func (p PinterestAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, a
 	return out, nil
 }
 
+var _ c.AdItemsReader = PinterestAds{}
+
+// AdItems lists the account's ad groups or ads, archived ones too. An ad
+// group's budget counts as daily only when Pinterest says it is.
+func (p PinterestAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level string) ([]c.AdItem, error) {
+	path := "/ad_accounts/" + esc(acct.ID)
+	switch level {
+	case c.AdLevelGroup:
+		path += "/ad_groups"
+	case c.AdLevelAd:
+		path += "/ads"
+	default:
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	var out []c.AdItem
+	q := url.Values{"entity_statuses": {"ACTIVE,PAUSED,ARCHIVED"}}
+	err := p.pages(ctx, cl, creds, path, q, func(raw json.RawMessage) error {
+		var list []struct {
+			ID         string `json:"id"`
+			Name       string `json:"name"`
+			Status     string `json:"status"`
+			CampaignID string `json:"campaign_id"`
+			AdGroupID  string `json:"ad_group_id"`
+			Budget     *int64 `json:"budget_in_micro_currency"`
+			BudgetType string `json:"budget_type"`
+			Creative   string `json:"creative_type"`
+			URL        string `json:"destination_url"`
+		}
+		_ = json.Unmarshal(raw, &list)
+		for _, e := range list {
+			if e.ID == "" {
+				continue
+			}
+			it := c.AdItem{ID: e.ID, ParentID: e.CampaignID, Name: e.Name, Status: status(e.Status), ProviderStatus: e.Status}
+			if level == c.AdLevelAd {
+				it.ParentID = e.AdGroupID
+				it.Details = adDetails(map[string]string{c.AdDetailType: strings.ToLower(e.Creative), c.AdDetailURL: e.URL})
+				if e.URL != "" {
+					it.Details[c.AdDetailTemplated] = strconv.FormatBool(adtrack.HasTemplate(e.URL))
+				}
+			} else if e.BudgetType == "DAILY" && e.Budget != nil && *e.Budget > 0 {
+				it.DailyBudgetMicros = ptrI(*e.Budget)
+			}
+			out = append(out, it)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// AdItemDays reads ad group or ad analytics by day, split like AdDays: a
+// call names at most 250 ad groups or ads and spans at most 90 days.
+func (p PinterestAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level, from, to string) ([]c.AdItemDay, error) {
+	items, err := p.AdItems(ctx, cl, creds, acct, level)
+	if err != nil {
+		return nil, err
+	}
+	path, param, key := "/ad_groups/analytics", "ad_group_ids", "AD_GROUP_ID"
+	if level == c.AdLevelAd {
+		path, param, key = "/ads/analytics", "ad_ids", "AD_ID"
+	}
+	byID := map[string]c.AdItem{}
+	for _, it := range items {
+		byID[it.ID] = it
+	}
+	all := days(from, to)
+	var out []c.AdItemDay
+	for start := 0; start < len(all); start += pinterestDays {
+		window := all[start:min(start+pinterestDays, len(all))]
+		for i := 0; i < len(items); i += pinterestIDs {
+			batch := items[i:min(i+pinterestIDs, len(items))]
+			ids := make([]string, len(batch))
+			for j, it := range batch {
+				ids[j] = it.ID
+			}
+			q := url.Values{
+				"start_date": {window[0]}, "end_date": {window[len(window)-1]}, "granularity": {"DAY"},
+				param:     {strings.Join(ids, ",")},
+				"columns": {"SPEND_IN_MICRO_DOLLAR,IMPRESSION_1,CLICKTHROUGH_1,TOTAL_CONVERSIONS"},
+			}
+			var rows []map[string]json.RawMessage
+			if err := p.call(cl, creds["access_token"]).get(ctx, p.base(cl)+"/ad_accounts/"+esc(acct.ID)+path+"?"+q.Encode(), &rows); err != nil {
+				return nil, err
+			}
+			for _, r := range rows {
+				var id flexID
+				var date string
+				var spend, impressions, clicks flexInt
+				_ = json.Unmarshal(r[key], &id)
+				_ = json.Unmarshal(r["DATE"], &date)
+				_ = json.Unmarshal(r["SPEND_IN_MICRO_DOLLAR"], &spend)
+				_ = json.Unmarshal(r["IMPRESSION_1"], &impressions)
+				_ = json.Unmarshal(r["CLICKTHROUGH_1"], &clicks)
+				it, ok := byID[string(id)]
+				if !ok || len(date) < 10 || spend == 0 && impressions == 0 && clicks == 0 {
+					continue
+				}
+				day := c.AdItemDay{ID: it.ID, ParentID: it.ParentID, Name: it.Name, Date: date[:10], SpendMicros: int64(spend), Impressions: int64(impressions), Clicks: int64(clicks)}
+				var conv *flexNum
+				if json.Unmarshal(r["TOTAL_CONVERSIONS"], &conv) == nil && conv != nil {
+					day.Conversions = ptrF(float64(*conv))
+				}
+				out = append(out, day)
+			}
+		}
+	}
+	return out, nil
+}
+
 // flexID reads an id sent as a JSON number or a string.
 type flexID string
 
@@ -246,6 +356,14 @@ func (p PinterestAds) SendConversions(ctx context.Context, cl *c.Client, creds c
 		if len(keys) == 0 {
 			results[i].Skipped, results[i].Reason = true, "no Pinterest click id or identifier to match on"
 			continue
+		}
+		// Where the person was, beside the identifiers above and never the
+		// only thing sent: the platform matches on them unhashed.
+		if cv.IPAddress != "" {
+			user["client_ip_address"], keys = cv.IPAddress, append(keys, "ip_address")
+		}
+		if cv.UserAgent != "" {
+			user["client_user_agent"], keys = cv.UserAgent, append(keys, "user_agent")
 		}
 		kind := cv.EventType
 		if kind == "" {

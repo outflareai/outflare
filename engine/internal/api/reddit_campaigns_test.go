@@ -36,7 +36,7 @@ func (f *fakeEngain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.URL.Path == "/me":
-		io.WriteString(w, `{"user": {"id": "u1", "email": "ana@northpeak.example", "name": "Ana"}, "projects": [{"id": "proj-1", "name": "Geonode"}]}`)
+		io.WriteString(w, `{"user": {"id": "u1", "email": "ana@northpeak.example", "name": "Ana"}, "projects": [{"id": "proj-1", "name": "Northpeak"}]}`)
 	case r.URL.Path == "/balance":
 		io.WriteString(w, `{"credits": 480, "freeComments": 2}`)
 	case r.URL.Path == "/tasks/comment" || r.URL.Path == "/tasks/reply" || r.URL.Path == "/tasks/post":
@@ -78,7 +78,7 @@ func (f *fakeRedditInfo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads++
-	body := `"Geonode's residential pool worked for me"`
+	body := `"Northpeak's residential pool worked for me"`
 	if f.removed {
 		body = `"[removed]"`
 	}
@@ -99,9 +99,9 @@ func TestRedditCampaigns(t *testing.T) {
 	e.integrations.Client.BaseURLs["engain"] = es.URL
 	e.integrations.Client.BaseURLs["reddit.public"] = rs.URL
 
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "handle": "geonode"})["id"].(string)
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})["id"].(string)
 	thread := "https://www.reddit.com/r/proxies/comments/1abc2d/best_residential_proxies/"
-	comment := map[string]any{"brand": "geonode", "kind": "comment", "target_url": thread, "content": "Geonode's residential pool worked for me",
+	comment := map[string]any{"brand": "northpeak", "kind": "comment", "target_url": thread, "content": "Northpeak's residential pool worked for me",
 		"brand_mentioned": true, "strategy": "top_comment_on_ranking_thread"}
 
 	// Nothing goes out without an Engain connection: the action stays a draft.
@@ -118,12 +118,12 @@ func TestRedditCampaigns(t *testing.T) {
 	}
 
 	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "engain", "credentials": map[string]any{"api_key": "eng_test_key"}})
-	if b := owner.must(200, "GET", base+"/reddit/budget?brand=geonode", nil); b["engain_credits"] != 480.0 || b["monthly_credit_limit"] != 30.0 {
+	if b := owner.must(200, "GET", base+"/reddit/budget?brand=northpeak", nil); b["engain_credits"] != 480.0 || b["monthly_credit_limit"] != 30.0 {
 		t.Fatalf("budget: %v", b)
 	}
 
 	// An experiment, then a comment in it: sent, published, live.
-	exp := owner.must(201, "POST", base+"/reddit/experiments", map[string]any{"brand": "geonode", "name": "Top comment, no link",
+	exp := owner.must(201, "POST", base+"/reddit/experiments", map[string]any{"brand": "northpeak", "name": "Top comment, no link",
 		"hypothesis": "A plain recommendation survives in r/proxies", "strategy": "top_comment_on_ranking_thread"})
 	comment["experiment_id"] = exp["id"]
 	a1 := owner.must(201, "POST", base+"/reddit/actions", comment)
@@ -155,7 +155,7 @@ func TestRedditCampaigns(t *testing.T) {
 		len(a1["snapshots"].([]any)) != 1 {
 		t.Fatalf("live: %v", a1)
 	}
-	r := owner.must(200, "GET", base+"/reddit/report?brand=geonode&group_by=subreddit", nil)
+	r := owner.must(200, "GET", base+"/reddit/report?brand=northpeak&group_by=subreddit", nil)
 	tot := r["totals"].(map[string]any)
 	if tot["mentions_live"] != 1.0 || tot["mentions_placed"] != 1.0 || tot["credits"] != 5.0 || tot["cost_cents"] != 50.0 || len(r["groups"].([]any)) != 1 {
 		t.Fatalf("report live: %v", r)
@@ -177,7 +177,7 @@ func TestRedditCampaigns(t *testing.T) {
 		strings.Join(kinds, ",") != "created,approved,submitted,went_live,removed" {
 		t.Fatalf("removed: %v %v", a1, kinds)
 	}
-	tot = owner.must(200, "GET", base+"/reddit/report?brand=geonode", nil)["totals"].(map[string]any)
+	tot = owner.must(200, "GET", base+"/reddit/report?brand=northpeak", nil)["totals"].(map[string]any)
 	if tot["mentions_live"] != 0.0 || tot["mentions_placed"] != 1.0 || tot["removed"] != 1.0 {
 		t.Fatalf("report removed: %v", tot)
 	}
@@ -193,7 +193,7 @@ func TestRedditCampaigns(t *testing.T) {
 	if code != 409 || out["error"].(map[string]any)["code"] != "reddit_budget_reached" {
 		t.Fatalf("budget: %d %v", code, out)
 	}
-	drafts := owner.must(200, "GET", base+"/reddit/actions?brand=geonode&status=draft", nil)["data"].([]any)
+	drafts := owner.must(200, "GET", base+"/reddit/actions?brand=northpeak&status=draft", nil)["data"].([]any)
 	if len(drafts) != 2 {
 		t.Fatalf("refused actions are kept as drafts: %v", drafts)
 	}
@@ -218,16 +218,16 @@ func TestRedditCampaigns(t *testing.T) {
 	}
 
 	// Links stay clean.
-	owner.must(400, "POST", base+"/reddit/actions", map[string]any{"brand": "geonode", "kind": "comment", "target_url": thread, "content": "x",
-		"link_url": "https://geonode.example/?utm_source=reddit"})
+	owner.must(400, "POST", base+"/reddit/actions", map[string]any{"brand": "northpeak", "kind": "comment", "target_url": thread, "content": "x",
+		"link_url": "https://northpeak.example/?utm_source=reddit"})
 
 	// Through to Engain: preflight and subreddit stats.
-	pf := owner.must(200, "POST", base+"/reddit/preflight", map[string]any{"brand": "geonode", "subreddit": "r/proxies",
-		"items": []any{map[string]any{"key": "a", "taskType": "comment", "content": "Geonode worked for me"}}})
+	pf := owner.must(200, "POST", base+"/reddit/preflight", map[string]any{"brand": "northpeak", "subreddit": "r/proxies",
+		"items": []any{map[string]any{"key": "a", "taskType": "comment", "content": "Northpeak worked for me"}}})
 	if pf["results"] == nil {
 		t.Fatalf("preflight: %v", pf)
 	}
-	if st := owner.must(200, "GET", base+"/reddit/subreddits/proxies?brand=geonode", nil); st["engain"] == nil || st["ours"].(map[string]any)["removed"] != 1.0 {
+	if st := owner.must(200, "GET", base+"/reddit/subreddits/proxies?brand=northpeak", nil); st["engain"] == nil || st["ours"].(map[string]any)["removed"] != 1.0 {
 		t.Fatalf("subreddit: %v", st)
 	}
 
@@ -238,7 +238,7 @@ func TestRedditCampaigns(t *testing.T) {
 	bot.must(403, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"monthly_credit_limit": 1000})
 	bot.must(200, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"engain_project_id": "proj-1"})
 	owner.must(200, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"require_approval": true})
-	reply := bot.must(201, "POST", base+"/reddit/actions", map[string]any{"brand": "geonode", "kind": "reply", "target_url": thread + "k9xyz12/",
+	reply := bot.must(201, "POST", base+"/reddit/actions", map[string]any{"brand": "northpeak", "kind": "reply", "target_url": thread + "k9xyz12/",
 		"content": "Same here, it held up for scraping", "brand_mentioned": false})
 	if reply["status"] != "draft" {
 		t.Fatalf("agent action with approval on: %v", reply)

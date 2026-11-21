@@ -116,6 +116,11 @@ const conversionID = `COALESCE(NULLIF(regexp_replace(e.message_id, '^browser:', 
 const (
 	OptOut = "opt_out"
 	OptIn  = "opt_in"
+	// Collected: the brand says its own site already collects consent for
+	// ad data and ad personalisation from everyone, so conversions go, and
+	// people join ad audiences, for everyone, in every country, as
+	// granted. Someone who withdrew is still never sent or added.
+	Collected = "collected"
 )
 
 // strict are the countries where ad data needs a grant (EEA, UK, CH).
@@ -143,6 +148,8 @@ type payload struct {
 func (s *Sender) Register(q *jobs.Queue) {
 	q.Handle(JobSend, s.job)
 	q.Handle(JobPayers, s.payersJob)
+	q.Handle(JobAudience, s.audienceJob)
+	q.Handle(JobMatchQuality, s.matchQualityJob)
 }
 
 func (s *Sender) now() time.Time {
@@ -211,8 +218,16 @@ func (s *Sender) Tick(ctx context.Context) error {
 			return err
 		}
 	}
-	// The payers lists refresh once a day (payers.go).
-	return s.queuePayers(ctx)
+	// The payers lists refresh once a day (payers.go), and so do the
+	// audiences (audiences.go) and the platforms' match quality
+	// (match_quality.go).
+	if err := s.queuePayers(ctx); err != nil {
+		return err
+	}
+	if err := s.queueAudiences(ctx); err != nil {
+		return err
+	}
+	return s.queueMatchQuality(ctx)
 }
 
 // Match queues the events rules match that have not been queued yet: the
@@ -255,12 +270,16 @@ func Match(ctx context.Context, q conversions.Querier, ws string) (int64, error)
 // event that doesn't qualify is looked at once and never logged as a send.
 func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64, error) {
 	type pending struct {
-		id, ws, defID string
-		from          time.Time
-		brand         *string
+		id, ws, defID, role string
+		from                time.Time
+		brand               *string
+	}
+	ledger, err := hasLedger(ctx, q)
+	if err != nil {
+		return 0, err
 	}
 	rows, err := q.Query(ctx, `
-		SELECT r.id::text, r.workspace_id::text, d.id::text, COALESCE(r.matched_until, r.created_at), a.brand_id::text
+		SELECT r.id::text, r.workspace_id::text, d.id::text, r.feed_role, COALESCE(r.matched_until, r.created_at), a.brand_id::text
 		FROM ad_conversion_rules r
 		JOIN ad_accounts a ON a.id = r.ad_account_id AND a.status = 'active'
 		JOIN conversion_definitions d ON d.id = r.conversion_id AND d.archived_at IS NULL AND d.filters <> '[]'::jsonb
@@ -271,7 +290,7 @@ func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64
 	var list []pending
 	for rows.Next() {
 		var p pending
-		if err := rows.Scan(&p.id, &p.ws, &p.defID, &p.from, &p.brand); err != nil {
+		if err := rows.Scan(&p.id, &p.ws, &p.defID, &p.role, &p.from, &p.brand); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -299,7 +318,8 @@ func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64
 			WHERE e.workspace_id = $1 AND e.name = $2 AND e.received_at > $3 AND e.received_at <= $4 AND e.occurred_at > now() - interval '30 days'
 			  AND ($5::uuid IS NULL OR e.brand_id = $5::uuid)
 			  AND `+oneCopy("$7::uuid")+`
-			ORDER BY e.received_at, e.id LIMIT $6`, p.ws, d.Event, p.from, cutoff, p.brand, filterBatch, p.id)
+			  AND `+roleFilterOn("$8", ledger)+`
+			ORDER BY e.received_at, e.id LIMIT $6`, p.ws, d.Event, p.from, cutoff, p.brand, filterBatch, p.id, p.role)
 		if err != nil {
 			return queued, err
 		}
@@ -429,6 +449,12 @@ type rule struct {
 	acct  connectors.AdAccount
 	// def is the conversion definition the rule sends, if it names one.
 	def *conversions.Definition
+	// eventName is the customer event the rule takes. predicted sends
+	// each one with what people like the person went on to pay, and
+	// qualifiedOnly holds the ones less likely to pay than the brand's
+	// average (predict.go).
+	eventName                string
+	predicted, qualifiedOnly bool
 }
 
 type queued struct {
@@ -440,6 +466,66 @@ type queued struct {
 	// country is where the event itself says the person was (eventCountry),
 	// for when no website visit of theirs says.
 	country string
+	// ip and userAgent are the event's own context.ip and
+	// context.userAgent: the person's device, as their server passed on.
+	ip, userAgent string
+}
+
+// eventDevice is the address and browser an event's context carries
+// (context.ip; context.userAgent or user_agent). An address that doesn't
+// parse is dropped.
+func eventDevice(c map[string]any) (ip, userAgent string) {
+	if v, ok := c["ip"].(string); ok {
+		if a, err := netip.ParseAddr(strings.TrimSpace(v)); err == nil {
+			ip = a.String()
+		}
+	}
+	for _, k := range []string{"userAgent", "user_agent"} {
+		if v, ok := c[k].(string); ok && strings.TrimSpace(v) != "" {
+			userAgent = strings.TrimSpace(v)
+			break
+		}
+	}
+	if len(userAgent) > 1024 {
+		userAgent = userAgent[:1024]
+	}
+	return ip, userAgent
+}
+
+// browserLookback is how far back PersonBrowser looks for a visit.
+const browserLookback = 90 * 24 * time.Hour
+
+// PersonBrowser is the browser (user agent) of the person's most recent
+// event that carried one, at or before a conversion and within
+// browserLookback of it: the site script stores it on every event it
+// records (context.userAgent), so a conversion a server sent without one
+// still carries the browser the person visited with. "" when they were
+// never seen in a browser.
+func PersonBrowser(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, at time.Time) (string, error) {
+	var ua string
+	var err error
+	switch {
+	case recordID != nil:
+		err = q.QueryRow(ctx, `SELECT context->>'userAgent' FROM customer_events
+			WHERE workspace_id = $1 AND record_id = $2 AND occurred_at <= $3 AND occurred_at >= $4
+			  AND COALESCE(context->>'userAgent', '') <> ''
+			ORDER BY occurred_at DESC LIMIT 1`, ws, *recordID, at, at.Add(-browserLookback)).Scan(&ua)
+	case anonID != nil && *anonID != "":
+		err = q.QueryRow(ctx, `SELECT context->>'userAgent' FROM customer_events
+			WHERE workspace_id = $1 AND record_id IS NULL AND anonymous_id = $2 AND occurred_at <= $3 AND occurred_at >= $4
+			  AND COALESCE(context->>'userAgent', '') <> ''
+			ORDER BY occurred_at DESC LIMIT 1`, ws, *anonID, at, at.Add(-browserLookback)).Scan(&ua)
+	default:
+		return "", nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	ua = strings.TrimSpace(ua)
+	if len(ua) > 1024 {
+		ua = ua[:1024]
+	}
+	return ua, nil
 }
 
 var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
@@ -590,14 +676,14 @@ func (s *Sender) loadRule(ctx context.Context, ws, id string) (rule, error) {
 		SELECT r.id, r.workspace_id, a.integration_id, a.connector, r.event_type, r.target_id, r.target_name,
 			r.value_property, r.value_unit, r.currency, r.fixed_value_micros,
 			a.external_id, a.name, a.currency, a.time_zone, a.meta, d.id::text, coalesce(a.brand_id::text, ''),
-			a.id, r.feed_role, r.customer_type, a.feed
+			a.id, r.feed_role, r.customer_type, a.feed, r.event_name, r.predicted_value, r.qualified_only
 		FROM ad_conversion_rules r JOIN ad_accounts a ON a.id = r.ad_account_id
 		LEFT JOIN conversion_definitions d ON d.id = r.conversion_id
 		WHERE r.workspace_id = $1 AND r.id = $2 AND r.enabled`, ws, id).Scan(
 		&r.id, &r.ws, &r.integrationID, &r.connector, &r.eventType, &r.targetID, &r.targetName,
 		&r.valueProperty, &r.valueUnit, &r.currency, &r.fixed,
 		&r.acct.ID, &r.acct.Name, &r.acct.Currency, &r.acct.TimeZone, &meta, &defID, &r.brand,
-		&r.accountID, &r.feedRole, &r.customerType, &feed)
+		&r.accountID, &r.feedRole, &r.customerType, &feed, &r.eventName, &r.predicted, &r.qualifiedOnly)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, connectors.ErrNotFound
 	}
@@ -641,6 +727,7 @@ func (s *Sender) loadQueued(ctx context.Context, ws, ruleID string) ([]queued, e
 		var c map[string]any
 		_ = json.Unmarshal(evCtx, &c)
 		q.country = eventCountry(c)
+		q.ip, q.userAgent = eventDevice(c)
 		out = append(out, q)
 	}
 	return out, rows.Err()
@@ -659,48 +746,107 @@ func (s *Sender) build(ctx context.Context, ws string, r rule, mode string, q qu
 			return cv, fmt.Sprintf("it doesn't meet the conditions of %s", r.def.Name), nil
 		}
 	}
-	send, granted, reason, err := consentFor(ctx, s.Pool, ws, q.recordID, q.anonID, mode, "ad_user_data", "ad data", q.country)
+	country, source, err := PersonCountry(ctx, s.Pool, ws, q.recordID, q.anonID, q.country)
+	if err != nil {
+		return cv, "", err
+	}
+	// The send log shows the country the decision was made on and where it
+	// came from, whether the conversion goes or is held.
+	if _, err := s.Pool.Exec(ctx, `UPDATE ad_conversion_sends SET country = $2, country_source = $3 WHERE id = $1`, q.id, country, source); err != nil {
+		return cv, "", err
+	}
+	send, granted, reason, err := consentIn(ctx, s.Pool, ws, q.recordID, q.anonID, mode, "ad_user_data", "ad data", country)
 	if err != nil || !send {
 		return cv, reason, err
 	}
 	cv.ConsentGranted = granted
+	cv.IPAddress, cv.UserAgent = q.ip, q.userAgent
+	if cv.UserAgent == "" {
+		// A server's event rarely names the person's browser; the site
+		// script's events do.
+		if cv.UserAgent, err = PersonBrowser(ctx, s.Pool, ws, q.recordID, q.anonID, q.occurred); err != nil {
+			return cv, "", err
+		}
+	}
+	if countryCode.MatchString(country) {
+		cv.Country = country
+	}
 	if err := s.clicks(ctx, ws, q, &cv); err != nil {
 		return cv, "", err
 	}
-	if q.recordID != nil {
-		cv.ExternalID = connectors.HashID(*q.recordID)
-		rows, err := s.Pool.Query(ctx, `SELECT namespace, value FROM record_identities
-			WHERE workspace_id = $1 AND record_id = $2 AND valid_to IS NULL AND namespace IN ('email', 'phone')
-			ORDER BY verified DESC, created_at DESC LIMIT 6`, ws, *q.recordID)
-		if err != nil {
-			return cv, "", err
-		}
-		for rows.Next() {
-			var ns, v string
-			if err := rows.Scan(&ns, &v); err != nil {
-				rows.Close()
-				return cv, "", err
-			}
-			switch ns {
-			case "email":
-				cv.Emails = append(cv.Emails, connectors.HashID(v))
-				cv.GoogleEmails = append(cv.GoogleEmails, connectors.HashGoogleEmail(v))
-			case "phone":
-				// E.164 with the plus; Meta wants digits only.
-				cv.Phones = append(cv.Phones, connectors.HashID(v))
-				cv.PhoneDigits = append(cv.PhoneDigits, connectors.HashID(strings.TrimPrefix(v, "+")))
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return cv, "", err
-		}
+	if err := s.identities(ctx, ws, q.recordID, &cv); err != nil {
+		return cv, "", err
 	}
 	cv.ValueMicros, cv.Currency = value(r, q.props)
+	if r.predicted || r.qualifiedOnly {
+		reason, err := s.predict(ctx, ws, r, q, country, &cv)
+		if err != nil || reason != "" {
+			return cv, reason, err
+		}
+	}
 	if cv.CustomerType, err = s.customerType(ctx, ws, r, q); err != nil {
 		return cv, "", err
 	}
 	return cv, "", nil
+}
+
+// predict gives a sign-up the value people like the person went on to
+// pay (a rule with predicted), and holds one less likely to pay than the
+// brand's average (a rule with qualifiedOnly), saying why. While the brand
+// has too little history, every sign-up goes with the rule's own value.
+func (s *Sender) predict(ctx context.Context, ws string, r rule, q queued, country string, cv *connectors.AdConversion) (string, error) {
+	cur := r.currency
+	if cur == "" {
+		cur = r.acct.Currency
+	}
+	hist, err := qualities.get(ctx, s.Pool, ws, r.brand, r.eventName, cur, s.now())
+	if err != nil {
+		return "", err
+	}
+	domain, err := personEmailDomain(ctx, s.Pool, ws, q.recordID)
+	if err != nil {
+		return "", err
+	}
+	share, v, qualified := hist.Predict(country, EmailKind(ctx, domain))
+	if r.qualifiedOnly && !qualified {
+		return fmt.Sprintf("not a qualified sign-up: people like this paid %.1f%% of the time, against %.1f%% for everyone", share*100, hist.PaidShare*100), nil
+	}
+	if r.predicted && v != nil {
+		cv.ValueMicros, cv.Currency = v, cur
+	}
+	return "", nil
+}
+
+// identities fills the person's own id and their hashed emails and
+// phones, newest verified first.
+func (s *Sender) identities(ctx context.Context, ws string, recordID *string, cv *connectors.AdConversion) error {
+	if recordID == nil {
+		return nil
+	}
+	cv.ExternalID = connectors.HashID(*recordID)
+	rows, err := s.Pool.Query(ctx, `SELECT namespace, value FROM record_identities
+		WHERE workspace_id = $1 AND record_id = $2 AND valid_to IS NULL AND namespace IN ('email', 'phone')
+		ORDER BY verified DESC, created_at DESC LIMIT 6`, ws, *recordID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ns, v string
+		if err := rows.Scan(&ns, &v); err != nil {
+			return err
+		}
+		switch ns {
+		case "email":
+			cv.Emails = append(cv.Emails, connectors.HashID(v))
+			cv.GoogleEmails = append(cv.GoogleEmails, connectors.HashGoogleEmail(v))
+		case "phone":
+			// E.164 with the plus; Meta wants digits only.
+			cv.Phones = append(cv.Phones, connectors.HashID(v))
+			cv.PhoneDigits = append(cv.PhoneDigits, connectors.HashID(strings.TrimPrefix(v, "+")))
+		}
+	}
+	return rows.Err()
 }
 
 // clicks fills the click ids: the event's own, then the latest of each
@@ -739,6 +885,43 @@ func (s *Sender) clicks(ctx context.Context, ws string, q queued, cv *connectors
 			}
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return s.eventClicks(ctx, ws, q, cv)
+}
+
+// eventClicks fills click ids still missing from the person's own earlier
+// events within the click window, newest first. A server's sign-up event
+// often carries the click id its site kept (properties.click_ids), while
+// the person's later payments, sent from the server too, carry none and
+// may have no visit the site script tied to them.
+func (s *Sender) eventClicks(ctx context.Context, ws string, q queued, cv *connectors.AdConversion) error {
+	if q.recordID == nil {
+		return nil
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT properties->'click_ids' FROM customer_events
+		WHERE workspace_id = $1 AND record_id = $2 AND properties ? 'click_ids' AND jsonb_typeof(properties->'click_ids') = 'object'
+		  AND occurred_at <= $3 AND occurred_at > $3 - $4::interval
+		ORDER BY occurred_at DESC LIMIT 20`, ws, *q.recordID, q.occurred, fmt.Sprintf("%d seconds", int(clickWindow.Seconds())))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return err
+		}
+		var ids map[string]any
+		_ = json.Unmarshal(raw, &ids)
+		for k, v := range ids {
+			if str, ok := v.(string); ok && str != "" && cv.ClickIDs[k] == "" {
+				cv.ClickIDs[k] = str
+			}
+		}
+	}
 	return rows.Err()
 }
 
@@ -773,21 +956,75 @@ func ConsentMode(ctx context.Context, q jobs.Querier, ws, brand string) (string,
 	return mode, err
 }
 
-// consentFor decides one purpose. The person's country is their latest
-// website visit's; fallback, the event's own (eventCountry), is used when
-// no visit says, such as a purchase from a server for someone the site
-// script never saw.
-func consentFor(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, mode, purpose, what, fallback string) (send, granted bool, reason string, err error) {
-	var country string
+// Where a person's country came from (ad_conversion_sends.country_source).
+const (
+	CountryFromVisit        = "visit"
+	CountryFromEvent        = "event"
+	CountryFromEarlierEvent = "earlier_event"
+	CountryFromRecord       = "record"
+)
+
+// PersonCountry is the country a consent decision is made on, and where
+// it came from, best evidence first: the person's latest website visit;
+// the event's own (eventCountry), such as a purchase from a server for
+// someone the site script never saw; their most recent earlier event that
+// carried a country or an IP address; the country on their customer
+// record. "" when nothing says, and then the decision plays safe.
+func PersonCountry(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, event string) (country, source string, err error) {
 	err = q.QueryRow(ctx, `SELECT country FROM site_sessions WHERE workspace_id = $1
 		AND (record_id = $2 OR ($3::text IS NOT NULL AND anonymous_id = $3)) AND country <> ''
 		ORDER BY started_at DESC LIMIT 1`, ws, recordID, anonID).Scan(&country)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", "", err
+	}
+	if country != "" {
+		return country, CountryFromVisit, nil
+	}
+	if event != "" {
+		return event, CountryFromEvent, nil
+	}
+	if recordID == nil {
+		return "", "", nil
+	}
+	// Their newest events that say where they were: a few, since an IP
+	// address may not resolve to a country.
+	var raw []byte
+	err = q.QueryRow(ctx, `SELECT COALESCE(jsonb_agg(x.context), '[]') FROM (
+		SELECT context FROM customer_events WHERE workspace_id = $1 AND record_id = $2
+			AND (context ? 'ip' OR context ? 'location') ORDER BY occurred_at DESC LIMIT 20) x`, ws, recordID).Scan(&raw)
+	if err != nil {
+		return "", "", err
+	}
+	var earlier []map[string]any
+	_ = json.Unmarshal(raw, &earlier)
+	for _, c := range earlier {
+		if cc := eventCountry(c); cc != "" {
+			return cc, CountryFromEarlierEvent, nil
+		}
+	}
+	var attr string
+	err = q.QueryRow(ctx, `SELECT COALESCE(attributes->>'country', '') FROM records WHERE workspace_id = $1 AND id = $2`, ws, recordID).Scan(&attr)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", "", err
+	}
+	if attr = strings.ToUpper(strings.TrimSpace(attr)); countryCode.MatchString(attr) {
+		return attr, CountryFromRecord, nil
+	}
+	return "", "", nil
+}
+
+// consentFor decides one purpose on the person's country (PersonCountry);
+// fallback is the event's own.
+func consentFor(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, mode, purpose, what, fallback string) (send, granted bool, reason string, err error) {
+	country, _, err := PersonCountry(ctx, q, ws, recordID, anonID, fallback)
+	if err != nil {
 		return false, false, "", err
 	}
-	if country == "" {
-		country = fallback
-	}
+	return consentIn(ctx, q, ws, recordID, anonID, mode, purpose, what, country)
+}
+
+// consentIn decides one purpose for a person in country ("": unknown).
+func consentIn(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, mode, purpose, what, country string) (send, granted bool, reason string, err error) {
 	// The person's latest choice, or, for a visitor nobody has identified
 	// yet, the one their browser made on the site's consent banner.
 	status := ""
@@ -804,6 +1041,8 @@ func consentFor(ctx context.Context, q jobs.Querier, ws string, recordID, anonID
 	case status == "withdrawn":
 		return false, false, "the person withdrew consent for " + what, nil
 	case status == "granted":
+		return true, true, "", nil
+	case mode == Collected:
 		return true, true, "", nil
 	case country == "":
 		return false, false, "no consent for " + what + ", and their country is unknown", nil

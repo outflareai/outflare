@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/outflareai/outflare/engine/internal/adconv"
 )
@@ -65,5 +66,52 @@ func TestAdConversionsEventCountry(t *testing.T) {
 		by[de]["status"] != "skipped" || !strings.Contains(by[de]["reason"].(string), "EEA") ||
 		by[none]["status"] != "skipped" || !strings.Contains(by[none]["reason"].(string), "unknown") {
 		t.Fatalf("sends: %v", by)
+	}
+}
+
+// A conversion a server sent without a browser takes the one the site
+// script stored on the person's latest earlier event, never a later one,
+// an old one or another person's.
+func TestPersonBrowser(t *testing.T) {
+	e := freshEnv(t)
+	ctx := context.Background()
+	owner, ws := setupOwner(t, e.h)
+	person := func(name, email string) string {
+		t.Helper()
+		return owner.must(201, "POST", "/v1/workspaces/"+ws+"/records", map[string]any{"type": "person", "name": name,
+			"identities": []any{map[string]any{"namespace": "email", "value": email}}})["id"].(string)
+	}
+	ana, ben := person("Ana", "ana@acme.example"), person("Ben", "ben@acme.example")
+	now := time.Now().UTC()
+	for _, ev := range []struct {
+		rec, ua string
+		ago     time.Duration
+	}{
+		{ana, "Old/1.0", 100 * 24 * time.Hour},
+		{ana, "Earlier/1.0", 48 * time.Hour},
+		{ana, "Latest/2.0", 2 * time.Hour},
+		{ana, "", time.Hour},
+		{ana, "Later/3.0", -time.Hour},
+	} {
+		c := `{}`
+		if ev.ua != "" {
+			c = `{"userAgent": "` + ev.ua + `"}`
+		}
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, context, occurred_at)
+			VALUES ($1, outflare_first_brand($1), $2, 'page', 'page.viewed', $3::jsonb, $4)`, ws, ev.rec, c, now.Add(-ev.ago)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ua, err := adconv.PersonBrowser(ctx, e.pool, ws, &ana, nil, now); err != nil || ua != "Latest/2.0" {
+		t.Errorf("Ana's browser = %q, %v", ua, err)
+	}
+	if ua, err := adconv.PersonBrowser(ctx, e.pool, ws, &ana, nil, now.Add(-95*24*time.Hour)); err != nil || ua != "Old/1.0" {
+		t.Errorf("Ana's browser 95 days ago = %q, %v", ua, err)
+	}
+	if ua, err := adconv.PersonBrowser(ctx, e.pool, ws, &ben, nil, now); err != nil || ua != "" {
+		t.Errorf("Ben's browser = %q, %v", ua, err)
+	}
+	if ua, err := adconv.PersonBrowser(ctx, e.pool, ws, nil, nil, now); err != nil || ua != "" {
+		t.Errorf("nobody's browser = %q, %v", ua, err)
 	}
 }

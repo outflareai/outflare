@@ -78,4 +78,32 @@ func TestSERankingTrackedRanks(t *testing.T) {
 	if err != nil || got.Project != "" || len(got.Ranks) != 0 {
 		t.Fatalf("no project: %+v %v", got, err)
 	}
+
+	// Numbers sent as strings (ids, positions, flags) are read the same.
+	strs, _ := fake(t, map[string]any{
+		"GET /project-management/sites":                 []any{map[string]any{"id": "9", "title": "Main site", "name": "example.com", "is_active": "1"}},
+		"GET /project-management/system/search-engines": []any{map[string]any{"id": "200", "name": "Google USA"}},
+		"GET /project-management/sites/search-engines":  []any{map[string]any{"site_engine_id": "1", "search_engine_id": "200"}},
+		"GET /project-management/keywords":              []any{map[string]any{"id": "11", "name": "cheap proxies"}},
+		"GET /project-management/sites/positions": []any{map[string]any{"site_engine_id": "1", "keywords": []any{
+			map[string]any{"id": "11", "positions": []any{map[string]any{"date": "2026-11-05", "pos": "6", "is_map": false}}},
+		}}},
+	})
+	got, err = s.TrackedRanks(ctx, strs, c.Creds{"api_key": "k"}, c.TrackedRankQuery{Hosts: []string{"example.com"}, From: "2026-11-01", To: "2026-11-05"})
+	if err != nil || got.Project != "Main site" || len(got.Ranks) != 1 || *got.Ranks[0].Days[0].Position != 6 {
+		t.Fatalf("string numbers: %+v %v", got, err)
+	}
+
+	// An answer of another shape says which step and what it began with.
+	odd, _ := fake(t, map[string]any{"GET /project-management/sites": map[string]any{"sites": []any{}}})
+	_, err = s.TrackedRanks(ctx, odd, c.Creds{"api_key": "k"}, c.TrackedRankQuery{Hosts: []string{"example.com"}})
+	if c.KindOf(err) != c.ErrUnavailable || !strings.Contains(err.Error(), "reading the projects") || !strings.Contains(err.Error(), `{"sites":[]}`) {
+		t.Fatalf("odd shape: %v", err)
+	}
+	// A refusal keeps its kind and names the step.
+	none, _ := fake(t, map[string]any{})
+	_, err = s.TrackedRanks(ctx, none, c.Creds{"api_key": "k"}, c.TrackedRankQuery{Hosts: []string{"example.com"}})
+	if c.KindOf(err) != c.ErrInvalid || !strings.Contains(err.Error(), "SE Ranking projects, reading the projects") {
+		t.Fatalf("refused: %v", err)
+	}
 }

@@ -119,6 +119,7 @@ const sourceLabel: Record<string, string> = {
   manual: "Flagged on an account",
   api: "The API",
   agent: "Agents",
+  feed: "Slack channels",
 };
 
 // Whose signals turned into revenue.

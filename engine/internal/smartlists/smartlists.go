@@ -34,8 +34,15 @@ const (
 	JobRefresh = "smart_list.refresh"
 	// Every is how often each list is refreshed without being asked.
 	Every = 15 * time.Minute
-	// MaxRules is the most rules a list can have.
+	// MaxRules is the most rules one group (the list itself, or a group
+	// inside it) can have.
 	MaxRules = 20
+	// MaxTests is the most tests a list can have, counting those in its
+	// groups.
+	MaxTests = 50
+	// MaxDepth is how deep groups go: the list's own rules are level 1, a
+	// group in them level 2, a group in that level 3.
+	MaxDepth = 3
 	// refreshTimeout bounds the one statement a refresh runs.
 	refreshTimeout = "120s"
 )
@@ -60,10 +67,33 @@ const (
 //     level is company (billing) or person (usage); by default the list's
 //     own kind of record: billing stages for a company list, usage stages
 //     for a people list.
+//   - page: whether they viewed a page (exists) or not (not_exists) on one
+//     of the brand's sites, by its host and path. Only views from a browser
+//     tied to them by something they did (signing in to the product,
+//     clicking a tracked link in an email Outflare sent, or a visitor link)
+//     count, so nobody can put someone in a list by sending page views.
+//   - in_smart_list: whether they are in another list of the brand (smart,
+//     static or from a query) or not; a list can't depend on itself.
+//   - marketing_email: whether they may get marketing email (exists) or not
+//     (not_exists), as the People list's Marketing email column says.
+//
+// Event and page rules also take min_count (did it at least that many
+// times; with not_exists, fewer), within_days (in the last that many
+// days) or before_days (more than that many days ago), and an event rule
+// where: tests on the event's properties, such as amount_minor over 10000.
+//
+// Or a rule is a group of rules (rules, with match) that passes when all,
+// any or none of them pass, so a list can say "paid and (on pro or on
+// team) and none of (refunded, churned)". Groups hold groups, MaxDepth
+// deep.
 //
 // A list of companies (record_type account) tests the company: attribute,
 // event (the company's own events and its people's) and product_stage.
 type Rule struct {
+	// A group: its rules and whether all, any or none of them must pass.
+	Rules []Rule `json:"rules,omitempty"`
+	Match string `json:"match,omitempty"`
+
 	Attribute        string `json:"attribute,omitempty"`
 	CompanyAttribute string `json:"company_attribute,omitempty"`
 	Event            string `json:"event,omitempty"`
@@ -73,9 +103,35 @@ type Rule struct {
 	ProductStage     string `json:"product_stage,omitempty"`
 	Product          string `json:"product,omitempty"`
 	Level            string `json:"level,omitempty"`
-	Op               string `json:"op"`
+	Op               string `json:"op,omitempty"`
 	Value            any    `json:"value,omitempty"`
+
+	Page           *Page          `json:"page,omitempty"`
+	InSmartList    string         `json:"in_smart_list,omitempty"`
+	MarketingEmail bool           `json:"marketing_email,omitempty"`
+	MinCount       int            `json:"min_count,omitempty"`
+	BeforeDays     int            `json:"before_days,omitempty"`
+	Where          []PropertyTest `json:"where,omitempty"`
 }
+
+// Page is the page a page rule tests: on the site Host (empty: any of the
+// brand's sites), with a path that is, starts with or contains Path
+// (Match; contains by default). Both empty is any page.
+type Page struct {
+	Host  string `json:"host,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Match string `json:"match,omitempty"`
+}
+
+// PropertyTest is one test on an event's properties, compared as attributes are.
+type PropertyTest struct {
+	Property string `json:"property"`
+	Op       string `json:"op"`
+	Value    any    `json:"value,omitempty"`
+}
+
+// MaxWhere is the most property tests an event rule can have.
+const MaxWhere = 5
 
 // Record types a list can hold.
 const (
@@ -84,11 +140,14 @@ const (
 )
 
 var (
-	fieldRE   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}(\.[a-z0-9_]{1,62})*$`)
-	eventRE   = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`)
-	uuidRE    = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	ops       = map[string]bool{"eq": true, "neq": true, "gt": true, "lt": true, "contains": true, "exists": true, "not_exists": true}
-	numericRE = `'^\s*-?[0-9]+(\.[0-9]+)?\s*$'`
+	fieldRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}(\.[a-z0-9_]{1,62})*$`)
+	eventRE = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`)
+	uuidRE  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	ops     = map[string]bool{"eq": true, "neq": true, "gt": true, "lt": true, "contains": true, "exists": true, "not_exists": true,
+		"starts_with": true, "in": true, "not_in": true, "in_last_days": true, "more_than_days_ago": true}
+	hostRE     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
+	propertyRE = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$-]{0,99}(\.[A-Za-z0-9_$-]{1,100})*$`)
+	numericRE  = `'^\s*-?[0-9]+(\.[0-9]+)?\s*$'`
 )
 
 // Check reports what is wrong with a people list's rules, or "".
@@ -103,30 +162,125 @@ func CheckFor(recordType string, rules []Rule, match string) string {
 	if match != "all" && match != "any" {
 		return "match is all or any"
 	}
+	if n := Tests(rules); n > MaxTests {
+		return fmt.Sprintf("a smart list has at most %d rules, counting those in groups", MaxTests)
+	}
+	return checkGroup(recordType, rules, "", 1)
+}
+
+// Tests counts the tests in rules, those in groups included.
+func Tests(rules []Rule) int {
+	n := 0
+	for _, r := range rules {
+		if r.group() {
+			n += Tests(r.Rules)
+		} else {
+			n++
+		}
+	}
+	return n
+}
+
+// group reports whether r is a group of rules rather than one test.
+func (r Rule) group() bool { return r.Rules != nil || r.Match != "" }
+
+// checkGroup checks the rules of a group at depth; at names rules in
+// messages: "rule 2.1" is the first rule of the group that is rule 2.
+func checkGroup(recordType string, rules []Rule, at string, depth int) string {
 	if len(rules) > MaxRules {
-		return fmt.Sprintf("a smart list has at most %d rules", MaxRules)
+		if at == "" {
+			return fmt.Sprintf("a smart list has at most %d rules", MaxRules)
+		}
+		return fmt.Sprintf("rule %s: a group has at most %d rules", at, MaxRules)
 	}
 	for i, r := range rules {
-		msg := checkRule(r)
-		if msg == "" && recordType == Companies && (r.CompanyAttribute != "" || r.InList != "" || r.NewsSearch != "") {
-			msg = "a company list tests attribute, event or product_stage"
+		name := strconv.Itoa(i + 1)
+		if at != "" {
+			name = at + "." + name
+		}
+		var msg string
+		switch {
+		case r.group():
+			msg = checkGroupRule(r, depth)
+			if msg == "" {
+				if sub := checkGroup(recordType, r.Rules, name, depth+1); sub != "" {
+					return sub
+				}
+			}
+		default:
+			msg = checkRule(r)
+			if msg == "" && recordType == Companies && (r.CompanyAttribute != "" || r.InList != "" || r.NewsSearch != "" || r.Page != nil || r.MarketingEmail) {
+				msg = "a company list tests attribute, event, product_stage or in_smart_list"
+			}
 		}
 		if msg != "" {
-			return fmt.Sprintf("rule %d: %s", i+1, msg)
+			return fmt.Sprintf("rule %s: %s", name, msg)
 		}
+	}
+	return ""
+}
+
+// checkGroupRule checks a group itself, not its rules.
+func checkGroupRule(r Rule, depth int) string {
+	switch {
+	case depth >= MaxDepth:
+		return fmt.Sprintf("groups go at most %d levels deep", MaxDepth-1)
+	case r.Match != "all" && r.Match != "any" && r.Match != "none":
+		return "a group's match is all, any or none"
+	case len(r.Rules) == 0:
+		return "a group has at least one rule"
+	case r.Attribute != "" || r.CompanyAttribute != "" || r.Event != "" || r.InList != "" || r.NewsSearch != "" || r.ProductStage != "" ||
+		r.Product != "" || r.Level != "" || r.Op != "" || r.Value != nil || r.WithinDays != 0 || r.Page != nil || r.InSmartList != "" ||
+		r.MarketingEmail || r.MinCount != 0 || r.BeforeDays != 0 || r.Where != nil:
+		return "a group has only rules and match"
 	}
 	return ""
 }
 
 func checkRule(r Rule) string {
 	set := 0
-	for _, v := range []string{r.Attribute, r.CompanyAttribute, r.Event, r.InList, r.NewsSearch, r.ProductStage} {
+	for _, v := range []string{r.Attribute, r.CompanyAttribute, r.Event, r.InList, r.NewsSearch, r.ProductStage, r.InSmartList} {
 		if v != "" {
 			set++
 		}
 	}
+	if r.Page != nil {
+		set++
+	}
+	if r.MarketingEmail {
+		set++
+	}
 	if set != 1 {
-		return "each rule tests one of attribute, company_attribute, event, in_list, news_search or product_stage"
+		return "each rule tests one of attribute, company_attribute, event, page, in_list, in_smart_list, news_search, product_stage or marketing_email, or is a group (rules and match)"
+	}
+	if msg := checkCounts(r); msg != "" {
+		return msg
+	}
+	if r.Page != nil || r.InSmartList != "" || r.MarketingEmail {
+		switch {
+		case r.Op != "exists" && r.Op != "not_exists":
+			return "page, in_smart_list and marketing_email rules use exists (did, is, may) or not_exists (didn't, isn't, may not)"
+		case r.Value != nil:
+			return "op " + r.Op + " takes no value"
+		case r.InSmartList != "" && !uuidRE.MatchString(r.InSmartList):
+			return "in_smart_list is a list's id"
+		case (r.InSmartList != "" || r.MarketingEmail) && r.WithinDays != 0:
+			return "within_days is only for event, page and news_search rules"
+		}
+		if p := r.Page; p != nil {
+			switch {
+			case p.Host != "" && (len(p.Host) > 253 || !hostRE.MatchString(p.Host)):
+				return "page.host is a site's host name in lowercase, such as example.com or app.example.com"
+			case len(p.Path) > 500 || strings.ContainsAny(p.Path, "\n\r"):
+				return "page.path is at most 500 characters"
+			case p.Match != "" && p.Match != "is" && p.Match != "starts_with" && p.Match != "contains":
+				return "page.match is is, starts_with or contains"
+			}
+		}
+		if r.WithinDays < 0 || r.WithinDays > 3650 {
+			return "within_days is 1 to 3650, or 0 for ever"
+		}
+		return ""
 	}
 	if r.ProductStage != "" {
 		switch {
@@ -147,7 +301,7 @@ func checkRule(r Rule) string {
 		return "product and level are only for product_stage rules"
 	}
 	if !ops[r.Op] {
-		return "op is eq, neq, gt, lt, contains, exists or not_exists"
+		return "op is eq, neq, gt, lt, contains, starts_with, in, not_in, in_last_days, more_than_days_ago, exists or not_exists"
 	}
 	switch {
 	case r.Attribute != "" && (!fieldRE.MatchString(r.Attribute) || len(r.Attribute) > 200):
@@ -163,20 +317,91 @@ func checkRule(r Rule) string {
 	case (r.Event != "" || r.InList != "" || r.NewsSearch != "") && r.Op != "exists" && r.Op != "not_exists":
 		return "event, in_list and news_search rules use exists (did, is in) or not_exists (didn't, isn't)"
 	case r.WithinDays != 0 && r.Event == "" && r.NewsSearch == "":
-		return "within_days is only for event and news_search rules"
+		return "within_days is only for event, page and news_search rules"
 	case r.WithinDays < 0 || r.WithinDays > 3650:
 		return "within_days is 1 to 3650, or 0 for ever"
-	case r.Op != "exists" && r.Op != "not_exists" && r.Value == nil:
-		return "op " + r.Op + " needs a value"
-	case r.Op == "exists" || r.Op == "not_exists":
-		if r.Value != nil && (r.Attribute != "" || r.CompanyAttribute != "") {
-			return "op " + r.Op + " takes no value"
+	case (r.Event != "" || r.InList != "" || r.NewsSearch != "") && r.Value != nil:
+		return "op " + r.Op + " takes no value"
+	}
+	if r.Attribute != "" || r.CompanyAttribute != "" {
+		return checkValue(r.Op, r.Value)
+	}
+	for i, w := range r.Where {
+		switch {
+		case !propertyRE.MatchString(w.Property):
+			return fmt.Sprintf("where %d: property is a property's name, such as plan or amount_minor", i+1)
+		case !ops[w.Op]:
+			return fmt.Sprintf("where %d: op is eq, neq, gt, lt, contains, starts_with, in, not_in, in_last_days, more_than_days_ago, exists or not_exists", i+1)
+		}
+		if msg := checkValue(w.Op, w.Value); msg != "" {
+			return fmt.Sprintf("where %d: %s", i+1, msg)
 		}
 	}
-	switch v := r.Value.(type) {
-	case nil, bool, float64, json.Number, int, int64:
+	return ""
+}
+
+// checkCounts checks the parts of an event or page rule that say how often
+// and when, and that no other rule sets them.
+func checkCounts(r Rule) string {
+	counted := r.Event != "" || r.Page != nil
+	switch {
+	case !counted && (r.MinCount != 0 || r.BeforeDays != 0):
+		return "min_count and before_days are only for event and page rules"
+	case r.Where != nil && r.Event == "":
+		return "where is only for event rules"
+	case len(r.Where) > MaxWhere:
+		return fmt.Sprintf("an event rule has at most %d where tests", MaxWhere)
+	case r.MinCount < 0 || r.MinCount > 100000:
+		return "min_count is 1 to 100000, or 0 for once"
+	case r.BeforeDays < 0 || r.BeforeDays > 3650:
+		return "before_days is 1 to 3650, or 0"
+	case r.BeforeDays != 0 && r.WithinDays != 0:
+		return "set within_days (in the last days) or before_days (more than that many days ago), not both"
+	}
+	return ""
+}
+
+// checkValue checks what op compares with: nothing for exists and
+// not_exists, a list for in and not_in, a whole number of days for
+// in_last_days and more_than_days_ago, otherwise text, a number or true
+// or false.
+func checkValue(op string, value any) string {
+	switch op {
+	case "exists", "not_exists":
+		if value != nil {
+			return "op " + op + " takes no value"
+		}
+		return ""
+	case "in", "not_in":
+		list, ok := value.([]any)
+		if !ok || len(list) == 0 || len(list) > 100 {
+			return "op " + op + " takes a list of 1 to 100 values"
+		}
+		for _, v := range list {
+			if msg := checkScalar(v); msg != "" {
+				return msg
+			}
+		}
+		return ""
+	case "in_last_days", "more_than_days_ago":
+		n, ok := number(value)
+		d, err := strconv.Atoi(n)
+		if !ok || err != nil || d < 1 || d > 36500 {
+			return "op " + op + " takes a whole number of days, 1 to 36500"
+		}
+		return ""
+	}
+	if value == nil {
+		return "op " + op + " needs a value"
+	}
+	return checkScalar(value)
+}
+
+func checkScalar(v any) string {
+	switch x := v.(type) {
+	case bool, float64, json.Number, int, int64:
 	case string:
-		if len(v) > 500 {
+		if len(x) > 500 {
 			return "value is at most 500 characters"
 		}
 	default:
@@ -193,8 +418,49 @@ func InLists(rules []Rule) []string {
 		if r.InList != "" {
 			out = append(out, r.InList)
 		}
+		out = append(out, InLists(r.Rules)...)
 	}
 	return out
+}
+
+// SmartLists is every list the rules name with in_smart_list, for the
+// caller to check they are the brand's and that no list depends on itself.
+func SmartLists(rules []Rule) []string {
+	out := []string{}
+	for _, r := range rules {
+		if r.InSmartList != "" {
+			out = append(out, r.InSmartList)
+		}
+		out = append(out, SmartLists(r.Rules)...)
+	}
+	return out
+}
+
+// Negative reports whether the rules pick nearly everyone, because what
+// decides who is in only leaves people out (didn't, isn't, is not): every
+// rule when all must pass, or any one of them when any may.
+func Negative(rules []Rule, match string) bool {
+	return len(rules) > 0 && broad(rules, match, false)
+}
+
+// broad reports whether a group of rules passes for nearly everyone;
+// flipped is whether something above it says "none of".
+func broad(rules []Rule, match string, flipped bool) bool {
+	inner := flipped != (match == "none")
+	// All must pass, unless a "none of" above turns it round.
+	every := (match == "all") != inner
+	for _, r := range rules {
+		var b bool
+		if r.group() {
+			b = broad(r.Rules, r.Match, inner)
+		} else {
+			b = (r.Op == "not_exists" || r.Op == "neq" || r.Op == "not_in") != inner
+		}
+		if b != every {
+			return b
+		}
+	}
+	return every
 }
 
 // NewsSearches is every news search the rules name, for the caller to
@@ -205,6 +471,7 @@ func NewsSearches(rules []Rule) []string {
 		if r.NewsSearch != "" {
 			out = append(out, r.NewsSearch)
 		}
+		out = append(out, NewsSearches(r.Rules)...)
 	}
 	return out
 }
@@ -286,19 +553,29 @@ func (b *builder) where(where string, rules []Rule, match string, brandID *strin
 	if len(rules) == 0 {
 		return where, b.args
 	}
+	return where + ` AND ` + b.group(rules, match, eventBrand), b.args
+}
+
+// group is the SQL that holds when all, any or none of rules pass. Each
+// rule is never NULL, so NOT is safe.
+func (b *builder) group(rules []Rule, match, eventBrand string) string {
 	parts := make([]string, 0, len(rules))
 	for _, r := range rules {
 		parts = append(parts, `COALESCE(`+b.rule(r, eventBrand)+`, false)`)
 	}
-	join := " AND "
-	if match == "any" {
-		join = " OR "
+	switch match {
+	case "any":
+		return `(` + strings.Join(parts, " OR ") + `)`
+	case "none":
+		return `NOT (` + strings.Join(parts, " OR ") + `)`
 	}
-	return where + ` AND (` + strings.Join(parts, join) + `)`, b.args
+	return `(` + strings.Join(parts, " AND ") + `)`
 }
 
 func (b *builder) rule(r Rule, eventBrand string) string {
 	switch {
+	case r.group():
+		return b.group(r.Rules, r.Match, eventBrand)
 	case r.ProductStage != "":
 		level := r.Level
 		if level == "" {
@@ -323,16 +600,51 @@ func (b *builder) rule(r Rule, eventBrand string) string {
 			who = `(e.record_id = r.id OR e.account_id = r.id OR e.record_id IN (SELECT rr.from_id FROM record_relationships rr
 				WHERE rr.workspace_id = $1 AND rr.to_id = r.id AND rr.kind = 'companies' AND rr.valid_to IS NULL))`
 		}
-		sql := `EXISTS (SELECT 1 FROM customer_events e WHERE e.workspace_id = $1 AND ` + who + ` AND e.name = ` + b.arg(r.Event) +
-			` AND e.source <> 'browser'` + eventBrand
-		if r.WithinDays > 0 {
-			sql += ` AND e.occurred_at >= now() - make_interval(days => ` + b.arg(r.WithinDays) + `::int)`
+		cond := `e.workspace_id = $1 AND ` + who + ` AND e.name = ` + b.arg(r.Event) + ` AND e.source <> 'browser'` + eventBrand + b.when(r)
+		for _, w := range r.Where {
+			path := b.arg(strings.Split(w.Property, "."))
+			cond += ` AND COALESCE(` + b.compare(`(e.properties #> `+path+`::text[])`, `(e.properties #>> `+path+`::text[])`, w.Op, w.Value) + `, false)`
 		}
-		sql += `)`
+		return b.counted(cond, r)
+	case r.Page != nil:
+		// Page views come from the site script, which anyone can call, so
+		// only views from a browser the person was tied to by something
+		// they did count: signing in to the product, clicking a tracked
+		// link in an email Outflare sent, or a visitor link.
+		cond := `e.workspace_id = $1 AND e.record_id = r.id AND e.name = 'page.viewed'` + eventBrand + b.when(r) + `
+			AND EXISTS (SELECT 1 FROM site_visitors sv WHERE sv.workspace_id = $1 AND sv.anonymous_id = e.anonymous_id
+				AND sv.record_id = r.id AND sv.identified_by IN ('product', 'email_click', 'link'))`
+		if h := strings.ToLower(strings.TrimPrefix(r.Page.Host, "www.")); h != "" {
+			p := b.arg(h)
+			cond += ` AND ` + PageHostSQL + ` IN (` + p + `, 'www.' || ` + p + `)`
+		}
+		if r.Page.Path != "" {
+			path := `lower(COALESCE(e.context->'page'->>'path', ''))`
+			p := b.arg(strings.ToLower(r.Page.Path))
+			switch r.Page.Match {
+			case "is":
+				cond += ` AND rtrim(` + path + `, '/') = rtrim(` + p + `, '/')`
+			case "starts_with":
+				cond += ` AND starts_with(` + path + `, ` + p + `)`
+			default:
+				cond += ` AND strpos(` + path + `, ` + p + `) > 0`
+			}
+		}
+		return b.counted(cond, r)
+	case r.InSmartList != "":
+		// The other list's members as of its last refresh.
+		l := b.arg(r.InSmartList)
+		sql := `(EXISTS (SELECT 1 FROM smart_list_members m WHERE m.workspace_id = $1 AND m.list_id = ` + l + `::uuid AND m.record_id = r.id)
+			OR EXISTS (SELECT 1 FROM static_list_members m WHERE m.workspace_id = $1 AND m.list_id = ` + l + `::uuid AND m.record_id = r.id))`
 		if r.Op == "not_exists" {
 			return `NOT ` + sql
 		}
 		return sql
+	case r.MarketingEmail:
+		if r.Op == "not_exists" {
+			return `NOT ` + MayMarketSQL
+		}
+		return MayMarketSQL
 	case r.NewsSearch != "":
 		sql := `EXISTS (SELECT 1 FROM news_article_authors aa JOIN news_hits h ON h.article_id = aa.article_id
 			JOIN news_articles x ON x.id = aa.article_id
@@ -375,39 +687,87 @@ func (b *builder) rule(r Rule, eventBrand string) string {
 	return b.test("r", r.Attribute, r.Op, r.Value)
 }
 
+// PageHostSQL is the host of a page.viewed event e: the one the script
+// sent, or the one in its URL, in lowercase.
+const PageHostSQL = `COALESCE(NULLIF(lower(e.context->'page'->>'host'), ''), lower(substring(e.context->'page'->>'url' FROM '^https?://([^/:?#]+)')), '')`
+
+// when is the condition on an event e's time: in the last within_days
+// days, or more than before_days days ago.
+func (b *builder) when(r Rule) string {
+	switch {
+	case r.WithinDays > 0:
+		return ` AND e.occurred_at >= now() - make_interval(days => ` + b.arg(r.WithinDays) + `::int)`
+	case r.BeforeDays > 0:
+		return ` AND e.occurred_at < now() - make_interval(days => ` + b.arg(r.BeforeDays) + `::int)`
+	}
+	return ""
+}
+
+// counted is the SQL that holds when events e matching cond happened (op
+// exists) at least min_count times, or (not_exists) fewer. It stops
+// counting at min_count, so a busy person costs no more than a quiet one.
+func (b *builder) counted(cond string, r Rule) string {
+	sql := `EXISTS (SELECT 1 FROM customer_events e WHERE ` + cond + `)`
+	if r.MinCount > 1 {
+		n := b.arg(r.MinCount)
+		sql = `((SELECT count(*) FROM (SELECT 1 FROM customer_events e WHERE ` + cond + ` LIMIT ` + n + `::int) x) >= ` + n + `::int)`
+	}
+	if r.Op == "not_exists" {
+		return `NOT ` + sql
+	}
+	return sql
+}
+
 // test compares a field on records aliased alias with op and value.
 func (b *builder) test(alias, field, op string, value any) string {
 	path := b.arg(strings.Split(field, "."))
-	j := `(` + alias + `.attributes #> ` + path + `::text[])`
-	t := `(` + alias + `.attributes #>> ` + path + `::text[])`
-	r := Rule{Op: op, Value: value}
-	switch r.Op {
+	return b.compare(`(`+alias+`.attributes #> `+path+`::text[])`, `(`+alias+`.attributes #>> `+path+`::text[])`, op, value)
+}
+
+// compare tests a JSON value, j as jsonb and t as text, with op and value.
+func (b *builder) compare(j, t, op string, value any) string {
+	switch op {
 	case "exists":
 		return `COALESCE(` + t + `, '') <> ''`
 	case "not_exists":
 		return `COALESCE(` + t + `, '') = ''`
-	}
-	s := b.arg(text(r.Value))
-	eq := func() string {
-		if n, ok := number(r.Value); ok {
-			return `(CASE WHEN ` + t + ` ~ ` + numericRE + ` THEN ` + t + `::numeric = ` + b.arg(n) + `::text::numeric ELSE lower(` + t + `) = lower(` + s + `) END)`
+	case "in_last_days", "more_than_days_ago":
+		n, _ := number(value)
+		at := `outflare_try_timestamptz(` + t + `)`
+		since := `now() - make_interval(days => ` + b.arg(n) + `::int)`
+		if op == "in_last_days" {
+			return `(` + at + ` >= ` + since + ` AND ` + at + ` <= now() + interval '1 day')`
 		}
-		return `lower(` + t + `) = lower(` + s + `)`
+		return `(` + at + ` < ` + since + `)`
+	case "in", "not_in":
+		list, _ := value.([]any)
+		parts := make([]string, 0, len(list))
+		for _, v := range list {
+			parts = append(parts, `COALESCE(`+b.eq(t, v)+`, false)`)
+		}
+		in := `(` + strings.Join(parts, " OR ") + `)`
+		if op == "not_in" {
+			return `(` + t + ` IS NULL OR NOT ` + in + `)`
+		}
+		return in
 	}
-	switch r.Op {
+	switch op {
 	case "eq":
-		return eq()
+		return b.eq(t, value)
 	case "neq":
-		return `(` + t + ` IS NULL OR NOT COALESCE(` + eq() + `, false))`
+		return `(` + t + ` IS NULL OR NOT COALESCE(` + b.eq(t, value) + `, false))`
+	}
+	s := b.arg(text(value))
+	switch op {
 	case "gt", "lt":
 		cmp := ">"
-		if r.Op == "lt" {
+		if op == "lt" {
 			cmp = "<"
 		}
 		// Numbers compare as numbers, everything else as text, so ISO
 		// dates sort.
 		asText := `(` + t + ` COLLATE "C") ` + cmp + ` (` + s + ` COLLATE "C")`
-		if n, ok := number(r.Value); ok {
+		if n, ok := number(value); ok {
 			return `(CASE WHEN ` + t + ` ~ ` + numericRE + ` THEN ` + t + `::numeric ` + cmp + ` ` + b.arg(n) + `::text::numeric ELSE ` + asText + ` END)`
 		}
 		return asText
@@ -415,9 +775,37 @@ func (b *builder) test(alias, field, op string, value any) string {
 		return `(CASE WHEN jsonb_typeof(` + j + `) = 'array'
 			THEN EXISTS (SELECT 1 FROM jsonb_array_elements_text(` + j + `) x WHERE lower(x) = lower(` + s + `))
 			ELSE strpos(lower(` + t + `), lower(` + s + `)) > 0 END)`
+	case "starts_with":
+		return `starts_with(lower(` + t + `), lower(` + s + `))`
 	}
 	return `false`
 }
+
+// eq is the SQL that t equals value: as numbers when both are, otherwise
+// as text, ignoring case.
+func (b *builder) eq(t string, value any) string {
+	s := b.arg(text(value))
+	if n, ok := number(value); ok {
+		return `(CASE WHEN ` + t + ` ~ ` + numericRE + ` THEN ` + t + `::numeric = ` + b.arg(n) + `::text::numeric ELSE lower(` + t + `) = lower(` + s + `) END)`
+	}
+	return `lower(` + t + `) = lower(` + s + `)`
+}
+
+// MayMarketSQL is true for a person (records r) who may get marketing
+// email, as the People list's Marketing email column works it out: not
+// held for review, nothing on the opt-out list that stops marketing email,
+// and their contact basis lets it under the workspace's rule
+// (customers.MayMarket).
+const MayMarketSQL = `(r.record_type = 'person' AND NOT r.needs_review
+	AND NOT EXISTS (SELECT 1 FROM record_identities i JOIN suppressions s ON s.workspace_id = r.workspace_id AND (
+			(s.kind = 'email' AND s.value = i.value) OR (s.kind = 'domain' AND s.value = split_part(i.value, '@', 2)))
+		WHERE i.record_id = r.id AND i.namespace = 'email' AND i.valid_to IS NULL
+			AND COALESCE(NULLIF(split_part(s.reason, ':', 2), ''), s.reason) NOT IN ('customer', 'partner', 'blocklist'))
+	AND CASE (SELECT c.status FROM consents c WHERE c.workspace_id = r.workspace_id AND c.record_id = r.id
+			AND c.channel = 'email' AND c.topic = '' AND c.purpose = 'marketing' ORDER BY c.occurred_at DESC, c.created_at DESC LIMIT 1)
+		WHEN 'granted' THEN true WHEN 'withdrawn' THEN false
+		ELSE outflare_contact_origin(r.origin, r.attributes) <> 'prospect'
+			AND (SELECT w.customer_marketing FROM workspaces w WHERE w.id = r.workspace_id) = 'inferred' END)`
 
 // Querier is a pool or a transaction.
 type Querier interface {
@@ -431,7 +819,36 @@ type Person struct {
 	Name      string    `json:"name"`
 	Email     string    `json:"email"`
 	EnteredAt time.Time `json:"entered_at,omitzero"`
+	// Members only: when the record was made, their first signed_up event,
+	// and what they have paid less refunds.
+	CreatedAt       *time.Time `json:"created_at,omitempty"`
+	SignedUpAt      *time.Time `json:"signed_up_at,omitempty"`
+	LifetimeRevenue *Money     `json:"lifetime_revenue,omitempty"`
 }
+
+// Money is an amount in one currency, in minor units (cents).
+type Money struct {
+	Currency    string `json:"currency"`
+	AmountMinor int64  `json:"amount_minor"`
+}
+
+// memberCols are what Members adds for each person: when the record was
+// made, their first signed_up event, and their lifetime revenue. That is
+// the record's own computed field (from a billing connection) when it has
+// one, and otherwise their payment events less refunds, in the currency
+// they paid most in.
+const memberCols = `, r.created_at,
+	(SELECT min(e.occurred_at) FROM customer_events e WHERE e.record_id = r.id AND e.workspace_id = r.workspace_id AND e.name = 'signed_up'),
+	COALESCE(r.attributes->'lifetime_revenue'->>'currency', pay.currency, ''),
+	COALESCE((r.attributes->'lifetime_revenue'->>'amount_minor')::bigint, pay.net, 0)`
+
+const memberPay = ` LEFT JOIN LATERAL (
+		SELECT upper(e.properties->>'currency') AS currency, GREATEST(sum(CASE WHEN e.name = 'payment.succeeded' THEN (e.properties->>'amount_minor')::numeric
+			ELSE -(e.properties->>'amount_minor')::numeric END), 0)::bigint AS net
+		FROM customer_events e
+		WHERE e.record_id = r.id AND e.workspace_id = r.workspace_id AND e.name IN ('payment.succeeded', 'payment.refunded')
+			AND e.source <> 'browser' AND e.properties->>'amount_minor' ~ '^-?[0-9]+(\.[0-9]+)?$' AND e.properties->>'currency' ~ '^[A-Za-z]{3}$'
+		GROUP BY 1 ORDER BY 2 DESC LIMIT 1) pay ON r.attributes->'lifetime_revenue'->>'currency' IS NULL`
 
 // personCols is a person's name and first verified email, from records r.
 // For a company it is the main domain.
@@ -488,14 +905,22 @@ func Members(ctx context.Context, q Querier, ws, listID string, seen []string, a
 	}
 	// A deleted person (Recently deleted) keeps their place, hidden, so
 	// restoring them isn't joining again.
-	rows, err := q.Query(ctx, `SELECT `+personCols+`, m.entered_at FROM `+table+` m JOIN records r ON r.id = m.record_id
+	rows, err := q.Query(ctx, `SELECT `+personCols+`, m.entered_at`+memberCols+` FROM `+table+` m JOIN records r ON r.id = m.record_id`+memberPay+`
 		WHERE m.workspace_id = $1 AND m.list_id = $2 AND r.deleted_at IS NULL`+cond+` ORDER BY m.entered_at DESC, m.record_id DESC LIMIT $3`, args...)
 	if err != nil {
 		return nil, err
 	}
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Person, error) {
 		var p Person
-		return p, row.Scan(&p.ID, &p.Name, &p.Email, &p.EnteredAt)
+		var currency string
+		var net int64
+		if err := row.Scan(&p.ID, &p.Name, &p.Email, &p.EnteredAt, &p.CreatedAt, &p.SignedUpAt, &currency, &net); err != nil {
+			return p, err
+		}
+		if currency != "" {
+			p.LifetimeRevenue = &Money{Currency: strings.ToUpper(currency), AmountMinor: net}
+		}
+		return p, nil
 	})
 	if out == nil {
 		out = []Person{}

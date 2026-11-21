@@ -8,7 +8,7 @@ Outflare works commission out. It never pays anyone: you approve a month, pay it
 
 Someone in the team directory is on a brand's sales team for a quarter when they have a quota that quarter, own something in the [forecast](revenue.md#forecast), have a role on the brand's sales desk (SDR, account executive or sales manager), or are covered by a commission plan that is on. Their managers are on it too, up to the top.
 
-A record's owner is a workspace member, so a person in the directory needs their sign-in linked (Settings, Team, edit the person) before deals and companies can be theirs. The page marks people with no sign-in.
+Anyone in the team directory can own records, with or without a sign-in, so a salesperson who never opens the app still has their leads, deals, quota and commission counted. The page marks people with no sign-in. When they get one later (Settings, Team, edit the person), everything they own stays theirs.
 
 ## Giving someone a lead, a company or a deal
 

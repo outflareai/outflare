@@ -22,6 +22,9 @@ const (
 const (
 	FromHomePage = "home_page"
 	FromPerson   = "manual"
+	// FromMentions: the mention listener found videos on it that the
+	// competitor posted itself.
+	FromMentions = "mentions"
 )
 
 // CompetitorLink is one of a competitor's profiles and whether it is

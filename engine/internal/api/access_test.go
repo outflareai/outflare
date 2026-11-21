@@ -483,6 +483,19 @@ func TestChangeATokensNameAndPermissions(t *testing.T) {
 	mgr.must(200, "PATCH", base+"/api-tokens/"+id, map[string]any{"scopes": []string{"leads.read"}})
 	mgr.must(403, "PATCH", base+"/api-tokens/"+mgrOut["api_token"].(map[string]any)["id"].(string), map[string]any{"name": "me"})
 
+	// Each token says who created it; one made by another token has no person.
+	mine := owner.must(200, "GET", base+"/api-tokens", nil)["data"].([]any)
+	if c, _ := mine[0].(map[string]any)["created_by"].(map[string]any); c == nil || c["name"] != "Jack" {
+		t.Fatalf("created_by: %v", mine[0])
+	}
+	if c := out["api_token"].(map[string]any)["created_by"]; c == nil {
+		t.Fatalf("created token has no created_by: %v", out)
+	}
+	child := mgr.must(201, "POST", base+"/api-tokens", map[string]any{"name": "child", "scopes": []string{"leads.read"}})
+	if c := child["api_token"].(map[string]any)["created_by"]; c != nil {
+		t.Fatalf("token-made token names a person: %v", c)
+	}
+
 	audit := owner.must(200, "GET", base+"/audit-events", nil)["data"].([]any)
 	if !slices.ContainsFunc(audit, func(a any) bool { return a.(map[string]any)["action"] == "token.updated" }) {
 		t.Fatal("no token.updated audit event")

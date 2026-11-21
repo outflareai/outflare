@@ -128,6 +128,10 @@ type Step struct {
 	Within *Window `json:"within,omitempty"`
 	// Label is the step's name on the chart; a default fits its kind.
 	Label string `json:"label,omitempty"`
+	// Optional shows the step without making it a gate: people who
+	// skipped it still go on to the next step and count there. Not for
+	// step 1, the last step or an any-order funnel.
+	Optional bool `json:"optional,omitempty"`
 }
 
 // AdClicks asks for the ad networks' clicks, impressions and spend over
@@ -181,7 +185,11 @@ type Funnel struct {
 	To   time.Time `json:"to"`
 	// Window is the overall limit from step 1; DefaultWindow when unset.
 	Window *Window `json:"window,omitempty"`
-	// Breakdown splits people by a field of their step 1 (Breakdowns).
+	// Breakdown splits people by a field of their step 1 (Breakdowns), by
+	// a field of a later step (step:<n>:<field>, the row that took them to
+	// step n; people who never got there have none), or by a field of the
+	// person's own record (person:<field key>; a company's for a company
+	// funnel, none for browsers nobody has identified).
 	Breakdown string `json:"breakdown,omitempty"`
 	// Order is strict (the default): people do the steps in this order.
 	// With any, they do them in any order: step 1 is whichever they did
@@ -211,7 +219,7 @@ var Intervals = []string{"day", "week", "month"}
 // Limits.
 const (
 	MinSteps  = 2
-	MaxSteps  = 10
+	MaxSteps  = 20
 	MaxRange  = 366 * 24 * time.Hour
 	MaxGroups = 25
 )
@@ -236,6 +244,10 @@ var EventFields = map[string]string{
 	"utm_term":     `e.context #>> '{campaign,term}'`,
 	"utm_content":  `e.context #>> '{campaign,content}'`,
 	"source":       `e.source`,
+	// The product the event is about and its category (products.category).
+	// (A bare "product" stays the event's own product property.)
+	"product_key":      `(SELECT pr.key FROM products pr WHERE pr.id = e.product_id)`,
+	"product_category": `(SELECT NULLIF(pr.category, '') FROM products pr WHERE pr.id = e.product_id)`,
 }
 
 // VisitFields are what a visit can be filtered and broken down by.
@@ -277,10 +289,23 @@ var VisitFields = map[string]string{
 // PaymentFields are what a payment can be filtered and broken down by.
 // amount is in the brand's currency's major unit (49.00).
 var PaymentFields = map[string]string{
-	"amount":   `(t.brand_amount_minor::numeric / 100)`,
-	"product":  `(SELECT COALESCE(NULLIF(pr.key, ''), pr.name) FROM products pr WHERE pr.id = t.product_id)`,
-	"source":   `t.source`,
-	"currency": `t.currency`,
+	"amount":           `(t.brand_amount_minor::numeric / 100)`,
+	"product":          `(SELECT COALESCE(NULLIF(pr.key, ''), pr.name) FROM products pr WHERE pr.id = t.product_id)`,
+	"product_category": `(SELECT NULLIF(pr.category, '') FROM products pr WHERE pr.id = t.product_id)`,
+	"source":           `t.source`,
+	"currency":         `t.currency`,
+	// Where the person who paid first came from: the channel, source and
+	// landing page of their first website visit (first touch). Empty for
+	// a payer with no visit on record. These make revenue from organic
+	// search, or from people who first landed on the blog, a filter.
+	"first_channel":      firstVisit(`s.channel`),
+	"first_source":       firstVisit(`s.source`),
+	"first_landing_path": firstVisit(`s.landing_path`),
+}
+
+// firstVisit reads a column of the payer's first website visit.
+func firstVisit(col string) string {
+	return `(SELECT NULLIF(` + col + `, '') FROM site_sessions s WHERE s.workspace_id = t.workspace_id AND s.record_id = t.record_id ORDER BY s.started_at LIMIT 1)`
 }
 
 // networkExpr is the ad network whose click id a visit carried, in the
@@ -402,6 +427,17 @@ func (f Funnel) Validate() error {
 		if s.First && s.Kind != KindEvent && s.Kind != KindPayment {
 			return Invalid(at + ".first only applies to event and payment steps")
 		}
+		if s.Optional {
+			if i == 0 || i == len(f.Steps)-1 {
+				return Invalid(at + ".optional is for a step in the middle: step 1 says who is in the funnel and the last step who finished it")
+			}
+			if f.Order == OrderAny {
+				return Invalid(at + ".optional needs steps in order: an any-order funnel counts how many steps people did")
+			}
+		}
+		if s.Within != nil && s.Within.From != nil && *s.Within.From >= 1 && *s.Within.From <= len(f.Steps) && f.Steps[*s.Within.From-1].Optional {
+			return Invalid(at + ".within.from names an optional step, which not everyone does; count from a required step")
+		}
 		if len(s.Label) > 80 {
 			return Invalid(at + ".label is at most 80 characters")
 		}
@@ -424,8 +460,14 @@ func (f Funnel) Validate() error {
 		}
 	}
 	if f.Breakdown != "" {
-		if _, err := breakdownExpr(f.Steps[0].Kind, f.Breakdown); err != nil {
+		step, field, person, err := f.breakdownTarget()
+		if err != nil {
 			return err
+		}
+		if !person {
+			if _, err := breakdownExpr(f.Steps[step].Kind, field); err != nil {
+				return err
+			}
 		}
 	}
 	if f.By != "" && f.By != ByPerson && f.By != ByCompany {
@@ -441,7 +483,10 @@ func (f Funnel) Validate() error {
 			if s.Within != nil {
 				return Invalid(fmt.Sprintf("steps[%d].within needs steps in order; an any-order funnel has only the overall window", i))
 			}
-			if f.Breakdown != "" && s.Kind != f.Steps[0].Kind {
+			if strings.HasPrefix(f.Breakdown, StepPrefix) {
+				return Invalid("breakdown by a later step needs steps in order: an any-order funnel has no step 2")
+			}
+			if f.Breakdown != "" && !strings.HasPrefix(f.Breakdown, PersonPrefix) && s.Kind != f.Steps[0].Kind {
 				return Invalid("breakdown in an any-order funnel needs every step to be of the same kind, because any step can be the first")
 			}
 		}
@@ -477,6 +522,9 @@ func (f Funnel) Validate() error {
 		if x.From < 1 || x.To <= x.From || x.To > len(f.Steps) {
 			return Invalid(fmt.Sprintf("%s.from and .to are step numbers, from before to, 1 to %d", at, len(f.Steps)))
 		}
+		if f.Steps[x.From-1].Optional || f.Steps[x.To-1].Optional {
+			return Invalid(at + ".from and .to name required steps: not everyone does an optional one")
+		}
 	}
 	if f.AdClicks != nil && f.AdClicks.Network != "" {
 		if _, ok := networkByID(f.AdClicks.Network); !ok {
@@ -510,6 +558,11 @@ func validFilter(kind string, f Filter, at string) error {
 		if _, err := experimentExpr(kind, strings.TrimPrefix(f.Property, ExperimentPrefix), &a); err != nil {
 			return err
 		}
+	} else if strings.HasPrefix(f.Property, PersonPrefix) || strings.HasPrefix(f.Property, CompanyPrefix) {
+		var a args
+		if _, _, err := recordFieldExpr(kind, f.Property, &a); err != nil {
+			return err
+		}
 	} else {
 		switch kind {
 		case KindVisit:
@@ -518,7 +571,11 @@ func validFilter(kind string, f Filter, at string) error {
 			}
 		case KindPayment:
 			if _, ok := PaymentFields[f.Property]; !ok {
-				return Invalid(at + ".property for a payment is amount, product, source or currency")
+				return Invalid(at + ".property for a payment is one of " + strings.Join(Breakdowns(KindPayment), ", ") + ", person:<field> or company:<field>")
+			}
+		case KindSearch:
+			if _, ok := SearchFields[f.Property]; !ok {
+				return Invalid(at + ".property for a search series is query, page, country or device")
 			}
 		}
 	}
@@ -568,7 +625,21 @@ func text(v any) string {
 }
 
 // args collects query parameters and hands back their placeholders.
-type args struct{ list []any }
+type args struct {
+	list []any
+	// internal is the brand's internal and test people, left out of every
+	// row a query counts when the brand turned that on (internal.go).
+	internal internalPeople
+	// records are the person and company fields this brand's insights may
+	// read; nil while a spec is only being validated.
+	records *recordFields
+}
+
+// recordFields are the fields of a brand's people and companies an
+// insight may split or filter by, key to label (BreakdownFields).
+type recordFields struct {
+	person, company map[string]string
+}
 
 func (a *args) add(v any) string {
 	a.list = append(a.list, v)
@@ -581,6 +652,9 @@ func fieldExpr(kind, property string, a *args) (string, error) {
 	if flag, ok := strings.CutPrefix(property, ExperimentPrefix); ok {
 		return experimentExpr(kind, flag, a)
 	}
+	if x, ok, err := recordFieldExpr(kind, property, a); ok || err != nil {
+		return x, err
+	}
 	switch kind {
 	case KindVisit:
 		if x, ok := VisitFields[property]; ok {
@@ -590,6 +664,11 @@ func fieldExpr(kind, property string, a *args) (string, error) {
 		if x, ok := PaymentFields[property]; ok {
 			return x, nil
 		}
+	case KindSearch:
+		if x, ok := SearchFields[property]; ok {
+			return x, nil
+		}
+		return "", Invalid(fmt.Sprintf("%q isn't a field of a search series", property))
 	default:
 		if x, ok := EventFields[property]; ok {
 			return x, nil
@@ -606,6 +685,75 @@ func fieldExpr(kind, property string, a *args) (string, error) {
 		return `(e.properties #>> ` + a.add(strings.Split(path, ".")) + `::text[])`, nil
 	}
 	return "", Invalid(fmt.Sprintf("%q isn't a field of a %s step", property, kind))
+}
+
+// CompanyPrefix names a field of the company a row's person belongs to:
+// company:<field key>, such as company:plan. For a row about a company
+// itself it is that company's field. PersonPrefix (person:<field key>)
+// is the person's own field.
+const CompanyPrefix = "company:"
+
+// rowRecord is the column holding a row's record id, by kind.
+func rowRecord(kind string) string {
+	switch kind {
+	case KindVisit:
+		return "s"
+	case KindPayment:
+		return "t"
+	case KindEvent, KindPage, KindConversion:
+		return "e"
+	}
+	return ""
+}
+
+// recordFieldExpr is the SQL for person:<key> or company:<key> on a row of
+// kind: the field of the row's person, or of their (first) company, as
+// text. ok is false for any other property.
+func recordFieldExpr(kind, property string, a *args) (string, bool, error) {
+	key, person := strings.CutPrefix(property, PersonPrefix)
+	if !person {
+		var company bool
+		if key, company = strings.CutPrefix(property, CompanyPrefix); !company {
+			return "", false, nil
+		}
+	}
+	whose := "people"
+	if !person {
+		whose = "companies"
+	}
+	alias := rowRecord(kind)
+	if alias == "" {
+		return "", true, Invalid(fmt.Sprintf("%s isn't a field of a %s series", property, kind))
+	}
+	if !personFieldPattern.MatchString(key) {
+		return "", true, Invalid(property + " names a field by its key, such as person:plan or company:plan")
+	}
+	if a.records != nil {
+		allowed := a.records.person
+		if !person {
+			allowed = a.records.company
+		}
+		if _, ok := allowed[key]; !ok {
+			return "", true, Invalid(fmt.Sprintf("%s isn't a field this brand's %s can be split or filtered by (the catalog's person_fields and company_fields)", property, whose))
+		}
+	}
+	rec := alias + `.record_id`
+	if !person {
+		// The row's company: the record itself when it is one, else the
+		// person's first current company.
+		rec = `(SELECT CASE WHEN r0.record_type <> 'person' THEN r0.id ELSE (SELECT l.to_id FROM record_relationships l
+				JOIN records c0 ON c0.id = l.to_id AND c0.merged_into IS NULL AND c0.deleted_at IS NULL
+				WHERE l.workspace_id = r0.workspace_id AND l.from_id = r0.id AND l.kind = 'companies' AND l.valid_to IS NULL
+				ORDER BY l.valid_from, l.id LIMIT 1) END
+			FROM records r0 WHERE r0.workspace_id = ` + alias + `.workspace_id AND r0.id = ` + alias + `.record_id)`
+	}
+	k := a.add(key)
+	return `COALESCE((SELECT CASE jsonb_typeof(r.attributes -> ` + k + `)
+			WHEN 'string' THEN left(r.attributes ->> ` + k + `, 200)
+			WHEN 'number' THEN r.attributes ->> ` + k + `
+			WHEN 'boolean' THEN r.attributes ->> ` + k + `
+			WHEN 'array' THEN left((SELECT string_agg(v, ',') FROM jsonb_array_elements_text(r.attributes -> ` + k + `) v), 200) END
+		FROM records r WHERE r.workspace_id = ` + alias + `.workspace_id AND r.id = ` + rec + `), '')`, true, nil
 }
 
 // ExperimentPrefix names an A/B test's flag as a field: experiment:<flag
@@ -638,10 +786,64 @@ func experimentExpr(kind, flag string, a *args) (string, error) {
 		AND x.properties->>'flag' = ` + a.add(flag) + ` ORDER BY x.occurred_at LIMIT 1)`, nil
 }
 
+// StepPrefix and PersonPrefix name a funnel breakdown that isn't a field
+// of step 1: step:<n>:<field> and person:<field key>.
+const (
+	StepPrefix   = "step:"
+	PersonPrefix = "person:"
+)
+
+// BreakdownFields lists the fields of a brand's people ("person") or
+// companies ("account") a funnel may be split by, as key to label. The
+// API sets it from the brand's catalog, leaving out names, references and
+// fields marked confidential, so a report never lists what only someone
+// who may read people should see.
+var BreakdownFields func(ctx context.Context, q Querier, ws, brand, recordType string) (map[string]string, error)
+
+var personFieldPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$`)
+
+// breakdownTarget reads Breakdown: the index of the step whose rows carry
+// the field and the field, or person with the record field's key.
+func (f Funnel) breakdownTarget() (step int, field string, person bool, err error) {
+	if key, ok := strings.CutPrefix(f.Breakdown, PersonPrefix); ok {
+		if !personFieldPattern.MatchString(key) {
+			return 0, "", false, Invalid("person:<field> names a field of the person's record by its key, such as person:plan")
+		}
+		return 0, key, true, nil
+	}
+	rest, ok := strings.CutPrefix(f.Breakdown, StepPrefix)
+	if !ok {
+		return 0, f.Breakdown, false, nil
+	}
+	num, field, ok := strings.Cut(rest, ":")
+	n, convErr := strconv.Atoi(num)
+	if !ok || convErr != nil || field == "" || n < 1 || n > len(f.Steps) {
+		return 0, "", false, Invalid(fmt.Sprintf("step:<n>:<field> names one of the funnel's %d steps and a field of it, such as step:2:property:plan", len(f.Steps)))
+	}
+	return n - 1, field, false, nil
+}
+
+// personExpr is a record field as text for the actor in col: text,
+// numbers and yes/no as they are, a list joined by commas.
+func personExpr(col, pWS string, key string, a *args) string {
+	k := a.add(key)
+	return `COALESCE((SELECT CASE jsonb_typeof(r.attributes -> ` + k + `)
+			WHEN 'string' THEN left(r.attributes ->> ` + k + `, 200)
+			WHEN 'number' THEN r.attributes ->> ` + k + `
+			WHEN 'boolean' THEN r.attributes ->> ` + k + `
+			WHEN 'array' THEN left((SELECT string_agg(v, ',') FROM jsonb_array_elements_text(r.attributes -> ` + k + `) v), 200) END
+		FROM records r WHERE r.workspace_id = ` + pWS + ` AND r.id = (CASE WHEN ` + col + ` LIKE 'a:%' THEN NULL ELSE ` + col + ` END)::uuid), '')`
+}
+
 func breakdownExpr(kind, breakdown string) (string, error) {
 	if strings.HasPrefix(breakdown, ExperimentPrefix) {
 		var a args
 		return experimentExpr(kind, strings.TrimPrefix(breakdown, ExperimentPrefix), &a)
+	}
+	if strings.HasPrefix(breakdown, PersonPrefix) || strings.HasPrefix(breakdown, CompanyPrefix) {
+		var a args
+		_, _, err := recordFieldExpr(kind, breakdown, &a)
+		return "", err
 	}
 	if kind == KindEvent || kind == KindPage || kind == KindConversion {
 		if !strings.HasPrefix(breakdown, "property:") && !strings.HasPrefix(breakdown, "param:") {
@@ -801,6 +1003,10 @@ func source(kind, event string, conv conversion, filters []Filter, first bool, f
 	default:
 		return src, Invalid("kind is one of " + strings.Join(Kinds, ", "))
 	}
+	// The row's person is the first column of its table alias: e, s or t.
+	if w := a.notInternal(src.from[len(src.from)-1:] + ".record_id"); w != "" {
+		src.where = append(src.where, w)
+	}
 	return src, nil
 }
 
@@ -811,7 +1017,9 @@ type Compiled struct {
 	f         Funnel
 	labels    []string
 	with      string
-	args      args
+	// fbk is the breakdown column of f.
+	fbk  string
+	args args
 }
 
 // Labels are the steps' names, in order.
@@ -825,6 +1033,9 @@ func Compile(ctx context.Context, q Querier, ws, brand string, f Funnel) (*Compi
 	}
 	c := &Compiled{ws: ws, brand: brand, f: f}
 	a := &c.args
+	if err := a.leaveOutInternal(ctx, q, ws, brand); err != nil {
+		return nil, err
+	}
 	pWS, pBrand := a.add(ws), a.add(brand)
 	overall := DefaultWindow
 	if f.Window != nil {
@@ -836,6 +1047,33 @@ func Compile(ctx context.Context, q Querier, ws, brand string, f Funnel) (*Compi
 	pEnd := a.add(f.To.Add(overall))
 
 	anyOrder := f.Order == OrderAny
+	bkStep, bkField, bkPerson, err := f.breakdownTarget()
+	if err != nil {
+		return nil, err
+	}
+	// The breakdown column of f: step 1's by default.
+	fbk := `g1.bk`
+	if bkPerson {
+		fbk = personExpr(`g1.actor`, pWS, bkField, a) + ` AS bk`
+	} else if bkStep > 0 {
+		fbk = fmt.Sprintf(`COALESCE(g%d.sbk, '') AS bk`, bkStep+1)
+	}
+	c.fbk = fbk
+	if bkPerson {
+		typ, whose := "person", "people"
+		if f.By == ByCompany {
+			typ, whose = "account", "companies"
+		}
+		var allowed map[string]string
+		if BreakdownFields != nil {
+			if allowed, err = BreakdownFields(ctx, q, ws, brand, typ); err != nil {
+				return nil, err
+			}
+		}
+		if _, ok := allowed[bkField]; !ok {
+			return nil, Invalid(fmt.Sprintf("person:%s isn't a field this brand's %s can be split by (the catalog's person_fields and company_fields)", bkField, whose))
+		}
+	}
 	var ctes []string
 	for i, s := range f.Steps {
 		n := i + 1
@@ -853,8 +1091,8 @@ func Compile(ctx context.Context, q Querier, ws, brand string, f Funnel) (*Compi
 		}
 
 		bk := `''`
-		if (i == 0 || anyOrder) && f.Breakdown != "" {
-			x, err := fieldExpr(s.Kind, f.Breakdown, a)
+		if (i == bkStep || anyOrder) && f.Breakdown != "" && !bkPerson {
+			x, err := fieldExpr(s.Kind, bkField, a)
 			if err != nil {
 				return nil, err
 			}
@@ -890,12 +1128,12 @@ func Compile(ctx context.Context, q Querier, ws, brand string, f Funnel) (*Compi
 	// them. Each is a hash join on the person, not a scan per person.
 	ctes = append(ctes, `g1 AS (SELECT DISTINCT ON (actor) actor, bk, ts AS t1 FROM s1 ORDER BY actor, ts)`)
 	carried := []string{`p.actor`, `p.bk`, `p.t1`}
-	cols := []string{`g1.actor`, `g1.bk`, `g1.t1`}
+	cols := []string{`g1.actor`, fbk, `g1.t1`}
 	var joins []string
 	for i := 1; i < len(f.Steps); i++ {
 		n := i + 1
 		s := f.Steps[i]
-		prev := fmt.Sprintf(`p.t%d`, i)
+		prev := f.before(i, `p.`)
 		deadline := `p.t1 + ` + pOverall + `::interval`
 		if s.Within != nil {
 			anchor := prev
@@ -908,8 +1146,20 @@ func Compile(ctx context.Context, q Querier, ws, brand string, f Funnel) (*Compi
 		if sameStep(f.Steps[i-1], s) {
 			after = `>`
 		}
-		ctes = append(ctes, fmt.Sprintf(`g%d AS (SELECT %s, min(x.ts) AS t%d FROM g%d p JOIN s%d x ON x.actor = p.actor AND x.ts %s %s AND x.ts <= %s GROUP BY %s)`,
-			n, strings.Join(carried, ", "), n, i, n, after, prev, deadline, strings.Join(carried, ", ")))
+		// The breakdown of a later step is the field on the row that
+		// took the person there.
+		sbk := ""
+		if i == bkStep {
+			sbk = `, (array_agg(x.bk ORDER BY x.ts))[1] AS sbk`
+		}
+		// An optional step keeps everyone from the step before, with no
+		// time for those who skipped it.
+		join := `JOIN`
+		if s.Optional {
+			join = `LEFT JOIN`
+		}
+		ctes = append(ctes, fmt.Sprintf(`g%d AS (SELECT %s, min(x.ts) AS t%d%s FROM g%d p `+join+` s%d x ON x.actor = p.actor AND x.ts %s %s AND x.ts <= %s GROUP BY %s)`,
+			n, strings.Join(carried, ", "), n, sbk, i, n, after, prev, deadline, strings.Join(carried, ", ")))
 		carried = append(carried, fmt.Sprintf(`p.t%d`, n))
 		cols = append(cols, fmt.Sprintf(`g%d.t%d`, n, n))
 		joins = append(joins, fmt.Sprintf(`LEFT JOIN g%d ON g%d.actor = g1.actor`, n, n))
@@ -929,6 +1179,29 @@ func Compile(ctx context.Context, q Querier, ws, brand string, f Funnel) (*Compi
 	ctes = append(ctes, `f AS (SELECT `+strings.Join(cols, ", ")+` FROM g1 `+strings.Join(joins, " ")+where+`)`)
 	c.with = `WITH ` + strings.Join(ctes, ",\n")
 	return c, nil
+}
+
+// before is when the person did step number n (counted from 1) or, where
+// that step is optional and they skipped it, the latest step ahead of it
+// that they did. prefix goes in front of each step's time column.
+func (f Funnel) before(n int, prefix string) string {
+	i := n
+	out := fmt.Sprintf(`%st%d`, prefix, i)
+	if i-1 > 0 && f.Steps[i-1].Optional {
+		return `COALESCE(` + out + `, ` + f.before(i-1, prefix) + `)`
+	}
+	return out
+}
+
+// gate is the last required step ahead of step i (both counted from 0):
+// the people a step's rate and drop-off are measured against.
+func (f Funnel) gate(i int) int {
+	for j := i - 1; j > 0; j-- {
+		if !f.Steps[j].Optional {
+			return j
+		}
+	}
+	return 0
 }
 
 // anyOrderLabel names step n of an any-order funnel: how many of the
@@ -957,7 +1230,7 @@ func (c *Compiled) compileAnyOrder(ctes *[]string, pTo, pOverall string) {
 	*ctes = append(*ctes, `g1 AS (SELECT DISTINCT ON (actor) actor, bk, ts AS t1 FROM allsteps WHERE ts < `+pTo+` ORDER BY actor, ts)`)
 	*ctes = append(*ctes, `d AS (SELECT p.actor, x.step, min(x.ts) AS ts FROM g1 p JOIN allsteps x ON x.actor = p.actor AND x.ts >= p.t1 AND x.ts <= p.t1 + `+pOverall+`::interval GROUP BY p.actor, x.step)`)
 	*ctes = append(*ctes, `r AS (SELECT actor, ts, row_number() OVER (PARTITION BY actor ORDER BY ts, step) AS k FROM d)`)
-	cols := []string{`g1.actor`, `g1.bk`, `g1.t1`}
+	cols := []string{`g1.actor`, c.fbk, `g1.t1`}
 	var joins []string
 	for k := 2; k <= n; k++ {
 		cols = append(cols, fmt.Sprintf(`r%d.ts AS t%d`, k, k))
@@ -995,13 +1268,35 @@ type StepResult struct {
 	// Rates are 0 to 1: of the people at step 1, and at the step before.
 	ConversionFromStart    float64 `json:"conversion_from_start"`
 	ConversionFromPrevious float64 `json:"conversion_from_previous"`
-	// Dropped is how many reached the step before but not this one.
+	// Dropped is how many reached the step before but not this one. The
+	// step before is the last required one: an optional step drops nobody.
 	Dropped int `json:"dropped"`
+	// Optional marks a step people may skip, and Skipped is how many
+	// went on to a later step without doing it.
+	Optional bool `json:"optional,omitempty"`
+	Skipped  int  `json:"skipped,omitempty"`
 	// Times from the step before, in seconds; null on step 1 and when
 	// nobody reached the step.
 	MedianSeconds  *float64 `json:"median_seconds"`
 	AverageSeconds *float64 `json:"average_seconds"`
+	// TimeToConvert is how long people took from the step before, as
+	// counts per span of time (TimeBounds). Only on the funnel's own
+	// steps from step 2, not on breakdown groups.
+	TimeToConvert []TimeBucket `json:"time_to_convert,omitempty"`
 }
+
+// TimeBucket is the people who took at least FromSeconds and less than
+// ToSeconds (no upper end when nil) to reach a step from the one before.
+type TimeBucket struct {
+	FromSeconds float64  `json:"from_seconds"`
+	ToSeconds   *float64 `json:"to_seconds"`
+	Count       int      `json:"count"`
+}
+
+// TimeBounds are the edges of the time-to-convert buckets, in seconds:
+// under a minute, to 5 and 30 minutes, 1, 6 and 24 hours, 3, 7 and 30
+// days, and longer.
+var TimeBounds = []float64{0, 60, 300, 1800, 3600, 21600, 86400, 259200, 604800, 2592000}
 
 // Group is one breakdown value's steps.
 type Group struct {
@@ -1040,10 +1335,15 @@ type Result struct {
 	AdClicks  *AdClickResult `json:"ad_clicks"`
 }
 
-func steps(labels []string, counts []int, medians, averages []*float64) []StepResult {
+func (c *Compiled) steps(counts, skipped []int, medians, averages []*float64) []StepResult {
+	labels := c.labels
 	out := make([]StepResult, len(labels))
 	for i := range labels {
 		r := StepResult{Label: labels[i], Count: counts[i]}
+		anyOrder := c.f.Order == OrderAny
+		if !anyOrder && c.f.Steps[i].Optional {
+			r.Optional, r.Skipped = true, skipped[i]
+		}
 		if counts[0] > 0 {
 			r.ConversionFromStart = float64(counts[i]) / float64(counts[0])
 		}
@@ -1053,9 +1353,15 @@ func steps(labels []string, counts []int, medians, averages []*float64) []StepRe
 				r.ConversionFromPrevious = 0
 			}
 		} else {
-			r.Dropped = counts[i-1] - counts[i]
-			if counts[i-1] > 0 {
-				r.ConversionFromPrevious = float64(counts[i]) / float64(counts[i-1])
+			g := i - 1
+			if !anyOrder {
+				g = c.f.gate(i)
+			}
+			if !r.Optional {
+				r.Dropped = counts[g] - counts[i]
+			}
+			if counts[g] > 0 {
+				r.ConversionFromPrevious = float64(counts[i]) / float64(counts[g])
 			}
 			r.MedianSeconds, r.AverageSeconds = medians[i], averages[i]
 		}
@@ -1071,11 +1377,45 @@ func (c *Compiled) Run(ctx context.Context, q Querier) (Result, error) {
 	for i := 1; i <= n; i++ {
 		sel = append(sel, fmt.Sprintf(`count(t%d)::int`, i))
 	}
+	// Time from the step before: the latest earlier step the person did.
+	took := func(i int) string {
+		prev := fmt.Sprintf(`t%d`, i-1)
+		if c.f.Order != OrderAny {
+			prev = c.f.before(i-1, ``)
+		}
+		return fmt.Sprintf(`extract(epoch FROM t%d - %s)`, i, prev)
+	}
 	for i := 2; i <= n; i++ {
-		d := fmt.Sprintf(`extract(epoch FROM t%d - t%d)`, i, i-1)
+		d := took(i)
 		sel = append(sel, `(percentile_cont(0.5) WITHIN GROUP (ORDER BY `+d+`))::float8`, `avg(`+d+`)::float8`)
 	}
-	a := args{list: slices.Clone(c.args.list)}
+	// How long each step took, in buckets.
+	nb := len(TimeBounds)
+	for i := 2; i <= n; i++ {
+		d := took(i)
+		for b, lo := range TimeBounds {
+			cond := fmt.Sprintf(`%s >= %v`, d, lo)
+			if b+1 < nb {
+				cond += fmt.Sprintf(` AND %s < %v`, d, TimeBounds[b+1])
+			}
+			sel = append(sel, `count(*) FILTER (WHERE `+cond+`)::int`)
+		}
+	}
+	// Who went on past each optional step without doing it.
+	var optional []int
+	if c.f.Order != OrderAny {
+		for i, s := range c.f.Steps {
+			if s.Optional {
+				optional = append(optional, i)
+				var later []string
+				for j := i + 2; j <= n; j++ {
+					later = append(later, fmt.Sprintf(`t%d`, j))
+				}
+				sel = append(sel, fmt.Sprintf(`count(*) FILTER (WHERE t%d IS NULL AND COALESCE(%s) IS NOT NULL)::int`, i+1, strings.Join(later, ", ")))
+			}
+		}
+	}
+	a := args{list: slices.Clone(c.args.list), records: c.args.records}
 	period := `NULL::timestamptz`
 	if c.f.Interval != "" {
 		z := a.add(zoneName(c.f.Location))
@@ -1105,18 +1445,39 @@ func (c *Compiled) Run(ctx context.Context, q Querier) (Result, error) {
 		for i := 1; i < n; i++ {
 			dest = append(dest, &medians[i], &averages[i])
 		}
+		times := make([][]int, n)
+		for i := 1; i < n; i++ {
+			times[i] = make([]int, nb)
+			for b := range times[i] {
+				dest = append(dest, &times[i][b])
+			}
+		}
+		skipped := make([]int, n)
+		for _, i := range optional {
+			dest = append(dest, &skipped[i])
+		}
 		if err := rows.Scan(dest...); err != nil {
 			return Result{}, err
 		}
 		switch {
 		case gbk == 1 && gp == 1:
-			res.Steps = steps(c.labels, counts, medians, averages)
+			res.Steps = c.steps(counts, skipped, medians, averages)
+			for i := 1; i < n; i++ {
+				for b, lo := range TimeBounds {
+					tb := TimeBucket{FromSeconds: lo, Count: times[i][b]}
+					if b+1 < nb {
+						hi := TimeBounds[b+1]
+						tb.ToSeconds = &hi
+					}
+					res.Steps[i].TimeToConvert = append(res.Steps[i].TimeToConvert, tb)
+				}
+			}
 		case gbk == 0 && c.f.Breakdown != "":
 			v := ""
 			if bk != nil {
 				v = *bk
 			}
-			res.Breakdown = append(res.Breakdown, Group{Value: v, Steps: steps(c.labels, counts, medians, averages)})
+			res.Breakdown = append(res.Breakdown, Group{Value: v, Steps: c.steps(counts, skipped, medians, averages)})
 		case gp == 0 && p != nil:
 			res.OverTime = append(res.OverTime, Period{Start: p.UTC(), Counts: counts})
 		}
@@ -1125,9 +1486,9 @@ func (c *Compiled) Run(ctx context.Context, q Querier) (Result, error) {
 		return Result{}, err
 	}
 	if res.Steps == nil {
-		res.Steps = steps(c.labels, make([]int, n), make([]*float64, n), make([]*float64, n))
+		res.Steps = c.steps(make([]int, n), make([]int, n), make([]*float64, n), make([]*float64, n))
 	}
-	res.Breakdown = topGroups(res.Breakdown, c.labels)
+	res.Breakdown = c.topGroups(res.Breakdown)
 	slices.SortFunc(res.OverTime, func(x, y Period) int { return x.Start.Compare(y.Start) })
 	if c.f.AdClicks != nil {
 		ac, err := adClicks(ctx, q, c.ws, c.brand, c.f)
@@ -1141,7 +1502,8 @@ func (c *Compiled) Run(ctx context.Context, q Querier) (Result, error) {
 
 // topGroups keeps the biggest MaxGroups by step 1 and adds the rest up as
 // "$other". Medians can't be added up, so other has none.
-func topGroups(groups []Group, labels []string) []Group {
+func (c *Compiled) topGroups(groups []Group) []Group {
+	labels := c.labels
 	slices.SortStableFunc(groups, func(x, y Group) int {
 		if x.Steps[0].Count != y.Steps[0].Count {
 			return y.Steps[0].Count - x.Steps[0].Count
@@ -1151,13 +1513,14 @@ func topGroups(groups []Group, labels []string) []Group {
 	if len(groups) <= MaxGroups {
 		return groups
 	}
-	counts := make([]int, len(labels))
+	counts, skipped := make([]int, len(labels)), make([]int, len(labels))
 	for _, g := range groups[MaxGroups:] {
 		for i, s := range g.Steps {
 			counts[i] += s.Count
+			skipped[i] += s.Skipped
 		}
 	}
-	other := Group{Value: "$other", Steps: steps(labels, counts, make([]*float64, len(labels)), make([]*float64, len(labels)))}
+	other := Group{Value: "$other", Steps: c.steps(counts, skipped, make([]*float64, len(labels)), make([]*float64, len(labels)))}
 	return append(groups[:MaxGroups:MaxGroups], other)
 }
 
@@ -1233,12 +1596,17 @@ func (c *Compiled) People(ctx context.Context, q Querier, pq PeopleQuery) ([]Per
 	if pq.Step < 1 || pq.Step > n || (pq.Dropped && pq.Step == 1) {
 		return nil, false, Invalid(fmt.Sprintf("step is 1 to %d; dropped people are from step 2 on", n))
 	}
-	a := args{list: slices.Clone(c.args.list)}
+	a := args{list: slices.Clone(c.args.list), records: c.args.records}
 	where := []string{fmt.Sprintf(`t%d IS NOT NULL`, pq.Step)}
 	order := fmt.Sprintf(`t%d`, pq.Step)
 	if pq.Dropped {
-		where = []string{fmt.Sprintf(`t%d IS NOT NULL`, pq.Step-1), fmt.Sprintf(`t%d IS NULL`, pq.Step)}
-		order = fmt.Sprintf(`t%d`, pq.Step-1)
+		// Dropped from the last required step before this one.
+		g := pq.Step - 1
+		if c.f.Order != OrderAny {
+			g = c.f.gate(pq.Step-1) + 1
+		}
+		where = []string{fmt.Sprintf(`t%d IS NOT NULL`, g), fmt.Sprintf(`t%d IS NULL`, pq.Step)}
+		order = fmt.Sprintf(`t%d`, g)
 	}
 	if pq.BreakdownSet {
 		where = append(where, `bk = `+a.add(pq.Breakdown))
@@ -1266,9 +1634,10 @@ func (c *Compiled) People(ctx context.Context, q Querier, pq PeopleQuery) ([]Per
 			return nil, false, err
 		}
 		p.Times = []time.Time{}
+		// A skipped optional step has no time; the ones after it do.
 		for _, t := range times {
 			if t == nil {
-				break
+				continue
 			}
 			p.Times = append(p.Times, t.UTC())
 		}
@@ -1282,4 +1651,10 @@ func (c *Compiled) People(ctx context.Context, q Querier, pq PeopleQuery) ([]Per
 		out = out[:pq.Limit]
 	}
 	return out, more, nil
+}
+
+// ValidEventFilter checks a filter on events and page views, such as a
+// dashboard's filters that every tile takes.
+func ValidEventFilter(f Filter, at string) error {
+	return validFilter(KindEvent, f, at)
 }

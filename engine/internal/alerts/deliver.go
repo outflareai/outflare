@@ -24,7 +24,8 @@ type Service struct {
 	Send func(ctx context.Context, m sysmail.Message) error
 	// PublicURL is where links in the email point.
 	PublicURL string
-	// Store opens the workspace's own chat connections (Slack).
+	// Store opens the workspace's own chat connections (Slack, a Telegram
+	// bot).
 	Store *connectors.Store
 }
 
@@ -58,7 +59,7 @@ func (s *Service) deliver(ctx context.Context, job jobs.Job) error {
 	if err != nil {
 		return err
 	}
-	if d.channel == "slack" {
+	if d.channel == "slack" || d.channel == "telegram" {
 		return s.post(ctx, job, d, r)
 	}
 	return s.email(ctx, job, d, r)
@@ -111,8 +112,33 @@ func (s *Service) email(ctx context.Context, job jobs.Job, d delivery, r Row) er
 	case sentToday >= DailyCap:
 		return skip("daily_cap")
 	}
-	v := Describe(ctx, s.Pool, r)
-	if err := s.Send(ctx, Message(email, d.workspace, URL(s.PublicURL, d.slug, v.Path), URL(s.PublicURL, d.slug, "alerts"), v)); err != nil {
+	// The same kind for the same person in the same brand, still waiting:
+	// one email lists them all. The others are marked grouped, and put
+	// back if the email fails, so the retry takes them again.
+	others, ok, err := s.group(ctx, d, r)
+	if err != nil || !ok {
+		return err
+	}
+	views := []View{Describe(ctx, s.Pool, r)}
+	for _, id := range others {
+		o, err := Load(ctx, s.Pool, d.ws, id)
+		if err != nil {
+			s.ungroup(ctx, d.ws, others)
+			return err
+		}
+		views = append(views, Describe(ctx, s.Pool, o))
+	}
+	ev.Props["grouped"] = len(others)
+	settings := URL(s.PublicURL, d.slug, "alerts")
+	var m sysmail.Message
+	if len(views) == 1 {
+		m = Message(email, d.workspace, URL(s.PublicURL, d.slug, views[0].Path), settings, views[0])
+	} else {
+		k, _ := Find(r.Kind)
+		m = GroupMessage(email, d.workspace, k.Title, URL(s.PublicURL, d.slug, groupPath(views)), settings, views)
+	}
+	if err := s.Send(ctx, m); err != nil {
+		s.ungroup(ctx, d.ws, others)
 		track.Fail(ctx, s.Log, ev, "email_failed", err)
 		if job.Attempt >= job.MaxAttempts {
 			_ = s.finish(ctx, d, "failed", "email_failed")
@@ -126,11 +152,78 @@ func (s *Service) email(ctx context.Context, job jobs.Job, d delivery, r Row) er
 	return nil
 }
 
-// post sends the alert to the workspace's own Slack (or another chat tool
-// with the notify capability), through its own connection.
+// groupLimit is the most alerts one email lists.
+const groupLimit = 50
+
+// group takes the other alerts of r's kind waiting to be emailed to the
+// same person in the same brand, raised in the last hour, and marks them
+// grouped into this email. One person's burst is taken by one job at a
+// time (an advisory lock), and ok is false when another job already took
+// this delivery into its email.
+func (s *Service) group(ctx context.Context, d delivery, r Row) (others []string, ok bool, err error) {
+	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('alert_email:' || $1 || ':' || $2 || ':' || $3, 0))`,
+			*d.userID, r.Kind, deref(r.BrandID)); err != nil {
+			return err
+		}
+		var status string
+		if err := tx.QueryRow(ctx, `SELECT status FROM alert_deliveries WHERE id = $1`, d.id).Scan(&status); err != nil {
+			return err
+		}
+		if status != "queued" {
+			return nil
+		}
+		ok = true
+		rows, err := tx.Query(ctx, `UPDATE alert_deliveries x SET status = 'skipped', reason = 'grouped'
+			FROM (SELECT o.id FROM alert_deliveries o JOIN alerts a ON a.id = o.alert_id AND a.workspace_id = o.workspace_id
+				WHERE o.workspace_id = $1 AND o.user_id = $2 AND o.channel = 'email' AND o.status = 'queued' AND o.id <> $3
+				  AND a.kind = $4 AND a.brand_id IS NOT DISTINCT FROM $5::uuid AND a.created_at > now() - interval '1 hour'
+				ORDER BY a.created_at, o.id LIMIT $6) g
+			WHERE x.id = g.id RETURNING x.alert_id::text`, d.ws, *d.userID, d.id, r.Kind, r.BrandID, groupLimit-1)
+		if err != nil {
+			return err
+		}
+		others, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		return err
+	})
+	return others, ok, err
+}
+
+// ungroup puts grouped deliveries back in the queue after the email that
+// listed them failed; the retry takes them again.
+func (s *Service) ungroup(ctx context.Context, ws string, alertIDs []string) {
+	if len(alertIDs) == 0 {
+		return
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE alert_deliveries SET status = 'queued', reason = NULL
+		WHERE workspace_id = $1 AND alert_id::text = ANY($2) AND channel = 'email' AND status = 'skipped' AND reason = 'grouped'`, ws, alertIDs); err != nil {
+		s.Log.Error("alert emails could not be put back after a failed send", "err", err)
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// groupPath is where a grouped email's button opens: the page they share,
+// else the alerts list.
+func groupPath(views []View) string {
+	for _, v := range views[1:] {
+		if v.Path != views[0].Path {
+			return "alerts"
+		}
+	}
+	return views[0].Path
+}
+
+// post sends the alert to the workspace's own Slack or Telegram bot (a
+// chat tool with the notify capability), through its own connection.
 func (s *Service) post(ctx context.Context, job jobs.Job, d delivery, r Row) error {
 	ev := track.Event{Name: "alert.posted", WorkspaceID: d.ws, ActorType: "system", Surface: "job",
-		Props: map[string]any{"kind": r.Kind, "alert_id": r.ID, "channel": "slack"}}
+		Props: map[string]any{"kind": r.Kind, "alert_id": r.ID, "channel": d.channel}}
 	fail := func(code string, err error) error {
 		track.Fail(ctx, s.Log, ev, code, err)
 		_ = s.finish(ctx, d, "failed", code)
@@ -185,13 +278,40 @@ func Message(email, workspace, url, settingsURL string, v View) sysmail.Message 
 		body = append(body, v.Text)
 	}
 	return sysmail.Email{
-		To:      email,
-		Subject: v.Title,
-		Preview: workspace + ": " + v.Title,
-		Heading: v.Title,
-		Body:    body,
-		Button:  "Open in Outflare",
-		URL:     url,
-		Note:    "You get this because of the alert settings in " + workspace + ". Change which alerts come by email, or mute this kind for yourself, under Alerts: " + settingsURL,
+		To:        email,
+		Subject:   v.Title,
+		Preview:   workspace + ": " + v.Title,
+		Heading:   v.Title,
+		Body:      body,
+		Button:    "Open in Outflare",
+		URL:       url,
+		Note:      "You get this because of the alert settings in " + workspace + ". Switch this kind of email off, or mute it for yourself only, at any time.",
+		LinkLabel: "Manage notifications",
+		LinkURL:   settingsURL,
+	}.Message()
+}
+
+// GroupMessage is one email for several alerts of one kind: how many, and
+// each one's title.
+func GroupMessage(email, workspace, kindTitle, url, settingsURL string, views []View) sysmail.Message {
+	heading := fmt.Sprintf("%s: %d alerts", kindTitle, len(views))
+	body := make([]string, 0, len(views)+1)
+	for _, v := range views {
+		body = append(body, v.Title+".")
+	}
+	if len(views) > 0 && views[0].Text != "" {
+		body = append(body, views[0].Text)
+	}
+	return sysmail.Email{
+		To:        email,
+		Subject:   heading,
+		Preview:   workspace + ": " + heading,
+		Heading:   heading,
+		Body:      body,
+		Button:    "Open in Outflare",
+		URL:       url,
+		Note:      "These came together, so they are in one email. You get this because of the alert settings in " + workspace + ". Switch this kind of email off, or mute it for yourself only, at any time.",
+		LinkLabel: "Manage notifications",
+		LinkURL:   settingsURL,
 	}.Message()
 }

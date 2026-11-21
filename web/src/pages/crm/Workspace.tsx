@@ -10,20 +10,15 @@ import type { Schemas } from "@outflare/sdk";
 import {
   ArrowDown,
   ArrowUp,
-  Building2,
-  CheckSquare,
   ChevronLeft,
   ChevronRight,
   Columns3,
   Download,
-  FileText,
   Filter,
   LayoutGrid,
   List,
   Plus,
   Search,
-  Settings2,
-  Users,
   X,
   Bookmark,
   Trash2,
@@ -41,6 +36,7 @@ import {
   Status,
   toast,
   confirmAction,
+  CopyButton,
 } from "@/ui";
 import { setBrand, useBrand } from "@/lib/brand";
 import { displayName, identity, useCatalog } from "@/lib/records";
@@ -56,7 +52,11 @@ import { RecordBoard } from "./Board";
 import { CRMReports } from "./Reports";
 import { CRMCollections } from "./Collections";
 import { CRMSettings } from "./Settings";
+import { usePeopleSetup } from "@/lib/peopleSetup";
+import { PeopleSetupCard } from "./PeopleSetup";
 import { MailPrivacy } from "./Mail";
+import { AddFromEvent } from "./AddFromEvent";
+import { subSourceNoun, useSubSources } from "@/components/sub-source-picker";
 import {
   Popover,
   PopoverContent,
@@ -83,6 +83,10 @@ type Config = {
   group: string;
   /** Which records: the live ones, those held for someone to approve, or archived ones. */
   show: "active" | "review" | "archived";
+  /** People only: who may get marketing email (yes), who may not (no), or everyone. */
+  marketing: "" | "yes" | "no";
+  /** People only: everyone, or only Individuals (people with no company). */
+  company: "" | "individual";
 };
 const defaults = (): Config => ({
   q: "",
@@ -93,6 +97,8 @@ const defaults = (): Config => ({
   layout: "table",
   group: "",
   show: "active",
+  marketing: "",
+  company: "",
 });
 function readConfig(raw: unknown): Config {
   const c = raw && typeof raw === "object" ? (raw as Partial<Config>) : {};
@@ -114,6 +120,8 @@ function readConfig(raw: unknown): Config {
     layout: c.layout === "board" ? "board" : "table",
     group: typeof c.group === "string" ? c.group : "",
     show: c.show === "review" || c.show === "archived" ? c.show : "active",
+    marketing: c.marketing === "yes" || c.marketing === "no" ? c.marketing : "",
+    company: c.company === "individual" ? "individual" : "",
   };
 }
 
@@ -207,10 +215,19 @@ function WorkspaceBody({
   const cat = useCatalog(ws);
   const { brand, query } = useBrand(ws);
   const brandId = brand?.id ?? "";
+  const setup = usePeopleSetup(brandId || undefined);
+  const sellsTo = setup?.sells_to;
   const parts = (open ?? "person").split(":");
-  const section = parts[0] || "person";
-  const preview = parts[1];
+  // Cold contacts (Outreach's menu item) are the People list's Cold filter.
+  const cold = parts[0] === "cold";
+  // event:{key} is the People list filtered to one event or conference.
+  const fromEvent = parts[0] === "event" ? parts[1] : undefined;
+  const section = cold || fromEvent ? "person" : parts[0] || "person";
+  const preview = fromEvent ? undefined : parts[1];
+  const preset = (): Partial<Config> =>
+    cold ? { filters: { source: "cold" } } : fromEvent ? { filters: { source: "event", sub_source: fromEvent } } : {};
   const special = [
+    "add-from-event",
     "tasks",
     "notes",
     "settings",
@@ -223,6 +240,7 @@ function WorkspaceBody({
   const [config, setConfig] = useState<Config>(() => ({
     ...defaults(),
     ...(type === "deal" ? { layout: "board", group: "stage" } : {}),
+    ...preset(),
   }));
   const [rows, setRows] = useState<Rec[]>([]);
   const [referenceNames, setReferenceNames] = useState<Record<string, string>>(
@@ -264,6 +282,7 @@ function WorkspaceBody({
     direction: config.direction,
     filters: config.filters,
     show: config.show,
+    marketing: config.marketing,
   });
   const viewRequest = useRef(0);
   const loadViews = useCallback(async () => {
@@ -292,13 +311,14 @@ function WorkspaceBody({
     setConfig({
       ...defaults(),
       ...(type === "deal" ? { layout: "board", group: "stage" } : {}),
+      ...preset(),
     });
     setOffset(0);
     setCursors([undefined]);
     setNextCursor(null);
     setSelected(new Set());
     setViewId("");
-  }, [type]);
+  }, [type, cold, fromEvent]);
   useEffect(() => {
     if (special) return;
     const controller = new AbortController();
@@ -324,6 +344,8 @@ function WorkspaceBody({
                 .map(([k, v]) => `${k}:${v}`),
               ...(config.show === "review" ? { review: "needs_review" as const } : {}),
               ...(config.show === "archived" ? { archived: "true" as const } : {}),
+              ...(type === "person" && config.marketing ? { marketing: config.marketing } : {}),
+              ...(type === "person" && config.company === "individual" ? { empty_attribute: "companies" } : {}),
             },
           },
           signal: controller.signal,
@@ -354,7 +376,8 @@ function WorkspaceBody({
       patch.sort !== undefined ||
       patch.direction !== undefined ||
       patch.filters !== undefined ||
-      patch.show !== undefined
+      patch.show !== undefined ||
+      patch.marketing !== undefined
     )
       setOffset(0);
       setCursors([undefined]);
@@ -387,9 +410,13 @@ function WorkspaceBody({
   const activeView = views.find((v) => v.id === viewId);
   const defaultColumns =
     type === "person"
-      ? ["job_title", "companies", "lifecycle_stage", "owner"]
+      ? sellsTo === "consumers"
+        ? ["source", "sub_source", "job_title", "owner"]
+        : ["source", "sub_source", "companies", "job_title", "owner"]
       : type === "account"
         ? ["industry", "company_size", "lifecycle_stage", "owner"]
+        : type === "customer_account"
+          ? ["company", "billing_plan", "mrr", "billing_status", "owner"]
         : type === "deal"
           ? ["stage", "value", "associated_company", "close_date"]
           : fields.slice(0, 5).map((f) => f.key);
@@ -610,18 +637,26 @@ function WorkspaceBody({
         "tasks",
         "notes",
         "settings",
-      ].includes(value)
-        ? value
+        "add-from-event",
+        "event",
+      ].includes(value.split(":")[0])
+        ? value.split(":")[0]
         : "custom",
     });
   };
+  if (section === "add-from-event" && brandId)
+    return (
+      <AddFromEvent
+        brand={brandId}
+        event={parts[1] || undefined}
+        onBack={() => navigate("person")}
+        onDone={(event) => navigate(`event:${event}`)}
+      />
+    );
   return (
     <div className="space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="mb-1 text-xs text-muted-foreground">
-            {brand?.name ? `${brand.name} / CRM` : "CRM"}
-          </div>
           <h1 className="text-2xl font-semibold tracking-tight">
             {section === "tasks"
               ? "My work"
@@ -635,15 +670,11 @@ function WorkspaceBody({
                       ? "Lists"
                       : (obj?.plural ?? "Relationships")}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {section === "tasks"
-              ? "Keep every follow-up moving."
-              : section === "notes"
-                ? "The context your team needs, connected to each relationship."
-                : section === "settings"
-                  ? "Make the CRM fit the way your team works."
-                  : "Your relationships, connected. Every detail in one place."}
-          </p>
+          {type === "person" && !special && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Everyone the brand knows, cold contacts included. Source says where they came from; progress lives on deals.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <div className="min-w-52">
@@ -659,6 +690,12 @@ function WorkspaceBody({
           <Button variant="ghost" onClick={() => go("connectors")}>
             Connect data
           </Button>
+          {type === "person" && !special && canManage && obj && fields.some((f) => f.key === "sub_source") && (
+            <Button variant="ghost" onClick={() => navigate(config.filters.source === "event" && config.filters.sub_source ? `add-from-event:${config.filters.sub_source}` : "add-from-event")}>
+              <Plus className="size-3.5" />
+              Add people from an event
+            </Button>
+          )}
           {!special && canManage && obj && (
             <Button onClick={() => setAdding(true)}>
               <Plus className="size-3.5" />
@@ -667,39 +704,29 @@ function WorkspaceBody({
           )}
         </div>
       </header>
-      <nav
-        aria-label="CRM sections"
-        className="flex flex-wrap gap-1 rounded-xl border bg-card p-1.5 shadow-xs"
-      >
-        {[
-          { key: "person", label: "People", Icon: Users },
-          { key: "account", label: "Companies", Icon: Building2 },
-          { key: "deal", label: "Deals", Icon: LayoutGrid },
-          { key: "tasks", label: "My work", Icon: CheckSquare },
-          { key: "notes", label: "Notes", Icon: FileText },
-          ...(
-            cat.catalog?.types.filter(
-              (t) =>
-                !["person", "account", "deal"].includes(t.key) &&
-                !t.archived &&
-                !t.key.startsWith("list_"),
-            ) ?? []
-          ).map((t) => ({ key: t.key, label: t.plural, Icon: List })),
-          { key: "collections", label: "Lists", Icon: List },
-          { key: "reports", label: "Reports", Icon: LayoutGrid },
-          { key: "settings", label: "Settings", Icon: Settings2 },
-        ].map(({ key, label, Icon }) => (
-          <button
-            key={key}
-            className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${section === key ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
-            aria-current={section === key ? "page" : undefined}
-            onClick={() => navigate(key)}
-          >
-            <Icon className="size-3.5" />
-            {label}
-          </button>
-        ))}
-      </nav>
+      {/* The CRM's pages are in the left menu. A brand's own record types
+          have no menu item yet, so they are listed here when it has any. */}
+      {(() => {
+        const own = cat.catalog?.types.filter(
+          (t) => !["person", "account", "deal", "customer_account"].includes(t.key) && !t.archived && !t.key.startsWith("list_"),
+        ) ?? [];
+        return own.length > 0 ? (
+          <nav aria-label="Your own record types" className="flex flex-wrap items-center gap-1 text-xs">
+            <span className="mr-1 text-muted-foreground">Your own types:</span>
+            {own.map((t) => (
+              <button
+                key={t.key}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 font-medium ${section === t.key ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
+                aria-current={section === t.key ? "page" : undefined}
+                onClick={() => navigate(t.key)}
+              >
+                <List className="size-3.5" />
+                {t.plural}
+              </button>
+            ))}
+          </nav>
+        ) : null;
+      })()}
       <ErrorText>{cat.error}</ErrorText>
       {!cat.catalog && !cat.error && <Loading />}
       {special &&
@@ -730,8 +757,10 @@ function WorkspaceBody({
           cat={cat}
           onOpen={openRecord}
           onTasks={() => navigate("tasks")}
+          onEvent={(key) => navigate(`event:${key}`)}
         />
       )}
+      {section === "settings" && brandId && <PeopleSetupCard brandId={brandId} canManage={canConfigure} />}
       {section === "settings" && (
         <MailPrivacy
           ws={ws}
@@ -828,6 +857,69 @@ function WorkspaceBody({
             </div>
           </div>
           <ErrorText>{viewError}</ErrorText>
+          {type === "person" && fields.some((f) => f.key === "source") && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div role="group" aria-label="Source" className="inline-flex flex-wrap rounded-lg border p-0.5 text-xs">
+                {[{ key: "", label: "Everyone" }, ...cat.options(fields.find((f) => f.key === "source")!)].map((o) => {
+                  const on = (config.filters.source ?? "") === o.key;
+                  return (
+                    <button
+                      key={o.key || "all"}
+                      aria-pressed={on}
+                      className={`rounded-md px-2.5 py-1.5 font-medium ${on ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                      onClick={() => change({ filters: { ...config.filters, source: o.key, sub_source: "" } })}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {config.filters.source && fields.some((f) => f.key === "sub_source") && brandId && (
+                <SubSourceFilter
+                  brand={brandId}
+                  source={config.filters.source}
+                  value={config.filters.sub_source ?? ""}
+                  onChange={(v) => change({ filters: { ...config.filters, sub_source: v } })}
+                />
+              )}
+              <select
+                aria-label="Marketing email"
+                className={field}
+                value={config.marketing}
+                onChange={(e) => change({ marketing: e.target.value as Config["marketing"] })}
+              >
+                <option value="">Marketing email: anyone</option>
+                <option value="yes">Marketing email: yes</option>
+                <option value="no">Marketing email: no</option>
+              </select>
+              {(sellsTo === "mixed" || sellsTo === "companies") && (
+                <select
+                  aria-label="Company"
+                  className={field}
+                  value={config.company}
+                  onChange={(e) => change({ company: e.target.value as Config["company"] })}
+                >
+                  <option value="">Company: anyone</option>
+                  <option value="individual">Individuals (no company)</option>
+                </select>
+              )}
+              {sellsTo === "marketplace" && fields.some((f) => f.key === "marketplace_role") && (
+                <select
+                  aria-label="Buyer or seller"
+                  className={field}
+                  value={config.filters.marketplace_role ?? ""}
+                  onChange={(e) => change({ filters: { ...config.filters, marketplace_role: e.target.value } })}
+                >
+                  <option value="">Buyers and sellers</option>
+                  {cat.options(fields.find((f) => f.key === "marketplace_role")!).map((o) => (
+                    <option key={o.key} value={o.key}>
+                      {o.label}s
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <label className="relative min-w-48 flex-1">
               <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1105,6 +1197,9 @@ function WorkspaceBody({
               >
                 {type === "person" || type === "account" ? "Bulk edit" : "Edit attribute"}
               </Button>
+              {type === "person" && brandId && (
+                <AddToSequence brand={brandId} people={chosen.map((r) => r.id)} onDone={() => setSelected(new Set())} />
+              )}
               <Button
                 variant="ghost"
                 disabled={busy}
@@ -1150,7 +1245,7 @@ function WorkspaceBody({
                 <thead className="border-b bg-muted/30 text-muted-foreground">
                   <tr>
                     {canManage && (
-                      <th className="w-10 p-3">
+                      <th className="w-10 p-3 align-middle">
                         <input
                           type="checkbox"
                           aria-label="Select this page"
@@ -1168,6 +1263,11 @@ function WorkspaceBody({
                       </th>
                     )}
                     <th className="min-w-56 p-3 font-medium">{obj.name}</th>
+                    {type === "person" && (
+                      <th className="p-3 font-medium whitespace-nowrap" title="Whether marketing email (newsletters, product news, broadcasts) may go to them. Cold contacts start at no until they opt in. One-to-one email and cold outreach are not affected.">
+                        Marketing email
+                      </th>
+                    )}
                     {activeColumns.map((key) => (
                       <th key={key} className="min-w-40 p-3 font-medium">
                         {fields.find((f) => f.key === key)!.label}
@@ -1182,11 +1282,12 @@ function WorkspaceBody({
                 </thead>
                 <tbody className="divide-y">
                   {rows.map((r) => (
-                    <tr key={r.id} className="hover:bg-muted/20">
+                    <tr key={r.id} className="group/row hover:bg-muted/20 [&>td]:align-middle">
                       {canManage && (
-                        <td className="p-3">
+                        <td className="w-10 p-3 align-middle">
                           <input
                             type="checkbox"
+                            className="block"
                             aria-label={`Select ${displayName(r)}`}
                             checked={selected.has(r.id)}
                             onChange={(e) =>
@@ -1201,8 +1302,9 @@ function WorkspaceBody({
                         </td>
                       )}
                       <td className="p-3">
+                        <div className="flex items-center gap-1">
                         <button
-                          className="flex w-full items-center gap-2.5 rounded text-left focus-visible:outline-2 focus-visible:outline-ring"
+                          className="flex min-w-0 flex-1 items-center gap-2.5 rounded text-left focus-visible:outline-2 focus-visible:outline-ring"
                           aria-label={`Open ${displayName(r)}`}
                           onClick={() => openRecord(r.id)}
                         >
@@ -1215,15 +1317,33 @@ function WorkspaceBody({
                               {r.needs_review && <Badge tone="amber" title="Held for someone to approve before anything is sent to them.">Needs review</Badge>}
                               {r.archived && <Badge>Archived</Badge>}
                             </span>
-                            <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                              {identity(
-                                r,
-                                type === "account" ? "domain" : "email",
-                              )}
+                            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                              {identity(r, type === "account" ? "domain" : "email")}
                             </span>
                           </span>
                         </button>
+                        {identity(r, type === "account" ? "domain" : "email") && (
+                          <CopyButton
+                            text={identity(r, type === "account" ? "domain" : "email") ?? ""}
+                            label={type === "account" ? "Copy domain" : "Copy email"}
+                            className="shrink-0 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
+                          />
+                        )}
+                        </div>
                       </td>
+                      {type === "person" && (
+                        <td className="p-3 whitespace-nowrap">
+                          {r.contactability ? (
+                            <span title={r.contactability.why}>
+                              <Status tone={r.contactability.allowed.marketing ? "green" : "grey"}>
+                                {r.contactability.allowed.marketing ? "Yes" : "No"}
+                              </Status>
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">–</span>
+                          )}
+                        </td>
+                      )}
                       {activeColumns.map((key) => (
                         <td key={key} className="max-w-72 px-2 py-2">
                           <InlineField
@@ -1234,6 +1354,7 @@ function WorkspaceBody({
                             cat={cat}
                             canManage={canManage}
                             onSaved={refresh}
+                            empty={type === "person" && key === "companies" && sellsTo !== "consumers" ? "Individual" : undefined}
                           />
                         </td>
                       ))}
@@ -1460,5 +1581,87 @@ function WorkspaceBody({
         </Dialog>
       )}
     </div>
+  );
+}
+
+/** Adds the people picked on the People list to one of the brand's
+ * sequences: each gets the brand's lead for their email. */
+function AddToSequence({ brand, people, onDone }: { brand: string; people: string[]; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<{ id: string; name: string; status: string }[] | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  useEffect(() => {
+    if (!open || list) return;
+    void api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand } } }).then(({ data, error }) => {
+      if (data) setList(data.data.filter((q) => q.status !== "archived").map((q) => ({ id: q.id, name: q.name, status: q.status })));
+      else setError(errorMessage(error));
+    });
+  }, [open, list, brand]);
+  async function add(id: string, name: string) {
+    setBusy(id);
+    setError("");
+    const { data, error } = await api.POST("/v1/brands/{brand}/sequences/{id}/enrollments", {
+      params: { path: { brand, id } },
+      body: { record_ids: people },
+    });
+    setBusy("");
+    if (!data || !("enrolled" in data)) {
+      setError(errorMessage(error));
+      return;
+    }
+    const left = [
+      data.already_enrolled && `${data.already_enrolled} already in it`,
+      data.suppressed && `${data.suppressed} on the opt-out list`,
+      data.excluded && `${data.excluded} excluded by the sequence`,
+      data.active_elsewhere && `${data.active_elsewhere} in another sequence`,
+      data.no_email && `${data.no_email} with no email`,
+    ].filter(Boolean);
+    toast(`Added ${data.enrolled} to ${name}${left.length ? `. Left out: ${left.join(", ")}.` : "."}`);
+    track("ui.crm_people_sequenced", { count: people.length, enrolled: data.enrolled });
+    setOpen(false);
+    onDone();
+  }
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost">Add to sequence…</Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 space-y-1">
+        <p className="px-1 pb-1 text-sm font-semibold">Add {people.length} to a sequence</p>
+        <ErrorText>{error}</ErrorText>
+        {!list && !error && <Loading />}
+        {list?.length === 0 && <p className="px-1 text-xs text-muted-foreground">This brand has no sequences yet. Make one under Outreach → Sequences.</p>}
+        {list?.map((q) => (
+          <button
+            key={q.id}
+            disabled={!!busy}
+            className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-50"
+            onClick={() => void add(q.id, q.name)}
+          >
+            <span className="truncate">{q.name}</span>
+            <span className="text-muted-foreground">{busy === q.id ? "Adding…" : <Status tone={q.status === "active" ? "green" : "grey"}>{q.status === "active" ? "Active" : q.status === "paused" ? "Paused" : "Draft"}</Status>}</span>
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// SubSourceFilter narrows People to one sub-source of the Source picked:
+// one event or conference, for Events and conferences.
+function SubSourceFilter({ brand, source, value, onChange }: { brand: string; source: string; value: string; onChange: (v: string) => void }) {
+  const { list } = useSubSources(brand, source);
+  if (!list?.length && !value) return null;
+  const noun = subSourceNoun(source);
+  return (
+    <select aria-label={noun[0].toUpperCase() + noun.slice(1)} className={field} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{source === "event" ? "Every event" : "Every sub-source"}</option>
+      {(list ?? []).map((s) => (
+        <option key={s.key} value={s.key}>
+          {s.label} ({s.people.toLocaleString()})
+        </option>
+      ))}
+    </select>
   );
 }

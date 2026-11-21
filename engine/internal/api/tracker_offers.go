@@ -6,6 +6,8 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +38,7 @@ func (s *Server) routesTrackerOffers(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/offers", s.onBrand(manage, s.createOffer))
 	mux.HandleFunc("GET /v1/brands/{brand}/offers/{id}", s.onBrand(read, s.getOffer))
 	mux.HandleFunc("PATCH /v1/brands/{brand}/offers/{id}", s.onBrand(manage, s.updateOffer))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/offers/{id}", s.onBrand(manage, s.deleteOffer))
 }
 
 func (s *Server) listAffiliateNetworkTemplates(w http.ResponseWriter, r *http.Request) {
@@ -110,8 +113,23 @@ type trackerOfferView struct {
 	CapKind         string            `json:"cap_kind"`
 	FallbackOfferID *string           `json:"fallback_offer_id"`
 	Status          string            `json:"status"`
-	// MissingClickID says the URL doesn't carry the click id and its
-	// network adds none, so a postback can't name the click.
+	// ClickIDDelivery is the offer's setting for how the click's id
+	// reaches whoever reports its conversions: auto (worked out from the
+	// URL), first_party (a page of the brand's own reads the ofclk every
+	// redirect adds), affiliate (someone else's page: the URL passes
+	// {click_id} on in the network's parameter) or unattributed (no
+	// conversion is expected to name the click).
+	ClickIDDelivery string `json:"click_id_delivery"`
+	// ClickIDVia is what that comes to: template ({click_id} in the URL),
+	// network (the postback source's click id parameter, added to the
+	// URL), ofclk (the redirect's own parameter, for a first-party page)
+	// or none.
+	ClickIDVia string `json:"click_id_via"`
+	// MissingClickID says a conversion is expected to name the click and
+	// nothing carries its id: an affiliate offer (or an auto one that
+	// isn't on the brand's domains) whose URL passes no {click_id} on. A
+	// first-party offer never misses it, since a redirect adds the
+	// click's ofclk to every destination.
 	MissingClickID bool `json:"missing_click_id"`
 	// TrackingURL is the URL a click goes to, with the click id its
 	// network takes added.
@@ -122,17 +140,31 @@ type trackerOfferView struct {
 	// fallback offer, or elsewhere.
 	CapReached bool `json:"cap_reached"`
 	// Destinations is how many link destinations send to it.
-	Destinations int       `json:"destinations"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Destinations int `json:"destinations"`
+	// CheckEnabled says Outflare asks for the offer's page every six hours
+	// while a link sends to it, to see that it still answers. A network
+	// counts each request as a click, so it can be switched off. The
+	// rest is what the last check found, as on a lander: CheckStatus ""
+	// (not asked yet, or switched off), ok, failing, broken or refused.
+	CheckEnabled bool       `json:"check_enabled"`
+	CheckStatus  string     `json:"check_status"`
+	CheckCode    string     `json:"check_code"`
+	CheckedAt    *time.Time `json:"checked_at"`
+	BrokenSince  *time.Time `json:"broken_since"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 const offerSelect = `
 	SELECT o.id::text, o.brand_id::text, o.name, o.url, o.source_id::text, o.payout_mode, o.payout_micros, o.currency, o.country_payouts,
 	       o.conversion_type, o.daily_cap, o.cap_kind, o.fallback_offer_id::text, o.status, COALESCE(p.click_id_param, ''),
 	       COALESCE(d.clicks, 0), COALESCE(d.conversions, 0),
-	       (SELECT count(*) FROM tracking_link_destinations x WHERE x.offer_id = o.id AND x.removed_at IS NULL)::int, o.created_at, o.updated_at
+	       (SELECT count(*) FROM tracking_link_destinations x WHERE x.offer_id = o.id AND x.removed_at IS NULL)::int,
+	       o.check_enabled, o.check_status, o.check_code, o.checked_at, o.broken_since, o.created_at, o.updated_at,
+	       o.click_id_delivery, COALESCE(b.domains, '{}') || ARRAY(SELECT t.domain FROM tracking_domains t
+	         WHERE t.workspace_id = o.workspace_id AND t.brand_id = o.brand_id AND t.status = 'verified')
 	FROM tracker_offers o
+	LEFT JOIN brands b ON b.workspace_id = o.workspace_id AND b.id = o.brand_id
 	LEFT JOIN tracker_postback_sources p ON p.id = o.source_id
 	LEFT JOIN tracker_offer_days d ON d.offer_id = o.id AND d.day = $3::date
 	WHERE o.workspace_id = $1 AND o.brand_id = $2`
@@ -142,8 +174,10 @@ func scanOffer(row pgx.Row) (trackerOfferView, error) {
 	var micros int64
 	var raw []byte
 	var param string
+	var own []string
 	err := row.Scan(&v.ID, &v.BrandID, &v.Name, &v.URL, &v.SourceID, &v.PayoutMode, &micros, &v.Currency, &raw, &v.ConversionType, &v.DailyCap,
-		&v.CapKind, &v.FallbackOfferID, &v.Status, &param, &v.ClicksToday, &v.ConversionsToday, &v.Destinations, &v.CreatedAt, &v.UpdatedAt)
+		&v.CapKind, &v.FallbackOfferID, &v.Status, &param, &v.ClicksToday, &v.ConversionsToday, &v.Destinations,
+		&v.CheckEnabled, &v.CheckStatus, &v.CheckCode, &v.CheckedAt, &v.BrokenSince, &v.CreatedAt, &v.UpdatedAt, &v.ClickIDDelivery, &own)
 	if err != nil {
 		return v, err
 	}
@@ -157,7 +191,8 @@ func scanOffer(row pgx.Row) (trackerOfferView, error) {
 		v.CountryPayouts[c] = formatMicros(p)
 	}
 	v.TrackingURL = offerURL(v.URL, param)
-	v.MissingClickID = !strings.Contains(v.TrackingURL, "{click_id")
+	v.ClickIDVia = clickIDVia(v.ClickIDDelivery, v.URL, v.TrackingURL, own)
+	v.MissingClickID = v.ClickIDVia == "none" && v.ClickIDDelivery != "unattributed"
 	if v.DailyCap != nil {
 		used := v.ConversionsToday
 		if v.CapKind == "clicks" {
@@ -166,6 +201,44 @@ func scanOffer(row pgx.Row) (trackerOfferView, error) {
 		v.CapReached = used >= int64(*v.DailyCap)
 	}
 	return v, nil
+}
+
+// clickIDDeliveries are an offer's click_id_delivery settings.
+var clickIDDeliveries = []string{"auto", "first_party", "affiliate", "unattributed"}
+
+// clickIDVia says how an offer's click id reaches whoever reports its
+// conversions (trackerOfferView.ClickIDVia), from its setting, its URL as
+// saved (raw) and with its network's parameter (tracking), and the brand's
+// own domains (own). It reads the URL a redirect sends, so the warning and
+// the redirect can't disagree.
+func clickIDVia(delivery, raw, tracking string, own []string) string {
+	switch {
+	case delivery == "unattributed":
+		return "none"
+	case strings.Contains(raw, "{click_id"):
+		return "template"
+	case strings.Contains(tracking, "{click_id"):
+		return "network"
+	case delivery == "first_party", delivery == "auto" && ownHost(raw, own):
+		return "ofclk"
+	}
+	return "none"
+}
+
+// ownHost says a URL's host is one of domains, or a subdomain of one.
+func ownHost(raw string, domains []string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, d := range domains {
+		d = strings.ToLower(strings.TrimSpace(d))
+		if d != "" && (host == d || strings.HasSuffix(host, "."+d)) {
+			return true
+		}
+	}
+	return false
 }
 
 func formatMicros(m int64) string { return strconv.FormatFloat(float64(m)/1e6, 'f', -1, 64) }
@@ -240,7 +313,12 @@ type trackerOfferInput struct {
 	DailyCap       json.RawMessage `json:"daily_cap"`
 	CapKind        *string         `json:"cap_kind"`
 	Fallback       *string         `json:"fallback_offer_id"`
-	Status         *string         `json:"status"`
+	// ClickIDDelivery is auto, first_party, affiliate or unattributed.
+	ClickIDDelivery *string `json:"click_id_delivery"`
+	Status          *string `json:"status"`
+	// CheckEnabled switches the check that the offer's page still answers
+	// (on unless told otherwise).
+	CheckEnabled *bool `json:"check_enabled"`
 	// What check read: the daily cap (nil left out, *nil for none), the
 	// payout and the country payouts, in millionths.
 	cap       **int
@@ -349,6 +427,9 @@ func (in *trackerOfferInput) check() error {
 	if in.Status != nil && *in.Status != "active" && *in.Status != "archived" {
 		return errInvalid("status is active or archived")
 	}
+	if in.ClickIDDelivery != nil && !slices.Contains(clickIDDeliveries, *in.ClickIDDelivery) {
+		return errInvalid("click_id_delivery is auto, first_party (the brand's own page reads the ofclk a redirect adds), affiliate (the URL passes {click_id} to a network) or unattributed")
+	}
 	return nil
 }
 
@@ -424,11 +505,11 @@ func (s *Server) createOffer(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO tracker_offers (workspace_id, brand_id, source_id, name, url, payout_mode, payout_micros, currency,
-				country_payouts, conversion_type, daily_cap, cap_kind, fallback_offer_id, created_by)
+				country_payouts, conversion_type, daily_cap, cap_kind, fallback_offer_id, created_by, check_enabled, click_id_delivery)
 			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, COALESCE($6, 'postback'), COALESCE($7, 0), COALESCE($8, 'USD'), $9, COALESCE($10, ''), $11,
-				COALESCE($12, 'conversions'), NULLIF($13, '')::uuid, $14) RETURNING id::text`,
+				COALESCE($12, 'conversions'), NULLIF($13, '')::uuid, $14, COALESCE($15, true), COALESCE($16, 'auto')) RETURNING id::text`,
 			a.WorkspaceID, a.Brand, deref(in.SourceID), *in.Name, *in.URL, in.PayoutMode, in.payout, in.Currency, byJSON, in.ConversionType, cap,
-			in.CapKind, deref(in.Fallback), nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+			in.CapKind, deref(in.Fallback), nullIfEmpty(a.ActorID), in.CheckEnabled, in.ClickIDDelivery).Scan(&id); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "tracker_offer.created", "tracker_offer", id,
@@ -470,10 +551,10 @@ func (s *Server) updateOffer(w http.ResponseWriter, r *http.Request) {
 	err := errNotFound
 	if validUUID(id) {
 		err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-			var was string
+			var was, urlBefore string
 			var used int
-			err := tx.QueryRow(ctx, `SELECT status, (SELECT count(*) FROM tracking_link_destinations d WHERE d.offer_id = o.id AND d.removed_at IS NULL)
-				FROM tracker_offers o WHERE workspace_id = $1 AND brand_id = $2 AND id = $3 FOR UPDATE`, a.WorkspaceID, a.Brand, id).Scan(&was, &used)
+			err := tx.QueryRow(ctx, `SELECT status, url, (SELECT count(*) FROM tracking_link_destinations d WHERE d.offer_id = o.id AND d.removed_at IS NULL)
+				FROM tracker_offers o WHERE workspace_id = $1 AND brand_id = $2 AND id = $3 FOR UPDATE`, a.WorkspaceID, a.Brand, id).Scan(&was, &urlBefore, &used)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errNotFound
 			}
@@ -503,11 +584,20 @@ func (s *Server) updateOffer(w http.ResponseWriter, r *http.Request) {
 					country_payouts = COALESCE($9, country_payouts), conversion_type = COALESCE($10, conversion_type),
 					daily_cap = CASE WHEN $11 THEN $12 ELSE daily_cap END, cap_kind = COALESCE($13, cap_kind),
 					fallback_offer_id = CASE WHEN $14::text IS NULL THEN fallback_offer_id ELSE NULLIF($14, '')::uuid END,
-					status = COALESCE($15, status), updated_at = now()
+					status = COALESCE($15, status), check_enabled = COALESCE($16, check_enabled),
+					click_id_delivery = COALESCE($17, click_id_delivery), updated_at = now()
 				WHERE workspace_id = $1 AND id = $2`,
 				a.WorkspaceID, id, in.Name, in.URL, in.SourceID, in.PayoutMode, in.payout, in.Currency, byJSON, in.ConversionType,
-				setCap, cap, in.CapKind, in.Fallback, in.Status); err != nil {
+				setCap, cap, in.CapKind, in.Fallback, in.Status, in.CheckEnabled, in.ClickIDDelivery); err != nil {
 				return err
+			}
+			// A new URL is a page not asked yet, and a check switched off
+			// knows nothing: what the last check found goes.
+			if (in.URL != nil && *in.URL != urlBefore) || (in.CheckEnabled != nil && !*in.CheckEnabled) {
+				if _, err := tx.Exec(ctx, `UPDATE tracker_offers SET check_status = '', check_code = '', check_failures = 0, checked_at = NULL, broken_since = NULL
+					WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, id); err != nil {
+					return err
+				}
 			}
 			// Destinations keep the offer's URL, so the version before
 			// still sends their clicks there.
@@ -529,6 +619,51 @@ func (s *Server) updateOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Its URL, cap or fallback may route clicks differently now.
+	s.redirects.clear()
+	s.writeOffer(w, r, http.StatusOK, id)
+}
+
+// deleteOffer takes an offer off every link and flow that sends to it,
+// stops it being other offers' fallback, and archives it. Its clicks and
+// conversions stay in the reports under its name, and PATCH status=active
+// brings it back (not onto the links it was on).
+func (s *Server) deleteOffer(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	id := r.PathValue("id")
+	ctx := r.Context()
+	err := errNotFound
+	if validUUID(id) {
+		err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+			var was string
+			err := tx.QueryRow(ctx, `SELECT status FROM tracker_offers WHERE workspace_id = $1 AND brand_id = $2 AND id = $3 FOR UPDATE`,
+				a.WorkspaceID, a.Brand, id).Scan(&was)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errNotFound
+			}
+			if err != nil {
+				return err
+			}
+			gone, err := tx.Exec(ctx, `UPDATE tracking_link_destinations SET removed_at = now(), updated_at = now()
+				WHERE workspace_id = $1 AND offer_id = $2 AND removed_at IS NULL`, a.WorkspaceID, id)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE tracker_offers SET fallback_offer_id = NULL, updated_at = now()
+				WHERE workspace_id = $1 AND brand_id = $2 AND fallback_offer_id = $3`, a.WorkspaceID, a.Brand, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE tracker_offers SET status = 'archived', updated_at = now() WHERE workspace_id = $1 AND id = $2`,
+				a.WorkspaceID, id); err != nil {
+				return err
+			}
+			return record(ctx, tx, &a.principal, a.WorkspaceID, "tracker_offer.deleted", "tracker_offer", id,
+				map[string]any{"brand_id": a.Brand, "destinations": gone.RowsAffected(), "was_archived": was == "archived"})
+		})
+	}
+	if s.offerSaveError(w, r, err) {
+		return
+	}
+	// Links that sent to it route without it now.
 	s.redirects.clear()
 	s.writeOffer(w, r, http.StatusOK, id)
 }

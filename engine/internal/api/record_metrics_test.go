@@ -231,5 +231,39 @@ func TestRecordMetrics(t *testing.T) {
 	if fired(acme) != 0 {
 		t.Fatal("refills fired the rule")
 	}
+	// Product categories: a metric can count one category's products only.
+	owner.must(400, "PATCH", base+"/products/"+resi, map[string]any{"category": "Not A Key!"})
+	if v := owner.must(200, "PATCH", base+"/products/"+resi, map[string]any{"category": " Proxies "}); v["category"] != "proxies" {
+		t.Fatalf("a product's category: %v", v)
+	}
+	extract := owner.must(201, "POST", base+"/products", map[string]any{"name": "Extract", "key": "extract", "category": "web_data",
+		"aliases": []string{"extract"}})["id"].(string)
+	if l := owner.must(200, "GET", base+"/products?category=web_data", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["id"] != extract {
+		t.Fatalf("products in a category: %v", l)
+	}
+	exec(`INSERT INTO customer_events (workspace_id, record_id, brand_id, kind, name, properties, source, occurred_at, received_at, product_id, usage)
+		VALUES ($1, $2, $3, 'track', 'product_usage', '{"bandwidth_gb": 2.5}', 'api', now() - interval '2 days', now() - interval '2 days', $4, true),
+			($1, $2, $3, 'track', 'product_usage', '{"bandwidth_gb": 1}', 'api', now() - interval '2 days', now() - interval '2 days', $5, true)`,
+		ws, ana, brand, resi, extract)
+	catMetric := "proxies_gb_30d"
+	owner.must(400, "POST", base+"/metrics", map[string]any{"key": catMetric, "name": "Proxies GB", "aggregate": "sum",
+		"events": []string{"product_usage"}, "property": "bandwidth_gb", "product_category": "Bad Category!"})
+	cat := owner.must(201, "POST", base+"/metrics", map[string]any{"key": catMetric, "name": "Proxies GB", "aggregate": "sum",
+		"events": []string{"product_usage"}, "property": "bandwidth_gb", "product_category": "proxies"})
+	if cat["product_category"] != "proxies" {
+		t.Fatalf("a category metric: %v", cat)
+	}
+	settled()
+	if m := attr(acme); m["proxies_gb_30d"] != 2.5 {
+		t.Fatalf("a category metric is filled from that category's products only: %v", m)
+	}
+	for i, product := range []string{"residential", "extract"} {
+		owner.must(200, "POST", "/v1/workspaces/"+ws+"/customer-events", map[string]any{"type": "track", "userId": "u-ana", "event": "Product Usage",
+			"messageId": "usage-" + strconv.Itoa(i), "properties": map[string]any{"product": product, "bandwidth_gb": 1.5}})
+		settled()
+	}
+	if m := attr(acme); m["proxies_gb_30d"] != 4.0 {
+		t.Fatalf("a category metric counts live events of that category only: %v", m)
+	}
 	owner.must(200, "PATCH", base+"/metrics", map[string]any{"enabled": false})
 }

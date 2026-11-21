@@ -284,7 +284,7 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     used("added");
-    if (held) toast("Waiting for approval in a mission.");
+    if (held) toast("Waiting for approval on the Agents page.");
     reload();
   }
   // The connection only adds records, so a change is left to the person.

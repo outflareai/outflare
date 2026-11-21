@@ -1,8 +1,10 @@
 import { useEffect } from "react";
 
 /** Keep externally updated lists current without polling hidden pages or
- * letting an obsolete workspace/filter request overwrite the current one. */
-export function useVisibleRefresh(load: (signal?: AbortSignal) => Promise<void>) {
+ * letting an obsolete workspace/filter request overwrite the current one.
+ * It loads at once, every `every` ms while the page is visible, and again
+ * when the page is shown or the window focused. */
+export function useVisibleRefresh(load: (signal?: AbortSignal) => Promise<void>, every = 2000) {
   useEffect(() => {
     const controller = new AbortController();
     let running = false;
@@ -12,7 +14,7 @@ export function useVisibleRefresh(load: (signal?: AbortSignal) => Promise<void>)
       try { await load(controller.signal); } finally { running = false; }
     };
     void refresh();
-    const timer = window.setInterval(refresh, 2000);
+    const timer = window.setInterval(refresh, every);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
@@ -21,5 +23,5 @@ export function useVisibleRefresh(load: (signal?: AbortSignal) => Promise<void>)
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [load]);
+  }, [load, every]);
 }

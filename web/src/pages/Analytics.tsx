@@ -1,10 +1,10 @@
 import { PickBrand } from "@/components/pick-brand";
 import { pickedBrandId } from "@/lib/brand";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AnalyticsMetrics, AnalyticsOverviewSite, AnalyticsPoint, AnalyticsReport, AnalyticsReportName, AnalyticsSitePlan, AnalyticsSource, AnalyticsSummaryItem, AnalyticsSync, SEOSource, SiteAnalyticsReport } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, Empty, ErrorText, field, Loading, PageHeader, Stat, Stats, toast } from "../ui";
+import { Badge, Button, Card, CopyButton, Empty, ErrorText, field, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago } from "../format";
 import { Icon } from "../icons";
 import { DataTable } from "@/components/data-table";
@@ -93,19 +93,92 @@ const remember = (key: string, value?: string) => {
 // so websites can be compared across tools; nothing changes at the provider.
 // Analytics belong to one brand (plans/brands/README.md): with all brands
 // picked the page asks for one, and switching brands opens it afresh.
-export function Analytics(props: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
+export function Analytics(props: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void; item?: string }) {
   const { brand, active } = useBrand(props.ws);
   if (!brand) return <PickBrand what="Analytics" brands={active.length} />;
   return <AnalyticsPage key={brand.id} {...props} />;
 }
 
-function AnalyticsPage({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
+// The page's tabs, in order. Each shows one thing from one source, named
+// at its top, so nobody has to guess where a number comes from.
+type View = "overview" | OwnBreakdown | "search" | "tools";
+const views: { id: View; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "pages", label: "Pages" },
+  { id: "sources", label: "Sources" },
+  { id: "websites", label: "Websites" },
+  { id: "countries", label: "Countries" },
+  { id: "devices", label: "Devices" },
+  { id: "search", label: "Search" },
+  { id: "tools", label: "Connected tools" },
+];
+
+// A search engine's tool can narrow its reports to one page or one search
+// query, so each row of its Pages and Search queries tables opens a page
+// of its own: /analytics/search/page/{url} or /analytics/search/query/{q}.
+// The value is one path segment, so a page's slashes and trailing slash
+// survive the trip through the URL.
+type Drill = { kind: "page" | "query"; value: string };
+const narrows = (connector: string) => connector === "google_search_console" || connector === "bing_webmaster";
+const drillItem = (d: Drill) => `search/${d.kind}/${encodeURIComponent(d.value)}`;
+function parseDrill(item?: string): Drill | null {
+  const m = item?.match(/^search\/(page|query)\/(.+)$/);
+  if (!m) return null;
+  try {
+    return { kind: m[1] as Drill["kind"], value: decodeURIComponent(m[2]) };
+  } catch {
+    return null;
+  }
+}
+
+// The open page or search, for the browser tab's title.
+export const searchDrillName = (item?: string) => parseDrill(item)?.value;
+
+// Where a tab's numbers come from.
+function DataSource({ logo, name, children }: { logo?: string; name: string; children: ReactNode }) {
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground" data-testid="data-source">
+      <span className="font-mono text-[11px] tracking-wide uppercase">Source</span>
+      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">{logo && <ConnectorLogo id={logo} size="sm" />}{name}</span>
+      <span>· {children}</span>
+    </p>
+  );
+}
+
+function AnalyticsPage({ ws, canManage, go, item }: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void; item?: string }) {
   const [sources, setSources] = useState<AnalyticsSource[] | null>(null);
   const [seo, setSEO] = useState<SEOSource[] | null>(null);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(() => remember(`analytics:${ws}`));
+  // The tool whose reports are open on Connected tools; none shows them all.
+  const [tool, setTool] = useState("");
   const [days, setDays] = useState(28);
   const tracking = useSiteTracking(ws);
+  const drill = parseDrill(item);
+  const view: View = drill ? "search" : views.find((v) => v.id === item)?.id ?? "overview";
+  // The Search tab's site and table, kept while a page or query is open so
+  // going back finds them as they were.
+  const [searchSite, setSearchSite] = useState("");
+  const [searchTab, setSearchTab] = useState<AnalyticsReportName | undefined>();
+  const own = view !== "search" && view !== "tools";
+
+  // Outflare's own numbers, read once for every tab that shows them.
+  // website narrows everything to one host; sites are the hosts seen with
+  // no filter, so the picker keeps every choice while one is picked.
+  const [data, setData] = useState<SiteAnalyticsReport | null>(null);
+  const [ownError, setOwnError] = useState("");
+  const [website, setWebsite] = useState("");
+  const [sites, setSites] = useState<string[]>([]);
+  useEffect(() => {
+    if (!tracking) return;
+    setData(null);
+    api.GET("/v1/brands/{brand}/analytics/tracking", { params: { path: { brand: pickedBrandId() }, query: { ...range(days), ...(website ? { website } : {}) } } }).then(({ data, error }) => {
+      if (error || !data) return setOwnError(errorMessage(error));
+      setOwnError("");
+      setData(data);
+      if (!website) setSites(data.websites.map((w) => w.key).filter((k) => k !== "(none)"));
+    });
+  }, [days, website, tracking]);
 
   const load = useCallback(async () => {
     const seoReq = api.GET("/v1/brands/{brand}/seo", { params: { path: { brand: pickedBrandId() } } });
@@ -119,139 +192,148 @@ function AnalyticsPage({ ws, canManage, go }: { ws: string; canManage: boolean; 
     load();
   }, [load]);
 
-  const source = sources?.find((s) => s.id === selected) ?? sources?.[0];
+  // Search engines' own tools (Search Console, Bing) have a tab to
+  // themselves; the rest are on Connected tools.
+  const searchSources = (sources ?? []).filter((s) => s.reports.includes("search_queries"));
+  const search = searchSources.find((s) => s.id === selected) ?? searchSources[0];
+  const opened = sources?.find((s) => s.id === tool);
   const pick = (id: string) => {
     setSelected(id);
     remember(`analytics:${ws}`, id);
   };
+  const connect = canManage ? <Button onClick={() => go("connectors", "analytics")}>Choose a tool</Button> : <p className="text-[13px] text-muted-foreground">Ask a workspace admin to connect one.</p>;
 
-  const header = (
-    <PageHeader
-      title="Website analytics"
-      description="Visitors, top pages, traffic sources, search queries and conversions from the analytics tools already on your website, stored every six hours so you can compare tools and look back, plus a line from your SEO tools for each site."
-      action={sources && seo && sources.length + seo.length > 0 && canManage ? <Button variant="ghost" onClick={() => go("connectors", "analytics")}><Icon name="plus" className="size-3.5" /> Connect another</Button> : undefined}
-    />
-  );
-  // Until a site sends Outflare a visit, the way to add the snippet comes first.
-  const snippet = tracking === false && (
-    <Card
-      title="Add Outflare's snippet to your website"
-      description="One script tag in your site's <head> records every visit with where it came from, so sign-ups and revenue are credited to the channel that brought them. It works alongside the tools below."
-    >
-      <Button onClick={() => go("tracking")}>Get the snippet</Button>
-    </Card>
-  );
-  if (error) return <div className="space-y-6">{header}<ErrorText>{error}</ErrorText></div>;
-  if (!sources || !seo) return <div className="space-y-6">{header}<Loading /></div>;
-  if (sources.length === 0 && seo.length === 0) {
-    return (
-      <div className="space-y-6">
-        {header}
-        {snippet}
-        {tracking && <OwnTracking days={days} setDays={setDays} go={go} />}
-        <Empty
-          title={tracking ? "Compare with the analytics you already use" : "Connect the analytics you already use"}
-          action={canManage ? <Button onClick={() => go("connectors", "analytics")}>Choose a tool</Button> : <p className="text-[13px] text-muted-foreground">Ask a workspace admin to connect one.</p>}
-        >
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="Website analytics"
+        description="Who visits your website, what they read and where they come from. Each tab shows one thing, and says at the top where its numbers come from."
+        action={canManage ? <Button variant="ghost" onClick={() => go("connectors", "analytics")}><Icon name="plus" className="size-3.5" /> Connect a tool</Button> : undefined}
+      />
+      <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 border-b">
+        <Tabs value={view} onValueChange={(v) => go("analytics", v === "overview" ? undefined : v)} className="min-w-0">
+          <TabsList variant="line" className="max-w-full justify-start overflow-x-auto">
+            {views.map((v) => <TabsTrigger key={v.id} value={v.id}>{v.label}</TabsTrigger>)}
+          </TabsList>
+        </Tabs>
+        <span className="flex-1" />
+        <div className="flex flex-wrap items-center gap-2 pb-1.5">
+          {own && (sites.length > 1 || website) && (
+            <select aria-label="Website" className={field} value={website} onChange={(e) => setWebsite(e.target.value)}>
+              <option value="">All websites</option>
+              {sites.map((h) => <option key={h} value={h}>{h}</option>)}
+            </select>
+          )}
+          <select aria-label="Period" className={field} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            {periods.map((p) => <option key={p.days} value={p.days}>{p.label}</option>)}
+          </select>
+        </div>
+      </div>
+      <ErrorText>{error}</ErrorText>
+
+      {own && (
+        <section className="space-y-4" aria-label={views.find((v) => v.id === view)!.label}>
+          <DataSource name="Outflare Analytics">
+            every visit counted by the Outflare snippet on your website, live.{" "}
+            <button className="underline underline-offset-2 hover:text-foreground" onClick={() => go("visitors")}>See who's visiting</button>
+          </DataSource>
+          {tracking === false && (
+            <Card
+              title="Add Outflare's snippet to your website"
+              description="One script tag in your site's <head> counts every visit with where it came from, so sign-ups and revenue are credited to the channel that brought them. It works alongside any other analytics tool."
+            >
+              <Button onClick={() => go("tracking")}>Get the snippet</Button>
+            </Card>
+          )}
+          <ErrorText>{ownError}</ErrorText>
+          {tracking && !data && !ownError && <Loading />}
+          {tracking && data && view === "overview" && (
+            <Traffic report={{ ...data, report: "traffic", site: "", integration_id: "", connector: "outflare", cached: false, fetched_at: "", rows: undefined }} />
+          )}
+          {tracking && data && view !== "overview" && <OwnTable data={data} tab={view as OwnBreakdown} setWebsite={setWebsite} />}
+        </section>
+      )}
+
+      {view === "search" && sources && search && drill && narrows(search.connector) && (
+        <SearchDrill key={drill.kind + drill.value + days + search.id} ws={ws} source={search} site={searchSite} days={days} drill={drill} go={go} />
+      )}
+      {view === "search" && sources && !(search && drill && narrows(search.connector)) && (search ? (
+        <SourceView key={search.id + days} ws={ws} source={search} sources={searchSources} days={days} onPick={pick} canManage={canManage} onChanged={load} go={go}
+          initialSite={searchSite} onSite={setSearchSite} initialTab={searchTab} onTab={setSearchTab}
+          about="what people searched for before they clicked through to your website. Search engines report it two to three days late." />
+      ) : (
+        <Empty title="Connect Google Search Console to see your searches" action={connect}>
+          Search Console and Bing Webmaster Tools say which searches show your website, how often people click and where you rank. They connect with a sign-in to your own account.
+        </Empty>
+      ))}
+      {view === "search" && !sources && !error && <Loading />}
+
+      {view === "tools" && (!sources || !seo) && !error && <Loading />}
+      {view === "tools" && sources && seo && sources.length + seo.length === 0 && (
+        <Empty title="Connect the analytics you already use" action={connect}>
           Google Analytics, Search Console, Bing Webmaster Tools, PostHog, Plausible, Fathom, Matomo, Umami, Mixpanel, Amplitude, Cloudflare, Simple Analytics, Clarity or Vercel. Google tools connect with a sign-in; the rest take an API key. For rankings and backlinks, add DataForSEO or Ahrefs from the SEO connectors. Nothing else in Outflare needs this.
         </Empty>
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-6">
-      {header}
-      {snippet}
-      {tracking && <OwnTracking days={days} setDays={setDays} go={go} />}
-      <Websites ws={ws} days={days} sources={sources} seo={seo} selected={source?.id} onPick={pick} canManage={canManage} />
-      {seo.length > 0 && (
-        <p className="text-[13px] text-muted-foreground">
-          SEO tools, their budgets and every keyword are on the <button className="text-foreground underline underline-offset-2 hover:text-brand-strong dark:hover:text-brand" onClick={() => go("seo")}>SEO page</button>.
-        </p>
       )}
-      {source && <SourceView key={source.id} ws={ws} source={source} sources={sources} days={days} setDays={setDays} onPick={pick} canManage={canManage} onChanged={load} go={go} />}
+      {view === "tools" && sources && seo && sources.length + seo.length > 0 && !opened && (
+        <section className="space-y-4" aria-label="Connected tools">
+          <DataSource name="Your connected tools">
+            each tool's own totals for the same website, side by side, copied into Outflare every six hours. Pick a tool to open its reports.
+          </DataSource>
+          <Websites ws={ws} days={days} sources={sources} seo={seo} onPick={setTool} canManage={canManage} />
+          {seo.length > 0 && (
+            <p className="text-[13px] text-muted-foreground">
+              SEO tools, their budgets and every keyword are on the <button className="text-foreground underline underline-offset-2 hover:text-brand-strong dark:hover:text-brand" onClick={() => go("seo")}>SEO page</button>.
+            </p>
+          )}
+        </section>
+      )}
+      {view === "tools" && sources && opened && (
+        <section className="space-y-4" aria-label={opened.name}>
+          <button onClick={() => setTool("")} className="font-mono text-[12px] text-muted-foreground hover:text-foreground">← All connected tools</button>
+          <SourceView key={opened.id + days} ws={ws} source={opened} sources={[opened]} days={days} onPick={setTool} canManage={canManage} onChanged={load} go={go}
+            about="this tool's own numbers, asked for live." />
+        </section>
+      )}
     </div>
   );
 }
 
-// The brand's traffic as Outflare's own tag counted it, live, today
-// included: there whether or not an analytics tool is connected.
-function OwnTracking({ days, setDays, go }: { days: number; setDays: (d: number) => void; go: (t: Tab, item?: string) => void }) {
-  const [data, setData] = useState<SiteAnalyticsReport | null>(null);
-  const [error, setError] = useState("");
-  const [tab, setTab] = useState<OwnBreakdown>("pages");
-  // website narrows everything to one host; sites are the hosts seen with
-  // no filter, so the picker keeps every choice while one is picked.
-  const [website, setWebsite] = useState("");
-  const [sites, setSites] = useState<string[]>([]);
-  useEffect(() => {
-    setData(null);
-    api.GET("/v1/brands/{brand}/analytics/tracking", { params: { path: { brand: pickedBrandId() }, query: { ...range(days), ...(website ? { website } : {}) } } }).then(({ data, error }) => {
-      if (error || !data) return setError(errorMessage(error));
-      setError("");
-      setData(data);
-      if (!website) setSites(data.websites.map((w) => w.key).filter((k) => k !== "(none)"));
-    });
-  }, [days, website]);
-  const rows = data?.[tab] ?? [];
+type OwnRow = Row & { website?: string };
+
+// One breakdown of Outflare's own numbers: the tab's only table.
+function OwnTable({ data, tab, setWebsite }: { data: SiteAnalyticsReport; tab: OwnBreakdown; setWebsite: (h: string) => void }) {
+  const rows: OwnRow[] = data[tab] ?? [];
   const shown = ownBreakdowns.find((b) => b.id === tab)!;
   return (
-    <section className="space-y-3" aria-label="Outflare tracking">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-[13px] font-medium">Outflare tracking <span className="font-normal text-muted-foreground">· every visit your tag records, live</span></h2>
-        <span className="flex-1" />
-        {(sites.length > 1 || website) && (
-          <select aria-label="Website" className={field} value={website} onChange={(e) => setWebsite(e.target.value)}>
-            <option value="">All websites</option>
-            {sites.map((h) => <option key={h} value={h}>{h}</option>)}
-          </select>
-        )}
-        <select aria-label="Period" className={field} value={days} onChange={(e) => setDays(Number(e.target.value))}>
-          {periods.map((p) => <option key={p.days} value={p.days}>{p.label}</option>)}
-        </select>
-        <Button variant="ghost" onClick={() => go("visitors")}>See who's visiting</Button>
-      </div>
-      <ErrorText>{error}</ErrorText>
-      {!data && !error && <Loading />}
-      {data && (
-        <>
-          <Traffic report={{ ...data, report: "traffic", site: "", integration_id: "", connector: "outflare", cached: false, fetched_at: "", rows: undefined }} />
-          <Tabs value={tab} onValueChange={(v) => setTab(v as OwnBreakdown)}>
-            <TabsList className="h-8">
-              {ownBreakdowns.map((b) => <TabsTrigger key={b.id} value={b.id} className="px-2.5 text-[12px]">{b.label}</TabsTrigger>)}
-            </TabsList>
-          </Tabs>
-          <DataTable
-            data={rows}
-            rowId={(r: Row & { website?: string }) => `${r.website ?? ""}${r.key}`}
-            columnsMenu={false}
-            empty={`No ${shown.label.toLowerCase()} in this period.`}
-            columns={[
-              ...(tab === "pages"
-                ? [{ id: "website", header: "Website", accessorFn: (r: Row & { website?: string }) => r.website ?? "", cell: ({ row: { original: r } }: { row: { original: Row & { website?: string } } }) => (
-                    <button type="button" className="text-muted-foreground hover:text-foreground hover:underline" title={`Only ${r.website}`} onClick={() => r.website && r.website !== "(none)" && setWebsite(r.website)}>{r.website === "(none)" ? "Unknown" : r.website}</button>
-                  ) }]
-                : []),
-              { id: "key", header: shown.key, accessorFn: (r: Row) => r.key, cell: ({ row: { original: r } }: { row: { original: Row } }) => <span className="block max-w-[28rem] truncate font-medium" title={r.key}>{shown.show ? shown.show(r.key) : r.key}</span> },
-              ...metrics.filter((m) => rows.some((r) => r[m.key] !== undefined && r[m.key] !== null)).map((m) => ({
-                id: m.key,
-                header: m.label,
-                accessorFn: (r: Row) => r[m.key] ?? -1,
-                meta: { align: "right" as const, mono: true },
-                cell: ({ row: { original: r } }: { row: { original: Row } }) => show(r, m.key),
-              })),
-            ]}
-          />
-        </>
-      )}
-    </section>
+    <DataTable
+      data={rows}
+      rowId={(r: OwnRow) => `${r.website ?? ""}${r.key}`}
+      columnsMenu={false}
+      searchPlaceholder={rows.length > 10 ? `Filter ${shown.label.toLowerCase()}…` : undefined}
+      empty={`No ${shown.label.toLowerCase()} in this period.`}
+      columns={[
+        ...(tab === "pages"
+          ? [{ id: "website", header: "Website", accessorFn: (r: OwnRow) => r.website ?? "", cell: ({ row: { original: r } }: { row: { original: OwnRow } }) => (
+              <button type="button" className="text-muted-foreground hover:text-foreground hover:underline" title={`Only ${r.website}`} onClick={() => r.website && r.website !== "(none)" && setWebsite(r.website)}>{r.website === "(none)" ? "Unknown" : r.website}</button>
+            ) }]
+          : []),
+        { id: "key", header: shown.key, accessorFn: (r: OwnRow) => r.key, cell: ({ row: { original: r } }: { row: { original: OwnRow } }) => <span className="block max-w-[28rem] truncate font-medium" title={r.key}>{shown.show ? shown.show(r.key) : r.key}</span> },
+        ...metrics.filter((m) => rows.some((r) => r[m.key] !== undefined && r[m.key] !== null)).map((m) => ({
+          id: m.key,
+          header: m.label,
+          accessorFn: (r: OwnRow) => r[m.key] ?? -1,
+          meta: { align: "right" as const, mono: true },
+          cell: ({ row: { original: r } }: { row: { original: OwnRow } }) => show(r, m.key),
+        })),
+      ]}
+    />
   );
 }
 
 type OwnBreakdown = "pages" | "sources" | "websites" | "countries" | "devices";
 const regionNames = (() => {
   try {
-    return new Intl.DisplayNames(undefined, { type: "region" });
+    return new Intl.DisplayNames(["en"], { type: "region" });
   } catch {
     return null;
   }
@@ -404,7 +486,7 @@ function WebsiteCard({ ws, site, syncs, days, selected, onPick, canManage, open,
   ws: string; site: AnalyticsOverviewSite; syncs: AnalyticsSync[]; days: number; selected?: string; onPick: (id: string) => void; canManage: boolean; open: boolean; onToggle: () => void; onSetup: (integration: string) => void;
 }) {
   const cols = (["visitors", "pageviews", "sessions", "clicks", "impressions"] as Metric[]).filter((k) => site.tools.some((t) => t.totals?.[k] !== undefined && t.totals?.[k] !== null));
-  const searchTools = site.tools.filter((t) => t.totals?.clicks !== undefined && t.totals?.clicks !== null).length;
+  const searchTools = site.tools.filter((t) => !t.copy_of && t.totals?.clicks !== undefined && t.totals?.clicks !== null).length;
   const comparable = site.host !== "" && site.tools.filter((t) => t.first_day).length > 1;
   return (
     <div className="overflow-hidden rounded-lg border bg-card shadow-xs">
@@ -428,10 +510,15 @@ function WebsiteCard({ ws, site, syncs, days, selected, onPick, canManage, open,
             {site.tools.map((t) => {
               const sync = syncs.find((s) => s.integration_id === t.integration_id && s.site === t.site);
               return (
-                <tr key={t.integration_id + t.site} className={`border-b last:border-0 ${t.integration_id === selected ? "bg-muted/40" : ""}`}>
+                <tr key={t.integration_id + t.site} className={`border-b last:border-0 ${t.integration_id === selected ? "bg-muted/40" : ""} ${t.copy_of ? "text-muted-foreground" : ""}`}>
                   <td className="px-4 py-2">
                     <button className="flex items-center gap-2 text-left font-medium hover:underline" onClick={() => onPick(t.integration_id)} title="Open this tool's reports below"><ConnectorLogo id={t.connector} size="sm" />{t.name}</button>
                     {t.site_name && <div className="truncate pl-6 text-[12px] text-muted-foreground">{t.site_name}</div>}
+                    {t.copy_of && (
+                      <div className="pl-6 text-[12px] text-amber-700 dark:text-amber-300" title="Two connections read the same site, so it is counted once: from the one whose sync worked last.">
+                        Same site as {t.copy_of.name}, so it isn't counted twice.
+                      </div>
+                    )}
                     {!site.host && canManage && <button className="mt-0.5 pl-6 text-[12px] text-brand-strong underline underline-offset-2 dark:text-brand" onClick={() => onSetup(t.integration_id)}>Choose its brand</button>}
                   </td>
                   {cols.map((k) => <td key={k} className="px-4 py-2 text-right font-mono tabular-nums">{show(t.totals, k)}</td>)}
@@ -594,28 +681,45 @@ function Summary({ ws, days, sources, selected, onPick }: { ws: string; days: nu
   );
 }
 
-function SourceView({ ws, source, sources, days, setDays, onPick, canManage, onChanged, go }: {
-  ws: string; source: AnalyticsSource; sources: AnalyticsSource[]; days: number; setDays: (d: number) => void; onPick: (id: string) => void; canManage: boolean; onChanged: () => void; go: (t: Tab, item?: string) => void;
+function SourceView({ ws, source, sources, days, onPick, canManage, onChanged, go, about, initialSite, onSite, initialTab, onTab }: {
+  ws: string; source: AnalyticsSource; sources: AnalyticsSource[]; days: number; onPick: (id: string) => void; canManage: boolean; onChanged: () => void; go: (t: Tab, item?: string) => void; about: string;
+  initialSite?: string; onSite?: (site: string) => void; initialTab?: AnalyticsReportName; onTab?: (tab: AnalyticsReportName) => void;
 }) {
   const [sites, setSites] = useState<AnalyticsSitePlan[] | null>(null);
-  const [site, setSite] = useState(source.site);
+  const [site, setSite] = useState(initialSite || source.site);
   const [needSite, setNeedSite] = useState(false);
   const [traffic, setTraffic] = useState<AnalyticsReport | null>(null);
   const [error, setError] = useState("");
   const [fresh, setFresh] = useState(0);
   const tabs = breakdowns.filter((b) => source.reports.includes(b.id));
-  const [tab, setTab] = useState<AnalyticsReportName | undefined>(tabs[0]?.id);
+  const [tab, setTabState] = useState<AnalyticsReportName | undefined>(tabs.find((t) => t.id === initialTab)?.id ?? tabs[0]?.id);
+  const setTab = (t: AnalyticsReportName) => {
+    setTabState(t);
+    onTab?.(t);
+  };
+  // One sign-in reads every site of the account, each one brand's: the
+  // picked brand's page offers only its own (plans/brands/README.md).
+  const { brand: picked } = useBrand(ws);
+  const [mine, setMine] = useState<Set<string> | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/analytics/{id}/sites", { params: { path: { ws, id: source.id } } }).then(({ data }) => setSites(data?.data ?? []));
-  }, [ws, source.id]);
-
-  // With no default, show the first site that syncs rather than asking:
-  // the site list below is where sites are chosen.
+  }, [ws, source.id, reload]);
   useEffect(() => {
-    if (!needSite || !sites?.length) return;
-    setSite((sites.find((s) => s.sync) ?? sites[0]).id);
-  }, [needSite, sites]);
+    if (!picked) return setMine(null);
+    api.GET("/v1/workspaces/{ws}/analytics/site-brands", { params: { path: { ws }, query: { brand: "all" } } }).then(({ data }) =>
+      setMine(new Set((data?.data ?? []).filter((b) => b.integration_id === source.id && b.brand_id === picked.id).map((b) => b.site))));
+  }, [ws, source.id, picked?.id, reload]); // eslint-disable-line react-hooks/exhaustive-deps
+  const options = useMemo(() => (sites && picked ? (mine ? sites.filter((s) => mine.has(s.id)) : null) : sites), [sites, picked, mine]);
+
+  // With no default, show the brand's first site that syncs rather than
+  // asking: the site list below is where sites are chosen.
+  useEffect(() => {
+    if (!needSite || !options?.length) return;
+    setSite((options.find((s) => s.sync) ?? options[0]).id);
+  }, [needSite, options]);
 
   useEffect(() => {
     setTraffic(null);
@@ -630,7 +734,7 @@ function SourceView({ ws, source, sources, days, setDays, onPick, canManage, onC
       setNeedSite(false);
       setTraffic(data);
     });
-  }, [ws, source.id, source.reports, days, site, fresh]);
+  }, [ws, source.id, source.reports, days, site, fresh, reload]);
 
   async function saveSite(id: string) {
     setSite(id);
@@ -641,9 +745,17 @@ function SourceView({ ws, source, sources, days, setDays, onPick, canManage, onC
   }
 
   const siteName = sites?.find((s) => s.id === (traffic?.site ?? site))?.name;
+  const shownSite = traffic?.site ?? site;
+  useEffect(() => {
+    if (shownSite) onSite?.(shownSite);
+  }, [shownSite]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Search engines' rows open the page's searches, or the search's pages.
+  const openFor = (t: AnalyticsReportName) => narrows(source.connector) && (t === "pages" || t === "search_queries")
+    ? (key: string) => go("analytics", drillItem({ kind: t === "pages" ? "page" : "query", value: key }))
+    : undefined;
   return (
     <div className="space-y-3">
-      <h2 className="text-[13px] font-medium">Reports <span className="font-normal text-muted-foreground">· pages, sources and searches, live from one tool</span></h2>
+      <DataSource logo={source.connector} name={source.name}>{about}</DataSource>
       <div className="space-y-6">
         <div className="flex flex-wrap items-center gap-2">
           {sources.length > 1 && (
@@ -651,15 +763,12 @@ function SourceView({ ws, source, sources, days, setDays, onPick, canManage, onC
               {sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           )}
-          {sites && sites.length > 1 && (
+          {options && options.length > 1 && (
             <select aria-label="Site" className={`${field} max-w-72`} value={traffic?.site ?? site} onChange={(e) => saveSite(e.target.value)}>
               {!(traffic?.site ?? site) && <option value="">Choose a site…</option>}
-              {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {options.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           )}
-          <select aria-label="Period" className={field} value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            {periods.map((p) => <option key={p.days} value={p.days}>{p.label}</option>)}
-          </select>
           <span className="flex-1" />
           {traffic && (
             <span className="text-[12px] text-muted-foreground" title={new Date(traffic.fetched_at).toLocaleString()}>
@@ -677,8 +786,16 @@ function SourceView({ ws, source, sources, days, setDays, onPick, canManage, onC
         )}
 
         {sites && sites.length > 1 && <SiteList ws={ws} source={source} sites={sites} canManage={canManage} onChanged={onChanged} />}
+        {picking && picked && <SiteSetupDialog ws={ws} source={source} from="brand" focus={picked} onClose={(saved) => { setPicking(false); if (saved) { setNeedSite(false); setSite(""); setReload((n) => n + 1); onChanged(); } }} />}
         {needSite && sites?.length === 0 ? (
           <Empty title={`${source.name} can't see any sites`}>The account you connected has no properties it can read. Give it access in the provider, or connect a different account.</Empty>
+        ) : needSite && picked && options?.length === 0 ? (
+          <Empty
+            title={`${picked.name} has no site in ${source.name} yet`}
+            action={canManage ? <Button onClick={() => setPicking(true)}>Pick {picked.name}'s {source.connector_name} site</Button> : <p className="text-[13px] text-muted-foreground">Ask a workspace admin to pick it.</p>}
+          >
+            This sign-in can read {sites?.length === 1 ? "1 site" : `${sites?.length ?? 0} sites`}, and each belongs to one brand. Pick the ones that are {picked.name}'s; other brands' sites never show here.
+          </Empty>
         ) : (
           <>
             <ErrorText>{error}</ErrorText>
@@ -691,7 +808,13 @@ function SourceView({ ws, source, sources, days, setDays, onPick, canManage, onC
                     {tabs.map((t) => <TabsTrigger key={t.id} value={t.id} className="px-2.5 text-[12px]">{t.label}</TabsTrigger>)}
                   </TabsList>
                 </Tabs>
-                <Breakdown key={tab + site + days + fresh} ws={ws} source={source} report={tab} site={traffic?.site ?? site} days={days} fresh={fresh > 0} keyLabel={breakdowns.find((b) => b.id === tab)!.key} />
+                {/* Every table loads at once and stays loaded, so switching
+                    between them shows the answer straight away. */}
+                {tabs.map((t) => (
+                  <div key={t.id + site + days + fresh} hidden={t.id !== tab}>
+                    <Breakdown ws={ws} source={source} report={t.id} site={traffic?.site ?? site} days={days} fresh={fresh > 0} keyLabel={t.key} onOpen={openFor(t.id)} />
+                  </div>
+                ))}
               </section>
             )}
           </>
@@ -791,7 +914,7 @@ function DayBars({ points, label, format }: { points: { date: string; value: num
 
 type Row = NonNullable<AnalyticsReport["rows"]>[number];
 
-function Breakdown({ ws, source, report, site, days, fresh, keyLabel }: { ws: string; source: AnalyticsSource; report: AnalyticsReportName; site: string; days: number; fresh: boolean; keyLabel: string }) {
+function Breakdown({ ws, source, report, site, days, fresh, keyLabel, onOpen }: { ws: string; source: AnalyticsSource; report: AnalyticsReportName; site: string; days: number; fresh: boolean; keyLabel: string; onOpen?: (key: string) => void }) {
   const [data, setData] = useState<AnalyticsReport | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -806,23 +929,8 @@ function Breakdown({ ws, source, report, site, days, fresh, keyLabel }: { ws: st
   if (!data) return <Loading />;
   return (
     <div className="space-y-2">
-      <DataTable
-        data={rows}
-        rowId={(r: Row) => r.key}
-        columnsMenu={false}
-        searchPlaceholder={rows.length > 10 ? `Filter ${keyLabel.toLowerCase()}s…` : undefined}
-        empty={`No ${keyLabel.toLowerCase()}s in this period.`}
-        columns={[
-          { id: "key", header: keyLabel, accessorFn: (r: Row) => r.key, cell: ({ row: { original: r } }: { row: { original: Row } }) => <span className="block max-w-[28rem] truncate font-medium" title={r.key}>{r.key}</span> },
-          ...cols.map((m) => ({
-            id: m.key,
-            header: m.label,
-            accessorFn: (r: Row) => r[m.key] ?? -1,
-            meta: { align: "right" as const, mono: true },
-            cell: ({ row: { original: r } }: { row: { original: Row } }) => show(r, m.key),
-          })),
-        ]}
-      />
+      <SearchRows rows={rows} cols={cols} keyLabel={keyLabel} onOpen={onOpen} />
+      {onOpen && rows.length > 0 && <p className="text-[12px] text-muted-foreground">Click a {keyLabel === "Page" ? "page to see the searches that showed it" : "search to see the pages it showed"}.</p>}
       {data.notes.length > 0 && (
         <ul className="space-y-1 text-[12px] text-muted-foreground">
           {data.notes.filter((n) => !n.startsWith("Search Console data is usually")).map((n) => <li key={n}>{n}</li>)}
@@ -830,5 +938,101 @@ function Breakdown({ ws, source, report, site, days, fresh, keyLabel }: { ws: st
       )}
       {report === "events" && rows.some((r) => r.conversions !== undefined) && <p className="text-[12px] text-muted-foreground"><Badge>Conversions</Badge> are the events your tool counts as conversions or goals.</p>}
     </div>
+  );
+}
+
+// A table of report rows. With onOpen each row opens its own page, and the
+// first cell says so.
+function SearchRows({ rows, cols, keyLabel, onOpen }: { rows: Row[]; cols: typeof metrics; keyLabel: string; onOpen?: (key: string) => void }) {
+  return (
+    <DataTable
+      data={rows}
+      rowId={(r: Row) => r.key}
+      columnsMenu={false}
+      onRowClick={onOpen ? (r: Row) => onOpen(r.key) : undefined}
+      searchPlaceholder={rows.length > 10 ? `Filter ${keyLabel.toLowerCase()}s…` : undefined}
+      empty={`No ${keyLabel.toLowerCase()}s in this period.`}
+      columns={[
+        {
+          id: "key", header: keyLabel, accessorFn: (r: Row) => r.key,
+          cell: ({ row: { original: r } }: { row: { original: Row } }) => onOpen ? (
+            <span className="flex max-w-[34rem] items-center gap-1.5">
+              <span className="truncate font-medium group-hover:text-brand-strong group-hover:underline dark:group-hover:text-brand" title={r.key}>{r.key}</span>
+              <Icon name="chevron" className="size-3.5 shrink-0 text-muted-foreground" />
+            </span>
+          ) : <span className="block max-w-[28rem] truncate font-medium" title={r.key}>{r.key}</span>,
+        },
+        ...cols.map((m) => ({
+          id: m.key,
+          header: m.label,
+          accessorFn: (r: Row) => r[m.key] ?? -1,
+          meta: { align: "right" as const, mono: true },
+          cell: ({ row: { original: r } }: { row: { original: Row } }) => show(r, m.key),
+        })),
+      ]}
+    />
+  );
+}
+
+// One page's searches, or one search's pages, from Search Console or Bing:
+// its totals and days over the same period as the Search tab, then a row
+// per search or page, each opening its own page in turn.
+function SearchDrill({ ws, source, site, days, drill, go }: { ws: string; source: AnalyticsSource; site: string; days: number; drill: Drill; go: (t: Tab, item?: string) => void }) {
+  const [traffic, setTraffic] = useState<AnalyticsReport | null>(null);
+  const [list, setList] = useState<AnalyticsReport | null>(null);
+  const [error, setError] = useState("");
+  const isPage = drill.kind === "page";
+  const report: AnalyticsReportName = isPage ? "search_queries" : "pages";
+  useEffect(() => {
+    const query = { ...range(days), ...(site ? { site } : {}), ...(isPage ? { page: drill.value } : { keyword: drill.value }) };
+    const path = { ws, id: source.id };
+    Promise.all([
+      api.GET("/v1/workspaces/{ws}/analytics/{id}/reports/{report}", { params: { path: { ...path, report: "traffic" }, query } }),
+      api.GET("/v1/workspaces/{ws}/analytics/{id}/reports/{report}", { params: { path: { ...path, report }, query: { ...query, limit: 500 } } }),
+    ]).then(([t, l]) => {
+      if (t.error || !t.data) return setError(errorMessage(t.error));
+      if (l.error || !l.data) return setError(errorMessage(l.error));
+      setTraffic(t.data);
+      setList(l.data);
+    });
+  }, [ws, source.id, site, days, drill.value, isPage, report]);
+  const rows = useMemo(() => list?.rows ?? [], [list]);
+  const cols = metrics.filter((m) => ["clicks", "impressions", "ctr", "position"].includes(m.key));
+  const period = periods.find((p) => p.days === days)?.label.toLowerCase() ?? `last ${days} days`;
+  const back = () => go("analytics", "search");
+  const external = isPage && /^https?:\/\//.test(drill.value);
+  return (
+    <section className="space-y-4" aria-label={isPage ? "Page" : "Search query"}>
+      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+        <button onClick={back} className="hover:text-foreground">← Search</button>
+        <span>/</span>
+        <span>{isPage ? "Page" : "Search query"}</span>
+      </nav>
+      <header className="flex flex-wrap items-start gap-2">
+        <h2 className="min-w-0 text-lg font-semibold break-all">{isPage ? drill.value : `“${drill.value}”`}</h2>
+        <CopyButton text={drill.value} label={isPage ? "Copy URL" : "Copy search"} className="mt-0.5" />
+        {external && (
+          <a href={drill.value} target="_blank" rel="noreferrer noopener" className="mt-0.5 inline-flex items-center gap-1 text-[13px] text-muted-foreground underline underline-offset-2 hover:text-foreground">Open page</a>
+        )}
+      </header>
+      <DataSource logo={source.connector} name={source.name}>
+        {isPage ? "the searches that showed this page" : "the pages this search showed"} in the {period}. Search engines report it two to three days late.
+      </DataSource>
+      <ErrorText>{error}</ErrorText>
+      {!error && (!traffic || !list) && <Loading />}
+      {traffic && <Traffic report={{ ...traffic, notes: [] }} />}
+      {list && (
+        <div className="space-y-2">
+          <h3 className="text-[13px] font-medium">{isPage ? "Searches that showed this page" : "Pages this search showed"}</h3>
+          <SearchRows rows={rows} cols={cols} keyLabel={isPage ? "Query" : "Page"}
+            onOpen={(key) => go("analytics", drillItem({ kind: isPage ? "query" : "page", value: key }))} />
+          {list.notes.length > 0 && (
+            <ul className="space-y-1 text-[12px] text-muted-foreground">
+              {list.notes.filter((n) => !n.startsWith("Search Console data is usually")).map((n) => <li key={n}>{n}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

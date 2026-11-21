@@ -285,18 +285,18 @@ func TestBrandLimitedPersonConnectsAnAppForOneBrand(t *testing.T) {
 	h, e, _ := agentServer(t)
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
-	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "handle": "geonode"})["id"].(string)
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})["id"].(string)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "handle": "summitly"})
 	anon := &client{t: t, h: h}
 	redirect := "http://localhost:51234/callback"
 	clientID := anon.must(201, "POST", "/oauth/register", map[string]any{"redirect_uris": []string{redirect}, "client_name": "claude-code"})["client_id"].(string)
-	inv := owner.must(201, "POST", base+"/invites", map[string]any{"email": "op@example.com", "role": "operator", "brand_ids": []string{"geonode"}})
+	inv := owner.must(201, "POST", base+"/invites", map[string]any{"email": "op@example.com", "role": "operator", "brand_ids": []string{"northpeak"}})
 	op := &client{t: t, h: h}
 	op.must(200, "POST", "/v1/invites/accept", map[string]string{"token": inv["token"].(string), "name": "Op", "password": "ops long password"})
 
 	info := op.must(200, "GET", "/v1/agent-apps/authorize?"+url.Values{"client_id": {clientID}, "redirect_uri": {redirect}}.Encode(), nil)
 	brands := info["workspaces"].([]any)[0].(map[string]any)["brands"].([]any)
-	if len(brands) != 1 || brands[0].(map[string]any)["handle"] != "geonode" {
+	if len(brands) != 1 || brands[0].(map[string]any)["handle"] != "northpeak" {
 		t.Fatalf("offered brands: %v", brands)
 	}
 	verifier := strings.Repeat("y", 64)
@@ -304,9 +304,9 @@ func TestBrandLimitedPersonConnectsAnAppForOneBrand(t *testing.T) {
 		"workspace_id": ws, "access": "full", "approve": true}
 	// An app for every brand would see more than the person does.
 	op.must(400, "POST", "/v1/agent-apps/authorize", body)
-	body["brand"] = "repocket"
+	body["brand"] = "summitly"
 	op.must(400, "POST", "/v1/agent-apps/authorize", body)
-	body["brand"] = "geonode"
+	body["brand"] = "northpeak"
 	u, _ := url.Parse(op.must(200, "POST", "/v1/agent-apps/authorize", body)["redirect_url"].(string))
 	_, tok := form(t, h, "/oauth/token", url.Values{"grant_type": {"authorization_code"}, "code": {u.Query().Get("code")}, "client_id": {clientID},
 		"redirect_uri": {redirect}, "code_verifier": {verifier}})
@@ -316,7 +316,7 @@ func TestBrandLimitedPersonConnectsAnAppForOneBrand(t *testing.T) {
 	}
 
 	// Moved off the brand: the app stops refreshing.
-	if _, err := e.pool.Exec(context.Background(), `UPDATE memberships SET brand_ids = '{}'::uuid[] || (SELECT id FROM brands WHERE handle = 'repocket') WHERE role = 'operator'`); err != nil {
+	if _, err := e.pool.Exec(context.Background(), `UPDATE memberships SET brand_ids = '{}'::uuid[] || (SELECT id FROM brands WHERE handle = 'summitly') WHERE role = 'operator'`); err != nil {
 		t.Fatal(err)
 	}
 	if c, out := form(t, h, "/oauth/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tok["refresh_token"].(string)}}); c != 400 || out["error"] != "invalid_grant" {
@@ -547,5 +547,46 @@ func TestUnverifiedAppOnlyReads(t *testing.T) {
 	}
 	if len(named(got(), "oauth_client.verified")) != 1 || len(named(got(), "oauth_client.unverified")) != 1 {
 		t.Fatal("no verify events")
+	}
+}
+
+// The browser extension signs in like an app, but it is the person
+// clicking: it holds only the people-and-companies scopes, and its changes
+// run instead of waiting. Any other extension is an unknown app.
+func TestBrowserExtensionSignsIn(t *testing.T) {
+	h, _, _ := agentServer(t)
+	owner, ws := setupOwner(t, h)
+	base := "/v1/workspaces/" + ws
+	anon := &client{t: t, h: h}
+	const redirect = "https://kolppcifpdmbigbfddkchjdgbcnlobcg.chromiumapp.org/"
+	clientID := anon.must(201, "POST", "/oauth/register", map[string]any{"redirect_uris": []string{redirect}, "client_name": "Outflare for Chrome"})["client_id"].(string)
+	info := owner.must(200, "GET", "/v1/agent-apps/authorize?"+url.Values{"client_id": {clientID}, "redirect_uri": {redirect}}.Encode(), nil)
+	if info["app"] != "extension" || info["verified"] != true {
+		t.Fatalf("authorization info: %v", info)
+	}
+	// Whatever the consent screen sends, it gets people and companies only.
+	app := connectApp(t, h, owner, ws, clientID, redirect, []string{"customers.manage", "sequences.manage"})
+	who := app.must(200, "GET", "/v1/whoami", nil)
+	if sc := who["token"].(map[string]any)["scopes"].([]any); !slices.Equal(sc, []any{"workspace.read", "customers.read", "customers.manage"}) {
+		t.Fatalf("extension scopes: %v", sc)
+	}
+	app.must(403, "GET", base+"/sequences", nil)
+	// Adding a person runs straight away.
+	rec := app.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Ana",
+		"identities": []map[string]any{{"namespace": "email", "value": "ana@acme.example"}}})
+	if rec["id"] == nil {
+		t.Fatalf("added person: %v", rec)
+	}
+	apps := owner.must(200, "GET", base+"/agent-apps", nil)["data"].([]any)
+	if a := apps[0].(map[string]any); a["app"] != "extension" || a["require_mission"] != false || !slices.Equal(a["available_scopes"].([]any), []any{"customers.manage"}) {
+		t.Fatalf("connected app: %v", a)
+	}
+
+	// Another extension's address is not Outflare's: it only reads.
+	const other = "https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/"
+	otherID := anon.must(201, "POST", "/oauth/register", map[string]any{"redirect_uris": []string{other}, "client_name": "Outflare for Chrome"})["client_id"].(string)
+	info = owner.must(200, "GET", "/v1/agent-apps/authorize?"+url.Values{"client_id": {otherID}, "redirect_uri": {other}}.Encode(), nil)
+	if info["app"] != "unknown" || info["verified"] != false {
+		t.Fatalf("another extension: %v", info)
 	}
 }

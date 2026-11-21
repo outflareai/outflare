@@ -255,6 +255,8 @@ func (s *Server) createReportView(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, v)
 }
 
+var errViewPinned = errors.New("the view is on a dashboard")
+
 // editableView finds a view the caller may change: their own, or a
 // shared one.
 func (s *Server) editableView(w http.ResponseWriter, r *http.Request) (reportViewView, bool) {
@@ -294,6 +296,17 @@ func (s *Server) updateReportView(w http.ResponseWriter, r *http.Request) {
 		v.Shared = *in.Shared
 	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// A view on a dashboard stays shared: everyone who opens the
+		// dashboard runs it.
+		if in.Shared != nil && !*in.Shared {
+			var pinned bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM dashboard_tiles WHERE workspace_id = $1 AND report_view_id = $2)`, a.WorkspaceID, v.ID).Scan(&pinned); err != nil {
+				return err
+			}
+			if pinned {
+				return errViewPinned
+			}
+		}
 		if _, err := tx.Exec(ctx, `UPDATE report_views SET name = COALESCE($3, name), spec = COALESCE($4, spec), shared = COALESCE($5, shared), updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, v.ID, in.Name, spec, in.Shared); err != nil {
 			return err
@@ -301,6 +314,10 @@ func (s *Server) updateReportView(w http.ResponseWriter, r *http.Request) {
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "report_view.updated", "report_view", v.ID,
 			map[string]any{"brand_id": a.Brand, "name": in.Name != nil, "spec": in.Spec != nil, "shared": in.Shared}, reportViewProps(v))
 	})
+	if errors.Is(err, errViewPinned) {
+		writeError(w, r, http.StatusConflict, "conflict", "this report is on a dashboard, so it stays shared: take its tile off the dashboard first")
+		return
+	}
 	if s.allocError(w, r, err) {
 		return
 	}

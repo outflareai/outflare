@@ -127,6 +127,12 @@ func TestAdConversionsSendBack(t *testing.T) {
 		!strings.Contains(byRecord[de]["reason"].(string), "EEA") || byRecord[us]["value_micros"].(float64) != 12_500_000 {
 		t.Fatalf("send log: %v", sends)
 	}
+	// The log says which country each decision was made on, where that came
+	// from, and where the conversion went.
+	if byRecord[us]["country"] != "US" || byRecord[us]["country_source"] != "visit" || byRecord[de]["country"] != "DE" ||
+		byRecord[us]["target_name"] != "Northpeak pixel" || byRecord[us]["ad_account_id"] != acct || byRecord[us]["record_name"] != "Ana" {
+		t.Fatalf("send log details: %v", sends)
+	}
 	if keys := byRecord[us]["match_keys"].([]any); len(keys) < 2 {
 		t.Fatalf("match keys: %v", keys)
 	}
@@ -135,6 +141,41 @@ func TestAdConversionsSendBack(t *testing.T) {
 	}
 	if e := named("ad_conversions.sent"); len(e) != 0 {
 		t.Fatalf("SendRule alone emits nothing; the job does: %v", e)
+	}
+
+	// Buyers the site script never saw, whose purchase says nothing about
+	// where they are: an earlier event of theirs that did, then the country
+	// on their record, decide. With neither, the conversion is held.
+	quiet := func(name, email string) string {
+		return owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": name,
+			"identities": []any{map[string]any{"namespace": "email", "value": email}}})["id"].(string)
+	}
+	dee, eli, fay := quiet("Dee", "dee@acme.example"), quiet("Eli", "eli@acme.example"), quiet("Fay", "fay@acme.example")
+	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, context, message_id, occurred_at)
+		VALUES ($1, outflare_first_brand($1), $2, 'track', 'signed_up', '{"location": {"country": "us"}}', 'msg-dee-0', now() - interval '2 days')`, ws, dee); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE records SET attributes = attributes || '{"country": "ca"}' WHERE workspace_id = $1 AND id = $2`, ws, eli); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{dee, eli, fay} {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, properties, message_id, occurred_at)
+			VALUES ($1, outflare_first_brand($1), $2, 'track', 'order_completed', '{"total": 500}', $3, now())`, ws, id, "msg-quiet-"+id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adconv.Match(ctx, e.pool, ws)
+	if res, err := sender.SendRule(ctx, ws, ruleID); err != nil || res.Sent != 2 || res.Skipped != 1 {
+		t.Fatalf("country fallback: %+v %v", res, err)
+	}
+	for id, want := range map[string][3]string{dee: {"sent", "US", "earlier_event"}, eli: {"sent", "CA", "record"}, fay: {"skipped", "", ""}} {
+		l := owner.must(200, "GET", base+"/ads/conversion-sends?record_id="+id, nil)["data"].([]any)
+		if len(l) != 1 {
+			t.Fatalf("sends for %s: %v", id, l)
+		}
+		if s := l[0].(map[string]any); s["status"] != want[0] || s["country"] != want[1] || s["country_source"] != want[2] {
+			t.Fatalf("fallback for %v: %v", want, s)
+		}
 	}
 
 	// opt_in: outside the EEA too, only with a grant.
@@ -150,6 +191,36 @@ func TestAdConversionsSendBack(t *testing.T) {
 	adconv.Match(ctx, e.pool, ws)
 	if res, err := sender.SendRule(ctx, ws, ruleID); err != nil || res.Skipped != 1 || res.Sent != 0 {
 		t.Fatalf("opt_in: %+v %v", res, err)
+	}
+
+	// collected: the brand says its site collects consent from everyone, so
+	// Ben in Germany, with no grant on record, is sent as consented. Only a
+	// person can say so, and someone who withdrew is still held.
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "ads", "scopes": []string{"integrations.manage"}})["token"].(string)
+	bot := &client{t: t, h: e.h, bearer: tok}
+	bot.must(403, "PUT", base+"/ads/settings", map[string]any{"consent_mode": "collected"})
+	owner.must(200, "PUT", base+"/ads/settings", map[string]any{"consent_mode": "collected"})
+	owner.must(201, "POST", base+"/records/"+ok+"/consents", map[string]any{"channel": "ads", "purpose": "ad_user_data", "status": "withdrawn"})
+	for _, x := range [][2]string{{de, "msg-c1"}, {ok, "msg-c2"}, {fay, "msg-c3"}} {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, properties, message_id, occurred_at)
+			VALUES ($1, outflare_first_brand($1), $2, 'track', 'order_completed', '{}', $3, now())`, ws, x[0], x[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adconv.Match(ctx, e.pool, ws)
+	if res, err := sender.SendRule(ctx, ws, ruleID); err != nil || res.Sent != 2 || res.Skipped != 1 {
+		t.Fatalf("collected: %+v %v", res, err)
+	}
+	// It covers ad audiences too: Ben joins as consented to personalised
+	// ads with no grant on record, and the person who withdrew stays out.
+	if add, granted, _, err := adconv.AudienceConsent(ctx, e.pool, ws, de, adconv.Collected); err != nil || !add || !granted {
+		t.Fatalf("collected audience: add %v granted %v %v", add, granted, err)
+	}
+	if add, _, _, err := adconv.AudienceConsent(ctx, e.pool, ws, ok, adconv.Collected); err != nil || add {
+		t.Fatalf("collected audience, withdrawn: add %v %v", add, err)
+	}
+	if add, _, _, err := adconv.AudienceConsent(ctx, e.pool, ws, de, adconv.OptOut); err != nil || add {
+		t.Fatalf("opt_out audience in Germany: add %v %v", add, err)
 	}
 
 	// Switching a rule off skips what waits; deleting removes it.

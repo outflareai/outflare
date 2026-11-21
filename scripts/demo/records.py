@@ -5,7 +5,8 @@ events and two possible duplicates, so the People page has something to
 show. Everyone here is fictional (.example).
 
 Usage: python3 records.py WORKSPACE_ID TOKEN [BASE_URL]
-TOKEN is an API token with customers.read and customers.manage.
+TOKEN is an API token with workspace.read, customers.read, customers.manage
+and catalog.manage.
 Prints the ids the screenshots open to stderr.
 """
 import json
@@ -13,15 +14,20 @@ import sys
 import urllib.request
 
 ws, token = sys.argv[1], sys.argv[2]
-base = (sys.argv[3] if len(sys.argv) > 3 else "http://localhost:8080") + f"/v1/workspaces/{ws}"
+root = sys.argv[3] if len(sys.argv) > 3 else "http://localhost:8080"
+base = root + f"/v1/workspaces/{ws}"
 
 
 def call(method, path, body=None):
-    req = urllib.request.Request(base + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+    req = urllib.request.Request((path if path.startswith("http") else base + path), method=method, data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
     with urllib.request.urlopen(req) as r:
         return json.loads(r.read() or b"{}")
 
+
+# Brand data lives under the brand: Northpeak, the workspace's first brand.
+brand = call("GET", "/brands")["data"][0]["id"]
+base = root + f"/v1/brands/{brand}"
 
 companies = {}
 for name, domain, industry, size, stage in [
@@ -65,12 +71,35 @@ call("POST", f"/records/{ana['id']}/consents", {"channel": "email", "topic": "pr
 call("POST", f"/records/{people['Grace']['id']}/consents", {"channel": "email", "status": "withdrawn", "source": "unsubscribe_link"})
 
 # What they did in the product.
-call("POST", "/customer-events", {"batch": [
+call("POST", root + f"/v1/workspaces/{ws}/customer-events", {"batch": [
     {"type": "track", "userId": "usr_ana", "event": "Report Created", "properties": {"report": "weekly_pipeline"}},
     {"type": "track", "userId": "usr_ana", "event": "Teammate Invited", "properties": {"seats": 3}},
     {"type": "track", "userId": "usr_ben", "event": "Integration Connected", "properties": {"integration": "hubspot"}},
     {"type": "track", "userId": "usr_chloe", "event": "Trial Started", "properties": {"plan": "growth"}},
 ]})
+
+# Northpeak's product has workspaces: each is a customer account, with its
+# members and their roles, linked to a company or (for a freelancer) none.
+call("PATCH", "/people-setup", {"accounts": True})
+ivy = call("POST", "/records", {"type": "person", "origin": "first_party",
+                                "attributes": {"first_name": "Ivy", "last_name": "Chen", "job_title": "Freelance analyst", "country": "US"},
+                                "identities": [{"namespace": "email", "value": "ivy@personal.example", "verified": True},
+                                               {"namespace": "user_id", "value": "usr_ivy"}]})
+call("POST", root + f"/v1/workspaces/{ws}/customer-events", {"batch": [
+    {"type": "group", "userId": "usr_ana", "groupId": "wsp_acme", "traits": {"name": "Acme Analytics", "website": "https://acme-analytics.example"}},
+    {"type": "group", "userId": "usr_ben", "groupId": "wsp_acme"},
+    {"type": "group", "userId": "usr_chloe", "groupId": "wsp_brightline", "traits": {"name": "Brightline Ops", "website": "https://brightline.example"}},
+    {"type": "group", "userId": "usr_elif", "groupId": "wsp_driftwood", "traits": {"name": "Driftwood Studio", "website": "https://driftwood.example"}},
+    {"type": "group", "userId": "usr_grace", "groupId": "wsp_driftwood"},
+    {"type": "group", "userId": "usr_ivy", "groupId": "wsp_ivy", "traits": {"name": "Ivy's workspace"}},
+]})
+for who, role in (("Ana", "owner"), ("Ben", "admin"), ("Chloe", "owner"), ("Elif", "owner"), ("Grace", "member")):
+    for link in call("GET", f"/records/{people[who]['id']}/relationships")["data"]:
+        if link["field_key"] == "accounts":
+            call("PATCH", f"/records/{people[who]['id']}/relationships/{link['id']}", {"properties": {"role": role}})
+for link in call("GET", f"/records/{ivy['id']}/relationships")["data"]:
+    if link["field_key"] == "accounts":
+        call("PATCH", f"/records/{ivy['id']}/relationships/{link['id']}", {"properties": {"role": "owner"}})
 
 # Two possible duplicates: the same people again from a CRM import, with
 # the same emails unverified.

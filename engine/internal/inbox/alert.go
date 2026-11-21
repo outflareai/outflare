@@ -33,8 +33,9 @@ var categoryWords = map[string]string{
 
 // Settled runs what follows a label someone or something is sure of: the
 // reply rules, writing it into connected CRMs that asked for its label,
-// and an alert when the reply is hot. actorID is who set it,
-// so they aren't told what they already know.
+// and, when the reply is hot, its Sales conversation (QueueSalesReply) and
+// an alert. actorID is who set it, so they aren't told what they already
+// know.
 func Settled(ctx context.Context, q jobs.Querier, ws, inboundID, category, actorID, requestID string) error {
 	if err := QueueRules(ctx, q, ws, inboundID, category); err != nil {
 		return err
@@ -47,6 +48,9 @@ func Settled(ctx context.Context, q jobs.Querier, ws, inboundID, category, actor
 	}
 	if GroupOf(category) != "hot" {
 		return nil
+	}
+	if err := QueueSalesReply(ctx, q, ws, inboundID); err != nil {
+		return err
 	}
 	var brand, record, owner, sequence *string
 	err := q.QueryRow(ctx, `

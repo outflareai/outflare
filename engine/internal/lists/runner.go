@@ -395,19 +395,7 @@ func (r *runner) lookup(ctx context.Context, o *c.Opened, p c.Person) (c.Enriche
 	return e, err
 }
 
-func cacheKey(q c.PersonQuery) string {
-	switch {
-	case q.ProviderID != "":
-		return "id:" + q.ProviderID
-	case q.Email != "":
-		return "email:" + strings.ToLower(q.Email)
-	case q.LinkedInURL != "":
-		return "linkedin:" + strings.ToLower(strings.TrimRight(q.LinkedInURL, "/"))
-	case q.FirstName != "" && q.LastName != "" && (q.Domain != "" || q.Company != ""):
-		return "name:" + strings.ToLower(q.FirstName+"|"+q.LastName+"|"+q.Domain+"|"+q.Company)
-	}
-	return ""
-}
+func cacheKey(q c.PersonQuery) string { return q.CacheKey() }
 
 // add filters candidates by suppression, outreach history and
 // verification, then adds them to the list in one transaction with the

@@ -368,3 +368,57 @@ func TestGuessTakesOnlyAnUnpairedPayment(t *testing.T) {
 		t.Fatalf("u3 payments counted: %v", got)
 	}
 }
+
+// TestOrderPaymentNamesItsProduct: the payment an Order Completed is
+// counted as is about the product the order names, so that payment moves
+// the company's lifecycle stages for that product. A payment sent first
+// without a product learns it from its order.
+func TestOrderPaymentNamesItsProduct(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	ctx := context.Background()
+	var brand string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&brand); err != nil {
+		t.Fatal(err)
+	}
+	base := "/v1/brands/" + brand
+	events := "/v1/workspaces/" + ws + "/customer-events"
+	dc := owner.must(201, "POST", base+"/products", map[string]any{"name": "Datacenter", "key": "dc"})["id"].(string)
+	owner.must(200, "POST", events, map[string]any{"type": "identify", "userId": "u1", "traits": map[string]any{"name": "Ana"}})
+	order := func(props map[string]any, msg string) {
+		t.Helper()
+		owner.must(200, "POST", events, map[string]any{"type": "track", "userId": "u1", "event": "Order Completed", "messageId": msg, "properties": props})
+	}
+	products := func(sourceID string) (txProduct, eventProduct *string) {
+		t.Helper()
+		if err := e.pool.QueryRow(ctx, `SELECT product_id::text FROM transactions WHERE brand_id = $1 AND source_id = $2`, brand, sourceID).Scan(&txProduct); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.pool.QueryRow(ctx, `SELECT product_id::text FROM customer_events WHERE workspace_id = $1 AND name = 'payment.succeeded' AND properties->>'payment_id' = $2`,
+			ws, sourceID).Scan(&eventProduct); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	// An order naming a product: its payment and payment.succeeded name it.
+	order(map[string]any{"order_id": "ord_1", "revenue": 30, "currency": "USD", "product": "dc"}, "order-ord_1")
+	if tp, ep := products("ord_1"); tp == nil || *tp != dc || ep == nil || *ep != dc {
+		t.Fatalf("order's payment product: transaction %v, event %v, want %s", tp, ep, dc)
+	}
+
+	// An order naming no product: neither does its payment.
+	order(map[string]any{"order_id": "ord_2", "revenue": 10, "currency": "USD"}, "order-ord_2")
+	if tp, ep := products("ord_2"); tp != nil || ep != nil {
+		t.Fatalf("order with no product: transaction %v, event %v", tp, ep)
+	}
+
+	// A payment sent without a product learns it from its order.
+	owner.must(201, "POST", base+"/transactions", map[string]any{"kind": "payment", "amount_minor": 4900, "currency": "USD",
+		"source_id": "ch_1", "user_id": "u1"})
+	order(map[string]any{"order_id": "ch_1", "revenue": 49, "currency": "USD", "product": "dc"}, "order-ch_1")
+	var tp *string
+	if err := e.pool.QueryRow(ctx, `SELECT product_id::text FROM transactions WHERE brand_id = $1 AND source_id = 'ch_1'`, brand).Scan(&tp); err != nil || tp == nil || *tp != dc {
+		t.Fatalf("payment learning its product: %v %v", tp, err)
+	}
+}

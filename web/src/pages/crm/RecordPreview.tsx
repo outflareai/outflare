@@ -425,6 +425,7 @@ export function InlineField({
   names = {},
   canManage,
   onSaved,
+  empty = "–",
 }: {
   ws: string;
   record: Rec;
@@ -433,6 +434,8 @@ export function InlineField({
   names?: Record<string, string>;
   canManage: boolean;
   onSaved: () => void;
+  /** What an empty value reads as, such as Individual for a person with no company. */
+  empty?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState<unknown>(record.attributes[f.key] ?? null);
@@ -512,7 +515,12 @@ export function InlineField({
           <span
             className={`min-w-0 flex-1 break-words ${label ? "" : "text-muted-foreground"}`}
           >
-            {label || "Set value…"}
+            {label || (
+              <>
+                <span aria-hidden="true" className="group-hover/field:hidden group-focus-visible/field:hidden">{empty}</span>
+                <span className="hidden group-hover/field:inline group-focus-visible/field:inline">Set {f.label.toLowerCase()}…</span>
+              </>
+            )}
           </span>
           <Pencil className="size-3 shrink-0 text-muted-foreground opacity-0 group-hover/field:opacity-100" />
         </button>
@@ -533,6 +541,8 @@ export function InlineField({
           </label>
           <FieldInput
             ws={ws}
+            brand={record.brand_id ?? undefined}
+            values={record.attributes}
             f={f}
             value={value}
             names={names}

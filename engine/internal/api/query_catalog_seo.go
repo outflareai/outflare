@@ -1,0 +1,518 @@
+package api
+
+import "maps"
+
+// The catalog of the website, search, SEO, AI visibility and competitor
+// query tables (migration 0649).
+func init() { maps.Copy(queryCatalog, seoCatalog) }
+
+var seoCatalog = map[string]dataCatalogTable{
+	"search_daily": {
+		Area: "seo", Source: "Synced daily from the brand's Google Search Console connection, with its own sign-in.",
+		Columns: map[string]string{
+			"query":    "What people searched.",
+			"position": "Average position in results.",
+		},
+	},
+	"search_segments": {
+		Area: "seo", Source: "Synced daily from the brand's Google Search Console connection.",
+		Columns: map[string]string{
+			"position": "Average position in results.",
+		},
+	},
+	"search_vitals": {
+		Area: "seo", Source: "Read daily from Google's Chrome UX report for the brand's sites.",
+		Columns: map[string]string{
+			"p75":        "The 75th percentile value (milliseconds, or no unit for CLS).",
+			"good_share": "Share of visits rated good, 0 to 1.",
+		},
+	},
+	"search_sitemaps": {
+		Area: "seo", Source: "Synced from the brand's Google Search Console connection.",
+		Columns: map[string]string{
+			"last_submitted": "When it was last submitted.",
+			"last_read":      "When Google last read it.",
+			"pending":        "Whether Google still has to read it.",
+			"is_index":       "Whether it is a sitemap index.",
+			"errors":         "Errors Google found.",
+			"warnings":       "Warnings Google found.",
+			"submitted":      "Pages submitted.",
+			"checked_at":     "When Outflare last checked.",
+		},
+	},
+	"search_ga4_outcomes": {
+		Area: "seo", Source: "Synced daily from the brand's Google Analytics 4 connection.",
+		Columns: map[string]string{
+			"revenue_micros": "Revenue in micros of currency.",
+		},
+	},
+	"search_algorithm_updates": {
+		Area: "seo", Source: "Outflare's list of announced Google updates, per site.",
+		Columns: map[string]string{
+			"id":         "The update's id.",
+			"started_at": "The day it began.",
+			"ended_at":   "The day it ended.",
+		},
+	},
+	"url_inspections": {
+		Area: "seo", Source: "Read from the brand's Google Search Console connection.",
+		Time: "inspected_at",
+		Columns: map[string]string{
+			"coverage":           "Google's coverage state.",
+			"indexing":           "Whether indexing is allowed.",
+			"robots_txt":         "Whether robots.txt allows it.",
+			"page_fetch":         "Whether Google could fetch it.",
+			"google_canonical":   "The canonical Google chose.",
+			"user_canonical":     "The canonical the page declares.",
+			"last_crawl":         "When Google last crawled it.",
+			"crawled_as":         "desktop or mobile.",
+			"sitemaps":           "Sitemaps that list it.",
+			"mobile":             "Mobile usability verdict.",
+			"rich_results":       "Rich results verdict.",
+			"link":               "A link to the inspection in Search Console.",
+			"previous_verdict":   "The verdict before the last change.",
+			"verdict_changed_at": "When the verdict last changed.",
+		},
+	},
+	"indexability_snapshots": {
+		Area: "seo", Source: "Computed daily by Outflare from crawls and Search Console.",
+		Columns: map[string]string{
+			"crawled":        "Pages crawled.",
+			"indexable":      "Pages that can be indexed.",
+			"in_sitemap":     "Pages in a sitemap.",
+			"likely_indexed": "Pages that are likely indexed.",
+			"not_indexed":    "Pages not indexed.",
+			"unknown":        "Pages Outflare can't tell about.",
+			"issues":         "Counts by issue, as JSON.",
+			"taken_at":       "When it was taken.",
+		},
+	},
+	"seo_sites": {
+		Area: "seo", Source: "Added by the brand in SEO.",
+		Columns: map[string]string{
+			"start_url":          "Where crawls start.",
+			"verify_method":      "How the site was verified.",
+			"crawl_delay_ms":     "Wait between requests.",
+			"verify_watch_until": "Until when Outflare watches for verification.",
+			"render_js":          "Whether pages are rendered with JavaScript.",
+			"use_sitemaps":       "Whether sitemaps are read.",
+			"follow_nofollow":    "Whether nofollow links are followed.",
+			"ignore_params":      "Whether query strings are ignored.",
+			"max_depth":          "How deep crawls go.",
+			"include_patterns":   "Only addresses matching these are crawled.",
+			"exclude_patterns":   "Addresses matching these are skipped.",
+			"schedule_hour":      "The hour crawls run.",
+			"schedule_day":       "The day crawls run.",
+			"schedule_tz":        "The time zone of the schedule.",
+		},
+	},
+	"seo_snapshots": {
+		Area: "seo", Source: "Synced from the brand's own SEO data connections.",
+		Columns: map[string]string{
+			"key":     "What the row is about: a page, keyword or domain.",
+			"metrics": "The numbers, as JSON.",
+			"kind":    "What kind of row (see common values).",
+		},
+	},
+	"seo_regressions": {
+		Area: "seo", Source: "Detected by Outflare from the synced search data.",
+		Time: "detected_at",
+		Columns: map[string]string{
+			"subject": "What dropped: a page, keyword or the site.",
+			"before":  "The value before.",
+			"after":   "The value after.",
+		},
+	},
+	"seo_competitors": {
+		Area: "seo", Source: "Added by the brand or found by Outflare from search data.",
+		Columns: map[string]string{
+			"common_keywords":     "Share of keywords both rank for, 0 to 1.",
+			"check_error":         "Why the last check failed.",
+			"check_failures":      "Failed checks in a row.",
+			"presence_every_days": "How often its presence is scanned.",
+			"presence_outcome":    "What the last presence scan found, as JSON.",
+			"links":               "Its profiles and links, as JSON.",
+			"title":               "Its home page title.",
+			"description":         "Its home page description.",
+		},
+	},
+	"tracked_keywords": {
+		Area: "seo", Source: "Added by the brand in SEO, Rankings.",
+		Columns: map[string]string{
+			"keyword":    "The keyword.",
+			"frequency":  "How often it is checked.",
+			"last_error": "Why the last check failed.",
+			"failures":   "Failed checks in a row.",
+		},
+	},
+	"rank_observations": {
+		Area: "seo", Source: "Checked through the brand's own SERP data connection.",
+		Columns: map[string]string{
+			"tracked_id": "The tracked keyword (tracked_keywords.id).",
+			"top":        "The top results, as JSON.",
+			"url":        "The brand's page that ranked.",
+			"position":   "The brand's position, empty when not found.",
+		},
+	},
+	"keyword_serps": {
+		Area: "seo", Source: "Read through the brand's own SERP data connection.",
+		Time: "read_at",
+		Columns: map[string]string{
+			"keyword": "The keyword searched.",
+			"items":   "The results page, as JSON items.",
+			"read_at": "When it was read.",
+		},
+	},
+	"crawl_runs": {
+		Area: "seo", Source: "Outflare's crawler, on the brand's sites.",
+		Columns: map[string]string{
+			"trigger":            "What started it: schedule or a person.",
+			"delay_ms":           "Wait between requests.",
+			"consecutive_errors": "Errors in a row at the end.",
+			"pages_fetched":      "Pages read.",
+			"pages_blocked":      "Pages robots.txt blocked.",
+			"pages_failed":       "Pages that failed.",
+			"pages_found":        "Pages found.",
+			"pages_fallback":     "Pages read through the fallback fetcher.",
+			"pages_firewalled":   "Pages a firewall blocked.",
+			"fallback_hint":      "What to do when the site blocks the crawler.",
+			"health_score":       "The site's health, 0 to 100.",
+			"issues_errors":      "Errors found.",
+			"issues_warnings":    "Warnings found.",
+			"issues_notices":     "Notices found.",
+			"llms_txt_status":    "The HTTP status of the site's llms.txt.",
+			"llms_txt_bytes":     "The size of its llms.txt.",
+			"settings":           "The crawl's settings, as JSON.",
+			"pages_excluded":     "Pages left out by the site's patterns.",
+			"pages_rendered":     "Pages rendered with JavaScript.",
+			"step":               "Where the crawl is.",
+		},
+	},
+	"crawl_pages": {
+		Area: "seo", Source: "Outflare's crawler, on the brand's sites.",
+		Time: "fetched_at",
+		Columns: map[string]string{
+			"run_id":             "The crawl (crawl_runs.id).",
+			"source":             "How the crawler found it: links, sitemap or the start page.",
+			"status":             "ok, blocked, failed and the like.",
+			"found_on":           "The page that linked to it first.",
+			"http_status":        "The HTTP status code.",
+			"content_type":       "The content type.",
+			"redirect_to":        "Where it redirects, if it does.",
+			"noindex":            "Whether it asks not to be indexed.",
+			"links_out":          "Links on the page.",
+			"title":              "The page title.",
+			"title_count":        "How many title tags it has.",
+			"meta_description":   "The meta description.",
+			"canonical":          "The canonical address it gives.",
+			"canonical_count":    "How many canonical tags it has.",
+			"h1":                 "Its H1 headings.",
+			"lang":               "The language it declares.",
+			"hreflang":           "Its language alternates, as JSON.",
+			"schema_types":       "Structured data types on the page.",
+			"word_count":         "Words in the content.",
+			"images":             "Images.",
+			"images_no_alt":      "Images without alt text.",
+			"content_hash":       "A hash of the content, to spot duplicates.",
+			"viewport":           "Whether it sets a mobile viewport.",
+			"x_robots_tag":       "The X-Robots-Tag header.",
+			"links_in":           "Links to it from other crawled pages.",
+			"content_links_in":   "Links to it from the content of other pages (not menus).",
+			"fetched_via":        "How it was fetched: plain or rendered.",
+			"js_shell":           "Whether the page is empty without JavaScript.",
+			"og_title":           "Its Open Graph title.",
+			"og_image":           "Its Open Graph image.",
+			"insecure_resources": "Resources loaded over plain HTTP.",
+			"ai_signals":         "What helps AI assistants read it (llms.txt, structured data and the like), as JSON.",
+		},
+	},
+	"crawl_issues": {
+		Area: "seo", Source: "Outflare's crawler.",
+		Columns: map[string]string{
+			"page_id":  "The page (crawl_pages.id).",
+			"run_id":   "The crawl (crawl_runs.id).",
+			"rule":     "The check that failed.",
+			"severity": "error, warning or notice.",
+			"template": "The page template it was found on, when the same issue repeats.",
+		},
+	},
+	"crawl_links": {
+		Area: "seo", Source: "Outflare's crawler.",
+		Columns: map[string]string{
+			"from_page":   "The page the link is on (crawl_pages.id).",
+			"to_url":      "Where it points.",
+			"anchor":      "The link text.",
+			"internal":    "Whether it points to the same site.",
+			"boilerplate": "Whether it is in a menu, header or footer rather than the content.",
+		},
+	},
+	"crawl_ai_bots": {
+		Area: "seo", Source: "Outflare's crawler.",
+		Columns: map[string]string{
+			"purpose":       "What the crawler is for: training, search or a user's request.",
+			"root_allowed":  "Whether robots.txt lets it read the home page.",
+			"blocked_pages": "Pages it may not read.",
+		},
+	},
+	"backlink_events": {
+		Area: "seo", Source: "Synced from the brand's backlink data connections.",
+		Time: "at",
+		Columns: map[string]string{
+			"kind":          "found, lost, regained or rated.",
+			"backlink_id":   "The backlink (backlinks.id).",
+			"source_rating": "The linking domain's strength then, 0 to 100.",
+		},
+	},
+	"competitor_pages": {
+		Area: "seo", Source: "Outflare reads competitors' public sitemaps.",
+		Columns: map[string]string{
+			"competitor_id": "The competitor (seo_competitors.id).",
+			"lastmod":       "The page's last-changed date as the sitemap gives it.",
+			"gone_at":       "When it left the sitemap, if it did.",
+		},
+	},
+	"competitor_events": {
+		Area: "seo", Source: "Outflare, from competitors' sitemaps and the brand's SEO data connections.",
+		Time: "at",
+		Columns: map[string]string{
+			"kind": "What happened (see common values).",
+			"data": "The details, as JSON.",
+		},
+	},
+	"page_conversions": {
+		Area: "seo", Source: "Synced from the brand's analytics connection (Google Analytics 4 or PostHog).",
+		Columns: map[string]string{
+			"search_sessions":    "Sessions from search.",
+			"search_conversions": "Conversions from search sessions.",
+		},
+	},
+	"page_targets": {
+		Area: "seo", Source: "Set by the brand or suggested by Outflare in SEO.",
+		Columns: map[string]string{
+			"keyword":   "The keyword the page should rank for.",
+			"secondary": "Other keywords it covers.",
+			"origin":    "Who set it: the brand or Outflare.",
+		},
+	},
+	"link_pitches": {
+		Area: "seo", Source: "Outflare link building, through the brand's sequences.",
+		Columns: map[string]string{
+			"prospect_id": "The link prospect (link_prospects.id).",
+			"opener":      "The pitch's opening line.",
+			"reply_kind":  "How the site replied.",
+			"approved_by": "Who approved the pitch.",
+		},
+	},
+	"ai_prompts": {
+		Area: "seo", Source: "Written by the brand or suggested by Outflare in AI visibility.",
+		Columns: map[string]string{
+			"text":          "The question asked.",
+			"intent":        "What the asker wants: informational, commercial and the like.",
+			"awareness":     "How aware of the brand the asker is.",
+			"question_type": "The kind of question.",
+			"persona":       "Who is asking.",
+			"topic":         "What it is about.",
+			"competitor":    "The competitor it names, if any.",
+			"demand":        "How often people ask it, as an estimate.",
+			"demand_source": "Where the demand estimate came from.",
+			"source":        "How the prompt was added.",
+			"why":           "Why it was suggested.",
+		},
+	},
+	"ai_runs": {
+		Area: "seo", Source: "Outflare, on the brand's own AI keys.",
+		Columns: map[string]string{
+			"trigger":         "What started it: a schedule or a person.",
+			"models":          "The AI models asked, as JSON.",
+			"attempts":        "How many tries it took.",
+			"samples_planned": "Answers planned.",
+			"samples_done":    "Answers received.",
+			"samples_failed":  "Answers that failed.",
+			"cost_cents":      "What it cost on the brand's own AI keys, in US cents.",
+			"cost_micros":     "What it cost on the brand's own AI keys, in US dollar micros.",
+			"step":            "Where the run is.",
+		},
+	},
+	"ai_samples": {
+		Area: "seo", Source: "Asked by Outflare through the brand's own AI connections.",
+		Time: "sampled_at",
+		Columns: map[string]string{
+			"model":             "The AI model asked.",
+			"web_search":        "Whether the model searched the web for the answer.",
+			"attempt":           "Which try this was.",
+			"answer":            "The model's answer.",
+			"input_tokens":      "Tokens sent.",
+			"output_tokens":     "Tokens received.",
+			"cost_cents":        "What it cost on the brand's own AI key, in US cents.",
+			"cost_micros":       "What it cost, in US dollar micros.",
+			"facts_status":      "Whether its fact check is done.",
+			"facts_cost_cents":  "What the fact check cost, in US cents.",
+			"surface":           "Where the answer was read: the API or the assistant's app.",
+			"answer_model":      "The model that answered, as the provider reports it.",
+			"searches":          "What the model searched for.",
+			"brands_named":      "The brands the answer named.",
+			"check_url":         "A link to see the answer.",
+			"stance_status":     "Whether its stance check is done.",
+			"other_brands":      "Brands named that are neither the brand nor a known competitor.",
+			"stance_cost_cents": "What the stance check cost, in US cents.",
+			"provider":          "The AI provider.",
+		},
+	},
+	"ai_mentions": {
+		Area: "seo", Source: "Read by Outflare from ai_samples.",
+		Time: "sampled_at",
+		Columns: map[string]string{
+			"name":         "The brand named.",
+			"count":        "How often it was named in the answer.",
+			"stance":       "How the answer spoke of it: recommended, neutral, negative and the like.",
+			"stance_quote": "The words that show the stance.",
+		},
+	},
+	"ai_citations": {
+		Area: "seo", Source: "Read by Outflare from ai_samples.",
+		Time: "sampled_at",
+		Columns: map[string]string{
+			"owner":       "Whose page it is: self (the brand), competitor or other.",
+			"source_type": "What kind of page: the brand's site, a review site, a forum, news and the like.",
+			"url":         "The cited page.",
+			"title":       "The cited page's title.",
+		},
+	},
+	"ai_named_brands": {
+		Area: "seo", Source: "Outflare, from AI answers.",
+		Columns: map[string]string{
+			"name":     "The brand as AI answers name it.",
+			"name_key": "The name in a form for matching.",
+			"label":    "How Outflare sorted it.",
+			"sure":     "How sure Outflare is of that.",
+			"kind":     "self, competitor or other.",
+		},
+	},
+	"ai_cohorts": {
+		Area: "seo", Source: "Set up by the brand in AI visibility.",
+		Columns: map[string]string{
+			"locale":      "The language and country the prompts are asked in.",
+			"competitors": "The competitors to look for, as JSON.",
+		},
+	},
+	"ai_brand_facts": {
+		Area: "seo", Source: "Written by the brand in AI visibility.",
+		Columns: map[string]string{
+			"statement": "The fact as the brand states it.",
+			"topic":     "What the fact is about.",
+		},
+	},
+	"ai_fact_checks": {
+		Area: "seo", Source: "Checked by Outflare on the brand's own AI key.",
+		Time: "sampled_at",
+	},
+	"ai_claims": {
+		Area: "seo", Source: "Read by Outflare from AI answers on the brand's own AI key.",
+		Time: "sampled_at",
+	},
+	"ai_bot_hits": {
+		Area: "seo", Source: "Synced from the brand's CDN connection (such as Cloudflare).",
+	},
+	"ai_bot_reports": {
+		Area: "seo", Source: "Reported by the brand's site.",
+	},
+	"ai_page_checks": {
+		Area: "seo", Source: "Run by Outflare on request.",
+		Columns: map[string]string{
+			"found": "What the AI crawler found on the page, as JSON.",
+			"title": "The page's title.",
+		},
+	},
+	"ai_benchmarks": {
+		Area: "seo", Source: "Synced from the brand's AI visibility data connection.",
+		Columns: map[string]string{
+			"mentions":         "How often AI answers named it.",
+			"ai_search_volume": "Estimated AI searches on the topic.",
+		},
+	},
+	"analytics_daily": {
+		Area: "analytics", Source: "Synced daily from the brand's analytics connections.",
+		Columns: map[string]string{
+			"key":          "What the row is about in the report: a page, a source, a country and the like.",
+			"bounce_rate":  "Share of sessions that left after one page, 0 to 1.",
+			"avg_duration": "Average session length in seconds.",
+			"conversions":  "Conversions.",
+			"events":       "Events.",
+			"position":     "Average search position.",
+			"sessions":     "Sessions.",
+		},
+	},
+	"page_vitals": {
+		Area: "analytics", Source: "Outflare's site snippet.",
+		Columns: map[string]string{
+			"key_id":  "The site key that sent it.",
+			"lcp_ms":  "Largest Contentful Paint.",
+			"inp_ms":  "Interaction to Next Paint.",
+			"cls":     "Cumulative Layout Shift (no unit; under 0.1 is good).",
+			"fcp_ms":  "First Contentful Paint.",
+			"ttfb_ms": "Time to first byte.",
+		},
+	},
+	"heatmap_clicks": {
+		Area: "analytics", Source: "Outflare's site snippet.",
+		Time: "day",
+		Columns: map[string]string{
+			"x": "Where across the page, in grid units.",
+			"y": "Where down the page, in grid units.",
+		},
+	},
+	"heatmap_scrolls": {
+		Area: "analytics", Source: "Outflare's site snippet.",
+		Time: "day",
+		Columns: map[string]string{
+			"depth": "How far down, as a share of the page in percent.",
+			"views": "Views that reached that depth.",
+		},
+	},
+	"experiments": {
+		Area: "analytics", Source: "Set up by the brand or its agent in A/B tests.",
+		Columns: map[string]string{
+			"hypothesis":      "What the change should do.",
+			"design":          "How it is tested: split pages or before and after.",
+			"pattern":         "The change made.",
+			"holdout_percent": "Share of pages kept as control.",
+			"baseline_days":   "Days measured before.",
+			"measure_days":    "Days measured after.",
+			"start_on":        "When it starts.",
+			"result":          "The result, as JSON.",
+			"deploy_id":       "The deploy that made the change.",
+		},
+	},
+	"experiment_pages": {
+		Area: "analytics", Source: "Set up with the experiment.",
+		Columns: map[string]string{
+			"experiment_id": "The experiment (experiments.id).",
+			"grp":           "test or control.",
+			"baseline":      "The page's metric before the change.",
+		},
+	},
+	"site_visitors": {
+		Area: "analytics", Source: "Outflare's site snippet.",
+		Columns: map[string]string{
+			"identified_by":     "How Outflare learned who it is.",
+			"key_pageviews":     "Views of the brand's key pages.",
+			"last_path":         "The last page seen.",
+			"network":           "The visitor's network.",
+			"company_domain":    "The company the visitor's network belongs to.",
+			"company_name":      "That company's name.",
+			"reveal_checked_at": "When Outflare last looked up the company.",
+		},
+	},
+	"session_recordings": {
+		Area: "analytics", Source: "Outflare's site snippet, when recordings are on.",
+		Columns: map[string]string{
+			"session_id": "The visit's id in the snippet.",
+			"last_at":    "When the last part was recorded.",
+			"parts":      "Parts recorded.",
+			"paths":      "Pages visited.",
+			"clicks":     "Clicks made.",
+			"width":      "Screen width in pixels.",
+			"viewed_at":  "When someone first watched it.",
+		},
+	},
+}

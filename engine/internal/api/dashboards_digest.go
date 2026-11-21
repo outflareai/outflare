@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -29,7 +30,7 @@ const (
 
 func dashboardsDigest(ctx context.Context, q digests.Querier, ws, brand string, p digests.Period) (digests.Section, error) {
 	var out digests.Section
-	rows, err := q.Query(ctx, `SELECT d.id::text, d.brand_id::text, d.name, (SELECT count(*) FROM brands b WHERE b.workspace_id = d.workspace_id) > 1
+	rows, err := q.Query(ctx, `SELECT d.id::text, d.brand_id::text, d.name, (SELECT count(*) FROM brands b WHERE b.workspace_id = d.workspace_id) > 1, d.settings
 		FROM dashboards d WHERE d.workspace_id = $1 AND COALESCE(d.brand_id, outflare_first_brand(d.workspace_id)) = $3 AND d.settings->>'digest' = 'true' ORDER BY d.name LIMIT $2`, ws, digestDashboards, brand)
 	if err != nil {
 		return out, err
@@ -37,10 +38,11 @@ func dashboardsDigest(ctx context.Context, q digests.Querier, ws, brand string, 
 	type dash struct {
 		id, brand, name string
 		manyBrands      bool
+		settings        []byte
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (dash, error) {
 		var d dash
-		return d, r.Scan(&d.id, &d.brand, &d.name, &d.manyBrands)
+		return d, r.Scan(&d.id, &d.brand, &d.name, &d.manyBrands, &d.settings)
 	})
 	if err != nil {
 		return out, err
@@ -78,7 +80,14 @@ func dashboardsDigest(ctx context.Context, q digests.Querier, ws, brand string, 
 			}
 			prefix = brand + " · " + d.name
 		}
+		var st dashboardSettings
+		if err := json.Unmarshal(d.settings, &st); err != nil {
+			return out, err
+		}
 		for i, t := range specs {
+			if t.spec, err = withDashboardFilters("trend", t.spec, st.Filters); err != nil {
+				return out, err
+			}
 			start := time.Now()
 			tctx, cancel := context.WithTimeout(ctx, insightTimeout)
 			res, err := runSavedInsight(tctx, q, ws, d.brand, "trend", t.spec, rng, true, start)

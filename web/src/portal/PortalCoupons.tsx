@@ -112,7 +112,13 @@ export function PortalCoupons({
                     track("ui.copied", { kind: "partner_coupon" });
                     toast.success("Code copied");
                   } catch {
-                    setError(errorMessage(new Error("Copy the code manually from the text above.")));
+                    setError(
+                      errorMessage(
+                        new Error(
+                          "Copy the code manually from the text above.",
+                        ),
+                      ),
+                    );
                   }
                 }}
               >

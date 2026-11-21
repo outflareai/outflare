@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,6 +44,8 @@ func (s *Server) routesAdRMF(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+acct+"/bidding-strategies", s.onBrand(read, s.listAdPortfolios))
 	mux.HandleFunc("POST "+acct+"/bidding-strategies", s.onBrand(manage, s.createAdPortfolio))
 	mux.HandleFunc("PATCH "+acct+"/bidding-strategies/{strategy}", s.onBrand(manage, s.updateAdPortfolio))
+	mux.HandleFunc("GET "+acct+"/query", s.onBrand(read, s.queryAdAccount))
+	mux.HandleFunc("GET "+acct+"/query-fields", s.onBrand(read, s.listAdQueryFields))
 	mux.HandleFunc("GET "+acct+"/changes", s.onBrand(read, s.listAdAccountChanges))
 	mux.HandleFunc("GET "+acct+"/changes/{change}", s.onBrand(read, s.getAdAccountChange))
 	mux.HandleFunc("GET /v1/brands/{brand}/ads/bidding-strategies", s.onBrand(read, s.adPortfolioReport))
@@ -356,13 +359,23 @@ func portfolioTargets(w http.ResponseWriter, r *http.Request, cpa *int64, roas *
 	return true
 }
 
+// portfolioCPC checks the most a strategy pays for a click.
+func portfolioCPC(w http.ResponseWriter, r *http.Request, cpc *int64) bool {
+	if cpc != nil && (*cpc < 10_000 || *cpc > adBudgetMax) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "max_cpc_micros is at least 10000 (a cent) and at most 1000000000000 (a million)")
+		return false
+	}
+	return true
+}
+
 func (s *Server) createAdPortfolio(w http.ResponseWriter, r *http.Request) {
 	var in connectors.AdPortfolioSpec
 	if !decode(w, r, &in) {
 		return
 	}
 	in.Name, in.Type = strings.TrimSpace(in.Name), strings.TrimSpace(in.Type)
-	if !portfolioTargets(w, r, in.TargetCPAMicros, in.TargetROAS) {
+	in.ImpressionShareLocation = strings.ToLower(strings.TrimSpace(in.ImpressionShareLocation))
+	if !portfolioTargets(w, r, in.TargetCPAMicros, in.TargetROAS) || !portfolioCPC(w, r, in.MaxCPCMicros) {
 		return
 	}
 	if err := connectors.CheckPortfolio(in, true); err != nil {
@@ -385,6 +398,11 @@ func (s *Server) updateAdPortfolio(w http.ResponseWriter, r *http.Request) {
 		Name            string   `json:"name"`
 		TargetCPAMicros *int64   `json:"target_cpa_micros"`
 		TargetROAS      *float64 `json:"target_roas"`
+		// A target impression share strategy's place, share and most per
+		// click; a Maximise clicks strategy's most per click.
+		ImpressionShareLocation string   `json:"impression_share_location"`
+		ImpressionShare         *float64 `json:"impression_share"`
+		MaxCPCMicros            *int64   `json:"max_cpc_micros"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -393,8 +411,9 @@ func (s *Server) updateAdPortfolio(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	spec := connectors.AdPortfolioSpec{Name: strings.TrimSpace(in.Name), TargetCPAMicros: in.TargetCPAMicros, TargetROAS: in.TargetROAS}
-	if !portfolioTargets(w, r, in.TargetCPAMicros, in.TargetROAS) {
+	spec := connectors.AdPortfolioSpec{Name: strings.TrimSpace(in.Name), TargetCPAMicros: in.TargetCPAMicros, TargetROAS: in.TargetROAS,
+		ImpressionShareLocation: strings.ToLower(strings.TrimSpace(in.ImpressionShareLocation)), ImpressionShare: in.ImpressionShare, MaxCPCMicros: in.MaxCPCMicros}
+	if !portfolioTargets(w, r, in.TargetCPAMicros, in.TargetROAS) || !portfolioCPC(w, r, in.MaxCPCMicros) {
 		return
 	}
 	if err := connectors.CheckPortfolio(spec, false); err != nil {
@@ -409,7 +428,8 @@ func (s *Server) updateAdPortfolio(w http.ResponseWriter, r *http.Request) {
 	if s.adAccountChangeQueued(w, r, acct.id, adsync.AccountPortfolioUpdate, req) {
 		return
 	}
-	s.queueAdAccountChange(w, r, acct, adsync.AccountPortfolioUpdate, req, id, map[string]any{"target_cpa": in.TargetCPAMicros != nil, "target_roas": in.TargetROAS != nil, "renamed": spec.Name != ""})
+	s.queueAdAccountChange(w, r, acct, adsync.AccountPortfolioUpdate, req, id, map[string]any{"target_cpa": in.TargetCPAMicros != nil, "target_roas": in.TargetROAS != nil,
+		"impression_share": in.ImpressionShare != nil || spec.ImpressionShareLocation != "", "max_cpc": in.MaxCPCMicros != nil, "renamed": spec.Name != ""})
 }
 
 func (s *Server) listAdAccountChanges(w http.ResponseWriter, r *http.Request) {
@@ -489,6 +509,11 @@ type adPortfolioRow struct {
 	AdAccountID string `json:"ad_account_id"`
 	AccountName string `json:"account_name"`
 	Connector   string `json:"connector"`
+	// The currency the row's cost, average CPC and cost per conversion
+	// are in (the brand's own), and how many of it one unit of the
+	// strategy's currency is. The targets stay in the strategy's currency.
+	ReportCurrency string  `json:"report_currency"`
+	ExchangeRate   float64 `json:"exchange_rate"`
 }
 
 type adReportError struct {
@@ -532,6 +557,11 @@ func (s *Server) adPortfolioReport(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	to, rates, err := s.adReportCurrency(r)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	out, failed := []adPortfolioRow{}, []adReportError{}
 	for _, acct := range accts {
 		o, err := s.integrations.Open(r.Context(), s.pool, a.WorkspaceID, acct.integrationID)
@@ -560,35 +590,27 @@ func (s *Server) adPortfolioReport(w http.ResponseWriter, r *http.Request) {
 			if x.Currency == "" {
 				x.Currency = acct.acct.Currency
 			}
-			out = append(out, adPortfolioRow{AdPortfolioReport: x, AdAccountID: acct.id, AccountName: acct.acct.Name, Connector: acct.connector})
+			row := adPortfolioRow{AdPortfolioReport: x, AdAccountID: acct.id, AccountName: acct.acct.Name, Connector: acct.connector, ReportCurrency: x.Currency, ExchangeRate: 1}
+			if k, ok := rates.Rate(x.Currency, to); ok && to != "" && x.Currency != to {
+				scale := func(v *int64) *int64 {
+					if v == nil {
+						return nil
+					}
+					n := int64(math.Round(float64(*v) * k))
+					return &n
+				}
+				row.SpendMicros = *scale(&x.SpendMicros)
+				row.CPCMicros, row.CostPerConvMicros = scale(x.CPCMicros), scale(x.CostPerConvMicros)
+				row.ReportCurrency, row.ExchangeRate = to, k
+			}
+			out = append(out, row)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"from": f.from, "to": f.to, "data": out, "errors": failed,
-		"notes": []string{"Read live from each Google Ads account: average CPC and cost per conversion are Google's own, in micros of the strategy's currency."}})
+		"notes": []string{"Read live from each Google Ads account: average CPC and cost per conversion are Google's own. Cost, average CPC and cost per conversion are in micros of report_currency, the brand's own currency; a strategy's targets stay in its own currency."}})
 }
 
 // ---- removing a campaign, an ad or a keyword (M.110, M.130, M.140) ----
-
-// personRemoves answers 403 person_only unless the caller is a person on
-// their own signed-in session, and 400 unless the body says confirm: true.
-func personRemoves(w http.ResponseWriter, r *http.Request, what string) bool {
-	a := accessFrom(r.Context())
-	if a.ActorType != "human" || a.TokenID != "" || a.ViewID != "" {
-		writeError(w, r, http.StatusForbidden, "person_only", "removing a "+what+" can't be undone, so only a person, signed in, removes one: ask them to do it in Outflare under Paid ads")
-		return false
-	}
-	var in struct {
-		Confirm bool `json:"confirm"`
-	}
-	if !decode(w, r, &in) {
-		return false
-	}
-	if !in.Confirm {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "confirm must be true: removing a "+what+" can't be undone in the ad platform")
-		return false
-	}
-	return true
-}
 
 // adRemoverFor checks that the campaign's platform can remove things here.
 func (s *Server) adRemoverFor(w http.ResponseWriter, r *http.Request, ws, integrationID string) bool {
@@ -627,6 +649,7 @@ func (s *Server) queueAdRemove(w http.ResponseWriter, r *http.Request, c adCampa
 	if !s.adRemoverFor(w, r, a.WorkspaceID, c.integrationID) {
 		return
 	}
+	snap := s.removalSnapshot(ctx, a.WorkspaceID, map[string]string{"ad_campaign": "campaigns", "ad": "items", "ad_keyword": "keywords"}[targetType], targetID)
 	beforeJSON, _ := json.Marshal(before)
 	afterJSON, _ := json.Marshal(after)
 	var actor *string
@@ -645,6 +668,14 @@ func (s *Server) queueAdRemove(w http.ResponseWriter, r *http.Request, c adCampa
 		}
 		data := map[string]any{"change_id": id, "campaign_id": c.id, "external_id": c.externalID, "connector": c.connector, "brand_id": c.brand,
 			"before": before, "after": after}
+		// What was removed, kept so a person can make it again by hand, and
+		// the agent's action (with who approved it) when an agent asked.
+		if snap != nil {
+			data["snapshot"] = snap
+		}
+		if act := actionctx.ID(ctx); act != "" {
+			data["action_id"] = act
+		}
 		if err := recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, action, targetType, targetID, data,
 			map[string]any{"connector": c.connector, "kind": kind, "brand_id": c.brand}); err != nil {
 			return err
@@ -661,7 +692,7 @@ func (s *Server) queueAdRemove(w http.ResponseWriter, r *http.Request, c adCampa
 }
 
 func (s *Server) removeAdCampaign(w http.ResponseWriter, r *http.Request) {
-	if !personRemoves(w, r, "campaign") {
+	if !canRemove(w, r, "campaigns") {
 		return
 	}
 	a := accessFrom(r.Context())
@@ -708,7 +739,7 @@ func (s *Server) loadAdChild(ctx context.Context, w http.ResponseWriter, r *http
 }
 
 func (s *Server) removeAdItem(w http.ResponseWriter, r *http.Request) {
-	if !personRemoves(w, r, "ad") {
+	if !canRemove(w, r, "items") {
 		return
 	}
 	a := accessFrom(r.Context())
@@ -728,7 +759,7 @@ func (s *Server) removeAdItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) removeAdKeyword(w http.ResponseWriter, r *http.Request) {
-	if !personRemoves(w, r, "keyword") {
+	if !canRemove(w, r, "keywords") {
 		return
 	}
 	a := accessFrom(r.Context())

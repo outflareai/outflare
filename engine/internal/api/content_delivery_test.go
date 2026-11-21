@@ -124,7 +124,7 @@ func TestContentDeliveredToTheSite(t *testing.T) {
 	}
 
 	// Kept to its brand.
-	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})["id"].(string)
+	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Summitly", "handle": "summitly"})["id"].(string)
 	owner.must(404, "POST", "/v1/brands/"+other+"/content/"+id+"/delivered", map[string]any{"url": "https://northpeak.example/x"})
 }
 

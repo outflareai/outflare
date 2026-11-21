@@ -187,3 +187,190 @@ func TestZeroparkAdTargetDays(t *testing.T) {
 		t.Fatalf("a bad campaign id: %v", err)
 	}
 }
+
+// A campaign's targets as Zeropark holds them: the state (a word or an
+// object holding one), the bid and the smallest bid, for every target
+// with traffic in the last 30 days.
+func TestZeroparkAdTargetStates(t *testing.T) {
+	const cid = "11111111-1111-4111-8111-111111111111"
+	cl, _, _ := fake(t, map[string]any{
+		"GET /api/stats/campaign/" + cid + "/targets": func(r *http.Request) any {
+			if q := r.URL.Query(); q.Get("interval") != "LAST_30_DAYS" || q.Get("startDate") != "" {
+				return map[string]any{"page": 0, "limit": 1000, "total": 0, "elements": []any{}}
+			}
+			return map[string]any{"page": 0, "limit": 1000, "total": 5, "elements": []any{
+				map[string]any{"id": "aaaaaaaa-0000-4000-8000-000000000001", "target": "pub-17", "address": "pub-17", "source": "feed-a",
+					"state": map[string]any{"state": "ACTIVE", "actions": []string{"PAUSE"}}, "bid": map[string]any{"value": 0.0125, "autoBid": false}, "minBid": 0.0005},
+				map[string]any{"id": "aaaaaaaa-0000-4000-8000-000000000002", "target": "Example site", "address": "site.example",
+					"state": "PAUSED", "bid": map[string]any{"value": 0.02, "autoBid": true}},
+				map[string]any{"id": "aaaaaaaa-0000-4000-8000-000000000003", "target": "pub-19", "state": map[string]any{"state": "OVER_BUDGET"}},
+				map[string]any{"target": "pub-20", "state": 7},
+				map[string]any{"id": " "},
+			}}
+		},
+	})
+	z, creds, acct := ZeroparkAds{}, c.Creds{"api_token": "zp_test_not_a_real_token"}, c.AdAccount{ID: "zp-1001"}
+	var _ c.AdTargetStateReader = z
+	got, err := z.AdTargetStates(ctx, cl, creds, acct, cid)
+	if err != nil || len(got) != 4 {
+		t.Fatalf("targets %+v %v", got, err)
+	}
+	if g := got[0]; g.ID != "aaaaaaaa-0000-4000-8000-000000000001" || g.State != c.AdTargetActive || g.StateDetail != "" || g.Bid != (c.AdBid{Micros: 12_500}) ||
+		g.MinBidMicros != 500 || len(g.Keys) != 2 || g.Source != "feed-a" {
+		t.Fatalf("an active target %+v", g)
+	}
+	if g := got[1]; g.State != c.AdTargetPaused || g.Bid != (c.AdBid{Micros: 20_000, Auto: true}) || len(g.Keys) != 3 {
+		t.Fatalf("a paused target %+v", g)
+	}
+	if g := got[2]; g.State != c.AdTargetStopped || g.StateDetail != "over_budget" || g.Bid.Micros != 0 {
+		t.Fatalf("a target Zeropark holds back %+v", g)
+	}
+	// A state it can't read counts as active; a target without an id goes
+	// by its name.
+	if g := got[3]; g.State != c.AdTargetActive || g.ID != "pub-20" {
+		t.Fatalf("a target with an unknown state %+v", g)
+	}
+	if _, err := z.AdTargetStates(ctx, cl, creds, acct, "../x"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a bad campaign id: %v", err)
+	}
+}
+
+// Changes: a campaign is paused, resumed and given a daily budget, and a
+// target paused and resumed, with Zeropark's own calls (arguments in the
+// query string, the token in api-token).
+func TestZeroparkAdsChanges(t *testing.T) {
+	const cid = "11111111-1111-4111-8111-111111111111"
+	state := "ACTIVE"
+	budget := 50.0
+	var paused []string
+	ok := map[string]any{"state": "ACTIVE"}
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /api/stats/campaign/all": func(r *http.Request) any {
+			if r.URL.Query().Get("campaignNameOrId") != cid {
+				return map[string]any{"page": 0, "limit": 100, "total": 0, "elements": []any{}}
+			}
+			return map[string]any{"page": 0, "limit": 100, "total": 1, "elements": []any{map[string]any{
+				"details": map[string]any{"id": cid, "name": "Push US", "state": map[string]any{"state": state}, "dailyBudget": map[string]any{"type": "LIMITED", "amount": budget}},
+				"stats":   map[string]any{"spent": 1.5, "redirects": 300}}}}
+		},
+		"POST /api/campaign/" + cid + "/pause":  func(r *http.Request) any { state = "PAUSED"; return ok },
+		"POST /api/campaign/" + cid + "/resume": func(r *http.Request) any { state = "ACTIVE"; return ok },
+		"POST /api/campaign/" + cid + "/set/budget/daily": func(r *http.Request) any {
+			budget, _ = strconv.ParseFloat(r.URL.Query().Get("budget"), 64)
+			return ok
+		},
+		"POST /api/campaign/" + cid + "/targets/pause": func(r *http.Request) any {
+			paused = append(paused, r.URL.Query()["hashOrAddress"]...)
+			return map[string]any{"state": "PAUSED", "hashes": paused}
+		},
+		"POST /api/campaign/" + cid + "/targets/resume": func(r *http.Request) any {
+			paused = nil
+			return map[string]any{"state": "ACTIVE", "hashes": r.URL.Query()["hashOrAddress"]}
+		},
+	})
+	z, creds, acct := ZeroparkAds{}, c.Creds{"api_token": "zp_test_not_a_real_token"}, c.AdAccount{ID: "zp-1001", Currency: "USD"}
+	if d := z.Definition(); !d.Has(c.CapAdsManage) {
+		t.Fatal("Zeropark isn't marked manageable")
+	}
+
+	cp, err := z.AdCampaign(ctx, cl, creds, acct, cid)
+	if err != nil || cp.Status != c.AdActive || cp.DailyBudgetMicros == nil || *cp.DailyBudgetMicros != 50_000_000 {
+		t.Fatalf("campaign %+v %v", cp, err)
+	}
+	if _, err := z.AdCampaign(ctx, cl, creds, acct, "22222222-2222-4222-8222-222222222222"); err != c.ErrNotFound {
+		t.Fatalf("an unknown campaign: %v", err)
+	}
+	if err := z.SetCampaignStatus(ctx, cl, creds, acct, cid, false); err != nil {
+		t.Fatal(err)
+	}
+	if cp, _ := z.AdCampaign(ctx, cl, creds, acct, cid); cp.Status != c.AdPaused {
+		t.Fatalf("after a pause: %+v", cp)
+	}
+	if err := z.SetCampaignStatus(ctx, cl, creds, acct, cid, true); err != nil || state != "ACTIVE" {
+		t.Fatalf("resume: %v %s", err, state)
+	}
+	// The budget goes in dollars, rounded to the cent.
+	if err := z.SetCampaignDailyBudget(ctx, cl, creds, acct, cid, 25_126_000); err != nil || budget != 25.13 {
+		t.Fatalf("budget: %v %v", err, budget)
+	}
+	if err := z.SetCampaignDailyBudget(ctx, cl, creds, acct, cid, 0); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a zero budget: %v", err)
+	}
+
+	// A placement is a target, by its address or hash.
+	if kinds := z.ExclusionKinds(); len(kinds) != 1 || kinds[0] != c.ExcludePlacement {
+		t.Fatalf("exclusion kinds %v", kinds)
+	}
+	x := c.AdExclusion{Kind: c.ExcludePlacement, Value: "pub-17"}
+	if err := z.AddExclusion(ctx, cl, creds, acct, cid, x); err != nil || len(paused) != 1 || paused[0] != "pub-17" {
+		t.Fatalf("pause a target: %v %v", err, paused)
+	}
+	if err := z.RemoveExclusion(ctx, cl, creds, acct, cid, x); err != nil || paused != nil {
+		t.Fatalf("resume a target: %v %v", err, paused)
+	}
+	if err := z.AddExclusion(ctx, cl, creds, acct, cid, c.AdExclusion{Kind: c.ExcludeDevice, Value: "mobile"}); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a device exclusion: %v", err)
+	}
+	if err := z.AddExclusion(ctx, cl, creds, acct, "../x", x); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a bad campaign id: %v", err)
+	}
+	for _, r := range *reqs {
+		if r.header.Get("api-token") != "zp_test_not_a_real_token" {
+			t.Fatalf("%s %s went without the token", r.method, r.path)
+		}
+	}
+}
+
+// Bids: the campaign's and one target's are read, and set within
+// Zeropark's range with four decimals.
+func TestZeroparkAdsBids(t *testing.T) {
+	const cid = "11111111-1111-4111-8111-111111111111"
+	var asked []string
+	cl, _, _ := fake(t, map[string]any{
+		"GET /api/stats/campaign/" + cid + "/bid": map[string]any{"value": 0.0125, "autoBid": false},
+		"GET /api/stats/campaign/" + cid + "/targets": func(r *http.Request) any {
+			if r.URL.Query().Get("targetAddresses") != "pub-17" {
+				return map[string]any{"page": 0, "limit": 100, "total": 0, "elements": []any{}}
+			}
+			return map[string]any{"page": 0, "limit": 100, "total": 1, "elements": []any{
+				map[string]any{"id": "aaaaaaaa-0000-4000-8000-000000000001", "target": "pub-17", "address": "pub-17", "bid": map[string]any{"value": 0.02, "autoBid": true}}}}
+		},
+		"POST /api/campaign/" + cid + "/bid": func(r *http.Request) any {
+			asked = append(asked, "campaign?"+r.URL.RawQuery)
+			return map[string]any{"value": 0.01}
+		},
+		"POST /api/campaign/" + cid + "/target/bid": func(r *http.Request) any {
+			asked = append(asked, "target?"+r.URL.RawQuery)
+			return map[string]any{"value": 0.01}
+		},
+	})
+	z, creds, acct := ZeroparkAds{}, c.Creds{"api_token": "zp_test_not_a_real_token"}, c.AdAccount{ID: "zp-1001", Currency: "USD"}
+	if d := z.Definition(); !d.Has(c.CapAdsBids) {
+		t.Fatal("Zeropark isn't marked as taking bids")
+	}
+	b, err := z.Bid(ctx, cl, creds, acct, cid, "")
+	if err != nil || b.Micros != 12_500 || b.Auto {
+		t.Fatalf("campaign bid %+v %v", b, err)
+	}
+	b, err = z.Bid(ctx, cl, creds, acct, cid, "pub-17")
+	if err != nil || b.Micros != 20_000 || !b.Auto {
+		t.Fatalf("target bid %+v %v", b, err)
+	}
+	if _, err := z.Bid(ctx, cl, creds, acct, cid, "pub-99"); err != c.ErrNotFound {
+		t.Fatalf("an unknown target: %v", err)
+	}
+	if err := z.SetBid(ctx, cl, creds, acct, cid, "", 9_500); err != nil {
+		t.Fatal(err)
+	}
+	if err := z.SetBid(ctx, cl, creds, acct, cid, "pub-17", 15_000); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 2 || asked[0] != "campaign?bid=0.0095" || asked[1] != "target?bid=0.0150&hash=pub-17" {
+		t.Fatalf("bid calls: %v", asked)
+	}
+	for _, bad := range []int64{0, 99, 5_000_001} {
+		if err := z.SetBid(ctx, cl, creds, acct, cid, "", bad); c.KindOf(err) != c.ErrInvalid {
+			t.Fatalf("a bid of %d: %v", bad, err)
+		}
+	}
+}

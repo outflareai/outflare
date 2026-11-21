@@ -31,7 +31,7 @@ Manifests support these capabilities today. More are coming (enrichment, email f
 
 | Capability | Category | Inputs | Maps onto |
 | --- | --- | --- | --- |
-| `verify` | `email_verification` | `{{email}}` | `status` (deliverable, undeliverable, risky, unknown), `reason`, `provider_status`, `catch_all`, `disposable`, `role`, `free`, `suggestion`, `score` (0–100) |
+| `verify` | `email_verification` | `{{email}}` | `status` (deliverable, undeliverable, risky, unknown), `reason`, `provider_status`, `catch_all`, `disposable`, `role`, `free`, `suggestion`, `score` (0–100). When the `catch_all` field's answer is an outright no (`false`, `0` or `no`), the result also says the domain is confirmed not catch-all, which a test can check as `not_catch_all`; a missing field or a word such as `unknown` says neither |
 | `ip_score` | `fraud` | `{{ip}}`, `{{user_agent}}` | `score` (0–100 risk, required), and the flags `proxy`, `vpn`, `tor`, `hosting` and `crawler`. A flag is a path to a true/false value, or `{path, equals}` for a word that means true, such as `{path: connection_type, equals: Data Center}` |
 
 In `tests.yaml`, a capability's cases name it as the engine does: `run: verify` or `run: ip.score`.

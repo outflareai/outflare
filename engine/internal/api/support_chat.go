@@ -118,6 +118,7 @@ func (s *Server) routesSupportChat(mux *http.ServeMux) {
 	mux.HandleFunc("POST /chat/{key}/session", s.chatSession)
 	mux.HandleFunc("GET /chat/{key}/messages", s.chatMessages)
 	mux.HandleFunc("POST /chat/{key}/messages", s.chatSend)
+	mux.HandleFunc("POST /chat/{key}/email", s.chatEmail)
 	mux.HandleFunc("GET /chat/{key}/articles", s.chatArticles)
 	mux.HandleFunc("POST /chat/{key}/messages/{id}/feedback", s.chatFeedback)
 }
@@ -652,14 +653,27 @@ func (s *Server) chatSession(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	status, list, err := s.chatThread(ctx, cw, hash, time.Time{})
+	conv, status, list, err := s.chatThreadOf(ctx, cw, hash, time.Time{})
+	var waiting string
+	if err == nil && conv != "" {
+		waiting, err = support.ChatWaiting(ctx, s.pool, conv)
+	}
+	if err != nil {
+		metrics.SupportChatRequest("session", "error")
+		s.internal(w, r, err)
+		return
+	}
+	// Whether anyone is online to answer; null when the team doesn't use
+	// Online and Away.
+	online, err := support.TeamOnline(ctx, s.pool, cw.ws, cw.brand)
 	if err != nil {
 		metrics.SupportChatRequest("session", "error")
 		s.internal(w, r, err)
 		return
 	}
 	metrics.SupportChatRequest("session", "ok")
-	writeJSON(w, http.StatusOK, map[string]any{"token": token, "verified": verified, "status": nilIfEmpty(status), "messages": list})
+	writeJSON(w, http.StatusOK, map[string]any{"token": token, "verified": verified, "status": nilIfEmpty(status), "messages": list, "team_online": online,
+		"waiting": nilIfEmpty(waiting)})
 }
 
 func (s *Server) chatMessages(w http.ResponseWriter, r *http.Request) {
@@ -684,8 +698,14 @@ func (s *Server) chatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	conv, status, list, err := s.chatThreadOf(r.Context(), cw, hash, after)
 	var typing bool
+	var waiting string
 	if err == nil {
 		typing, err = s.chatTyping(r.Context(), cw, conv)
+	}
+	if err == nil && conv != "" {
+		// What a visitor with no answer yet is told: null, "email" (the
+		// team will answer by email) or "email_needed".
+		waiting, err = support.ChatWaiting(r.Context(), s.pool, conv)
 	}
 	if err != nil {
 		metrics.SupportChatRequest("poll", "error")
@@ -693,7 +713,7 @@ func (s *Server) chatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics.SupportChatRequest("poll", "ok")
-	writeJSON(w, http.StatusOK, map[string]any{"status": nilIfEmpty(status), "messages": list, "typing": typing})
+	writeJSON(w, http.StatusOK, map[string]any{"status": nilIfEmpty(status), "messages": list, "typing": typing, "waiting": nilIfEmpty(waiting)})
 }
 
 func (s *Server) chatSend(w http.ResponseWriter, r *http.Request) {
@@ -773,6 +793,64 @@ func (s *Server) chatSend(w http.ResponseWriter, r *http.Request) {
 	}
 	metrics.SupportChatRequest("send", "ok")
 	writeJSON(w, http.StatusCreated, map[string]any{"id": got.MessageID, "started": got.Started})
+}
+
+// chatEmail saves the address a visitor leaves so the team can answer by
+// email once they have gone. It is what they typed, not verified.
+func (s *Server) chatEmail(w http.ResponseWriter, r *http.Request) {
+	cw, ok := s.chatWidgetFrom(w, r, "email")
+	if !ok {
+		return
+	}
+	token, hash := chatToken(r)
+	if hash == nil {
+		metrics.SupportChatRequest("email", "bad_token")
+		writeError(w, r, http.StatusUnauthorized, "unauthenticated", "start a chat first")
+		return
+	}
+	var req struct {
+		Email string `json:"email"`
+	}
+	if !decodeLarge(w, r, &req, 4<<10) {
+		metrics.SupportChatRequest("email", "invalid")
+		return
+	}
+	email, ok := cleanChatEmail(req.Email)
+	if !ok || email == "" {
+		metrics.SupportChatRequest("email", "invalid")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "that email address doesn't look right")
+		return
+	}
+	if !s.chatSendLimit.hit(token) || !s.chatNetSendLimit.hit(networkKey(clientIP(r))) {
+		metrics.SupportChatRequest("email", "limited")
+		writeError(w, r, http.StatusTooManyRequests, "rate_limited", "wait a moment and try again")
+		return
+	}
+	ctx := r.Context()
+	var conv string
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if conv, err = support.ChatConversation(ctx, tx, cw.ws, cw.id, hash); err != nil || conv == "" {
+			return err
+		}
+		if err := support.SetChatContact(ctx, tx, cw.ws, conv, email, "", false); err != nil {
+			return err
+		}
+		return audit.Record(ctx, tx, audit.Event{WorkspaceID: cw.ws, ActorType: "system", Action: "support.chat_email_left",
+			TargetType: "support_conversation", TargetID: conv})
+	})
+	if err != nil {
+		metrics.SupportChatRequest("email", "error")
+		s.internal(w, r, err)
+		return
+	}
+	if conv == "" {
+		metrics.SupportChatRequest("email", "invalid")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "write a message first")
+		return
+	}
+	metrics.SupportChatRequest("email", "ok")
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
 }
 
 // chatArticles searches the help centre from the widget, so a visitor can

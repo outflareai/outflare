@@ -302,7 +302,7 @@ func (s *Server) dailyRows(ctx context.Context, ws, report, from, to, host strin
 		args = append(args, host)
 		sql += ` AND d.host = $5`
 	}
-	sql += sel.sql(`d.brand_id`, &args)
+	sql += sel.sql(`d.brand_id`, &args) + countedOnce("d")
 	rows, err := s.pool.Query(ctx, sql+` ORDER BY d.day`, args...)
 	if err != nil {
 		return nil, err

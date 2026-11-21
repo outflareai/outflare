@@ -34,7 +34,7 @@ type Contact = {
 // The campaign a profile's people go into: held for you unless auto_add.
 type Campaign = { profile_id: string; sequence_id: string | null; auto_add: boolean; daily_limit: number; ready_limit: number };
 type RunCampaign = { sequence_id: string; name: string; status: string; auto_add: boolean; daily_limit: number };
-type Qualifier = { id: string | null; profile_id: string | null; version: number; accept: string[]; reject: string[] };
+type Qualifier = { id: string | null; profile_id: string | null; version: number; accept: string[]; reject: string[]; instructions?: string };
 type Estimate = { searches: number; pages: number; max_ai_cents: number; provider_usd: number; per_company_usd: number };
 type Counts = { finding: number; added: number; ready?: number; enrolled?: number; stopped: number };
 type Run = {
@@ -44,7 +44,8 @@ type Run = {
   provider_cents: number; ai_cents: number; error_code: string | null; error: string | null; created_at: string; finished_at: string | null;
   // Only on a single run (and the front page's latest runs).
   pipeline?: Pipeline; contacts?: Counts; campaign?: RunCampaign;
-  spend?: { ai_cents: number; web_cents: number; web_tokens: number; people_credits: number; company_credits?: number; verify_credits?: number; people_cents?: number; verify_cents?: number; unpriced?: string[] };
+  spend?: { ai_cents: number; web_cents: number; web_tokens: number; people_credits: number; company_credits?: number; verify_credits?: number; people_cents?: number; verify_cents?: number; unpriced?: string[];
+    total_cents?: number; verified_contacts?: number; cents_per_contact?: number | null };
   results?: { in_campaign: number; sent: number; replied: number };
   to_review?: number;
   sources?: string[]; source_stats?: SourceStat[];
@@ -65,6 +66,8 @@ type Candidate = {
   id: string; domain: string; name: string; facts: Record<string, unknown>; emails: string[]; verdict: "accept" | "maybe" | "reject" | "unread";
   score: number | null; reasons: string[]; query: string; source?: string; evidence?: string; status: "pending" | "added" | "dismissed"; record_id: string | null; from_index: boolean;
   picked?: boolean; blocked?: string | null; warnings?: string[];
+  // grade is the A to D grade a profile that grades companies gives a fit (Outflare Cloud), with what it read.
+  grade?: "A" | "B" | "C" | "D" | null; grade_detail?: { volume: string; size: string; what: string; why: string } | null;
 };
 type Totals = { runs: number; found: number; fit: number; added: number; people: number; emails: number; in_campaign: number; replied: number; ai_cents: number; web_cents: number; web_tokens: number;
   people_credits?: number; verify_credits?: number; credit_cents?: number; credits_unpriced?: boolean };
@@ -101,6 +104,10 @@ const n = (v: number) => v.toLocaleString();
 const usd = (cents: number) => `$${(cents / 100).toFixed(cents < 100 ? 3 : 2).replace(/\.?0+$/, "") || "0"}`;
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const verdictTone = { accept: "green", maybe: "amber", reject: "red", unread: "grey" } as const;
+const gradeTone = { A: "green", B: "green", C: "amber", D: "red" } as const;
+// gradeTitle says what a grade rests on, for its badge's tooltip.
+const gradeTitle = (d: Candidate["grade_detail"]) =>
+  d ? [d.what, d.why, `Volume: ${d.volume}. Size: ${d.size}.`].filter(Boolean).join("\n") : "";
 // What an opt-out list entry that let a company through means.
 const warningLabel = (w: string) => {
   const why = w.split(":")[1] ?? w;
@@ -118,12 +125,15 @@ const codeLabel: Record<string, string> = {
   ai_model_needed: "needs an AI model", usage_limit_reached: "usage limit", skipped: "skipped by you",
   in_another_campaign: "in another campaign", campaign_ready: "ready for campaign", campaign_full: "campaign full, waiting",
   campaign_unavailable: "campaign unavailable", paused_by_you: "paused by you", risky_email: "unconfirmed email",
+  customer: "already a customer", blocklisted: "on the blocklist", free_mail: "a free mail domain", company_guard_unavailable: "waiting for a customer or blocklist check",
+  graded_out: "graded C or D", graded_solo: "one-person company, left for you", ungraded: "no grade, left for you",
 };
 const label = (code: string | null | undefined) => (code ? codeLabel[code] ?? code.replace(/_/g, " ") : "");
 
 // The steps a company goes through, in order. Unknown steps show as they are.
 const stages: { id: string; label: string; what: string }[] = [
   { id: "search", label: "Search", what: "Plans searches and runs them on Geonode" },
+  { id: "intake", label: "Customer check", what: "Asks your account lookup and blocklist connections about the company, before anything is read or paid for" },
   { id: "read", label: "Read website", what: "Reads each new company's homepage and contact or about pages" },
   { id: "qualify", label: "Judge fit", what: "Your AI says what the company is and whether it fits" },
   { id: "review", label: "Review", what: "Waits for you to add or dismiss, or sends a fit on straight away with review off" },
@@ -553,7 +563,7 @@ function SetupDialog({ ws, base, profiles, settings, initial, onClose, onStarted
   }, [base, target]);
   useEffect(() => {
     if (!profile) return;
-    call<Qualifier>("GET", `${base}/qualifiers?profile_id=${profile}`).then(({ data }) => setQualifier(data ?? null));
+    call<Qualifier>("GET", `${base}/qualifiers?profile_id=${profile}`).then(({ data }) => setQualifier(data ? { ...data, instructions: data.instructions ?? "" } : null));
     call<Campaign>("GET", `${base}/profiles/${profile}/campaign`).then(({ data }) => setCampaign(data ?? null));
   }, [base, profile]);
 
@@ -565,8 +575,10 @@ function SetupDialog({ ws, base, profiles, settings, initial, onClose, onStarted
       setError(errorMessage(e));
     };
     if (qualifier) {
-      const q = await call<Qualifier>("PUT", `${base}/qualifiers`, { profile_id: profile, accept: qualifier.accept, reject: qualifier.reject });
+      const q = await call<Qualifier>("PUT", `${base}/qualifiers`, { profile_id: profile, accept: qualifier.accept, reject: qualifier.reject, instructions: qualifier.instructions ?? "" });
       if (q.error) return fail(q.error);
+      // An older server leaves instructions out of its answer: keep what was typed.
+      if (q.data) setQualifier({ ...q.data, instructions: q.data.instructions ?? qualifier.instructions ?? "" });
     }
     if (campaign) {
       const c = await call<Campaign>("PUT", `${base}/profiles/${profile}/campaign`, { sequence_id: campaign.sequence_id ?? "", auto_add: campaign.auto_add });
@@ -625,6 +637,11 @@ function SetupDialog({ ws, base, profiles, settings, initial, onClose, onStarted
                 <>
                   <TagInput label="Accept companies that" placeholder="Sell software to finance teams" values={qualifier.accept} onChange={(v) => setQualifier({ ...qualifier, accept: v })} />
                   <TagInput label="Reject companies that" placeholder="Are agencies or resellers" values={qualifier.reject} onChange={(v) => setQualifier({ ...qualifier, reject: v })} />
+                  <label className="block space-y-1 text-[13px]">
+                    <span className="font-medium">Instructions</span>
+                    <textarea className={`${field} w-full`} rows={5} maxLength={20000} placeholder="We sell to finance teams at software companies with 50 to 500 employees. A company fits when…" value={qualifier.instructions ?? ""} onChange={(e) => setQualifier({ ...qualifier, instructions: e.target.value })} />
+                    <span className="block text-[12px] text-muted-foreground">Your own brief on which companies fit and how to judge them. Every AI step of a run reads it.</span>
+                  </label>
                   <p className="text-[12px] text-muted-foreground">The criteria are saved for this profile{qualifier.version > 0 ? ` (version ${qualifier.version})` : ""}.</p>
                 </>
               )}
@@ -1025,7 +1042,12 @@ function Companies({ base, run, canManage, filter, onFilter, onChanged }: { base
                       {typeof c.facts.summary === "string" && c.facts.summary && <span className="block truncate text-[12px] text-muted-foreground">{c.facts.summary}</span>}
                       {c.source && c.source !== "web" && <span className="block truncate text-[12px] text-muted-foreground" title={c.evidence}>Via {finderSource(c.source)}{c.evidence ? `: ${c.evidence}` : ""}</span>}
                     </td>
-                    <td className="px-3 py-2"><Badge tone={verdictTone[c.verdict]}>{c.verdict === "unread" ? "Not read" : `${c.verdict === "accept" ? "Fits" : c.verdict === "maybe" ? "Maybe" : "No"}${c.score != null ? ` · ${c.score}` : ""}`}</Badge></td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex flex-wrap gap-1">
+                        <Badge tone={verdictTone[c.verdict]}>{c.verdict === "unread" ? "Not read" : `${c.verdict === "accept" ? "Fits" : c.verdict === "maybe" ? "Maybe" : "No"}${c.score != null ? ` · ${c.score}` : ""}`}</Badge>
+                        {c.grade && <Badge tone={gradeTone[c.grade]} title={gradeTitle(c.grade_detail)}>Grade {c.grade}</Badge>}
+                      </span>
+                    </td>
                     <td className="max-w-sm px-3 py-2"><span className="block truncate text-[12px] text-muted-foreground" title={c.reasons.join("\n")}>{c.reasons[0] ?? ""}</span></td>
                     <td className="px-3 py-2">
                       <span className="inline-flex flex-wrap gap-1">
@@ -1174,7 +1196,9 @@ function People({ base, run, canManage, filter, onFilter, onChanged, onCampaign 
 // nothing, and the providers missing one are named.
 function Spend({ run, onRates }: { run: Run; onRates?: () => void }) {
   const sp = run.spend ?? { ai_cents: run.ai_cents, web_cents: run.provider_cents, web_tokens: run.search_tokens + run.page_tokens, people_credits: 0 };
-  const money$ = sp.ai_cents + sp.web_cents + (sp.people_cents ?? 0) + (sp.verify_cents ?? 0);
+  const money$ = sp.total_cents ?? sp.ai_cents + sp.web_cents + (sp.people_cents ?? 0) + (sp.verify_cents ?? 0);
+  // What a person with a verified address cost, from the priced spend.
+  const perContact = sp.cents_per_contact ?? null;
   const fit = run.accepted + run.maybe;
   const inCampaign = run.contacts?.enrolled ?? 0;
   const unpriced = sp.unpriced ?? [];
@@ -1186,12 +1210,12 @@ function Spend({ run, onRates }: { run: Run; onRates?: () => void }) {
         <Stat label="Web (Geonode)" value={sp.web_cents ? money(sp.web_cents) : `${n(sp.web_tokens)} tokens`} sub={`${plural(run.searches, "search", "searches")}, ${plural(run.pages, "page")}`} />
         <Stat label="Data provider" value={credits(sp.people_credits, sp.people_cents)} sub={sp.company_credits ? `${n(sp.company_credits)} for company searches, the rest for people` : "for people searches"} />
         <Stat label="Email verifier" value={credits(sp.verify_credits ?? 0, sp.verify_cents)} sub="for checking addresses" />
-        <Stat label="Per result" value={inCampaign ? usd(money$ / inCampaign) : fit ? usd(money$ / fit) : "–"}
-          sub={inCampaign ? "a person in the campaign" : "a company that fits"} />
+        <Stat label="Per result" value={perContact != null ? usd(perContact) : inCampaign ? usd(money$ / inCampaign) : fit ? usd(money$ / fit) : "–"}
+          sub={perContact != null ? "a person with a verified address" : inCampaign ? "a person in the campaign" : "a company that fits"} />
       </Stats>
       {unpriced.length > 0 && (
         <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] dark:border-amber-900 dark:bg-amber-950/40">
-          No price yet for {unpriced.map((p) => p || "your email verifier").join(", ")} credits, so they count nothing in the spend and per result.{" "}
+          No price yet for {unpriced.map((p) => p || "your email verifier").join(", ")}, so its calls count nothing in the spend and per result.{" "}
           {onRates ? <button className="underline" onClick={onRates}>Set prices in Outcomes</button> : "Set prices in Outcomes"}, under Spend.
         </p>
       )}

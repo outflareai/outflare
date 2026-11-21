@@ -216,3 +216,216 @@ func TestTaboolaAdsConversions(t *testing.T) {
 		t.Fatalf("no numeric id: %v", err)
 	}
 }
+
+// Changes: a campaign is paused, resumed and given a daily cap by a POST
+// on its own address, and a publisher site blocked and unblocked by a
+// PATCH that names only that site (Taboola's "Update a Campaign" and
+// "Patching targeted publishers").
+func TestTaboolaAdsChanges(t *testing.T) {
+	api := "/backstage/api/1.0"
+	camp := api + "/northpeak/campaigns/5750752"
+	active := true
+	var bodies []string
+	cl, reqs, _ := fake(t, map[string]any{
+		"POST /backstage/oauth/token": taboolaTokenRoute,
+		"GET " + camp + "/": func(r *http.Request) any {
+			return map[string]any{"id": 5750752, "name": "Spring", "status": "RUNNING", "is_active": active, "daily_cap": 100.5, "marketing_objective": "LEADS_GENERATION"}
+		},
+		"POST " + camp: func(r *http.Request) any {
+			var b map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			if v, ok := b["is_active"].(bool); ok {
+				active = v
+			}
+			raw, _ := json.Marshal(b)
+			bodies = append(bodies, "POST "+string(raw))
+			return map[string]any{"id": "5750752"}
+		},
+		"PATCH " + camp: func(r *http.Request) any {
+			var b map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			raw, _ := json.Marshal(b)
+			bodies = append(bodies, "PATCH "+string(raw))
+			return b
+		},
+	})
+	tb, creds, acct := TaboolaAds{}, taboolaCreds(), c.AdAccount{ID: "northpeak", Currency: "USD"}
+	if d := tb.Definition(); !d.Has(c.CapAdsManage) {
+		t.Fatalf("capabilities %v", d.Capabilities)
+	}
+	got, err := tb.AdCampaign(ctx, cl, creds, acct, "5750752")
+	if err != nil || got.Status != c.AdActive || got.Name != "Spring" || got.DailyBudgetMicros == nil || *got.DailyBudgetMicros != 100_500_000 {
+		t.Fatalf("campaign %+v %v", got, err)
+	}
+	// Paused by the advertiser: Taboola still says RUNNING, with
+	// is_active false.
+	if err := tb.SetCampaignStatus(ctx, cl, creds, acct, "5750752", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := tb.AdCampaign(ctx, cl, creds, acct, "5750752"); got.Status != c.AdPaused || got.ProviderStatus != "RUNNING" {
+		t.Fatalf("after the pause %+v", got)
+	}
+	if err := tb.SetCampaignStatus(ctx, cl, creds, acct, "5750752", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.SetCampaignDailyBudget(ctx, cl, creds, acct, "5750752", 75_499_000); err != nil {
+		t.Fatal(err)
+	}
+	x := c.AdExclusion{Kind: c.ExcludePlacement, Value: "examplenews-home"}
+	if err := tb.AddExclusion(ctx, cl, creds, acct, "5750752", x); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.RemoveExclusion(ctx, cl, creds, acct, "5750752", x); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`POST {"is_active":false}`, `POST {"is_active":true}`, `POST {"daily_cap":75.5}`,
+		`PATCH {"patch_operation":"ADD","publisher_targeting":{"publishers":["examplenews-home"]}}`,
+		`PATCH {"patch_operation":"REMOVE","publisher_targeting":{"publishers":["examplenews-home"]}}`,
+	}
+	if strings.Join(bodies, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("sent:\n%s", strings.Join(bodies, "\n"))
+	}
+	for _, r := range *reqs {
+		if (r.method == "POST" || r.method == "PATCH") && r.path == camp && r.header.Get("Content-Type") != "application/json" {
+			t.Fatalf("a change without a JSON body: %+v", r)
+		}
+	}
+	// Refused before anything is sent: a campaign id that isn't a number,
+	// no budget, something that isn't a site id, another kind.
+	sent := len(bodies)
+	if err := tb.SetCampaignStatus(ctx, cl, creds, acct, "../x", false); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("a bad campaign id: %v", err)
+	}
+	if err := tb.SetCampaignDailyBudget(ctx, cl, creds, acct, "5750752", 0); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("no budget: %v", err)
+	}
+	for _, bad := range []c.AdExclusion{{Kind: c.ExcludePlacement, Value: "https://site.example/a b"}, {Kind: c.ExcludePlacement}, {Kind: c.ExcludeDevice, Value: "mobile"}} {
+		if err := tb.AddExclusion(ctx, cl, creds, acct, "5750752", bad); c.KindOf(err) != c.ErrInvalid {
+			t.Fatalf("%+v: %v", bad, err)
+		}
+	}
+	if len(bodies) != sent {
+		t.Fatalf("a refused change was sent: %v", bodies[sent:])
+	}
+	if _, err := tb.AdCampaign(ctx, cl, creds, acct, "999"); err != c.ErrNotFound {
+		t.Fatalf("a campaign that isn't there: %v", err)
+	}
+	if kinds := tb.ExclusionKinds(); len(kinds) != 1 || kinds[0] != c.ExcludePlacement {
+		t.Fatalf("kinds %v", kinds)
+	}
+}
+
+// Ads come from the content report a day at a time, and their status from
+// the item lists of the campaigns that spent.
+func TestTaboolaCampaignAds(t *testing.T) {
+	api := "/backstage/api/1.0"
+	content := func(r *http.Request) any {
+		switch r.URL.Query().Get("start_date") {
+		case "2026-10-01":
+			return map[string]any{"results": []any{
+				map[string]any{"item": "301", "item_name": "Ten desk lamps", "thumbnail_url": "https://cdn.acme.example/lamp.jpg", "url": "https://acme.example/lamps",
+					"campaign": "5750752", "spent": 7.95, "impressions": 61609, "clicks": 40, "actions": 4, "conversions_value": 80.5},
+				map[string]any{"item": 302, "item_name": "Old headline", "url": "https://acme.example/chairs", "campaign": 5750752, "spent": 1.05, "impressions": 900, "clicks": 3},
+				map[string]any{"item": "303", "item_name": "Nothing shown", "campaign": "5750752", "spent": 0, "impressions": 0, "clicks": 0},
+			}}
+		case "2026-10-02":
+			return map[string]any{"results": []any{
+				map[string]any{"item": "302", "item_name": "New headline", "url": "https://acme.example/chairs", "campaign": "5750752", "spent": 2, "impressions": 1000, "clicks": 5},
+				map[string]any{"item": "401", "item_name": "Small campaign", "url": "https://acme.example/rugs", "campaign": "5750760", "spent": 0.5, "impressions": 100, "clicks": 1},
+			}}
+		}
+		return map[string]any{"results": []any{}}
+	}
+	cl, reqs, _ := fake(t, map[string]any{
+		"POST /backstage/oauth/token": taboolaTokenRoute,
+		"GET " + api + "/northpeak/reports/top-campaign-content/dimensions/item_breakdown": content,
+		"GET " + api + "/northpeak/campaigns/5750752/items/": map[string]any{"results": []any{
+			map[string]any{"id": "301", "campaign_id": "5750752", "type": "ITEM", "url": "https://acme.example/lamps", "thumbnail_url": "https://cdn.acme.example/lamp.jpg",
+				"title": "Ten desk lamps", "approval_state": "APPROVED", "is_active": true, "status": "RUNNING"},
+			map[string]any{"id": 302, "type": "ITEM", "url": "https://acme.example/chairs", "title": "New headline", "approval_state": "APPROVED", "is_active": false, "status": "PAUSED"},
+			map[string]any{"id": "304", "campaign_id": "5750752", "type": "ITEM", "url": "https://acme.example/sofas", "title": "Not allowed", "approval_state": "REJECTED", "status": "REJECTED"},
+		}},
+		"GET " + api + "/northpeak/campaigns/5750760/items/": map[string]any{"results": []any{}},
+	})
+	tb, creds, acct := TaboolaAds{}, taboolaCreds(), c.AdAccount{ID: "northpeak", Currency: "USD"}
+	items, days, err := tb.CampaignAds(ctx, cl, creds, acct, "2026-10-01", "2026-10-03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(days) != 4 || days[0].ID != "301" || days[0].ParentID != "5750752" || days[0].Date != "2026-10-01" || days[0].SpendMicros != 7_950_000 || days[0].Clicks != 40 ||
+		*days[0].Conversions != 4 || *days[0].ConversionValueMicros != 80_500_000 || days[1].ID != "302" || days[1].Conversions != nil ||
+		days[2].Date != "2026-10-02" || days[3].ID != "401" || days[3].ParentID != "5750760" {
+		t.Fatalf("days %+v", days)
+	}
+	// The listed items come first, then the one the lists didn't have,
+	// which says nothing about its status.
+	if len(items) != 4 || items[0].ID != "301" || items[0].Status != c.AdActive || items[0].ParentID != "5750752" || items[0].Details[c.AdDetailHeadline] != "Ten desk lamps" ||
+		items[0].Details[c.AdDetailPolicy] != "approved" || items[0].Details[c.AdDetailThumbnail] == "" || items[0].Details[c.AdDetailType] != "item" ||
+		items[1].ID != "302" || items[1].Status != c.AdPaused || items[1].ParentID != "5750752" || items[1].Name != "New headline" ||
+		items[2].ID != "304" || items[2].Status != c.AdOther || items[2].ProviderStatus != "REJECTED" || items[2].Details[c.AdDetailPolicy] != "disapproved" ||
+		items[3].ID != "401" || items[3].ProviderStatus != "" || items[3].ParentID != "5750760" || items[3].Details[c.AdDetailURL] != "https://acme.example/rugs" {
+		t.Fatalf("items %+v", items)
+	}
+	if _, ok := items[0].Details[c.AdDetailTemplated]; ok {
+		t.Fatal("Taboola's tracking code is on the campaign, so an item says nothing about the template")
+	}
+	// One report call a day, then the campaign that spent most first.
+	var calls []string
+	for _, r := range *reqs {
+		switch {
+		case strings.Contains(r.path, "/reports/"):
+			calls = append(calls, r.query)
+		case strings.HasSuffix(r.path, "/items/"):
+			calls = append(calls, r.path[len(api):])
+		}
+	}
+	want := []string{"end_date=2026-10-01&start_date=2026-10-01", "end_date=2026-10-02&start_date=2026-10-02", "end_date=2026-10-03&start_date=2026-10-03",
+		"/northpeak/campaigns/5750752/items/", "/northpeak/campaigns/5750760/items/"}
+	if strings.Join(calls, " ") != strings.Join(want, " ") {
+		t.Fatalf("calls %v", calls)
+	}
+	// A long window reads its last 31 days only.
+	n := len(*reqs)
+	if _, _, err := tb.CampaignAds(ctx, cl, creds, acct, "2026-07-01", "2026-09-30"); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*reqs)[n:]; len(got) != 31 || !strings.Contains(got[0].query, "start_date=2026-08-31") {
+		t.Fatalf("%d calls, first %s", len(got), got[0].query)
+	}
+}
+
+// One item is paused and resumed with is_active, by its campaign and id.
+func TestTaboolaAdStatus(t *testing.T) {
+	api := "/backstage/api/1.0"
+	var bodies []string
+	cl, reqs, _ := fake(t, map[string]any{
+		"POST /backstage/oauth/token": taboolaTokenRoute,
+		"POST " + api + "/northpeak/campaigns/5750752/items/301/": func(r *http.Request) any {
+			var b map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			raw, _ := json.Marshal(b)
+			bodies = append(bodies, string(raw))
+			return map[string]any{"id": "301", "campaign_id": "5750752", "is_active": b["is_active"]}
+		},
+	})
+	tb, creds, acct := TaboolaAds{}, taboolaCreds(), c.AdAccount{ID: "northpeak", Currency: "USD"}
+	if err := tb.SetAdStatus(ctx, cl, creds, acct, "5750752", "301", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.SetAdStatus(ctx, cl, creds, acct, "5750752", "301", true); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(bodies, " ") != `{"is_active":false} {"is_active":true}` {
+		t.Fatalf("bodies %v", bodies)
+	}
+	n := len(*reqs)
+	for _, bad := range [][2]string{{"", "301"}, {"5750752", ""}, {"5750752", "30x"}, {"../x", "301"}} {
+		if err := tb.SetAdStatus(ctx, cl, creds, acct, bad[0], bad[1], false); c.KindOf(err) != c.ErrInvalid {
+			t.Fatalf("%v: %v", bad, err)
+		}
+	}
+	if len(*reqs) != n {
+		t.Fatal("a bad id reached Taboola")
+	}
+}
